@@ -8,10 +8,13 @@ type json =
   | Array of json list
   | Object of (string * json) list
 
+(* Pre-compiled regexes *)
+let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
+let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+let string_content_re = Re.compile (Re.Posix.re "[^\"]*")
+
 (** Parse optional whitespace *)
-let ws () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  match_re re
+let ws () = match_re ws_re
 
 (** Parse null *)
 let null_parser () =
@@ -30,15 +33,13 @@ let bool_parser () =
 
 (** Parse a simple integer number (simplified) *)
 let number_parser () =
-  let re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?") in
-  let s = match_re re in
+  let s = match_re number_re in
   Number (float_of_string s)
 
 (** Parse a JSON string (simplified - no escape sequences) *)
 let string_parser () =
   let _ = consume "\"" in
-  let re = Re.compile (Re.Posix.re "[^\"]*") in
-  let s = match_re re in
+  let s = match_re string_content_re in
   let _ = consume "\"" in
   String s
 
@@ -98,8 +99,7 @@ and object_parser () =
 
 and key_value () =
   let _ = consume "\"" in
-  let re = Re.compile (Re.Posix.re "[^\"]*") in
-  let key = match_re re in
+  let key = match_re string_content_re in
   let _ = consume "\"" in
   let _ = ws () in
   let _ = consume ":" in

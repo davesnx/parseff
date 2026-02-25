@@ -7,6 +7,9 @@ type route =
   | BlogHome
   | BlogArticle of string
 
+(* Pre-compiled regex for blog slug *)
+let slug_re = Re.compile (Re.Posix.re ".+")
+
 (** Parse home route: / *)
 let home () =
   let _ = consume "/" in
@@ -34,8 +37,7 @@ let blog_home () =
 (** Parse blog article: /blog/slug *)
 let blog_article () =
   let _ = consume "/blog/" in
-  let re = Re.compile (Re.Posix.re ".+") in
-  let slug = match_re re in
+  let slug = match_re slug_re in
   end_of_input ();
   BlogArticle slug
 

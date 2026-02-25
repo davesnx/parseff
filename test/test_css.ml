@@ -10,20 +10,19 @@ type rule = {
   declarations : declaration list;
 }
 
+(* Pre-compiled regexes *)
+let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
+let identifier_re = Re.compile (Re.Posix.re "[a-zA-Z_-][a-zA-Z0-9_-]*")
+let property_value_re = Re.compile (Re.Posix.re "[^;]+")
+
 (** Parse optional whitespace *)
-let ws_may () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  match_re re
+let ws_may () = match_re ws_re
 
 (** Parse an identifier *)
-let identifier () =
-  let re = Re.compile (Re.Posix.re "[a-zA-Z_-][a-zA-Z0-9_-]*") in
-  match_re re
+let identifier () = match_re identifier_re
 
 (** Parse a CSS property value (anything except semicolon) *)
-let property_value () =
-  let re = Re.compile (Re.Posix.re "[^;]+") in
-  match_re re
+let property_value () = match_re property_value_re
 
 (** Parse a CSS declaration: property: value; *)
 let declaration () =
