@@ -1,0 +1,4 @@
+(library
+ (name parseff)
+ (public_name parseff)
+ (libraries re))

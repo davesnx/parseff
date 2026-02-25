@@ -1,0 +1,10 @@
+_build/
+*.install
+*.merlin
+*.opam
+!*.opam.template
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/

@@ -1,0 +1,11 @@
+version = 0.28.1
+profile = default
+break-cases = fit-or-vertical
+break-separators = before
+dock-collection-brackets = false
+field-space = tight
+if-then-else = keyword-first
+indicate-nested-or-patterns = space
+let-and = compact
+type-decl = compact
+wrap-comments = true
