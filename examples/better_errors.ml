@@ -1,151 +1,208 @@
-(** Example: Adding better error messages in userland *)
+let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
 
-open Parseff
+let number_0_255_simple () =
+  let digits = Parseff.many1 digit_val () in
+  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  if n >= 0 && n <= 255
+  then n
+  else
+    Parseff.fail (Printf.sprintf "number %d is out of range (must be 0-255)" n)
 
-(** Custom error type with context (for future extension) *)
-type parse_error = {
-  pos : int;
-  context : string list;
-  expected : string;
-}
-[@@warning "-34-69"]
-
-(** Labeled parser - adds context to errors *)
-let label name parser () =
-  try parser () with
-  | _ ->
-      (* In a real implementation, we'd catch Parse_error and add context *)
-      fail (Printf.sprintf "in %s: %s" name "parse failed")
-
-(** Expected combinator - improves error messages *)
-let ( <?> ) parser msg () =
-  try parser () with _ -> fail msg
-
-(** Example: IP address with better errors *)
-let digit_with_error () =
-  (digit <?> "expected digit (0-9)") ()
-
-let number_0_255 () =
-  (label "number (0-255)" (fun () ->
-       let digits = many1 digit_with_error () in
-       let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-       if n >= 0 && n <= 255 then n
-       else fail (Printf.sprintf "number %d is out of range (must be 0-255)" n)))
-    ()
-
-let ip_address_with_errors () =
-  let a = number_0_255 () in
-  let _ = ((fun () -> consume ".") <?> "expected '.' after first octet") () in
-  let b = number_0_255 () in
-  let _ = ((fun () -> consume ".") <?> "expected '.' after second octet") () in
-  let c = number_0_255 () in
-  let _ = ((fun () -> consume ".") <?> "expected '.' after third octet") () in
-  let d = number_0_255 () in
-  end_of_input ();
+let ip_address_simple () =
+  let a = number_0_255_simple () in
+  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
+  let b = number_0_255_simple () in
+  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
+  let c = number_0_255_simple () in
+  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
+  let d = number_0_255_simple () in
+  Parseff.end_of_input ();
   (a, b, c, d)
 
-(** Example: Expression parser with precedence and good errors *)
+let number_0_255_with_error () =
+  let digits = Parseff.many1 digit_val () in
+  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  if n >= 0 && n <= 255 then n else Parseff.error (`Out_of_range n)
+
+let ip_address_with_custom_errors () =
+  let a = number_0_255_with_error () in
+  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
+  let b = number_0_255_with_error () in
+  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
+  let c = number_0_255_with_error () in
+  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
+  let d = number_0_255_with_error () in
+  Parseff.end_of_input ();
+  (a, b, c, d)
+
 type expr = Num of int | Add of expr * expr | Mul of expr * expr
 
 let rec expr () =
-  (label "expression" (fun () ->
-       let left = term () in
-       let rest =
-         many
-           (fun () ->
-             let _ = whitespace () in
-             let _ = ((fun () -> char '+') <?> "expected '+' operator") () in
-             let _ = whitespace () in
-             term ())
-           ()
-       in
-       List.fold_left (fun acc t -> Add (acc, t)) left rest))
-    ()
+  let left = term () in
+  let rest =
+    Parseff.many
+      (fun () ->
+        let _ = Parseff.whitespace () in
+        let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
+        let _ = Parseff.whitespace () in
+        term ())
+      ()
+  in
+  List.fold_left (fun acc t -> Add (acc, t)) left rest
 
 and term () =
-  (label "term" (fun () ->
-       let left = factor () in
-       let rest =
-         many
-           (fun () ->
-             let _ = whitespace () in
-             let _ = ((fun () -> char '*') <?> "expected '*' operator") () in
-             let _ = whitespace () in
-             factor ())
-           ()
-       in
-       List.fold_left (fun acc f -> Mul (acc, f)) left rest))
-    ()
+  let left = factor () in
+  let rest =
+    Parseff.many
+      (fun () ->
+        let _ = Parseff.whitespace () in
+        let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
+        let _ = Parseff.whitespace () in
+        factor ())
+      ()
+  in
+  List.fold_left (fun acc f -> Mul (acc, f)) left rest
 
 and factor () =
-  (label "factor" (fun () ->
-       let _ = whitespace () in
-       ((fun () ->
-           let _ = ((fun () -> char '(') <?> "expected '('") () in
-           let _ = whitespace () in
-           let e = expr () in
-           let _ = whitespace () in
-           let _ = ((fun () -> char ')') <?> "expected ')'") () in
-           e)
-       <|> fun () ->
-           let d = (digit <?> "expected number") () in
-           Num d)
-         ()))
+  let _ = Parseff.whitespace () in
+  Parseff.or_
+    (fun () ->
+      let _ =
+        Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(')
+      in
+      let _ = Parseff.whitespace () in
+      let e = expr () in
+      let _ = Parseff.whitespace () in
+      let _ =
+        Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')')
+      in
+      e)
+    (fun () ->
+      let d = Parseff.expect "a number" Parseff.digit in
+      Num d)
     ()
 
 let rec expr_to_string = function
   | Num n -> string_of_int n
-  | Add (l, r) -> Printf.sprintf "(%s + %s)" (expr_to_string l) (expr_to_string r)
-  | Mul (l, r) -> Printf.sprintf "(%s * %s)" (expr_to_string l) (expr_to_string r)
+  | Add (l, r) ->
+      Printf.sprintf "(%s + %s)" (expr_to_string l) (expr_to_string r)
+  | Mul (l, r) ->
+      Printf.sprintf "(%s * %s)" (expr_to_string l) (expr_to_string r)
+
+let keyword () =
+  Parseff.one_of
+    [ (fun () -> Parseff.consume "if")
+    ; (fun () -> Parseff.consume "else")
+    ; (fun () -> Parseff.consume "while")
+    ]
+    ()
+
+let literal () =
+  Parseff.one_of_labeled
+    [ ("number", fun () -> Num (Parseff.digit ()))
+    ; ( "boolean"
+      , fun () ->
+          Parseff.or_
+            (fun () ->
+              let _ = Parseff.consume "true" in
+              Num 1)
+            (fun () ->
+              let _ = Parseff.consume "false" in
+              Num 0)
+            () )
+    ]
+    ()
 
 let () =
   Printf.printf "Better Error Messages Example\n";
   Printf.printf "==============================\n\n";
 
-  (* Test cases with errors *)
-  let test_cases =
-    [
-      ("192.168.1.1", true);
-      ("192.168.1.256", false);
-      ("192.168.1", false);
-      ("192.168.1.", false);
+  Printf.printf "Example 1: Using 'expect' for clear error messages\n";
+  Printf.printf "---------------------------------------------------\n";
+  let test_cases_simple =
+    [ ("192.168.1.1", true)
+    ; ("192.168.1.256", false)
+    ; ("192.168.1", false)
+    ; ("192.168.1.", false)
     ]
   in
-
-  Printf.printf "IP Address Parsing:\n";
-  Printf.printf "-------------------\n";
   List.iter
     (fun (input, should_succeed) ->
-      match run input ip_address_with_errors with
+      match Parseff.parse input ip_address_simple with
       | Ok ((a, b, c, d), _) ->
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
-      | Error { pos; expected } ->
+      | Error { pos; error= `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
-            input pos expected)
-    test_cases;
+            input pos expected
+      | Error _ -> Printf.printf "✗ Unknown error\n")
+    test_cases_simple;
 
-  Printf.printf "\nExpression Parsing:\n";
-  Printf.printf "-------------------\n";
-
-  let expr_tests = [ ("1+2*3", true); ("(1+2)*3", true); ("1+", false); ("1*)", false) ] in
-
+  Printf.printf "\nExample 2: Custom error types with polymorphic variants\n";
+  Printf.printf "--------------------------------------------------------\n";
+  let test_cases_custom = [ ("192.168.1.300", false); ("192.168.1.1", true) ] in
   List.iter
     (fun (input, should_succeed) ->
-      match run input expr with
+      match Parseff.parse input ip_address_with_custom_errors with
+      | Ok ((a, b, c, d), _) ->
+          Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
+      | Error { pos; error= `Expected expected } ->
+          Printf.printf "%s %-20s -> Parse error at pos %d: %s\n"
+            (if should_succeed then "✗" else "✓")
+            input pos expected
+      | Error { pos; error= `Out_of_range n } ->
+          Printf.printf
+            "✓ %-20s -> Custom error at pos %d: octet %d out of range (0-255)\n"
+            input pos n
+      | Error { pos; error= `Invalid_format msg } ->
+          Printf.printf "✓ %-20s -> Custom error at pos %d: %s\n" input pos msg
+      | Error _ -> Printf.printf "✗ Unknown error\n")
+    test_cases_custom;
+
+  Printf.printf "\nExample 3: Expression parser with precedence\n";
+  Printf.printf "--------------------------------------------\n";
+  let expr_tests =
+    [ ("1+2*3", true); ("(1+2)*3", true); ("1+", false); ("1*)", false) ]
+  in
+  List.iter
+    (fun (input, should_succeed) ->
+      match Parseff.parse input expr with
       | Ok (result, _) ->
           Printf.printf "✓ %-20s -> %s\n" input (expr_to_string result)
-      | Error { pos; expected } ->
+      | Error { pos; error= `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
-            input pos expected)
+            input pos expected
+      | Error _ -> Printf.printf "✗ Unknown error\n")
     expr_tests;
+
+  Printf.printf "\nExample 4: Using one_of and one_of_labeled\n";
+  Printf.printf "-------------------------------------------\n";
+  (match Parseff.parse "if" keyword with
+  | Ok (s, _) -> Printf.printf "✓ Parsed keyword: %s\n" s
+  | Error _ -> Printf.printf "✗ Error\n");
+
+  (match Parseff.parse "xyz" keyword with
+  | Ok _ -> Printf.printf "✗ Should have failed\n"
+  | Error { error= `Expected expected; _ } ->
+      Printf.printf "✓ Failed as expected: %s\n" expected
+  | Error _ -> Printf.printf "✓ Failed\n");
+
+  (match Parseff.parse "99" literal with
+  | Ok (e, _) -> Printf.printf "✓ Parsed literal: %s\n" (expr_to_string e)
+  | Error _ -> Printf.printf "✗ Error\n");
+
+  (match Parseff.parse "xyz" literal with
+  | Ok _ -> Printf.printf "✗ Should have failed\n"
+  | Error { error= `Expected expected; _ } ->
+      Printf.printf "✓ Failed with labels: %s\n" expected
+  | Error _ -> Printf.printf "✓ Failed\n");
 
   Printf.printf "\nConclusion:\n";
   Printf.printf "-----------\n";
   Printf.printf
-    "Adding better errors in userland is straightforward:\n\
-    \  1. Use <?> operator to add custom error messages\n\
-    \  2. Use 'label' combinator to add parsing context\n\
-    \  3. Custom error types can wrap parse_error with more info\n\
-    \  4. Error accumulation can be built on top (track all failures)\n"
+    "The new API provides:\n\
+    \  1. 'expect' combinator for cleaner error messages\n\
+    \  2. 'error' for custom polymorphic variant error types\n\
+    \  3. 'one_of' and 'one_of_labeled' for cleaner alternations\n\
+    \  4. 'or_' as a named alternative to the <|> operator\n"

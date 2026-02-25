@@ -1,3 +1,9 @@
 (tests
- (names test_primitives test_ip test_css test_json)
+ (names
+  test_primitives
+  test_ip
+  test_css
+  test_json
+  test_angstrom_compat
+  test_streaming)
  (libraries parseff alcotest re))

@@ -1,4 +1,5 @@
 version = 0.28.1
+ocaml-version = 5.3
 profile = default
 break-cases = fit-or-vertical
 break-separators = before

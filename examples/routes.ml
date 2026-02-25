@@ -1,48 +1,34 @@
-open Parseff
+type route = Home | About | Terms | BlogHome | BlogArticle of string
 
-type route =
-  | Home
-  | About
-  | Terms
-  | BlogHome
-  | BlogArticle of string
-
-(* Pre-compiled regex for blog slug *)
 let slug_re = Re.compile (Re.Posix.re ".+")
 
-(** Parse home route: / *)
 let home () =
-  let _ = consume "/" in
-  end_of_input ();
+  let _ = Parseff.consume "/" in
+  Parseff.end_of_input ();
   Home
 
-(** Parse about route: /about *)
 let about () =
-  let _ = consume "/about" in
-  end_of_input ();
+  let _ = Parseff.consume "/about" in
+  Parseff.end_of_input ();
   About
 
-(** Parse terms route: /legal/terms *)
 let terms () =
-  let _ = consume "/legal/terms" in
-  end_of_input ();
+  let _ = Parseff.consume "/legal/terms" in
+  Parseff.end_of_input ();
   Terms
 
-(** Parse blog home: /blog *)
 let blog_home () =
-  let _ = consume "/blog" in
-  end_of_input ();
+  let _ = Parseff.consume "/blog" in
+  Parseff.end_of_input ();
   BlogHome
 
-(** Parse blog article: /blog/slug *)
 let blog_article () =
-  let _ = consume "/blog/" in
-  let slug = match_re slug_re in
-  end_of_input ();
+  let _ = Parseff.consume "/blog/" in
+  let slug = Parseff.match_regex slug_re in
+  Parseff.end_of_input ();
   BlogArticle slug
 
-(** Top-level route parser *)
-let route () = (home <|> about <|> terms <|> blog_home <|> blog_article) ()
+let route () = Parseff.one_of [ home; about; terms; blog_home; blog_article ] ()
 
 let route_to_string = function
   | Home -> "Home"
@@ -53,24 +39,26 @@ let route_to_string = function
 
 let () =
   let test_cases =
-    [
-      ("/", Home);
-      ("/about", About);
-      ("/legal/terms", Terms);
-      ("/blog", BlogHome);
-      ("/blog/hello-world", BlogArticle "hello-world");
-      ("/blog/ocaml-effects", BlogArticle "ocaml-effects");
+    [ ("/", Home)
+    ; ("/about", About)
+    ; ("/legal/terms", Terms)
+    ; ("/blog", BlogHome)
+    ; ("/blog/hello-world", BlogArticle "hello-world")
+    ; ("/blog/ocaml-effects", BlogArticle "ocaml-effects")
     ]
   in
   Printf.printf "Route Parser Examples\n";
   Printf.printf "=====================\n\n";
   List.iter
     (fun (input, expected) ->
-      match run input route with
+      match Parseff.parse input route with
       | Ok (result, _) ->
           let matches = result = expected in
           Printf.printf "✓ %-25s -> %s %s\n" input (route_to_string result)
-            (if matches then "" else Printf.sprintf "(expected %s)" (route_to_string expected))
-      | Error { pos; expected = exp } ->
-          Printf.printf "✗ %-25s -> Error at %d: %s\n" input pos exp)
+            (if matches
+             then ""
+             else Printf.sprintf "(expected %s)" (route_to_string expected))
+      | Error { pos; error= `Expected exp } ->
+          Printf.printf "✗ %-25s -> Error at %d: %s\n" input pos exp
+      | Error _ -> Printf.printf "✗ %-25s -> Unknown error\n" input)
     test_cases

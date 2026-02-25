@@ -6,14 +6,14 @@
 
 (name parseff)
 
-(maintainers "Your Name <your.email@example.com>")
+(maintainers "David Sancho <dsnxmoreno@gmail.com>")
 
-(authors "Your Name <your.email@example.com>")
+(authors "David Sancho <dsnxmoreno@gmail.com>")
 
 (license MIT)
 
 (source
- (github username/parseff))
+ (github davesnx/parseff))
 
 (package
  (name parseff)
@@ -22,7 +22,7 @@
   "Parseff is a parser combinator library that uses algebraic effects as the communication channel between parsers and their runner, similar to how JavaScript generators use yield.")
  (depends
   (ocaml
-   (>= 5.0))
+   (>= 5.3))
   (re
    (>= 1.9.0))
   ;; Test dependencies

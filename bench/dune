@@ -1,4 +1,5 @@
 (executables
  (names bench_vs_angstrom bench_micro)
  (libraries parseff angstrom re benchmark)
- (ocamlopt_flags (:standard -O3 -unbox-closures)))
+ (ocamlopt_flags
+  (:standard -O3 -unbox-closures)))
