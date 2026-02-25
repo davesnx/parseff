@@ -2,13 +2,11 @@ open Parseff
 
 (** Simplified S-expression parser (atoms only, for demonstration) *)
 
-let ws () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  match_re re
+let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
+let atom_re = Re.compile (Re.Posix.re "[a-zA-Z0-9+*/-]+")
 
-let atom () =
-  let re = Re.compile (Re.Posix.re "[a-zA-Z0-9+*/-]+") in
-  match_re re
+let ws () = match_re ws_re
+let atom () = match_re atom_re
 
 (** Parse a simple list of atoms *)
 let simple_list () =

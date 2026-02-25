@@ -1,8 +1,3 @@
-(** Parser combinators with OCaml 5 algebraic effects *)
-
-(** {1 Span Type} *)
-
-(** A zero-copy slice of the input string. *)
 type span = {
   buf : string;
   off : int;
@@ -13,64 +8,34 @@ let[@inline always] span_to_string s =
   if s.len = 0 then ""
   else String.sub s.buf s.off s.len
 
-(** {1 Effect Types} *)
-
-(** Parser effects - the protocol between parsers and handlers *)
 type _ Effect.t +=
   | Consume : string -> string Effect.t
-      (** [Consume s] matches the exact literal string [s] *)
   | Satisfy : (char -> bool) * string -> char Effect.t
-      (** [Satisfy (pred, label)] matches a character satisfying [pred] *)
   | Match_re : Re.re -> string Effect.t
-      (** [Match_re re] matches a regular expression (must be compiled with [Re.compile]) *)
   | Choose : (unit -> 'a) * (unit -> 'a) -> 'a Effect.t
-      (** [Choose (left, right)] tries [left], backtracks and tries [right] on failure *)
-  | Fail : string -> 'a Effect.t  (** [Fail msg] aborts parsing with an error message *)
+  | Fail : string -> 'a Effect.t
   | Look_ahead : (unit -> 'a) -> 'a Effect.t
-      (** [Look_ahead p] runs parser [p] without consuming input *)
   | End_of_input : unit Effect.t
-      (** [End_of_input] succeeds only if no input remains *)
   | Take_while : (char -> bool) -> string Effect.t
-      (** [Take_while pred] consumes characters while [pred] holds, returns matched string *)
   | Skip_while : (char -> bool) -> unit Effect.t
-      (** [Skip_while pred] skips characters while [pred] holds *)
   | Greedy_many : (unit -> 'a) -> 'a list Effect.t
-      (** [Greedy_many p] applies [p] zero or more times greedily *)
   | Skip_while_then_char : (char -> bool) * char -> unit Effect.t
-      (** [Skip_while_then_char (pred, c)] skips chars matching [pred], then matches [c] *)
   | Fused_sep_take : (char -> bool) * char * (char -> bool) -> string Effect.t
-      (** [Fused_sep_take (ws_pred, sep_char, take_pred)]
-          skip ws, match sep, skip ws, take_while1 - all in one effect *)
   | Sep_by_take : (char -> bool) * char * (char -> bool) -> string list Effect.t
-      (** [Sep_by_take (ws_pred, sep_char, take_pred)]
-          Parses zero or more separated values entirely in the handler.
-          Equivalent to: first_take :: many (ws sep ws take) but in a tight loop. *)
   | Take_while_span : (char -> bool) -> span Effect.t
-      (** [Take_while_span pred] like Take_while but returns a zero-copy span *)
   | Sep_by_take_span : (char -> bool) * char * (char -> bool) -> span list Effect.t
-      (** [Sep_by_take_span] like Sep_by_take but returns zero-copy spans *)
 
-(** {1 Result Types} *)
-
-(** Parse result *)
 type 'a result =
-  | Ok of 'a * int  (** Success: parsed value and final position *)
-  | Error of { pos : int; expected : string }  (** Failure: position and expected token *)
+  | Ok of 'a * int
+  | Error of { pos : int; expected : string }
 
-(** Parse error exception *)
 exception Parse_error of int * string
 
-(** {1 Internal State} *)
-
-(** Internal parser state *)
 type state = {
   input : string;
   mutable pos : int;
 }
 
-(** {1 Runner/Handler} *)
-
-(** Run a parser on input *)
 let run input (parser : unit -> 'a) : 'a result =
   let st = { input; pos = 0 } in
   let input_len = String.length input in
@@ -300,13 +265,23 @@ let run input (parser : unit -> 'a) : 'a result =
                   (fun k ->
                     (try
                        let groups = Re.exec ~pos:st.pos re st.input in
-                       let matched = Re.Group.get groups 0 in
-                       let match_end = Re.Group.stop groups 0 in
-                       st.pos <- match_end;
-                       Effect.Deep.continue k matched
+                       let match_start = Re.Group.start groups 0 in
+                       if match_start <> st.pos then
+                         Effect.Deep.discontinue k
+                           (Parse_error (st.pos, "regex match failed"))
+                       else
+                         let matched = Re.Group.get groups 0 in
+                         let match_end = Re.Group.stop groups 0 in
+                         st.pos <- match_end;
+                         Effect.Deep.continue k matched
                      with Not_found ->
                        Effect.Deep.discontinue k
                          (Parse_error (st.pos, "regex match failed"))))
+            (* Greedy_many, Choose, and Look_ahead carry existential type
+               variables in their GADT constructors that can't unify with the
+               continuation's expected type inside effc. Obj.magic erases the
+               type mismatch — safe because go/go_shallow return the same
+               runtime representation regardless of the type parameter. *)
             | Greedy_many p ->
                 Some
                   (fun k ->
@@ -367,14 +342,12 @@ let run input (parser : unit -> 'a) : 'a result =
   in
   go parser
 
-(** Run a parser on input using shallow effects (lower overhead per effect) *)
 let run_shallow input (parser : unit -> 'a) : 'a result =
   let st = { input; pos = 0 } in
   let input_len = String.length input in
-  (* The shallow handler drives a fiber one effect at a time.
-     We need polymorphic recursion since go_shallow is called for sub-parsers
-     of different return types (Greedy_many, Choose, Look_ahead). 
-     drive/drive_exn are polymorphic in both the value type and the fiber's result type. *)
+  (* Polymorphic recursion: go_shallow is called for sub-parsers of different
+     return types (Greedy_many, Choose, Look_ahead), so drive/drive_exn must
+     be polymorphic in both the continuation value type and fiber result type. *)
   let rec go_shallow : type r. (unit -> r) -> r result = fun p ->
     let fiber = Effect.Shallow.fiber p in
     drive fiber ()
@@ -586,10 +559,14 @@ let run_shallow input (parser : unit -> 'a) : 'a result =
                   (fun k ->
                     (try
                        let groups = Re.exec ~pos:st.pos re st.input in
-                       let matched = Re.Group.get groups 0 in
-                       let match_end = Re.Group.stop groups 0 in
-                       st.pos <- match_end;
-                       drive k matched
+                       let match_start = Re.Group.start groups 0 in
+                       if match_start <> st.pos then
+                         drive_exn k (Parse_error (st.pos, "regex match failed"))
+                       else
+                         let matched = Re.Group.get groups 0 in
+                         let match_end = Re.Group.stop groups 0 in
+                         st.pos <- match_end;
+                         drive k matched
                      with Not_found ->
                        drive_exn k (Parse_error (st.pos, "regex match failed"))))
             | Greedy_many p ->
@@ -657,93 +634,58 @@ let run_shallow input (parser : unit -> 'a) : 'a result =
           (function
           | Parse_error (pos, msg) -> Error { pos; expected = msg }
           | ex -> raise ex);
-        effc = (fun (type c) (_eff : c Effect.t) -> None);
+        effc =
+          (fun (type c) (eff : c Effect.t) ->
+            match eff with
+            | Fail msg ->
+                Some (fun (k : (c, _) Effect.Shallow.continuation) ->
+                  drive_exn k (Parse_error (st.pos, msg)))
+            | _ ->
+                Some (fun (k : (c, _) Effect.Shallow.continuation) ->
+                  drive_exn k e));
       }
   in
   go_shallow parser
 
-(** {1 Primitive Combinators} *)
-
-(** [consume s] matches the exact literal string [s] *)
 let[@inline] consume s = Effect.perform (Consume s)
-
-(** [satisfy pred label] matches a character satisfying predicate [pred] *)
 let[@inline] satisfy pred label = Effect.perform (Satisfy (pred, label))
-
-(** [char c] matches the exact character [c] *)
 let[@inline] char c = satisfy (Char.equal c) (String.make 1 c)
-
-(** [match_re re] matches a regular expression *)
 let[@inline] match_re re = Effect.perform (Match_re re)
-
-(** [take_while pred] consumes characters while [pred] holds, returns matched string.
-    Always succeeds (returns "" if no characters match). *)
 let[@inline] take_while pred = Effect.perform (Take_while pred)
 
-(** [take_while1 pred label] consumes one or more characters while [pred] holds.
-    Fails with [label] if no characters match. *)
 let[@inline] take_while1 pred label =
   let s = take_while pred in
   if String.length s = 0 then Effect.perform (Fail label)
   else s
 
-(** [skip_while pred] skips characters while [pred] holds.
-    Always succeeds (skips zero characters if predicate doesn't match). *)
 let[@inline] skip_while pred = Effect.perform (Skip_while pred)
-
-(** [skip_while_then_char pred c] skips characters matching [pred] then matches [c].
-    Fused operation - more efficient than [skip_while pred; char c]. *)
 let[@inline] skip_while_then_char pred c = Effect.perform (Skip_while_then_char (pred, c))
 
-(** [sep_by_take ws_pred sep_char take_pred] parses a separated list of values
-    entirely in the handler. Returns list of matched strings.
-    Equivalent to sep_by (take_while1 take_pred) (ws *> char sep *> ws) but
-    handled entirely in a single effect dispatch with zero intermediate allocations. *)
 let[@inline] sep_by_take ws_pred sep_char take_pred =
   Effect.perform (Sep_by_take (ws_pred, sep_char, take_pred))
 
-(** [take_while_span pred] like take_while but returns a zero-copy span. *)
 let[@inline] take_while_span pred = Effect.perform (Take_while_span pred)
 
-(** [sep_by_take_span ws_pred sep_char take_pred] like sep_by_take but returns
-    zero-copy spans. No String.sub calls - callers use span_to_string when needed. *)
 let[@inline] sep_by_take_span ws_pred sep_char take_pred =
   Effect.perform (Sep_by_take_span (ws_pred, sep_char, take_pred))
 
-(** [fused_sep_take ws_pred sep_char take_pred] performs:
-    skip whitespace, match separator, skip whitespace, take_while1
-    all in a single effect dispatch. Returns the taken string. *)
 let[@inline] fused_sep_take ws_pred sep_char take_pred =
   Effect.perform (Fused_sep_take (ws_pred, sep_char, take_pred))
 
-(** [fail msg] aborts parsing with an error message *)
 let[@inline] fail msg = Effect.perform (Fail msg)
-
-(** [end_of_input ()] succeeds only if no input remains *)
 let[@inline] end_of_input () = Effect.perform End_of_input
-
-(** [(<|>)] is the alternation combinator - tries left, then right on failure *)
 let[@inline] ( <|> ) p q () = Effect.perform (Choose (p, q))
-
-(** [look_ahead p] runs parser [p] without consuming input *)
 let[@inline] look_ahead p = Effect.perform (Look_ahead p)
-
-(** [string s] is an alias for [consume s] *)
 let string = consume
 
-(** {1 Repetition Combinators} *)
-
-(** [many p] applies parser [p] zero or more times *)
 let[@inline] many (p : unit -> 'a) () : 'a list =
   Effect.perform (Greedy_many p)
 
-(** [many1 p] applies parser [p] one or more times *)
 let[@inline] many1 (p : unit -> 'a) () : 'a list =
   let first = p () in
   let rest = many p () in
   first :: rest
 
-(** [sep_by p sep] parses zero or more occurrences of [p] separated by [sep] *)
 let sep_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   ((fun () ->
      let first = p () in
@@ -758,7 +700,6 @@ let sep_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   <|> fun () -> [])
     ()
 
-(** [sep_by1 p sep] parses one or more occurrences of [p] separated by [sep] *)
 let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   let first = p () in
   let rest =
@@ -770,41 +711,26 @@ let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   in
   first :: rest
 
-(** [optional p] optionally applies parser [p] *)
 let optional (p : unit -> 'a) () : 'a option =
   ((fun () -> Some (p ())) <|> fun () -> None) ()
 
-(** [count n p] applies parser [p] exactly [n] times *)
 let count n (p : unit -> 'a) () : 'a list =
   let rec loop acc i =
     if i <= 0 then List.rev acc else loop (p () :: acc) (i - 1)
   in
   loop [] n
 
-(** {1 Convenience Combinators} *)
-
-(** [digit ()] parses a decimal digit and returns its integer value *)
 let digit () =
   let c = satisfy (fun c -> c >= '0' && c <= '9') "digit" in
   Char.code c - Char.code '0'
 
-(** [letter ()] parses an ASCII letter *)
 let letter () = satisfy (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) "letter"
-
 let[@inline always] is_whitespace c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
-
-(** [whitespace ()] parses zero or more whitespace characters *)
 let[@inline] whitespace () = take_while is_whitespace
-
-(** [whitespace1 ()] parses one or more whitespace characters *)
 let[@inline] whitespace1 () = take_while1 is_whitespace "whitespace"
-
-(** [skip_whitespace ()] skips zero or more whitespace characters (returns unit) *)
 let[@inline] skip_whitespace () = skip_while is_whitespace
 
-(** [alphanum ()] parses an alphanumeric character *)
 let alphanum () =
   satisfy (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) "alphanumeric"
 
-(** [any_char ()] parses any character *)
 let any_char () = satisfy (fun _ -> true) "any character"

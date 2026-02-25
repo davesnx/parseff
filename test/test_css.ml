@@ -72,12 +72,16 @@ let test_multiple_declarations () =
 
 let test_with_whitespace () =
   let input = "
-  div {
-    width: 100%;
-    height: 50px;
-  }
-  " in
-  match run input rule with
+   div {
+     width: 100%;
+     height: 50px;
+   }
+   " in
+  let rule_with_ws () =
+    let _ = ws_may () in
+    rule ()
+  in
+  match run input rule_with_ws with
   | Ok (r, _) ->
       Alcotest.(check string) "selector" "div" r.selector;
       Alcotest.(check int) "two declarations" 2 (List.length r.declarations)

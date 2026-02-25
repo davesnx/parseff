@@ -79,6 +79,12 @@ type _ Effect.t +=
   | Skip_while_then_char : (char -> bool) * char -> unit Effect.t
       (** [Skip_while_then_char (pred, c)] skips chars matching [pred], then matches [c].
           Fused operation for efficiency. *)
+  | Fused_sep_take : (char -> bool) * char * (char -> bool) -> string Effect.t
+      (** [Fused_sep_take (ws_pred, sep_char, take_pred)]
+          skip ws, match sep, skip ws, take_while1 — all in one effect. *)
+  | Sep_by_take : (char -> bool) * char * (char -> bool) -> string list Effect.t
+      (** [Sep_by_take (ws_pred, sep_char, take_pred)]
+          Parses zero or more separated values entirely in the handler. *)
   | Take_while_span : (char -> bool) -> span Effect.t
       (** [Take_while_span pred] like Take_while but returns a zero-copy span. *)
   | Sep_by_take_span : (char -> bool) * char * (char -> bool) -> span list Effect.t
