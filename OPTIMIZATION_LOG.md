@@ -103,6 +103,82 @@ Parse entire comma-separated list in a SINGLE effect dispatch with zero intermed
 
 ---
 
+## Phase 4: Compiler Hints and Zero-Copy Spans
+
+### Optimization 4.1: `[@inline]` Annotations
+**Files Modified:** `lib/parseff.ml`
+**Result:** Part of combined Phase 4
+
+Added `[@inline]` (and `[@inline always]` for trivial wrappers) to all combinator functions:
+`consume`, `satisfy`, `char`, `match_re`, `take_while`, `take_while1`, `skip_while`,
+`skip_while_then_char`, `sep_by_take`, `take_while_span`, `sep_by_take_span`,
+`fused_sep_take`, `fail`, `end_of_input`, `(<|>)`, `look_ahead`, `many`, `many1`,
+`whitespace`, `whitespace1`, `skip_whitespace`, `is_whitespace`, `span_to_string`.
+
+### Optimization 4.2: `-O3 -unbox-closures` Compiler Flags
+**Files Modified:** `lib/dune`, `bench/dune`
+**Result:** Combined with 4.1, gave ~15% boost (1,680k -> ~1,930k p/s)
+
+Added `(ocamlopt_flags (:standard -O3 -unbox-closures))` to dune files.
+Note: Flambda is NOT available in our OCaml 5.4.0 switch (`flambda: false`), so
+`-O3` enables only basic optimizations + closure unboxing.
+
+### Optimization 4.3: Zero-Copy Span API
+**Files Modified:** `lib/parseff.ml`, `lib/parseff.mli`, `bench/bench_vs_angstrom.ml`
+**Result:** "Fair" comparison: ~1,920k p/s (1.6x faster). With custom `float_of_span`: ~4,940k p/s (4.3x faster)
+
+New `span` type: `{ buf: string; off: int; len: int }` — a zero-copy slice of the input.
+New effects: `Take_while_span`, `Sep_by_take_span` — return spans instead of `String.sub` results.
+New helper: `span_to_string` — materializes only when needed.
+
+The "span" benchmark uses a custom `float_of_span` that handles 1-2 digit integers
+without calling `float_of_string`, which is why it's much faster. The "fair" comparison
+uses `float_of_string (span_to_string s)` like Angstrom does.
+
+### Combined Phase 4 Result
+**Before:** ~1,680,000 p/s | **After:** ~4,940,000 p/s (span) / ~1,920,000 p/s (fair)
+**vs Angstrom:** 4.3x faster (span) / 1.6x faster (fair)
+
+---
+
+## Phase 5: Shallow Effects Handler (Experiment)
+
+### Optimization 5.1: `run_shallow` with `Effect.Shallow`
+**Files Modified:** `lib/parseff.ml`, `lib/parseff.mli`, `bench/bench_vs_angstrom.ml`
+**Result:** **SLOWER** — shallow handler is 31-45% slower than deep handler
+
+Hypothesis: Shallow handlers avoid re-installing the full handler record on every
+continuation resume, reducing overhead. Deep handlers allocate a handler+fiber per
+`match_with` call (~22ns overhead).
+
+Reality: The shallow handler was consistently slower:
+
+```
+Parseff deep (span):     ~4,940,000 p/s (baseline)
+Parseff shallow (span):  ~3,395,000 p/s (-31%)
+Parseff deep (fair):     ~1,893,000 p/s
+Parseff shallow (fair):  ~1,537,000 p/s (-19%)
+Angstrom:                ~1,150,000 p/s
+```
+
+**Memory:** Shallow uses MORE memory (297.6 MB vs 196.8 MB) due to `Effect.Shallow.fiber`
+allocations. Each `go_shallow` call creates a new fiber object.
+
+### Why Shallow Was Slower
+1. **Fiber allocation overhead:** `Effect.Shallow.fiber` allocates a fiber per sub-parser call
+   (Greedy_many, Choose, Look_ahead), adding ~100MB minor GC pressure
+2. **No handler reuse:** Each `continue_with` call still builds the handler record
+3. **Deep handler is well-amortized:** Our fused operations already minimize `go` calls
+   (only ~2 per parse), so deep handler setup cost is already negligible
+4. **Polymorphic recursion overhead:** The `go_shallow`/`drive`/`drive_exn` mutual recursion
+   with locally-abstract types may add dispatch overhead vs the simpler deep `go`
+
+**Conclusion:** Shallow effects are NOT beneficial for Parseff's architecture. The deep
+handler remains the default and recommended runner. `run_shallow` is kept as an alternative
+for users who want to experiment.
+
+---
+
 ## Cumulative Results
 
 | Phase | Optimization | Performance | vs Angstrom | Memory |
@@ -112,10 +188,14 @@ Parse entire comma-separated list in a SINGLE effect dispatch with zero intermed
 | 2.1-2.3 | Core engine | 805,778 p/s | 1.5x slower | 90 MB |
 | 3.1 | Fused ws+char | 860,000 p/s | 1.32x slower | ~90 MB |
 | 3.2 | Fused sep_take | 1,045,000 p/s | 1.13x slower | ~90 MB |
-| **3.3** | **Sep_by_take** | **1,680,000 p/s** | **1.8x FASTER** | **180 MB** |
+| 3.3 | Sep_by_take | 1,680,000 p/s | 1.8x FASTER | 180 MB |
+| 4.1-4.2 | `[@inline]` + `-O3` | ~1,930,000 p/s | 1.6x FASTER | ~180 MB |
+| **4.3** | **Zero-copy spans** | **~4,940,000 p/s** | **4.3x FASTER** | **197 MB** |
+| 5.1 | Shallow effects | ~3,395,000 p/s | 3.0x FASTER | 298 MB |
 
-**Total improvement: 140x** (from 11,982 to ~1,680,000 parses/sec)
-**Angstrom performance: ~940,000 parses/sec**
+**Total improvement: 412x** (from 11,982 to ~4,940,000 parses/sec)
+**Fair comparison (same float_of_string): 160x** (to ~1,930,000 p/s, 1.6x faster than Angstrom)
+**Angstrom performance: ~1,150,000 p/s**
 
 ---
 
@@ -162,6 +242,7 @@ Key insight: Effect dispatch itself is cheap (~12ns), but `Effect.Deep.match_wit
 - **Get_pos/Set_pos effects**: Adding save/restore effects for backtracking was slower than handler-side `go` calls
 - **Exception-based many**: Catching Parse_error inside the continuation was slower than Greedy_many with `go`
 - **Flambda**: Not available in this OCaml build (would require compiler rebuild)
+- **Shallow effects handler**: 31-45% slower due to fiber allocation overhead and no meaningful handler reuse savings
 
 ### Surprises and Discoveries
 - Regex compilation was the dominant bottleneck (not effects!) - 30 compilations per parse

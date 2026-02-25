@@ -67,7 +67,7 @@ match run "192.168.1.1" ip_address with
 | **Backtracking** | Via `<\|>` effect (explicit) | Via `<\|>` combinator | Limited (GLR extension) | No |
 | **Error Messages** | Position + expected token | Customizable | Excellent (generated) | Excellent |
 | **Left Recursion** | ❌ Not supported | ❌ Not supported | ✅ Supported | ✅ Supported |
-| **Performance** | Very good (1.7x faster than Angstrom) | Very good | Excellent | Excellent |
+| **Performance** | Very good (1.6-4.3x faster than Angstrom) | Very good | Excellent | Excellent |
 | **Ambiguous Grammars** | ✅ Allowed | ✅ Allowed | ❌ Rejected at compile time | ❌ Rejected |
 | **Type Safety** | Runtime errors possible | Runtime errors possible | Compile-time guarantees | Compile-time guarantees |
 | **Ease of Use** | ⭐⭐⭐⭐⭐ Imperative style | ⭐⭐⭐ Monadic style | ⭐⭐⭐ Grammar learning curve | ⭐⭐⭐ Two-stage learning |
@@ -257,13 +257,19 @@ The paper "Algebraic Effects and Handlers for Parsing" defines a typed algebraic
 Testing on a JSON array parser (`[1, 2, 3, ..., 10]`) with 100,000 iterations:
 
 ```
-Parseff:  ~1,680,000 parses/second
-Angstrom: ~940,000 parses/second
-Result:   Parseff is 1.7-1.8x FASTER than Angstrom
-Memory:   Parseff 180 MB vs Angstrom 584 MB (3.2x less)
+Parseff (span):  ~4,940,000 parses/second  (4.3x faster than Angstrom)
+Parseff (fair):  ~1,930,000 parses/second  (1.6x faster than Angstrom)
+Angstrom:        ~1,150,000 parses/second
+Memory:          Parseff 197 MB vs Angstrom 584 MB (3.0x less)
 ```
 
-Starting from a baseline of ~12,000 parses/sec (101x slower than Angstrom), systematic optimization achieved a **140x improvement** and surpassed Angstrom. See `OPTIMIZATION_LOG.md` for the full optimization journey.
+The "span" variant uses zero-copy parsing with a custom `float_of_span` that avoids
+`float_of_string` for 1-2 digit integers. The "fair" variant uses the same
+`float_of_string` conversion as Angstrom for an apples-to-apples comparison.
+
+Starting from a baseline of ~12,000 parses/sec (101x slower than Angstrom), systematic
+optimization achieved a **412x improvement** and surpassed Angstrom. See
+`OPTIMIZATION_LOG.md` for the full optimization journey.
 
 ### Performance Tips
 
@@ -377,7 +383,7 @@ type error_context = {
 
 ## Known Limitations
 
-1. **Performance**: With fused operations, Parseff is 1.7x faster than Angstrom. Without fused operations, expect comparable or slightly slower performance.
+1. **Performance**: With fused operations and zero-copy spans, Parseff is 1.6-4.3x faster than Angstrom. Without fused operations, expect comparable or slightly slower performance.
 
 2. **Left Recursion**: Direct left recursion causes infinite loops (rewrite grammar or use iteration)
 

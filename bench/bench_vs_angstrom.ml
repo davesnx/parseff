@@ -12,17 +12,55 @@ let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
 module Parseff_JSON = struct
   open Parseff
 
+  (* Custom float_of_span avoids String.sub for simple integers *)
+  let[@inline always] float_of_span (s : span) =
+    if s.len = 1 then
+      Float.of_int (Char.code (String.unsafe_get s.buf s.off) - Char.code '0')
+    else if s.len = 2 && String.unsafe_get s.buf s.off >= '1' then
+      Float.of_int (
+        (Char.code (String.unsafe_get s.buf s.off) - Char.code '0') * 10
+        + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0'))
+    else
+      float_of_string (span_to_string s)
+
+  (* Fair version: same float_of_string as Angstrom *)
+  let[@inline] float_of_span_fair (s : span) =
+    float_of_string (span_to_string s)
+
   let json_array () =
     skip_while_then_char is_ws '[';
     skip_while is_ws;
-    (* Parse entire comma-separated list in a single effect dispatch *)
-    let str_elements = sep_by_take is_ws ',' is_digit_or_sign in
-    let elements = List.map float_of_string str_elements in
+    let spans = sep_by_take_span is_ws ',' is_digit_or_sign in
+    let elements = List.map float_of_span spans in
+    skip_while_then_char is_ws ']';
+    elements
+
+  let json_array_fair () =
+    skip_while_then_char is_ws '[';
+    skip_while is_ws;
+    let spans = sep_by_take_span is_ws ',' is_digit_or_sign in
+    let elements = List.map float_of_span_fair spans in
     skip_while_then_char is_ws ']';
     elements
 
   let parse input =
     match run input json_array with
+    | Ok (result, _) -> Some result
+    | Error _ -> None
+
+  let parse_fair input =
+    match run input json_array_fair with
+    | Ok (result, _) -> Some result
+    | Error _ -> None
+
+  (* Shallow handler variants *)
+  let parse_shallow input =
+    match run_shallow input json_array with
+    | Ok (result, _) -> Some result
+    | Error _ -> None
+
+  let parse_shallow_fair input =
+    match run_shallow input json_array_fair with
     | Ok (result, _) -> Some result
     | Error _ -> None
 end
@@ -51,6 +89,7 @@ let () =
   (* Warmup *)
   for _ = 1 to 1000 do
     ignore (Parseff_JSON.parse json_input);
+    ignore (Parseff_JSON.parse_shallow json_input);
     ignore (Angstrom_JSON.parse json_input)
   done;
 
@@ -63,7 +102,10 @@ let () =
       ~repeat:3
       100000L
       [
-        ("Parseff", (fun () -> ignore (Parseff_JSON.parse json_input)), ());
+        ("Parseff deep (span)", (fun () -> ignore (Parseff_JSON.parse json_input)), ());
+        ("Parseff deep (fair)", (fun () -> ignore (Parseff_JSON.parse_fair json_input)), ());
+        ("Parseff shallow (span)", (fun () -> ignore (Parseff_JSON.parse_shallow json_input)), ());
+        ("Parseff shallow (fair)", (fun () -> ignore (Parseff_JSON.parse_shallow_fair json_input)), ());
         ("Angstrom", (fun () -> ignore (Angstrom_JSON.parse json_input)), ());
       ]
   in

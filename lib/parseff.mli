@@ -29,6 +29,20 @@
     ]}
 *)
 
+(** {1 Span Type} *)
+
+(** A zero-copy slice of the input string.
+    Use [span_to_string] to materialize when needed. *)
+type span = {
+  buf : string;
+  off : int;
+  len : int;
+}
+
+(** [span_to_string s] extracts the string from a span.
+    Only call this when you actually need the string value. *)
+val span_to_string : span -> string
+
 (** {1 Effect Types} *)
 
 (** Parser effects - the protocol between parsers and handlers *)
@@ -65,6 +79,10 @@ type _ Effect.t +=
   | Skip_while_then_char : (char -> bool) * char -> unit Effect.t
       (** [Skip_while_then_char (pred, c)] skips chars matching [pred], then matches [c].
           Fused operation for efficiency. *)
+  | Take_while_span : (char -> bool) -> span Effect.t
+      (** [Take_while_span pred] like Take_while but returns a zero-copy span. *)
+  | Sep_by_take_span : (char -> bool) * char * (char -> bool) -> span list Effect.t
+      (** [Sep_by_take_span] like Sep_by_take but returns zero-copy spans. *)
 
 (** {1 Result Types} *)
 
@@ -93,6 +111,23 @@ exception Parse_error of int * string
     ]}
 *)
 val run : string -> (unit -> 'a) -> 'a result
+
+(** [run_shallow input parser] runs [parser] on [input] using shallow effect handlers.
+    
+    Shallow handlers avoid re-installing the full handler record on every effect resume,
+    which can reduce overhead for parsers that perform many simple effects. The handler
+    is re-applied one effect at a time rather than wrapping the entire continuation.
+    
+    Semantically identical to [run] - same parsers work with both runners.
+    
+    Example:
+    {[
+      match run_shallow "hello world" my_parser with
+      | Ok (result, pos) -> ...
+      | Error { pos; expected } -> ...
+    ]}
+*)
+val run_shallow : string -> (unit -> 'a) -> 'a result
 
 (** {1 Primitive Combinators} *)
 
@@ -178,6 +213,14 @@ val skip_while_then_char : (char -> bool) -> char -> unit
 (** [sep_by_take ws_pred sep_char take_pred] parses a separated list entirely in the handler.
     Returns list of matched strings. Zero intermediate effect dispatches. *)
 val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
+
+(** [take_while_span pred] like [take_while] but returns a zero-copy span.
+    No string allocation until you call [span_to_string]. *)
+val take_while_span : (char -> bool) -> span
+
+(** [sep_by_take_span ws_pred sep_char take_pred] like [sep_by_take] but returns
+    zero-copy spans. No String.sub allocations per element. *)
+val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
 
 (** [fused_sep_take ws_pred sep_char take_pred] performs:
     skip whitespace, match separator, skip whitespace, take_while1
