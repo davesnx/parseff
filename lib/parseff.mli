@@ -53,6 +53,18 @@ type _ Effect.t +=
   | End_of_input : unit Effect.t
       (** [End_of_input] succeeds only if no input remains.
           Use this to ensure the entire input has been consumed. *)
+  | Take_while : (char -> bool) -> string Effect.t
+      (** [Take_while pred] consumes characters while [pred] holds.
+          Returns the matched string (may be empty). *)
+  | Skip_while : (char -> bool) -> unit Effect.t
+      (** [Skip_while pred] skips characters while [pred] holds.
+          Always succeeds (skips zero characters if predicate doesn't match). *)
+  | Greedy_many : (unit -> 'a) -> 'a list Effect.t
+      (** [Greedy_many p] applies [p] zero or more times greedily.
+          More efficient than building many from Choose. *)
+  | Skip_while_then_char : (char -> bool) * char -> unit Effect.t
+      (** [Skip_while_then_char (pred, c)] skips chars matching [pred], then matches [c].
+          Fused operation for efficiency. *)
 
 (** {1 Result Types} *)
 
@@ -126,6 +138,52 @@ val char : char -> char
     ]}
 *)
 val match_re : Re.re -> string
+
+(** [take_while pred] consumes characters while [pred] holds.
+    Returns the matched string (may be empty).
+    This is much faster than regex for simple character class scanning.
+
+    Example:
+    {[
+      let digits () = take_while (fun c -> c >= '0' && c <= '9')
+    ]}
+*)
+val take_while : (char -> bool) -> string
+
+(** [take_while1 pred label] consumes one or more characters while [pred] holds.
+    Fails with [label] if no characters match.
+
+    Example:
+    {[
+      let digits1 () = take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+    ]}
+*)
+val take_while1 : (char -> bool) -> string -> string
+
+(** [skip_while pred] skips characters while [pred] holds (returns unit).
+    Always succeeds (skips zero characters if predicate doesn't match).
+    More efficient than [take_while] when you don't need the matched string.
+
+    Example:
+    {[
+      let skip_spaces () = skip_while (fun c -> c = ' ')
+    ]}
+*)
+val skip_while : (char -> bool) -> unit
+
+(** [skip_while_then_char pred c] skips characters matching [pred] then matches [c].
+    Fused operation - more efficient than [skip_while pred; char c]. *)
+val skip_while_then_char : (char -> bool) -> char -> unit
+
+(** [sep_by_take ws_pred sep_char take_pred] parses a separated list entirely in the handler.
+    Returns list of matched strings. Zero intermediate effect dispatches. *)
+val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
+
+(** [fused_sep_take ws_pred sep_char take_pred] performs:
+    skip whitespace, match separator, skip whitespace, take_while1
+    all in a single effect dispatch. Returns the taken string.
+    Much more efficient than separate calls for parsing separated values. *)
+val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
 
 (** [fail msg] aborts parsing with an error message.
     
@@ -254,11 +312,19 @@ val digit : unit -> int
 (** [letter ()] parses an ASCII letter (a-z or A-Z). *)
 val letter : unit -> char
 
-(** [whitespace ()] parses zero or more whitespace characters (space, tab, newline, carriage return). *)
+(** [is_whitespace c] returns true for whitespace characters (space, tab, newline, CR). *)
+val is_whitespace : char -> bool
+
+(** [whitespace ()] parses zero or more whitespace characters (space, tab, newline, carriage return).
+    Uses fast character scanning (not regex). *)
 val whitespace : unit -> string
 
 (** [whitespace1 ()] parses one or more whitespace characters. *)
 val whitespace1 : unit -> string
+
+(** [skip_whitespace ()] skips zero or more whitespace characters (returns unit).
+    More efficient than [whitespace] when you don't need the matched string. *)
+val skip_whitespace : unit -> unit
 
 (** [alphanum ()] parses an alphanumeric character (letter or digit). *)
 val alphanum : unit -> char

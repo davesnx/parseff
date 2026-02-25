@@ -5,41 +5,20 @@ open Benchmark
 (** Test input: JSON array *)
 let json_input = {|[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]|}
 
-(** Parseff JSON parser *)
+let is_digit_or_sign c = (c >= '0' && c <= '9') || c = '-' || c = '.'
+let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
+
+(** Parseff JSON parser - optimized with fused operations *)
 module Parseff_JSON = struct
   open Parseff
 
-  (* Pre-compiled regexes *)
-  let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-  let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-
-  let ws () = match_re ws_re
-
-  let number_parser () =
-    let s = match_re number_re in
-    float_of_string s
-
   let json_array () =
-    let _ = consume "[" in
-    let _ = ws () in
-    let elements =
-      ((fun () ->
-          let first = number_parser () in
-          let rest =
-            many
-              (fun () ->
-                let _ = ws () in
-                let _ = consume "," in
-                let _ = ws () in
-                number_parser ())
-              ()
-          in
-          first :: rest)
-      <|> fun () -> [])
-        ()
-    in
-    let _ = ws () in
-    let _ = consume "]" in
+    skip_while_then_char is_ws '[';
+    skip_while is_ws;
+    (* Parse entire comma-separated list in a single effect dispatch *)
+    let str_elements = sep_by_take is_ws ',' is_digit_or_sign in
+    let elements = List.map float_of_string str_elements in
+    skip_while_then_char is_ws ']';
     elements
 
   let parse input =
@@ -70,7 +49,7 @@ end
 
 let () =
   (* Warmup *)
-  for _ = 1 to 100 do
+  for _ = 1 to 1000 do
     ignore (Parseff_JSON.parse json_input);
     ignore (Angstrom_JSON.parse json_input)
   done;
@@ -82,7 +61,7 @@ let () =
   let results =
     latencyN
       ~repeat:3
-      10000L
+      100000L
       [
         ("Parseff", (fun () -> ignore (Parseff_JSON.parse json_input)), ());
         ("Angstrom", (fun () -> ignore (Angstrom_JSON.parse json_input)), ());
@@ -92,4 +71,4 @@ let () =
   print_newline ();
   tabulate results;
   
-  Printf.printf "\nNote: Lower latency is better. Angstrom is likely faster.\n"
+  Printf.printf "\nNote: Lower latency is better.\n"
