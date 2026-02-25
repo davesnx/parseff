@@ -9,13 +9,14 @@ let json_input = {|[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]|}
 module Parseff_JSON = struct
   open Parseff
 
-  let ws () =
-    let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-    match_re re
+  (* Pre-compiled regexes *)
+  let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
+  let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+
+  let ws () = match_re ws_re
 
   let number_parser () =
-    let re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?") in
-    let s = match_re re in
+    let s = match_re number_re in
     float_of_string s
 
   let json_array () =

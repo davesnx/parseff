@@ -235,15 +235,15 @@ let digit () =
 (** [letter ()] parses an ASCII letter *)
 let letter () = satisfy (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) "letter"
 
+(* Pre-compiled regexes for whitespace parsing *)
+let whitespace_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
+let whitespace1_re = Re.compile (Re.Posix.re "[ \t\n\r]+")
+
 (** [whitespace ()] parses zero or more whitespace characters *)
-let whitespace () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  match_re re
+let whitespace () = match_re whitespace_re
 
 (** [whitespace1 ()] parses one or more whitespace characters *)
-let whitespace1 () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]+") in
-  match_re re
+let whitespace1 () = match_re whitespace1_re
 
 (** [alphanum ()] parses an alphanumeric character *)
 let alphanum () =
