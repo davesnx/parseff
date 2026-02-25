@@ -1,26 +1,23 @@
 # Parseff Optimization Log
 
 ## Goal
-Achieve 10-15x performance improvement through systematic optimization.
+Beat Angstrom in performance. Original target was 10-15x improvement; achieved 140x.
 
 ## Baseline Measurements
 
-**Date:** 2026-02-25  
-**Commit:** dd0012a  
-**OCaml Version:** 5.4.0  
-**Platform:** Linux  
+**Date:** 2026-02-25
+**Commit:** dd0012a
+**OCaml Version:** 5.4.0
+**Platform:** Linux
 
 ### Benchmark Results (JSON Array Parser)
-**Input:** `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`  
-**Iterations:** 10,000  
-**Runs:** 3  
+**Input:** `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`
+**Iterations:** 10,000 (later increased to 100,000)
+**Runs:** 3
 
 ```
 Parseff Performance:
-- Run 1: 11,972.75 parses/sec
-- Run 2: 12,053.52 parses/sec  
-- Run 3: 11,918.55 parses/sec
-- Average: 11,981.6 parses/sec
+- Average: 11,982 parses/sec
 - Memory: 3,191.68 MB minor GC
 
 Angstrom Performance:
@@ -33,300 +30,161 @@ Gap: ~101x slower than Angstrom
 ### Identified Bottlenecks
 1. **Regex compilation (30 per parse):** ~600ms overhead per 10k iterations
 2. **String.sub allocations:** Every literal match allocates
-3. **Effect dispatch overhead:** Inherent to design (~10-30x)
-4. **Regex execution:** Even compiled regex has overhead
-
-### Target Performance
-- **Conservative:** 120,000 parses/sec (10x improvement)
-- **Optimistic:** 180,000 parses/sec (15x improvement)
-- **New gap to Angstrom:** 6-10x (vs current 101x)
+3. **Effect dispatch overhead:** Inherent to design (~12ns per effect)
+4. **Handler setup overhead:** ~35ns per `Effect.Deep.match_with` call
+5. **Too many effect dispatches:** ~45 effects per parse
 
 ---
 
 ## Phase 1: Regex Pre-compilation
 
-### Expected Improvement: 3-8x
-**Rationale:** Eliminate 300,000 redundant regex compilations per benchmark run.
-
----
-
 ### Optimization 1.1: Pre-compile Library Regexes
-
-**Date:** 2026-02-25  
-**Files Modified:** `lib/parseff.ml`  
-**Lines Changed:** 238-246  
-
-**Description:**
-Moved `Re.compile` calls from inside `whitespace()` and `whitespace1()` functions to module-level constants. These regexes were being recompiled on every single call.
-
-**Changes:**
-```ocaml
-(* BEFORE *)
-let whitespace () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  match_re re
-
-(* AFTER *)
-let whitespace_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let whitespace1_re = Re.compile (Re.Posix.re "[ \t\n\r]+")
-
-let whitespace () = match_re whitespace_re
-let whitespace1 () = match_re whitespace1_re
-```
-
-**Expected:** 1.1-1.2x (library has minimal regex usage)  
-**Actual:** **~1.0x (no change)** - 11,721 parses/sec vs 11,982 baseline
-
-**Analysis:** Library regex compilation was not the bottleneck. The whitespace functions are called frequently, but the benchmark's internal regexes dominated.
-
----
+**Files Modified:** `lib/parseff.ml`
+**Result:** ~1.0x (no measurable change)
+**Analysis:** Library regexes were not the bottleneck; benchmark regexes were.
 
 ### Optimization 1.2: Pre-compile Benchmark Regexes
+**Files Modified:** `bench/bench_vs_angstrom.ml`
+**Result:** **19.1x improvement** (11,982 -> 224,125 p/s)
+**Memory:** 3,191 MB -> 247 MB (12.9x reduction)
+**Gap to Angstrom:** 101x -> 5.3x
 
-**Date:** 2026-02-25  
-**Files Modified:** `bench/bench_vs_angstrom.ml`  
-**Lines Changed:** 10-19  
-**Commit:** [pending]
+This was THE critical bottleneck. Each parse compiled regexes ~30 times. Pre-compilation eliminated ~300,000 redundant compilations.
 
-**Description:**
-The benchmark was compiling 2 regexes (whitespace + number) inside hot loop functions. With 10k iterations and ~15 calls per iteration, this meant ~300,000 unnecessary regex compilations.
-
-**Changes:**
-```ocaml
-(* BEFORE - Lines 12-19 *)
-let ws () =
-  let re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  match_re re
-
-let number_parser () =
-  let re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?") in
-  let s = match_re re in
-  float_of_string s
-
-(* AFTER *)
-(* Pre-compile at module level *)
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-
-let ws () = match_re ws_re
-let number_parser () =
-  let s = match_re number_re in
-  float_of_string s
-```
-
-**Expected:** 3-8x improvement  
-**Actual:** **19.1x improvement!** 🚀
-
-**Benchmark Results:**
-```
-Before: 11,721 parses/sec, 3,191 MB memory
-After:  224,125 parses/sec, 247 MB memory
-
-Performance: 19.1x faster
-Memory: 12.9x reduction
-```
-
-**Analysis:** This was THE critical bottleneck. Each parse operation compiled regexes 30 times (21 whitespace + 10 number = 31 total). Pre-compilation eliminated 310,000 compilations in the benchmark, dramatically improving both speed and memory usage.
-
-**New Gap to Angstrom:** ~5.3x (down from 101x!)
+### Optimization 1.3-1.4: Pre-compile Test & Example Regexes
+**Files Modified:** `test/test_json.ml`, `test/test_css.ml`, `examples/routes.ml`
+**Result:** Best practice cleanup (no benchmark impact)
 
 ---
 
-### Optimization 1.3: Pre-compile Test Regexes
+## Phase 2: Core Engine Optimizations
 
-**Date:** 2026-02-25  
-**Files Modified:** `test/test_json.ml`, `test/test_css.ml`  
+### Optimization 2.1: Eliminate String.sub in Consume Handler
+**Result:** Part of combined Phase 2 (224k -> 660k combined with 2.2-2.3)
 
-**Description:**
-Tests were also recompiling regexes repeatedly. While test performance isn't critical, this ensures consistency and validates the pattern.
+Replaced `String.sub` + string comparison with direct `String.unsafe_get` byte-by-byte comparison. Eliminates allocation on every `consume` call.
 
-**test_json.ml - 4 regexes:**
-- Whitespace pattern (lines 12-14)
-- Number pattern (lines 32-34)
-- String content pattern (lines 39-41)
-- Object key pattern (lines 99-101)
+### Optimization 2.2: Add Take_while/Skip_while Effects
+**Result:** Part of combined Phase 2
 
-**test_css.ml - 3 regexes:**
-- Whitespace pattern (lines 14-16)
-- Identifier pattern (lines 19-21)
-- Property value pattern (lines 24-26)
+New effect types that scan N characters in a single effect dispatch instead of N separate Satisfy effects or regex calls. This dramatically reduced the number of effect dispatches per parse.
 
-**Expected:** Negligible performance impact (tests run once)  
-**Actual:** [Measuring...]
+### Optimization 2.3: Greedy_many Effect
+**Result:** 660k -> 805k p/s (1.22x)
 
----
+New `Greedy_many` effect that handles the `many` combinator loop inside the handler. Eliminates N Choose effects (one per iteration). Uses handler-side `go` calls instead.
 
-## Phase 2: String Optimizations
-
-### Expected Improvement: 1.2-1.5x
+### Combined Phase 2 Result
+**Before:** 224,125 p/s | **After:** 805,778 p/s | **Improvement:** 3.6x
+**Gap to Angstrom:** 5.3x -> 1.5x
 
 ---
 
-### Optimization 2.1: Eliminate String.sub in Consume
+## Phase 3: Fused Operations
 
-**Date:** [TBD]  
-**Files Modified:** `lib/parseff.ml`  
-**Lines Changed:** 60-71  
+### Optimization 3.1: Skip_while_then_char Fused Effect
+**Result:** 805k -> 860k p/s (1.07x)
 
-**Description:**
-[To be filled during implementation]
+Fused `skip_while` + `char` into a single effect dispatch. Common pattern in whitespace-then-delimiter parsing.
 
-**Expected:** 1.1-1.2x  
-**Actual:** [TBD]
+### Optimization 3.2: Fused_sep_take Effect
+**Result:** 860k -> 1,045k p/s (1.22x)
 
----
+Fused `skip_ws` + `sep_char` + `skip_ws` + `take_while1` into a single effect. Reduced effects per `many` iteration from 3 to 1.
 
-### Optimization 2.2: Replace Regex Whitespace with Character Scanning
+### Optimization 3.3: Sep_by_take Effect (The Breakthrough)
+**Result:** 1,045k -> 1,680k p/s (1.61x)
 
-**Date:** [TBD]  
-**Files Modified:** `lib/parseff.ml`  
-**Lines Changed:** 238-246  
+Parse entire comma-separated list in a SINGLE effect dispatch with zero intermediate handler setups. Eliminates all `go` calls from the inner loop (was 10 `go` calls, now 0). The loop runs entirely in handler-side code with direct character scanning.
 
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.1-1.3x  
-**Actual:** [TBD]
-
----
-
-### Optimization 2.3: Add Specialized ASCII Character Combinators
-
-**Date:** [TBD]  
-**Files Modified:** `lib/parseff.ml`, `lib/parseff.mli`  
-
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.05-1.1x  
-**Actual:** [TBD]
-
----
-
-## Phase 3: Compiler Optimizations
-
-### Expected Improvement: 1.2-1.5x
-
----
-
-### Optimization 3.1: Enable Flambda and Aggressive Inlining
-
-**Date:** [TBD]  
-**Files Modified:** `dune-project`, `lib/dune`  
-
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.1-1.3x  
-**Actual:** [TBD]
-
----
-
-### Optimization 3.2: Add Inline Hints to Hot Functions
-
-**Date:** [TBD]  
-**Files Modified:** `lib/parseff.ml`  
-
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.05-1.1x  
-**Actual:** [TBD]
-
----
-
-## Phase 4: Advanced Optimizations
-
-### Expected Improvement: 1.1-1.3x
-
----
-
-### Optimization 4.1: Greedy Many Combinator
-
-**Date:** [TBD]  
-**Files Modified:** `lib/parseff.ml`  
-
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.05-1.1x  
-**Actual:** [TBD]
-
----
-
-### Optimization 4.2: Add take_while Fast-Path Primitives
-
-**Date:** [TBD]  
-**Files Modified:** `lib/parseff.ml`, `lib/parseff.mli`  
-
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.05-1.1x  
-**Actual:** [TBD]
-
----
-
-## Phase 5: Profiling & Iteration
-
----
-
-### Optimization 5.1: Profile-Guided Optimizations
-
-**Date:** [TBD]  
-**Description:**
-[To be filled during implementation]
-
-**Expected:** 1.05-1.1x  
-**Actual:** [TBD]
+### Combined Phase 3 Result
+**Before:** 805,778 p/s | **After:** ~1,680,000 p/s | **Improvement:** 2.08x
+**Gap to Angstrom:** 1.5x -> **Parseff 1.7-1.8x FASTER**
 
 ---
 
 ## Cumulative Results
 
-| Phase | Optimization | Expected | Actual | Cumulative | Performance |
-|-------|-------------|----------|--------|------------|-------------|
-| Baseline | - | 1x | 1x | 1x | 11,982 p/s |
-| 1.1 | Library regex | 1.1-1.2x | 1.0x | 1.0x | 11,721 p/s |
-| 1.2 | Benchmark regex | 3-8x | **19.1x** | **19.1x** | **224,125 p/s** |
-| 1.3 | Test regex | ~1x | [TBD] | [TBD] | [TBD] |
-| 2.1 | No String.sub | 1.1-1.2x | [TBD] | [TBD] | [TBD] |
-| 2.2 | Char whitespace | 1.1-1.3x | [TBD] | [TBD] | [TBD] |
-| 2.3 | ASCII combinators | 1.05-1.1x | [TBD] | [TBD] | [TBD] |
-| 3.1 | Flambda | 1.1-1.3x | [TBD] | [TBD] | [TBD] |
-| 3.2 | Inline hints | 1.05-1.1x | [TBD] | [TBD] | [TBD] |
-| 4.1 | Greedy many | 1.05-1.1x | [TBD] | [TBD] | [TBD] |
-| 4.2 | take_while | 1.05-1.1x | [TBD] | [TBD] | [TBD] |
-| 5.1 | Profiling | 1.05-1.1x | [TBD] | [TBD] | [TBD] |
-| **Target** | **All** | **10-15x** | **19.1x ✓** | **19.1x** | **120k-180k p/s ✓** |
+| Phase | Optimization | Performance | vs Angstrom | Memory |
+|-------|-------------|-------------|-------------|--------|
+| Baseline | - | 11,982 p/s | 101x slower | 3,191 MB |
+| 1.2 | Regex pre-compile | 224,125 p/s | 5.3x slower | 247 MB |
+| 2.1-2.3 | Core engine | 805,778 p/s | 1.5x slower | 90 MB |
+| 3.1 | Fused ws+char | 860,000 p/s | 1.32x slower | ~90 MB |
+| 3.2 | Fused sep_take | 1,045,000 p/s | 1.13x slower | ~90 MB |
+| **3.3** | **Sep_by_take** | **1,680,000 p/s** | **1.8x FASTER** | **180 MB** |
+
+**Total improvement: 140x** (from 11,982 to ~1,680,000 parses/sec)
+**Angstrom performance: ~940,000 parses/sec**
+
+---
+
+## Effect Count Analysis
+
+Per parse of `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`:
+
+| Version | Effects | go Calls | Total Overhead |
+|---------|---------|----------|----------------|
+| Baseline (regex) | ~45 + 30 regex compiles | 12 | Very high |
+| Phase 1 (pre-compiled regex) | ~45 | 12 | High |
+| Phase 2 (take_while/greedy) | ~35 | 12 | Medium |
+| Phase 3.1 (fused ws+char) | ~28 | 12 | Medium |
+| Phase 3.2 (fused sep_take) | ~16 | 12 | Low |
+| **Phase 3.3 (sep_by_take)** | **~5** | **2** | **Minimal** |
+
+---
+
+## Microbenchmark Data (per effect type)
+
+```
+baseline (run+ret):    81,182,132/s  (~12ns)
+1x skip_while(10):    29,700,798/s  (~34ns)
+1x take_while(10):    29,574,288/s  (~34ns)
+10x satisfy:           8,382,650/s  (~119ns = ~12ns/effect)
+1x choose (success):  18,368,215/s  (~54ns, includes go call)
+many(10x satisfy):     2,253,070/s  (~444ns)
+```
+
+Key insight: Effect dispatch itself is cheap (~12ns), but `Effect.Deep.match_with` handler setup adds ~22ns. The biggest win came from reducing the total number of handler setups (`go` calls).
 
 ---
 
 ## Lessons Learned
 
 ### What Worked Well
-- [To be filled as we discover]
+- **Fused operations**: Combining multiple operations into single effect dispatches was the most impactful optimization strategy
+- **Handler-side loops**: Moving repetition logic into the handler (Sep_by_take) eliminated per-iteration overhead entirely
+- **Microbenchmarking**: Understanding per-effect costs guided optimization priorities
+- **Direct character scanning**: Replacing regex with character predicates was universally beneficial
 
 ### What Didn't Work as Expected
-- [To be filled as we discover]
+- **Hoisted handler records**: Pre-allocating the handler outside `go` was ~5% slower (Obj.magic overhead?)
+- **Get_pos/Set_pos effects**: Adding save/restore effects for backtracking was slower than handler-side `go` calls
+- **Exception-based many**: Catching Parse_error inside the continuation was slower than Greedy_many with `go`
+- **Flambda**: Not available in this OCaml build (would require compiler rebuild)
 
 ### Surprises and Discoveries
-- [To be filled as we discover]
+- Regex compilation was the dominant bottleneck (not effects!) - 30 compilations per parse
+- Effect dispatch is actually fast (~12ns) - the overhead is in handler setup
+- Memory usage correlated strongly with performance (fewer allocations = faster)
+- Parseff uses LESS memory than Angstrom with optimized combinators (180 MB vs 584 MB)
 
-### Best Practices Identified
-- [To be filled as we discover]
+### Key Technical Insights
+- `Effect.Deep.match_with` allocates a handler record + fiber per call (~22ns overhead)
+- Reducing `go` calls has more impact than reducing effect dispatches
+- The optimal strategy is maximal work per effect: do as much as possible in each handler
+- OCaml's `String.unsafe_get` with manual bounds checking is as fast as safe `String.get`
 
 ---
 
 ## Performance Best Practices for Users
 
-Based on our optimization journey, here are the key takeaways for writing fast parseff parsers:
-
-1. **Always pre-compile regexes at module level**
-2. **Use character combinators instead of regex for simple patterns**
-3. **Prefer take_while over regex for scanning**
-4. **Use specialized combinators (ascii_digit vs satisfy)**
-5. **Compile with --profile=release for production**
+1. **Always pre-compile regexes at module level** (19x speedup!)
+2. **Use `skip_while`/`take_while` instead of regex** for character class patterns
+3. **Use `skip_whitespace` instead of `whitespace`** when you don't need the string
+4. **Use fused operations** (`skip_while_then_char`, `fused_sep_take`, `sep_by_take`) for hot paths
+5. **Minimize `<|>` usage** - each alternation requires a handler setup for backtracking
+6. **Prefer `many` over manual recursion** - Greedy_many is optimized
 
 ---
 
@@ -334,5 +192,5 @@ Based on our optimization journey, here are the key takeaways for writing fast p
 
 - All measurements done on same hardware with consistent load
 - OCaml 5.4.0 with effects fully enabled
-- Benchmark uses latencyN with 10,000 iterations, 3 runs
+- Final benchmark uses latencyN with 100,000 iterations, 3 runs
 - Memory measurements from minor GC allocation counter
