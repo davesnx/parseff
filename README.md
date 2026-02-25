@@ -259,17 +259,19 @@ The paper "Algebraic Effects and Handlers for Parsing" defines a typed algebraic
 Testing on a simple JSON array parser (`[1, 2, 3, ..., 10]`):
 
 ```
-Parseff:  ~11,875 parses/second
-Angstrom: ~1,145,112 parses/second
-Result:   Angstrom is ~96x faster
+Parseff:  ~224,125 parses/second (after optimization)
+Angstrom: ~1,177,616 parses/second
+Result:   Angstrom is ~5.3x faster
 ```
+
+**Optimization Impact**: Initial version was 101x slower than Angstrom due to regex compilation in hot paths. After pre-compiling regexes at module level, Parseff achieved a **19.1x speedup** (from ~11,982 to ~224,125 parses/sec), bringing the gap down from 101x to just 5.3x. See `OPTIMIZATION_LOG.md` for details.
 
 ### Known Trade-offs
 
-1. **Effect Dispatch Overhead**: OCaml 5's effect system adds significant overhead
-   - Parseff is ~100x slower than Angstrom for simple parsers
-   - Effect dispatch and continuation management are expensive
+1. **Effect Dispatch Overhead**: OCaml 5's effect system adds overhead (~5-10x vs optimized parsers)
+   - Effect dispatch and continuation management have inherent costs
    - More competitive for complex grammars where flexibility matters more than raw speed
+   - **Best practice**: Always pre-compile regexes at module level (see Performance Tips below)
    
 2. **No Streaming**: Unlike Angstrom, Parseff requires the full input string upfront
    
@@ -284,6 +286,30 @@ Result:   Angstrom is ~96x faster
 - Building DSL interpreters with context-sensitive rules
 - Prototyping parser designs
 - Learning and teaching algebraic effects
+
+### Performance Tips
+
+To get the best performance from Parseff:
+
+1. **Always pre-compile regexes at module level**:
+   ```ocaml
+   (* ❌ SLOW - compiles regex on every call *)
+   let number () =
+     let re = Re.compile (Re.Posix.re "[0-9]+") in
+     match_re re
+   
+   (* ✅ FAST - compiles once at module initialization *)
+   let number_re = Re.compile (Re.Posix.re "[0-9]+")
+   let number () = match_re number_re
+   ```
+
+2. **Use character combinators for simple patterns** instead of regex where possible
+
+3. **Minimize backtracking** by ordering alternatives from most to least specific
+
+4. **Use `look_ahead` sparingly** as it requires continuation capture
+
+See `OPTIMIZATION_LOG.md` for detailed performance analysis and optimization techniques.
 
 ## Adding Better Error Messages
 
@@ -344,7 +370,7 @@ type error_context = {
 
 ## Known Limitations
 
-1. **Performance**: ~100x slower than Angstrom (see benchmarks)
+1. **Performance**: ~5-6x slower than Angstrom (see benchmarks). Effect dispatch overhead is inherent to the design.
 
 2. **Left Recursion**: Direct left recursion causes infinite loops (rewrite grammar or use iteration)
 
