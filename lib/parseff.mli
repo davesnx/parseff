@@ -229,24 +229,9 @@ val end_of_input : unit -> unit
         result
     ]} *)
 
-val ( <|> ) : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
-(** [(<|>)] is the alternation combinator. Tries the left parser; if it fails,
-    backtracks and tries the right parser.
-
-    Example:
-    {[
-      let bool_parser () =
-        ( (fun () ->
-            consume "true";
-            true)
-        <|> fun () ->
-          consume "false";
-          false )
-          ()
-    ]} *)
-
 val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
-(** [or_] is an alias for [<|>]. Named version of the alternation combinator.
+(** [or_] is the alternation combinator. Tries the left parser; if it fails,
+    backtracks and tries the right parser.
 
     Example:
     {[
@@ -372,7 +357,8 @@ val optional : (unit -> 'a) -> unit -> 'a option
 
     Example:
     {[
-      let optional_sign () = optional (fun () -> char '-' <|> char '+') ()
+      let optional_sign () =
+        optional (fun () -> or_ (fun () -> char '-') (fun () -> char '+') ()) ()
     ]} *)
 
 val count : int -> (unit -> 'a) -> unit -> 'a list

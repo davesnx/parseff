@@ -48,8 +48,8 @@ No `>>=`, no `let*`, no `*>`. Just `let` and `;`.
 
 ## Features
 
-- **Imperative style** — parsers are `unit -> 'a` functions composed through ordinary `let` bindings. No custom operators (`>>=`, `>>|`, `*>`) and no binding operators (`let*`, `let+`, `and+`)
-- **Backtracking by default** — `<|>` automatically saves and restores position on failure
+- **Imperative style** — parsers are `unit -> 'a` functions composed through ordinary `let` bindings, without monadic operators (`>>=`, `>>|`, `*>`) or binding operators (`let*`, `let+`, `and+`)
+- **Backtracking by default** — `or_` automatically saves and restores position on failure
 - **Streaming input** — parse from strings, files, channels, or custom readers with the same parser code
 - **Custom error types** — return domain-specific errors via polymorphic variants, not just strings
 - **Zero-copy parsing** — span-based APIs avoid string allocations on hot paths
@@ -87,7 +87,7 @@ See [bench/bench_vs_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark
 | Category | Functions |
 |---|---|
 | Core | `consume`, `char`, `satisfy`, `take_while`, `take_while1`, `skip_while`, `match_re`, `end_of_input` |
-| Combinators | `or_` / `<\|>`, `one_of`, `one_of_labeled`, `expect`, `look_ahead`, `optional` |
+| Combinators | `or_`, `one_of`, `one_of_labeled`, `expect`, `look_ahead`, `optional` |
 | Repetition | `many`, `many1`, `sep_by`, `sep_by1`, `count` |
 | Errors | `fail`, `error` |
 | Convenience | `digit`, `letter`, `alphanum`, `whitespace`, `skip_whitespace`, `any_char` |

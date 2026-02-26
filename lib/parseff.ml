@@ -879,7 +879,6 @@ let[@inline] fail msg = Effect.perform (Fail msg)
 let[@inline] error e = Effect.perform (Error_val e)
 let[@inline] end_of_input () = Effect.perform End_of_input
 let[@inline] or_ p q () = Effect.perform (Choose (p, q))
-let ( <|> ) = or_
 let[@inline] look_ahead p = Effect.perform (Look_ahead p)
 let[@inline] rec_ p = Effect.perform (Rec_ p)
 let[@inline] many (p : unit -> 'a) () : 'a list = Effect.perform (Greedy_many p)
@@ -890,7 +889,8 @@ let[@inline] many1 (p : unit -> 'a) () : 'a list =
   first :: rest
 
 let sep_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  ( (fun () ->
+  or_
+    (fun () ->
       let first = p () in
       let rest =
         many
@@ -900,7 +900,7 @@ let sep_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
           ()
       in
       first :: rest)
-  <|> fun () -> [] )
+    (fun () -> [])
     ()
 
 let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
@@ -915,7 +915,7 @@ let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   first :: rest
 
 let optional (p : unit -> 'a) () : 'a option =
-  ((fun () -> Some (p ())) <|> fun () -> None) ()
+  or_ (fun () -> Some (p ())) (fun () -> None) ()
 
 let count n (p : unit -> 'a) () : 'a list =
   let rec loop acc i =
@@ -952,7 +952,7 @@ let one_of parsers () =
   let rec try_all = function
     | [] -> fail "no alternative matched"
     | [ p ] -> p ()
-    | p :: rest -> (p <|> fun () -> try_all rest) ()
+    | p :: rest -> or_ p (fun () -> try_all rest) ()
   in
   try_all parsers
 
