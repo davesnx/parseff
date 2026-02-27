@@ -23,7 +23,7 @@
         (a, b, c, d)
 
       match Parseff.parse "192.168.1.1" ip_address with
-      | Ok (result, _) -> Printf.printf "Parsed: %d.%d.%d.%d\n" (fst (fst (fst result))) ...
+      | Ok result -> Printf.printf "Parsed: %d.%d.%d.%d\n" (fst (fst (fst result))) ...
       | Error { pos; error = `Expected msg } -> Printf.printf "Error at %d: %s\n" pos msg
       | Error _ -> Printf.printf "Other error\n"
     ]} *)
@@ -52,7 +52,7 @@ val span_to_string : span -> string
 
     User errors raised via [error] are also returned as [Error]. *)
 type ('a, 'e) result =
-  | Ok of 'a * int  (** Success: parsed value and final position *)
+  | Ok of 'a  (** Success: parsed value *)
   | Error of {
       pos : int;  (** Position where error occurred *)
       error : 'e;  (** Error value *)
@@ -71,14 +71,13 @@ val parse :
     recursive entry points. Defaults to [128]. When exceeded, parsing fails with
     an error instead of risking a stack overflow.
 
-    Returns [Ok (result, final_pos)] on success, or [Error { pos; error }] on
-    failure. All errors (parse errors and user errors) are returned in the
-    result.
+    Returns [Ok result] on success, or [Error { pos; error }] on failure. All
+    errors (parse errors and user errors) are returned in the result.
 
     Example:
     {@ocaml[
       match parse "hello" (fun () -> consume "hello") with
-      | Ok (s, pos) -> Printf.printf "Matched %S at position %d\n" s pos
+      | Ok s -> Printf.printf "Matched %S\n" s
       | Error { pos; error = `Expected msg } ->
           Printf.printf "Failed at %d: %s\n" pos msg
       | Error _ -> Printf.printf "Other error\n"
@@ -209,13 +208,17 @@ val error : 'e -> 'a
         else n
 
       match run input number with
-      | Ok (n, _) -> Printf.printf "Got %d\n" n
+      | Ok n -> Printf.printf "Got %d\n" n
       | Error { error = `Out_of_range n; _ } ->
           Printf.printf "%d is too large\n" n
       | Error { error = `Negative n; _ } ->
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
     ]} *)
+
+val position : unit -> int
+(** [position ()] returns the current parser offset in bytes from the start of
+    the input. *)
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only if no input remains. Use this to ensure the

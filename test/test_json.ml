@@ -107,51 +107,51 @@ and key_value () =
 
 let test_null () =
   match Parseff.parse "null" json with
-  | Ok (Null, _) -> ()
+  | Ok (Null) -> ()
   | Ok _ -> Alcotest.fail "Expected Null"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_bool_true () =
   match Parseff.parse "true" json with
-  | Ok (Bool true, _) -> ()
+  | Ok (Bool true) -> ()
   | Ok _ -> Alcotest.fail "Expected Bool true"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_bool_false () =
   match Parseff.parse "false" json with
-  | Ok (Bool false, _) -> ()
+  | Ok (Bool false) -> ()
   | Ok _ -> Alcotest.fail "Expected Bool false"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_number () =
   match Parseff.parse "42" json with
-  | Ok (Number n, _) -> Alcotest.(check (float 0.1)) "number" 42.0 n
+  | Ok (Number n) -> Alcotest.(check (float 0.1)) "number" 42.0 n
   | Ok _ -> Alcotest.fail "Expected Number"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_number_float () =
   match Parseff.parse "3.14" json with
-  | Ok (Number n, _) -> Alcotest.(check (float 0.01)) "float" 3.14 n
+  | Ok (Number n) -> Alcotest.(check (float 0.01)) "float" 3.14 n
   | Ok _ -> Alcotest.fail "Expected Number"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_string () =
   match Parseff.parse "\"hello\"" json with
-  | Ok (String s, _) -> Alcotest.(check string) "string" "hello" s
+  | Ok (String s) -> Alcotest.(check string) "string" "hello" s
   | Ok _ -> Alcotest.fail "Expected String"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_empty_array () =
   match Parseff.parse "[]" json with
-  | Ok (Array lst, _) -> Alcotest.(check int) "empty array" 0 (List.length lst)
+  | Ok (Array lst) -> Alcotest.(check int) "empty array" 0 (List.length lst)
   | Ok _ -> Alcotest.fail "Expected Array"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_simple_array () =
   match Parseff.parse "[1, 2, 3]" json with
-  | Ok (Array lst, _) ->
+  | Ok (Array lst) ->
       Alcotest.(check int) "three elements" 3 (List.length lst)
-  | Ok (v, _) ->
+  | Ok (v) ->
       let typ =
         match v with
         | Null -> "Null"
@@ -166,14 +166,14 @@ let test_simple_array () =
 
 let test_empty_object () =
   match Parseff.parse "{}" json with
-  | Ok (Object pairs, _) ->
+  | Ok (Object pairs) ->
       Alcotest.(check int) "empty object" 0 (List.length pairs)
   | Ok _ -> Alcotest.fail "Expected Object"
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_simple_object () =
   match Parseff.parse "{\"key\": \"value\"}" json with
-  | Ok (Object pairs, _) ->
+  | Ok (Object pairs) ->
       Alcotest.(check int) "one pair" 1 (List.length pairs);
       let key, _ = List.hd pairs in
       Alcotest.(check string) "key" "key" key
@@ -182,8 +182,8 @@ let test_simple_object () =
 
 let test_nested () =
   match Parseff.parse "{\"a\": {\"b\": null}}" json with
-  | Ok (Object _, _) -> ()
-  | Ok (v, _) ->
+  | Ok (Object _) -> ()
+  | Ok (v) ->
       let typ =
         match v with
         | Null -> "Null"
@@ -210,7 +210,7 @@ let make_deeply_nested_arrays depth =
 let test_deep_nesting_within_limit () =
   let input = make_deeply_nested_arrays 50 in
   match Parseff.parse input json with
-  | Ok (Array _, _) -> ()
+  | Ok (Array _) -> ()
   | Ok _ -> Alcotest.fail "Expected nested Array"
   | Error { error = `Expected msg; _ } ->
       Alcotest.fail (Printf.sprintf "Unexpected parse error: %s" msg)

@@ -32,7 +32,7 @@ let ip_address () =
 
 let () =
   match Parseff.parse "192.168.1.1" ip_address with
-  | Ok ((a, b, c, d), _) ->
+  | Ok ((a, b, c, d)) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error { pos; error = `Out_of_range n } ->
       Printf.printf "Error at %d: %d out of range (0-255)\n" pos n

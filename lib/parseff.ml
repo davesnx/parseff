@@ -6,6 +6,7 @@ let[@inline always] span_to_string s =
 type _ Effect.t +=
   | Consume : string -> string Effect.t
   | Satisfy : (char -> bool) * string -> char Effect.t
+  | Position : int Effect.t
   | Match_re : Re.re -> string Effect.t
   | Choose : (unit -> 'a) * (unit -> 'a) -> 'a Effect.t
   | Fail : string -> 'a Effect.t
@@ -24,7 +25,7 @@ type _ Effect.t +=
       -> span list Effect.t
   | Rec_ : (unit -> 'a) -> 'a Effect.t
 
-type ('a, 'e) result = Ok of 'a * int | Error of { pos : int; error : 'e }
+type ('a, 'e) result = Ok of 'a | Error of { pos : int; error : 'e }
 
 exception Parse_error of int * string
 exception User_error of int * Obj.t
@@ -257,8 +258,9 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
     match p () with
-    | v -> Ok (v, st.pos)
+    | v -> Ok v
     | exception exn -> handler.handle exn
+    | effect Position, k -> Effect.Deep.continue k st.pos
     | effect Consume s, k -> (
         match handle_consume st input_len s with
         | v -> Effect.Deep.continue k v
@@ -299,9 +301,7 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
         while not !failed do
           saved := st.pos;
           match go (Obj.magic p) with
-          | Ok (v, pos') ->
-              st.pos <- pos';
-              acc := Obj.magic v :: !acc
+          | Ok v -> acc := Obj.magic v :: !acc
           | Error _ ->
               st.pos <- !saved;
               failed := true
@@ -310,15 +310,11 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
     | effect Choose (left, right), k -> (
         let saved = st.pos in
         match go (Obj.magic left) with
-        | Ok (v, pos') ->
-            st.pos <- pos';
-            Effect.Deep.continue k (Obj.magic v)
+        | Ok v -> Effect.Deep.continue k (Obj.magic v)
         | Error _ -> (
             st.pos <- saved;
             match go (Obj.magic right) with
-            | Ok (v, pos') ->
-                st.pos <- pos';
-                Effect.Deep.continue k (Obj.magic v)
+            | Ok v -> Effect.Deep.continue k (Obj.magic v)
             | Error e ->
                 Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error))
             ))
@@ -329,7 +325,7 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
     | effect Look_ahead p, k -> (
         let saved = st.pos in
         match go (Obj.magic p) with
-        | Ok (v, _) ->
+        | Ok v ->
             st.pos <- saved;
             Effect.Deep.continue k (Obj.magic v)
         | Error e ->
@@ -344,9 +340,8 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
         else begin
           incr nest_depth;
           match go (Obj.magic p) with
-          | Ok (v, pos') ->
+          | Ok v ->
               decr nest_depth;
-              st.pos <- pos';
               Effect.Deep.continue k (Obj.magic v)
           | Error e ->
               decr nest_depth;
@@ -640,8 +635,9 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
     match p () with
-    | v -> Ok (v, st.pos)
+    | v -> Ok v
     | exception exn -> handler.handle exn
+    | effect Position, k -> Effect.Deep.continue k st.pos
     | effect Consume s, k -> (
         try
           ignore (ensure_bytes src st.pos (String.length s));
@@ -692,9 +688,7 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
         while not !failed do
           saved := st.pos;
           match go (Obj.magic p) with
-          | Ok (v, pos') ->
-              st.pos <- pos';
-              acc := Obj.magic v :: !acc
+          | Ok v -> acc := Obj.magic v :: !acc
           | Error _ ->
               st.pos <- !saved;
               sync_to_source ();
@@ -704,16 +698,12 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
     | effect Choose (left, right), k -> (
         let saved = st.pos in
         match go (Obj.magic left) with
-        | Ok (v, pos') ->
-            st.pos <- pos';
-            Effect.Deep.continue k (Obj.magic v)
+        | Ok v -> Effect.Deep.continue k (Obj.magic v)
         | Error _ -> (
             st.pos <- saved;
             sync_to_source ();
             match go (Obj.magic right) with
-            | Ok (v, pos') ->
-                st.pos <- pos';
-                Effect.Deep.continue k (Obj.magic v)
+            | Ok v -> Effect.Deep.continue k (Obj.magic v)
             | Error e ->
                 Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error))
             ))
@@ -724,7 +714,7 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
     | effect Look_ahead p, k -> (
         let saved = st.pos in
         match go (Obj.magic p) with
-        | Ok (v, _) ->
+        | Ok v ->
             st.pos <- saved;
             sync_to_source ();
             Effect.Deep.continue k (Obj.magic v)
@@ -741,9 +731,8 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
         else begin
           incr nest_depth;
           match go (Obj.magic p) with
-          | Ok (v, pos') ->
+          | Ok v ->
               decr nest_depth;
-              st.pos <- pos';
               Effect.Deep.continue k (Obj.magic v)
           | Error e ->
               decr nest_depth;
@@ -836,6 +825,7 @@ let[@inline] fused_sep_take ws_pred sep_char take_pred =
 
 let[@inline] fail msg = Effect.perform (Fail msg)
 let[@inline] error e = Effect.perform (Error_val e)
+let[@inline] position () = Effect.perform Position
 let[@inline] end_of_input () = Effect.perform End_of_input
 let[@inline] or_ p q () = Effect.perform (Choose (p, q))
 let[@inline] look_ahead p = Effect.perform (Look_ahead p)

@@ -32,7 +32,7 @@ let rule () =
 let test_simple_rule () =
   let input = "body { color: red; }" in
   match Parseff.parse input rule with
-  | Ok (r, _) ->
+  | Ok (r) ->
       Alcotest.(check string) "selector" "body" r.selector;
       Alcotest.(check int) "one declaration" 1 (List.length r.declarations);
       let decl = List.hd r.declarations in
@@ -45,7 +45,7 @@ let test_simple_rule () =
 let test_multiple_declarations () =
   let input = "p { margin: 0; padding: 10px; color: blue; }" in
   match Parseff.parse input rule with
-  | Ok (r, _) ->
+  | Ok (r) ->
       Alcotest.(check string) "selector" "p" r.selector;
       Alcotest.(check int) "three declarations" 3 (List.length r.declarations)
   | Error _ -> Alcotest.fail "Parse failed"
@@ -57,7 +57,7 @@ let test_with_whitespace () =
     rule ()
   in
   match Parseff.parse input rule_with_ws with
-  | Ok (r, _) ->
+  | Ok (r) ->
       Alcotest.(check string) "selector" "div" r.selector;
       Alcotest.(check int) "two declarations" 2 (List.length r.declarations)
   | Error _ -> Alcotest.fail "Parse failed"
@@ -65,7 +65,7 @@ let test_with_whitespace () =
 let test_empty_rule () =
   let input = "section {}" in
   match Parseff.parse input rule with
-  | Ok (r, _) ->
+  | Ok (r) ->
       Alcotest.(check string) "selector" "section" r.selector;
       Alcotest.(check int) "no declarations" 0 (List.length r.declarations)
   | Error _ -> Alcotest.fail "Parse failed"

@@ -37,12 +37,12 @@ module Parseff_JSON = struct
 
   let bench_span input =
     match Parseff.parse input json_array with
-    | Ok (result, _) -> Some result
+    | Ok (result) -> Some result
     | Error _ -> None
 
   let bench_fair input =
     match Parseff.parse input json_array_fair with
-    | Ok (result, _) -> Some result
+    | Ok (result) -> Some result
     | Error _ -> None
 end
 

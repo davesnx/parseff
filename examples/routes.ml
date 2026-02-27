@@ -53,7 +53,7 @@ let () =
   List.iter
     (fun (input, expected) ->
       match Parseff.parse input route with
-      | Ok (result, _) ->
+      | Ok (result) ->
           let matches = result = expected in
           Printf.printf "✓ %-25s -> %s %s\n" input (route_to_string result)
             (if matches then ""

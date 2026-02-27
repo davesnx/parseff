@@ -2,7 +2,7 @@ let run inputs parser = Parseff.parse (String.concat "" inputs) parser
 
 let check_ok ~msg typ parser inputs expected =
   match run inputs parser with
-  | Ok (v, _) -> Alcotest.(check typ) msg expected v
+  | Ok (v) -> Alcotest.(check typ) msg expected v
   | Error _ -> Alcotest.fail (Printf.sprintf "%s: expected success" msg)
 
 let check_fail ~msg parser inputs =
