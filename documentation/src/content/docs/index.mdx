@@ -1,0 +1,201 @@
+---
+title: Parseff
+description: Write parsers as plain functions. Algebraic effects handle the rest.
+template: splash
+hero:
+  tagline: Write parsers as plain functions. Algebraic effects handle the rest.
+  actions:
+    - text: Quick Start
+      link: /parseff/quick-start
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/davesnx/parseff
+      icon: external
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is Parseff?
+
+Parseff is a parser combinator library for OCaml 5 where parsers are regular functions — not monadic values, not applicative functors, just `unit -> 'a`. Algebraic effects handle backtracking, error reporting, and input management behind the scenes.
+
+The result is parser code that reads like imperative OCaml but retains the composability of traditional combinators.
+
+```ocaml
+let ip_address () =
+  let a = number () in
+  let _ = Parseff.consume "." in
+  let b = number () in
+  let _ = Parseff.consume "." in
+  let c = number () in
+  let _ = Parseff.consume "." in
+  let d = number () in
+  Parseff.end_of_input ();
+  (a, b, c, d)
+```
+
+No monadic plumbing. Just `let` and `;`.
+
+<CardGrid>
+  <Card title="Imperative style, functional guarantees" icon="pencil">
+    Write `let x = consume "hello"` instead of `consume "hello" >>= fun x ->`. No monadic operators or binding operators (`let*`, `let+`). Parsers compose through ordinary function calls.
+  </Card>
+  <Card title="Backtracking by default" icon="random">
+    Like Angstrom, alternation backtracks automatically. No `try` combinator needed.
+  </Card>
+  <Card title="Zero-copy parsing" icon="document">
+    Span-based APIs avoid string allocations on hot paths. Only materialize strings when you need them.
+  </Card>
+  <Card title="Custom error types" icon="warning">
+    Return domain-specific errors via polymorphic variants or custom types — not just strings.
+  </Card>
+  <Card title="Streaming input" icon="open-book">
+    Parse from strings, files, channels, or custom readers. The same parser code works with both `parse` and `parse_source` — no changes needed.
+  </Card>
+  <Card title="High performance" icon="rocket">
+    1.6x to 4.3x faster than Angstrom on JSON benchmarks, with 3x less memory usage.
+  </Card>
+</CardGrid>
+
+## How It Works
+
+Parsers are regular OCaml functions that perform algebraic effects. The `parse` runner installs an effect handler that manages input state, backtracking, and error collection.
+
+```ocaml
+(* Each combinator performs an effect *)
+let _ = consume "hello"       (* -> Effect.perform (Consume "hello") *)
+let c = satisfy is_digit      (* -> Effect.perform (Satisfy (is_digit, "digit")) *)
+let r = or_ left right ()     (* -> Effect.perform (Choose (left, right)) *)
+let xs = many parser ()       (* -> Effect.perform (Greedy_many parser) *)
+```
+
+The effect handler:
+- **`Consume`** — matches the literal against input at the current position, advances the cursor
+- **`Choose`** — saves the cursor position, tries the left parser, backtracks and tries the right on failure
+- **`Greedy_many`** — loops the parser until it fails, collecting results, then restores position to the last success
+
+This is analogous to how JavaScript generators use `yield` to communicate with a runner — except with OCaml's type-safe effect system.
+
+## Parseff vs. Angstrom
+
+The same arithmetic expression parser in both styles:
+
+**Angstrom** (monadic):
+
+```ocaml
+open Angstrom
+
+let parens p = char '(' *> p <* char ')'
+let add = char '+' *> return (+)
+let sub = char '-' *> return (-)
+let mul = char '*' *> return ( * )
+let div = char '/' *> return (/)
+let integer =
+  take_while1 (function '0' .. '9' -> true | _ -> false) >>| int_of_string
+
+let chainl1 e op =
+  let rec go acc =
+    choice [ lift2 (fun f x -> f acc x) op e >>= go; return acc ] in
+  e >>= fun init -> go init
+
+let expr : int t =
+  fix (fun expr ->
+    let factor = choice [ parens expr; integer ] in
+    let term   = chainl1 factor (choice [ mul; div ]) in
+    chainl1 term (choice [ add; sub ]))
+```
+
+**Parseff** (imperative):
+
+```ocaml
+let rec expr () =
+  let left = term () in
+  let rest =
+    Parseff.many (fun () ->
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char '+' in
+      Parseff.skip_whitespace ();
+      term ()) ()
+  in
+  List.fold_left (fun acc t -> acc + t) left rest
+
+and term () =
+  let left = factor () in
+  let rest =
+    Parseff.many (fun () ->
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char '*' in
+      Parseff.skip_whitespace ();
+      factor ()) ()
+  in
+  List.fold_left (fun acc f -> acc * f) left rest
+
+and factor () =
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.char '(' in
+      let e = expr () in
+      let _ = Parseff.char ')' in
+      e)
+    (fun () ->
+      let digits = Parseff.take_while1
+        (fun c -> c >= '0' && c <= '9') "integer" in
+      int_of_string digits)
+    ()
+```
+
+The Parseff version uses standard control flow — `let` bindings, function calls, `List.fold_left`. No monadic combinators (`>>=`, `>>|`, `*>`, `<*>`, `lift2`, `fix`) and no binding operators (`let*`, `let+`, `and+`). You don't need to learn a DSL of operators to write parsers.
+
+## Comparison
+
+| Feature | Parseff | [Angstrom](https://github.com/inhabitedtype/angstrom) | [MParser](https://github.com/cakeplus/mparser) | [Opal](https://github.com/pyrocat101/opal) |
+|---|---|---|---|---|
+| Imperative-style API | Yes | No | No | No |
+| Monadic interface | No | Yes | Yes | Yes |
+| Backtracking by default | Yes | Yes | No | No |
+| Unbounded lookahead | Yes | Yes | Yes | No |
+| Custom error types | Yes | No | No | No |
+| Zero-copy API | Yes | Yes | No | No |
+| Streaming/incremental input | Yes | Yes | No | No |
+| Requires OCaml 5+ | Yes | No | No | No |
+
+## Performance
+
+Benchmarked on a JSON array parser (`[1, 2, 3, ..., 10]`) over 100,000 iterations:
+
+| | Parses/sec | vs. Angstrom |
+|---|---|---|
+| Parseff (zero-copy spans) | ~4,940,000 | 4.3x faster |
+| Parseff (fair comparison) | ~1,930,000 | 1.6x faster |
+| Angstrom | ~1,150,000 | baseline |
+
+Memory: Parseff 197 MB vs Angstrom 584 MB (3x less).
+
+The "fair comparison" uses the same `float_of_string` conversion as Angstrom. The "zero-copy spans" variant uses span-based parsing to avoid intermediate string allocations.
+
+See [Performance](/parseff/performance) for methodology and optimization techniques.
+
+## Installation
+
+```bash
+opam install parseff
+```
+
+Requires OCaml >= 5.3.
+
+## Trade-offs
+
+- **Backtracking cost**: Each `or_` saves/restores cursor position. Deep alternation trees in tight loops can be expensive.
+- **Streaming buffer growth**: When using `parse_source`, the internal buffer grows monotonically — old data is never discarded. Memory usage equals total input size. Fine for most inputs; not ideal for multi-gigabyte streams.
+- **OCaml 5+ required**: Algebraic effects are not available before OCaml 5.0.
+
+## References
+
+- Krishnaswami & Yallop (PLDI '19) — [A Typed, Algebraic Approach to Parsing](https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf)
+- Wadler, P. — [Monads for Functional Programming](https://link.springer.com/chapter/10.1007/3-540-59451-5_2)
+- Kiselyov, O. et al. — [Algebraic Effects and Effect Handlers](https://okmij.org/ftp/Computation/variables-effects.html)
+
+---
+
+Inspired by [yieldparser](https://github.com/JavaScriptRegenerated/yieldparser) and [Angstrom](https://github.com/inhabitedtype/angstrom).

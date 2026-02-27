@@ -1,0 +1,14 @@
+:root {
+  --sl-font: 'Instrument Sans', sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', monospace;
+
+  --sl-color-accent-low: #0f2640;
+  --sl-color-accent: #7CACF8;
+  --sl-color-accent-high: #b8d4fc;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e2edf8;
+  --sl-color-accent: #528FC3;
+  --sl-color-accent-high: #3a6a99;
+}
