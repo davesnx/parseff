@@ -1,5 +1,5 @@
 ---
-title: Core Primitives
+title: Core
 description: Basic parsing operations in Parseff
 ---
 
@@ -20,8 +20,8 @@ Matches an exact literal string. Returns the matched string.
 **Example:**
 ```ocaml
 let parser () =
-  let _ = consume "hello" in
-  consume "world"
+  let _ = Parseff.consume "hello" in
+  Parseff.consume "world"
 
 (* Matches "helloworld" *)
 ```
@@ -46,17 +46,17 @@ Matches an exact character. Returns the matched character.
 
 **Example:**
 ```ocaml
-let comma () = char ','
-let lparen () = char '('
-let rparen () = char ')'
+let comma () = Parseff.char ','
+let left_paren () = Parseff.char '('
+let right_paren () = Parseff.char ')'
 
 (* Parse a comma-separated pair *)
 let pair () =
-  let _ = lparen () in
-  let a = digit () in
+  let _ = left_paren () in
+  let a = Parseff.digit () in
   let _ = comma () in
-  let b = digit () in
-  let _ = rparen () in
+  let b = Parseff.digit () in
+  let _ = right_paren () in
   (a, b)
 
 (* Matches "(1,2)" -> (1, 2) *)
@@ -64,25 +64,9 @@ let pair () =
 
 </div>
 
----
-
-### `string`
-
-```ocaml
-val string : string -> string
-```
-
-Alias for `consume`. Use whichever name you prefer.
-
-<div class="api-example">
-
-**Example:**
-```ocaml
-let greeting () = string "Hello, "
-(* Same as: let greeting () = consume "Hello, " *)
-```
-
-</div>
+:::tip[`char` vs `consume`]
+Use `char` for single characters and `consume` for multi-character strings. They both match literals, but `char` makes the intent clear and avoids a string allocation for a single byte.
+:::
 
 ---
 
@@ -100,19 +84,19 @@ Matches a character satisfying the given predicate. The `~label` parameter is us
 ```ocaml
 (* Match any vowel *)
 let vowel () = 
-  satisfy 
+  Parseff.satisfy 
     (fun c -> String.contains "aeiouAEIOU" c) 
     ~label:"vowel"
 
 (* Match any digit *)
 let digit_char () = 
-  satisfy 
+  Parseff.satisfy 
     (fun c -> c >= '0' && c <= '9') 
     ~label:"digit"
 
 (* Match any uppercase letter *)
 let uppercase () = 
-  satisfy 
+  Parseff.satisfy 
     (fun c -> c >= 'A' && c <= 'Z') 
     ~label:"uppercase letter"
 ```
@@ -123,10 +107,10 @@ let uppercase () =
 The label parameter is shown in error messages. Choose descriptive labels for better errors:
 ```ocaml
 (* BAD: *)
-satisfy is_digit ~label:"char"  (* Error: expected 'char' *)
+Parseff.satisfy is_digit ~label:"char"  (* Error: expected 'char' *)
 
 (* GOOD: *)
-satisfy is_digit ~label:"digit"  (* Error: expected 'digit' *)
+Parseff.satisfy is_digit ~label:"digit"  (* Error: expected 'digit' *)
 ```
 :::
 
@@ -149,12 +133,12 @@ Consumes characters while the predicate holds. Returns the matched string (may b
 **Example:**
 ```ocaml
 (* Parse digits *)
-let digits () = take_while (fun c -> c >= '0' && c <= '9')
+let digits () = Parseff.take_while (fun c -> c >= '0' && c <= '9')
 
 (* Parse identifier *)
 let identifier () =
-  let first = satisfy (fun c -> c = '_' || (c >= 'a' && c <= 'z')) ~label:"letter" in
-  let rest = take_while (fun c -> 
+  let first = Parseff.satisfy (fun c -> c = '_' || (c >= 'a' && c <= 'z')) ~label:"letter" in
+  let rest = Parseff.take_while (fun c -> 
     c = '_' || 
     (c >= 'a' && c <= 'z') || 
     (c >= '0' && c <= '9')
@@ -172,10 +156,10 @@ let identifier () =
 
 ```ocaml
 (* SLOW: *)
-let digits = match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+let digits = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
 
 (* FAST: *)
-let digits = take_while (fun c -> c >= '0' && c <= '9')
+let digits = Parseff.take_while (fun c -> c >= '0' && c <= '9')
 ```
 :::
 
@@ -184,7 +168,7 @@ let digits = take_while (fun c -> c >= '0' && c <= '9')
 ### `take_while1`
 
 ```ocaml
-val take_while1 : (char -> bool) -> string -> string
+val take_while1 : (char -> bool) -> label:string -> string
 ```
 
 Like `take_while`, but requires at least one character. Fails if no characters match.
@@ -194,13 +178,13 @@ Like `take_while`, but requires at least one character. Fails if no characters m
 **Example:**
 ```ocaml
 (* Parse non-empty digits *)
-let digits1 () = take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+let digits1 () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
 (* Parse identifier (simpler than take_while approach) *)
 let identifier () = 
-  take_while1 
+  Parseff.take_while1 
     (fun c -> c = '_' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
-    "identifier character"
+    ~label:"identifier character"
 
 (* Matches "foo123" -> "foo123" *)
 (* Fails on "" -> Error: expected identifier character *)
@@ -223,12 +207,12 @@ Skips characters while the predicate holds (returns unit). Always succeeds. More
 **Example:**
 ```ocaml
 (* Skip spaces *)
-let skip_spaces () = skip_while (fun c -> c = ' ')
+let skip_spaces () = Parseff.skip_while (fun c -> c = ' ')
 
 (* Parse comma-separated values *)
 let csv_value () =
   skip_spaces ();
-  let value = take_while (fun c -> c <> ',' && c <> '\n') in
+  let value = Parseff.take_while (fun c -> c <> ',' && c <> '\n') in
   skip_spaces ();
   value
 
@@ -242,11 +226,11 @@ If you don't need the matched string, use `skip_while` instead of `take_while` f
 
 ```ocaml
 (* UNNECESSARY ALLOCATION: *)
-let _ = take_while is_space in
+let _ = Parseff.take_while is_space in
 do_something ()
 
 (* BETTER: *)
-skip_while is_space;
+Parseff.skip_while is_space;
 do_something ()
 ```
 :::
@@ -270,15 +254,15 @@ Matches a compiled regular expression. The regex must be compiled with `Re.compi
 (* BAD: Compiles regex on every call *)
 let number () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
-  match_regex re
+  Parseff.match_regex re
 
 (* GOOD: Compiles once at module initialization *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
-let number () = match_regex number_re
+let number () = Parseff.match_regex number_re
 
 (* Parse email address *)
 let email_re = Re.compile (Re.Posix.re "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
-let email () = match_regex email_re
+let email () = Parseff.match_regex email_re
 
 (* "user@example.com" -> "user@example.com" *)
 ```
@@ -292,20 +276,20 @@ let email () = match_regex email_re
 (* BAD — compiles on every parse *)
 let number () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
-  match_regex re
+  Parseff.match_regex re
 
 (* GOOD — compiles once *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
-let number () = match_regex number_re
+let number () = Parseff.match_regex number_re
 ```
 
 Consider using `take_while` instead of regex for simple patterns:
 ```ocaml
 (* Instead of: *)
-let number () = match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+let number () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
 
 (* Use: *)
-let number () = take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+let number () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
 :::
 
@@ -327,9 +311,9 @@ Aborts parsing with an error message.
 ```ocaml
 (* Validate range *)
 let byte () =
-  let n = int_of_string (take_while1 (fun c -> c >= '0' && c <= '9') "digit") in
+  let n = int_of_string (Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit") in
   if n >= 0 && n <= 255 then n 
-  else fail "number must be between 0 and 255"
+  else Parseff.fail "number must be between 0 and 255"
 
 (* Parse: "128" -> 128 *)
 (* Parse: "300" -> Error: number must be between 0 and 255 *)
@@ -351,23 +335,18 @@ Aborts parsing with a user-defined error value. Custom errors are caught by `par
 
 **Example:**
 ```ocaml
-type validation_error = 
-  | Out_of_range of int
-  | Negative of int
-  | Invalid_format
-
 let validated_number () =
-  let s = take_while1 (fun c -> c >= '0' && c <= '9') "digit" in
+  let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
   let n = int_of_string s in
-  if n < 0 then error (Negative n)
-  else if n > 255 then error (Out_of_range n)
+  if n < 0 then Parseff.error (`Negative n)
+  else if n > 255 then Parseff.error (`Out_of_range n)
   else n
 
-match parse "300" validated_number with
-| Ok (n) -> Printf.printf "Got %d\n" n
-| Error { error = Out_of_range n; _ } ->
+match Parseff.parse "300" validated_number with
+| Ok n -> Printf.printf "Got %d\n" n
+| Error { error = `Out_of_range n; _ } ->
     Printf.printf "%d is too large (max 255)\n" n
-| Error { error = Negative n; _ } ->
+| Error { error = `Negative n; _ } ->
     Printf.printf "%d is negative\n" n
 | Error { error = `Expected expected; _ } -> 
     Printf.printf "Parse error: %s\n" expected
@@ -380,9 +359,10 @@ Polymorphic variants work great with `error` for quick error types:
 
 ```ocaml
 let number () =
-  let n = parse_int () in
-  if n > 255 then error `Too_large
-  else if n < 0 then error `Negative
+  let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
+  let n = int_of_string s in
+  if n > 255 then Parseff.error `Too_large
+  else if n < 0 then Parseff.error `Negative
   else n
 ```
 :::
@@ -403,8 +383,8 @@ Succeeds only if no input remains. Use this to ensure the entire input has been 
 ```ocaml
 (* Parse complete input *)
 let complete_number () =
-  let n = digit () in
-  end_of_input ();
+  let n = Parseff.digit () in
+  Parseff.end_of_input ();
   n
 
 (* Matches: "5" -> 5 *)
@@ -421,28 +401,22 @@ Use `end_of_input` when you want to ensure all input is consumed:
 ```ocaml
 (* Partial parsing - allows leftover input *)
 let partial_digit () =
-  let n = digit () in
-  let pos = position () in
+  let n = Parseff.digit () in
+  let pos = Parseff.position () in
   (n, pos)
 
-match parse "123abc" partial_digit with
+match Parseff.parse "123abc" partial_digit with
 | Ok (n, pos) -> (* n=1, pos=1, "23abc" remains *)
 
 (* Complete parsing - requires all input consumed *)
 let complete_digit () =
-  let n = digit () in
-  end_of_input ();
+  let n = Parseff.digit () in
+  Parseff.end_of_input ();
   n
 
-match parse "123abc" complete_digit with
+match Parseff.parse "123abc" complete_digit with
 | Error { pos; error = `Expected expected } -> (* Error: expected end of input *)
 ```
 :::
 
----
 
-## Next Steps
-
-- Learn about [Combinators](/parseff/api/combinators) for composition
-- Explore [Repetition combinators](/parseff/api/repetition) for loops
-- Check out [Zero-copy API](/parseff/api/zero-copy) for performance

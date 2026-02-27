@@ -17,13 +17,13 @@ Parses a decimal digit (0-9) and returns its integer value.
 
 **Example:**
 ```ocaml
-let d = digit () in  (* parses "7" -> 7 *)
+let d = Parseff.digit () in  (* parses "7" -> 7 *)
 Printf.printf "Got digit: %d\n" d
 
 (* Parse two-digit number *)
 let two_digits () =
-  let a = digit () in
-  let b = digit () in
+  let a = Parseff.digit () in
+  let b = Parseff.digit () in
   a * 10 + b
 
 (* Matches "42" -> 42 *)
@@ -41,7 +41,7 @@ Parses an ASCII letter (a-z or A-Z).
 
 **Example:**
 ```ocaml
-let initial () = letter ()
+let initial () = Parseff.letter ()
 
 (* Matches "A" -> 'A' *)
 (* Matches "z" -> 'z' *)
@@ -61,8 +61,8 @@ Parses an alphanumeric character (letter or digit).
 **Example:**
 ```ocaml
 let username () =
-  let first = letter () in
-  let rest = many alphanum () in
+  let first = Parseff.letter () in
+  let rest = Parseff.many Parseff.alphanum () in
   String.make 1 first ^ String.of_seq (List.to_seq rest)
 
 (* Matches "user123" -> "user123" *)
@@ -81,19 +81,14 @@ Parses any character. Fails only at end of input.
 
 **Example:**
 ```ocaml
-(* Parse quoted string *)
-let quoted_string () =
-  let _ = char '"' in
-  let chars = many (fun () ->
-    (* Parse any char except quote *)
-    let c = any_char () in
-    if c = '"' then fail "unexpected quote"
-    else c
-  ) () in
-  let _ = char '"' in
-  String.of_seq (List.to_seq chars)
+(* Skip past a single unknown character *)
+let skip_one () =
+  let _ = Parseff.any_char () in
+  ()
 
-(* Matches "hello world" -> "hello world" *)
+(* Peek at the next character without consuming it *)
+let peek () =
+  Parseff.look_ahead Parseff.any_char
 ```
 
 ---
@@ -111,9 +106,9 @@ Returns true for whitespace characters (space, tab, newline, carriage return).
 **Example:**
 ```ocaml
 let trim_parser () =
-  skip_while is_whitespace;
-  let value = take_while1 (fun c -> not (is_whitespace c)) "value" in
-  skip_while is_whitespace;
+  Parseff.skip_while Parseff.is_whitespace;
+  let value = Parseff.take_while1 (fun c -> not (Parseff.is_whitespace c)) ~label:"value" in
+  Parseff.skip_while Parseff.is_whitespace;
   value
 
 (* Matches "  hello  " -> "hello" *)
@@ -132,9 +127,9 @@ Parses zero or more whitespace characters. Returns the matched string. Always su
 **Example:**
 ```ocaml
 let spaced_values () =
-  let a = digit () in
-  let _ = whitespace () in
-  let b = digit () in
+  let a = Parseff.digit () in
+  let _ = Parseff.whitespace () in
+  let b = Parseff.digit () in
   (a, b)
 
 (* Matches "1 2" -> (1, 2) *)
@@ -155,9 +150,9 @@ Parses one or more whitespace characters. Fails if no whitespace found.
 **Example:**
 ```ocaml
 let words () =
-  sep_by1
-    (fun () -> take_while1 (fun c -> not (is_whitespace c)) "word")
-    (fun () -> whitespace1 ())
+  Parseff.sep_by1
+    (fun () -> Parseff.take_while1 (fun c -> not (Parseff.is_whitespace c)) ~label:"word")
+    (fun () -> Parseff.whitespace1 ())
     ()
 
 (* Matches "hello world" -> ["hello"; "world"] *)
@@ -178,20 +173,20 @@ Skips zero or more whitespace characters (returns unit). More efficient than `wh
 ```ocaml
 (* Parse comma-separated list with flexible spacing *)
 let flexible_list () =
-  let _ = char '[' in
-  skip_whitespace ();
-  let values = sep_by
+  let _ = Parseff.char '[' in
+  Parseff.skip_whitespace ();
+  let values = Parseff.sep_by
     (fun () ->
-      skip_whitespace ();
-      let n = digit () in
-      skip_whitespace ();
+      Parseff.skip_whitespace ();
+      let n = Parseff.digit () in
+      Parseff.skip_whitespace ();
       n
     )
-    (fun () -> char ',')
+    (fun () -> Parseff.char ',')
     ()
   in
-  skip_whitespace ();
-  let _ = char ']' in
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char ']' in
   values
 
 (* All of these parse to [1; 2; 3]: *)
@@ -205,11 +200,11 @@ Always use `skip_whitespace` instead of `whitespace` when you don't need the mat
 
 ```ocaml
 (* SLOWER: *)
-let _ = whitespace () in
+let _ = Parseff.whitespace () in
 parse_value ()
 
 (* FASTER: *)
-skip_whitespace ();
+Parseff.skip_whitespace ();
 parse_value ()
 ```
 :::
@@ -239,13 +234,8 @@ let addition () =
 
 let () =
   match Parseff.parse "1 + 2 + 3" addition with
-  | Ok (result) -> Printf.printf "Result: %d\n" result
+  | Ok result -> Printf.printf "Result: %d\n" result
   | Error { pos; error = `Expected expected } -> Printf.printf "Error at %d: %s\n" pos expected
 ```
 
----
 
-## Next Steps
-
-- Explore [Zero-copy API](/parseff/api/zero-copy) for maximum performance
-- Learn about [Optimization techniques](/parseff/guides/optimization)

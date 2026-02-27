@@ -55,6 +55,23 @@ let () =
 - Streaming with `Source.of_string`, `Source.of_channel`, `Source.of_function`
 - Fused operations for hot paths (`Parseff.sep_by_take`, `Parseff.skip_while_then_char`)
 - Zero-copy span APIs for low-allocation parsing (`Parseff.take_while_span`, `Parseff.sep_by_take_span`, `Parseff.fused_sep_take`, `Parseff.skip_while_then_char`)
+- Domain-safe: each `parse` / `parse_source` call is self-contained with no global mutable state, so independent parses can run in parallel across OCaml 5 domains
+
+## Thread Safety
+
+Parseff is safe to use from multiple OCaml 5 domains concurrently. All mutable state (the parser position, the internal buffer, the recursion depth counter) is created locally inside each `parse` or `parse_source` call and is never shared. There is no global mutable state in the library.
+
+This means you can run independent parses in parallel without synchronization:
+
+```ocaml
+let results =
+  List.init num_workers (fun i ->
+    Domain.spawn (fun () ->
+      Parseff.parse inputs.(i) my_parser))
+  |> List.map Domain.join
+```
+The only constraint is that a single `Source.t` value must not be shared across domains, since it contains mutable read state. Create a separate source per domain.
+
 
 ## Comparison
 

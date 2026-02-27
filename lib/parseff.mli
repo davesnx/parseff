@@ -18,7 +18,6 @@
         let c = number () in
         let _ = Parseff.consume "." in
         let d = number () in
-        let _ = Parseff.consume "." in
         Parseff.end_of_input ();
         (a, b, c, d)
 
@@ -136,14 +135,15 @@ val take_while : (char -> bool) -> string
       let digits () = take_while (fun c -> c >= '0' && c <= '9')
     ]} *)
 
-val take_while1 : (char -> bool) -> string -> string
-(** [take_while1 fun label] like {!take_while} but requires at least one
+val take_while1 : (char -> bool) -> label:string -> string
+(** [take_while1 fun ~label] like {!take_while} but requires at least one
     character to match. Fails with [label] in the error message if no characters
     match.
 
     Example:
     {@ocaml[
-      let digits1 () = take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+      let digits1 () =
+        take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
     ]} *)
 
 val skip_while : (char -> bool) -> unit

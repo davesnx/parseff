@@ -1,237 +1,204 @@
 ---
-title: Optimization Tips
-description: Get maximum performance from Parseff
+title: Making Parsers Fast
+description: Techniques for writing high-performance parsers with Parseff
 ---
 
-This guide covers techniques for writing fast parsers with Parseff.
+This guide covers practical techniques for getting the most performance out of Parseff. Each section shows a slow pattern, a fast alternative, and the expected impact.
 
-## Quick Wins
+## Quick wins
 
-### 1. Pre-compile regexes
+### Pre-compile regexes
 
-Compile regexes at module level, not inside parser functions:
+Compile regexes once at module level, not inside parser functions:
 
 ```ocaml
-(* BAD — compiles on every call (100x+ slower) *)
+(* Slow — compiles on every call *)
 let number () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
-  match_regex re
+  Parseff.match_regex re
 
-(* GOOD — compiles once at module init *)
+(* Fast — compiles once at module init *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
-let number () = match_regex number_re
+let number () = Parseff.match_regex number_re
 ```
 
-Impact: 100x+ speedup.
+**Impact:** 100x+ improvement. Regex compilation is expensive — dozens of allocations and automaton construction per call.
 
 ---
 
-### 2. Use `take_while` instead of regex
+### Use `take_while` instead of regex
 
-For simple character classes, `take_while` is much faster:
+For simple character classes, `take_while` runs a tight loop with no regex overhead:
 
 ```ocaml
-(* SLOW — regex overhead *)
-let digits = match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+(* Slow — regex *)
+let digits () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
 
-(* FAST — direct character scanning *)
-let digits = take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+(* Fast — direct scanning *)
+let digits () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
 
-Impact: 5-10x speedup.
+**Impact:** 5-10x improvement. Use regex only when you need its pattern-matching power (alternation, repetition, grouping). For "all characters matching a predicate," `take_while` is the right tool.
 
 ---
 
-### 3. Use `skip_whitespace` instead of `whitespace`
+### Use `skip_whitespace` instead of `whitespace`
 
-When you don't need the matched string:
+When you just need to move past whitespace:
 
 ```ocaml
-(* WASTEFUL — allocates a string you discard *)
-let _ = whitespace () in
+(* Wasteful — allocates a string you discard *)
+let _ = Parseff.whitespace () in
 parse_value ()
 
-(* EFFICIENT — skips without allocation *)
-skip_whitespace ();
+(* Efficient — skips without allocation *)
+Parseff.skip_whitespace ();
 parse_value ()
 ```
 
-Impact: small but cumulative in hot loops.
+**Impact:** Small per-call, but cumulative in tight loops that skip whitespace between every token.
 
 ---
 
-### 4. Use fused operations
+### Use fused operations
 
-Combined operations reduce effect dispatches:
+Combined operations dispatch a single effect instead of multiple:
 
 ```ocaml
-(* SLOW — 4 effect dispatches *)
-skip_whitespace ();
-let _ = char ',' in
-skip_whitespace ();
-let value = take_while1 is_digit "digit" in
+(* Slow — 4 effect dispatches *)
+Parseff.skip_whitespace ();
+let _ = Parseff.char ',' in
+Parseff.skip_whitespace ();
+let value = Parseff.take_while1 is_digit ~label:"digit" in
+...
 
-(* FAST — 1 effect dispatch *)
-let value = fused_sep_take is_whitespace ',' is_digit
+(* Fast — 1 effect dispatch *)
+let value = Parseff.fused_sep_take is_whitespace ',' is_digit
 ```
 
-Impact: 2-4x speedup in hot paths.
+**Impact:** 2-4x improvement in hot paths. Each effect dispatch has overhead (handler lookup, continuation management). Fusing reduces the number of dispatches.
+
+Available fused operations:
+
+| Operation | Replaces |
+|-----------|----------|
+| `skip_while_then_char f c` | `skip_while f; char c` |
+| `fused_sep_take ws sep pred` | `skip_whitespace; char sep; skip_whitespace; take_while1 pred` |
+| `sep_by_take ws sep pred` | `sep_by (take_while pred) (skip_ws; char sep; skip_ws)` |
+| `sep_by_take_span ws sep pred` | Same, but returns spans instead of strings |
 
 ---
 
-### 5. Use zero-copy spans
+### Use zero-copy spans
 
-Avoid intermediate string allocations:
+Avoid intermediate string allocations when you can work with slices:
 
 ```ocaml
-(* SLOW — allocates strings *)
-let parse_ints () =
-  sep_by
-    (fun () -> int_of_string (take_while1 is_digit "digit"))
-    (fun () -> char ',')
+(* Slow — allocates strings *)
+let parse_values () =
+  Parseff.sep_by
+    (fun () -> int_of_string (Parseff.take_while1 is_digit ~label:"digit"))
+    (fun () -> Parseff.char ',')
     ()
 
-(* FAST — zero-copy spans *)
-let int_of_span span =
-  (* custom conversion, no String.sub *)
-  ...
-
-let parse_ints () =
-  let spans = sep_by_take_span is_whitespace ',' is_digit in
+(* Fast — zero-copy spans *)
+let parse_values () =
+  let spans = Parseff.sep_by_take_span is_whitespace ',' is_digit in
   List.map int_of_span spans
 ```
 
-Impact: 2-3x speedup + 3x less memory.
+**Impact:** 2-3x improvement + 3x less memory allocation. Each `take_while1` call allocates a new string via `String.sub`. Spans point into the original input buffer — no allocation until you call `span_to_string`.
+
+See the [Zero-Copy Performance example](/parseff/examples/zero-copy-performance) for a detailed walkthrough.
 
 ---
 
-## Advanced Optimization
+## Advanced techniques
 
-### Minimize `or_` Usage
+### Minimize `or_` in loops
 
-Each alternation creates a handler for backtracking. This is expensive in hot loops:
+Each `or_` installs an effect handler for backtracking. In a `many` loop that runs thousands of times, this overhead compounds:
 
 ```ocaml
-(* EXPENSIVE — handler per alternation *)
+(* Expensive — handler per alternation, per iteration *)
 let keyword () =
-  or_
-    (fun () -> consume "class")
+  Parseff.or_
+    (fun () -> Parseff.consume "class")
     (fun () ->
-      or_
-        (fun () -> consume "function")
-        (fun () ->
-          or_ (fun () -> consume "const") (fun () -> consume "let") ())
+      Parseff.or_
+        (fun () -> Parseff.consume "function")
+        (fun () -> Parseff.consume "let")
         ())
     ()
 
-(* BETTER — parse then validate *)
+(* Better — parse then validate *)
 let keyword () =
-  let w = take_while1 is_alphanum "keyword" in
+  let w = Parseff.take_while1 (fun c -> c >= 'a' && c <= 'z') ~label:"keyword" in
   match w with
-  | "class" | "function" | "const" | "let" -> w
-  | _ -> fail "expected keyword"
+  | "class" | "function" | "let" -> w
+  | _ -> Parseff.fail "expected keyword"
 ```
 
-**When alternation is OK:**
-- Top-level choices (not in loops)
-- Complex parsers that can't be validated easily
-- When readability matters more than performance
+**When `or_` is fine:**
+- Top-level choices (not inside tight loops)
+- Complex parsers where each branch has distinct structure
+- When the number of alternatives is small (2-3)
 
 ---
 
-### Use Handler-Level Operations
+### Push work into handler-level operations
 
-For hot paths, push work into the handler:
+Handler-level operations run entirely inside the effect handler, avoiding the overhead of dispatching multiple effects:
 
 ```ocaml
-(* Standard - good *)
+(* Standard — good *)
 let parse_list () =
-  sep_by parse_int (fun () -> char ',') ()
+  Parseff.sep_by
+    (fun () -> int_of_string (Parseff.take_while1 is_digit ~label:"digit"))
+    (fun () -> Parseff.char ',')
+    ()
 
-(* Handler-level - best *)
+(* Handler-level — better *)
 let parse_list () =
-  sep_by_take is_whitespace ',' is_digit
+  Parseff.sep_by_take is_whitespace ',' is_digit
   |> List.map int_of_string
 ```
 
-Available handler-level operations:
-- `sep_by_take` - separated list of strings
-- `sep_by_take_span` - separated list of spans
-- `skip_while_then_char` - skip + match
-- `fused_sep_take` - whitespace + sep + whitespace + take
+The handler-level version runs the entire separator-delimited scan in a single operation, then you map over the results.
 
 ---
 
-### Profile Your Parser
+### Profile before optimizing
 
-Use OCaml profiling to find hot spots:
+Use OCaml profiling to find actual bottlenecks:
 
 ```bash
 # Build with profiling
 ocamlfind ocamlopt -package parseff -p -linkpkg your_parser.ml -o your_parser
 
-# Run
+# Run and generate profile
 ./your_parser
-
-# Generate profile
 gprof your_parser gmon.out > profile.txt
 ```
 
 Look for:
 - Regex compilation in hot paths
 - Excessive string allocations
-- Deep recursion
-- Alternation in loops
+- Deep recursion (consider depth limits)
+- Alternation inside `many` loops
 
 ---
 
-## Performance Checklist
+## Performance checklist
 
-Before releasing your parser, check:
+Before shipping a parser, check:
 
 - [ ] All regexes compiled at module level
-- [ ] `take_while` used instead of regex for simple patterns
-- [ ] `skip_whitespace` used instead of `whitespace` when string not needed
+- [ ] `take_while` used instead of regex for simple character classes
+- [ ] `skip_whitespace` used instead of `whitespace` when the string isn't needed
 - [ ] Fused operations used in hot paths
-- [ ] Zero-copy spans used for performance-critical sections
-- [ ] `or_` minimized or avoided in loops
-- [ ] Benchmarked against alternative implementations
+- [ ] Zero-copy spans used where string allocation is avoidable
+- [ ] `or_` minimized in inner loops
+- [ ] Benchmarked against target throughput
 
----
 
-## Real-World Example
-
-Here's a JSON array parser optimized using these techniques:
-
-```ocaml
-let int_of_span (span : Parseff.span) =
-  let rec loop i acc =
-    if i >= span.len then acc
-    else
-      let c = span.buf.[span.off + i] in
-      loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
-  in
-  loop 0 0
-
-let json_array () =
-  let _ = Parseff.char '[' in
-  let spans = Parseff.sep_by_take_span Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
-  let _ = Parseff.char ']' in
-  Parseff.end_of_input ();
-  List.map int_of_span spans
-```
-
-Optimizations applied:
-1. Zero-copy spans
-2. Handler-level `sep_by_take_span`
-3. Custom `int_of_span` avoids `int_of_string`
-4. No regex
-5. No alternations in hot path
-
----
-
-## Next Steps
-
-- See [Zero-Copy API](/parseff/api/zero-copy) for span operations
-- Read [Performance](/parseff/performance) for benchmarks
-- Check the `OPTIMIZATION_LOG.md` in the repo for the full optimization journey

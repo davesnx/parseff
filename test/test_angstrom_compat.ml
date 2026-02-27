@@ -2,7 +2,7 @@ let run inputs parser = Parseff.parse (String.concat "" inputs) parser
 
 let check_ok ~msg typ parser inputs expected =
   match run inputs parser with
-  | Ok (v) -> Alcotest.(check typ) msg expected v
+  | Ok v -> Alcotest.(check typ) msg expected v
   | Error _ -> Alcotest.fail (Printf.sprintf "%s: expected success" msg)
 
 let check_fail ~msg parser inputs =
@@ -105,16 +105,16 @@ let basic_constructors =
       `Quick,
       fun () ->
         check_s ~msg:"true, non-empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> true) "char")
+          (fun () -> Parseff.take_while1 (fun _ -> true) ~label:"char")
           [ "asdf" ] "asdf";
         check_fail ~msg:"false, non-empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> false) "char")
+          (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
           [ "asdf" ];
         check_fail ~msg:"true, empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> true) "char")
+          (fun () -> Parseff.take_while1 (fun _ -> true) ~label:"char")
           [ "" ];
         check_fail ~msg:"false, empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> false) "char")
+          (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
           [ "" ] );
   ]
 
@@ -243,7 +243,7 @@ let count_while_regression =
           [ "asdf" ] "asdf";
         check_s ~msg:"take_while1 then eof"
           (fun () ->
-            let s = Parseff.take_while1 (fun _ -> true) "char" in
+            let s = Parseff.take_while1 (fun _ -> true) ~label:"char" in
             Parseff.end_of_input ();
             s)
           [ "asdf" ] "asdf" );

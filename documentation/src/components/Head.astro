@@ -1,0 +1,13 @@
+---
+import instrumentSans400 from '@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff2?url';
+import ibmPlexMono400 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2?url';
+
+const { head } = Astro.locals.starlightRoute;
+
+const preloadFonts = [instrumentSans400, ibmPlexMono400];
+---
+
+{preloadFonts.map((href) => (
+	<link rel="preload" href={href} as="font" type="font/woff2" crossorigin />
+))}
+{head.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}

@@ -17,7 +17,7 @@ let ip_address () =
 
 let test_valid_ip1 () =
   match Parseff.parse "1.2.3.4" ip_address with
-  | Ok ((a, b, c, d)) ->
+  | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 1 a;
       Alcotest.(check int) "b" 2 b;
       Alcotest.(check int) "c" 3 c;
@@ -26,7 +26,7 @@ let test_valid_ip1 () =
 
 let test_valid_ip2 () =
   match Parseff.parse "255.255.255.255" ip_address with
-  | Ok ((a, b, c, d)) ->
+  | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 255 a;
       Alcotest.(check int) "b" 255 b;
       Alcotest.(check int) "c" 255 c;
@@ -35,7 +35,7 @@ let test_valid_ip2 () =
 
 let test_valid_ip3 () =
   match Parseff.parse "192.168.1.100" ip_address with
-  | Ok ((a, b, c, d)) ->
+  | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
       Alcotest.(check int) "c" 1 c;

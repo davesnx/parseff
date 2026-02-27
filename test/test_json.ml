@@ -107,7 +107,7 @@ and key_value () =
 
 let test_null () =
   match Parseff.parse "null" json with
-  | Ok (Null) -> ()
+  | Ok Null -> ()
   | Ok _ -> Alcotest.fail "Expected Null"
   | Error _ -> Alcotest.fail "Parse failed"
 
@@ -149,9 +149,8 @@ let test_empty_array () =
 
 let test_simple_array () =
   match Parseff.parse "[1, 2, 3]" json with
-  | Ok (Array lst) ->
-      Alcotest.(check int) "three elements" 3 (List.length lst)
-  | Ok (v) ->
+  | Ok (Array lst) -> Alcotest.(check int) "three elements" 3 (List.length lst)
+  | Ok v ->
       let typ =
         match v with
         | Null -> "Null"
@@ -183,7 +182,7 @@ let test_simple_object () =
 let test_nested () =
   match Parseff.parse "{\"a\": {\"b\": null}}" json with
   | Ok (Object _) -> ()
-  | Ok (v) ->
+  | Ok v ->
       let typ =
         match v with
         | Null -> "Null"

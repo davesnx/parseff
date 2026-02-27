@@ -45,7 +45,7 @@ let () =
         if String.contains input '(' then parse_list else parse_atom
       in
       match Parseff.parse input parser with
-      | Ok (result) ->
+      | Ok result ->
           let matches = result = expected in
           Printf.printf "✓ %-15s -> [%s] %s\n" input
             (String.concat "; " result)

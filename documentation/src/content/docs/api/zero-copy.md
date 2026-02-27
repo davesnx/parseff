@@ -30,11 +30,11 @@ Like `take_while`, but returns a zero-copy span instead of allocating a string.
 **Example:**
 ```ocaml
 (* Without span - allocates string *)
-let digits = take_while (fun c -> c >= '0' && c <= '9') in
+let digits = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
 let n = int_of_string digits  (* uses allocated string *)
 
 (* With span - no allocation until needed *)
-let digits = take_while_span (fun c -> c >= '0' && c <= '9') in
+let digits = Parseff.take_while_span (fun c -> c >= '0' && c <= '9') in
 let n = int_of_span digits  (* custom function, no intermediate string *)
 ```
 
@@ -51,7 +51,7 @@ let int_of_span span =
   loop 0 0
 
 let fast_integer () =
-  let digits = take_while_span (fun c -> c >= '0' && c <= '9') in
+  let digits = Parseff.take_while_span (fun c -> c >= '0' && c <= '9') in
   int_of_span digits
 ```
 
@@ -69,17 +69,17 @@ Like `sep_by_take`, but returns zero-copy spans. No `String.sub` allocations per
 ```ocaml
 (* Parse CSV line with zero-copy *)
 let csv_line () =
-  let spans = sep_by_take_span
-    is_whitespace  (* skip whitespace *)
+  let spans = Parseff.sep_by_take_span
+    Parseff.is_whitespace  (* skip whitespace *)
     ','            (* separator *)
     (fun c -> c <> ',' && c <> '\n')  (* value characters *)
   in
   (* Only allocate strings when needed *)
-  List.map span_to_string spans
+  List.map Parseff.span_to_string spans
 
 (* Even better - process spans directly *)
 let csv_to_ints () =
-  let spans = sep_by_take_span is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
+  let spans = Parseff.sep_by_take_span Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
   List.map int_of_span spans
 ```
 
@@ -97,14 +97,14 @@ Performs: skip whitespace, match separator, skip whitespace, take_while1 — all
 ```ocaml
 (* Inefficient - multiple effect dispatches *)
 let parse_value () =
-  skip_whitespace ();
-  let _ = char ',' in
-  skip_whitespace ();
-  take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char ',' in
+  Parseff.skip_whitespace ();
+  Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
 (* Efficient - single effect dispatch *)
 let parse_value () =
-  fused_sep_take is_whitespace ',' (fun c -> c >= '0' && c <= '9')
+  Parseff.fused_sep_take Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9')
 ```
 
 ---
@@ -119,14 +119,15 @@ Skips characters matching predicate, then matches a character. Fused operation f
 
 **Example:**
 ```ocaml
-(* Inefficient *)
-let comma_after_space () =
-  skip_whitespace ();
-  char ','
+(* Inefficient — two effect dispatches *)
+let skip_ws_then_comma () =
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char ',' in
+  ()
 
-(* Efficient - fused *)
-let comma_after_space () =
-  skip_while_then_char is_whitespace ','
+(* Efficient — single fused effect dispatch *)
+let skip_ws_then_comma () =
+  Parseff.skip_while_then_char Parseff.is_whitespace ','
 ```
 
 ---
@@ -143,9 +144,9 @@ Parses zero or more separated values entirely in the handler. Returns list of ma
 ```ocaml
 (* Parse array values efficiently *)
 let array_values () =
-  let _ = char '[' in
-  let values = sep_by_take is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
-  let _ = char ']' in
+  let _ = Parseff.char '[' in
+  let values = Parseff.sep_by_take Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
+  let _ = Parseff.char ']' in
   List.map int_of_string values
 
 (* Matches "[1, 2, 3]" -> [1; 2; 3] *)
@@ -160,18 +161,18 @@ let array_values () =
 ```ocaml
 (* Standard API - allocates intermediate strings *)
 let parse_numbers () =
-  sep_by
+  Parseff.sep_by
     (fun () ->
-      skip_whitespace ();
-      let s = take_while1 (fun c -> c >= '0' && c <= '9') "digit" in
+      Parseff.skip_whitespace ();
+      let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
       int_of_string s
     )
-    (fun () -> char ',')
+    (fun () -> Parseff.char ',')
     ()
 
 (* Zero-copy API - no allocations until conversion *)
 let parse_numbers_fast () =
-  let spans = sep_by_take_span is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
+  let spans = Parseff.sep_by_take_span Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
   List.map int_of_span spans
 ```
 
@@ -180,14 +181,14 @@ let parse_numbers_fast () =
 ```ocaml
 (* Multiple effects - slower *)
 let value () =
-  skip_whitespace ();
-  let _ = char ',' in
-  skip_whitespace ();
-  take_while1 (fun c -> c >= '0' && c <= '9') "digit"
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char ',' in
+  Parseff.skip_whitespace ();
+    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
 (* Single effect - faster *)
 let value () =
-  fused_sep_take is_whitespace ',' (fun c -> c >= '0' && c <= '9')
+  Parseff.fused_sep_take Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9')
 ```
 
 ---
@@ -219,10 +220,7 @@ let () =
       Printf.printf "Error at %d: %s\n" pos expected
 ```
 
-**Performance:**
-- Standard API: ~1,930,000 parses/second
-- Zero-copy API: ~4,940,000 parses/second **(2.5x faster)**
-- Memory: 3x reduction
+The zero-copy version is roughly 2.5x faster than the standard API and uses 3x less memory. See the [Zero-Copy Performance example](/parseff/examples/zero-copy-performance) for a detailed breakdown and the [Comparison with Angstrom](/parseff/guides/comparison) for benchmark methodology.
 
 ---
 
@@ -239,9 +237,4 @@ let () =
 - You need to store parsed strings long-term (just use the regular API)
 - The performance difference doesn't matter for your use case
 
----
 
-## Next Steps
-
-- Read [Optimization Guide](/parseff/guides/optimization) for more performance tips
-- See [Core Primitives](/parseff/api/primitives) for basic operations

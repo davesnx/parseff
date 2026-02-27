@@ -1,11 +1,11 @@
 ---
-title: Repetition Combinators
-description: Looping constructs for parsing repeated patterns
+title: Repetition & Separation
+description: Looping constructs for parsing repeated and separated patterns
 ---
 
-Repetition combinators allow you to parse patterns that occur zero or more times.
+These combinators handle patterns that repeat: lists, separated values, delimited blocks, and operator chains.
 
-## Basic Repetition
+## Basic repetition
 
 ### `many`
 
@@ -13,15 +13,13 @@ Repetition combinators allow you to parse patterns that occur zero or more times
 val many : (unit -> 'a) -> unit -> 'a list
 ```
 
-Applies a parser zero or more times. Returns a list of results. Always succeeds (returns empty list if parser doesn't match).
+Applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately).
 
-**Example:**
 ```ocaml
-let digits () = many digit ()
-
-(* Matches "123" -> [1; 2; 3] *)
-(* Matches "" -> [] *)
-(* Matches "abc" -> [] *)
+let digits () = Parseff.many Parseff.digit ()
+(* "123"  -> [1; 2; 3] *)
+(* ""     -> []         *)
+(* "abc"  -> []         *)
 ```
 
 ---
@@ -32,15 +30,13 @@ let digits () = many digit ()
 val many1 : (unit -> 'a) -> unit -> 'a list
 ```
 
-Applies a parser one or more times. Fails if the parser doesn't match at least once.
+Like `many`, but requires at least one match. Fails if the parser doesn't succeed at least once.
 
-**Example:**
 ```ocaml
-let non_empty_digits () = many1 digit ()
-
-(* Matches "123" -> [1; 2; 3] *)
-(* Fails on "" *)
-(* Fails on "abc" *)
+let digits1 () = Parseff.many1 Parseff.digit ()
+(* "123" -> [1; 2; 3] *)
+(* ""    -> Error      *)
+(* "abc" -> Error      *)
 ```
 
 ---
@@ -53,33 +49,35 @@ val count : int -> (unit -> 'a) -> unit -> 'a list
 
 Applies a parser exactly `n` times. Fails if the parser doesn't match `n` times.
 
-**Example:**
 ```ocaml
-(* Parse exactly 3 digits *)
-let three_digits () = count 3 digit ()
+let three_digits () = Parseff.count 3 Parseff.digit ()
+(* "123"  -> [1; 2; 3] *)
+(* "12"   -> Error      *)
+```
 
-(* Parse RGB hex color: #RRGGBB *)
-let hex_digit () = 
-  satisfy (fun c -> 
-    (c >= '0' && c <= '9') || 
-    (c >= 'a' && c <= 'f') || 
+Useful for fixed-width formats:
+
+```ocaml
+let hex_digit () =
+  Parseff.satisfy (fun c ->
+    (c >= '0' && c <= '9') ||
+    (c >= 'a' && c <= 'f') ||
     (c >= 'A' && c <= 'F')
   ) ~label:"hex digit"
 
+(* Parse #RRGGBB color *)
 let hex_color () =
-  let _ = char '#' in
-  let r = count 2 hex_digit () in
-  let g = count 2 hex_digit () in
-  let b = count 2 hex_digit () in
-  end_of_input ();
+  let _ = Parseff.char '#' in
+  let r = Parseff.count 2 hex_digit () in
+  let g = Parseff.count 2 hex_digit () in
+  let b = Parseff.count 2 hex_digit () in
   (r, g, b)
-
-(* Matches "#ff00aa" -> (['f';'f'], ['0';'0'], ['a';'a']) *)
+(* "#ff00aa" -> (['f';'f'], ['0';'0'], ['a';'a']) *)
 ```
 
 ---
 
-## Separated Lists
+## Separated lists
 
 ### `sep_by`
 
@@ -87,40 +85,16 @@ let hex_color () =
 val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
 
-Parses zero or more occurrences of a value separated by a separator. Always succeeds.
+Parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds.
 
-**Example:**
 ```ocaml
-(* Parse CSV line *)
 let csv_line () =
-  sep_by
-    (fun () -> take_while (fun c -> c <> ',' && c <> '\n'))
-    (fun () -> char ',')
+  Parseff.sep_by
+    (fun () -> Parseff.take_while (fun c -> c <> ',' && c <> '\n'))
+    (fun () -> Parseff.char ',')
     ()
-
-(* Matches "a,b,c" -> ["a"; "b"; "c"] *)
-(* Matches "" -> [] *)
-
-(* Parse array: [1, 2, 3] *)
-let array () =
-  let _ = char '[' in
-  skip_whitespace ();
-  let values = sep_by
-    (fun () ->
-      skip_whitespace ();
-      let n = digit () in
-      skip_whitespace ();
-      n
-    )
-    (fun () -> char ',')
-    ()
-  in
-  skip_whitespace ();
-  let _ = char ']' in
-  values
-
-(* Matches "[1, 2, 3]" -> [1; 2; 3] *)
-(* Matches "[]" -> [] *)
+(* "a,b,c" -> ["a"; "b"; "c"] *)
+(* ""      -> []               *)
 ```
 
 ---
@@ -131,47 +105,202 @@ let array () =
 val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
 
-Like `sep_by`, but requires at least one occurrence.
+Like `sep_by`, but requires at least one element.
 
-**Example:**
 ```ocaml
-let non_empty_csv () =
-  sep_by1
-    (fun () -> take_while1 (fun c -> c <> ',' && c <> '\n') "value")
-    (fun () -> char ',')
+let csv_line1 () =
+  Parseff.sep_by1
+    (fun () -> Parseff.take_while1 (fun c -> c <> ',' && c <> '\n') ~label:"value")
+    (fun () -> Parseff.char ',')
     ()
-
-(* Matches "a,b,c" -> ["a"; "b"; "c"] *)
-(* Matches "a" -> ["a"] *)
-(* Fails on "" *)
+(* "a,b,c" -> ["a"; "b"; "c"] *)
+(* "a"     -> ["a"]           *)
+(* ""      -> Error            *)
 ```
 
 ---
 
-## Complete Example: JSON Array Parser
+## Delimiters and terminators
+
+### `between`
 
 ```ocaml
-let is_whitespace c = 
-  c = ' ' || c = '\t' || c = '\n' || c = '\r'
+val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> unit -> 'c
+```
 
+Parses an opening delimiter, then the body, then a closing delimiter. Returns the body's value.
+
+```ocaml
+let parens p =
+  Parseff.between
+    (fun () -> Parseff.char '(')
+    (fun () -> Parseff.char ')')
+    p
+
+let parenthesized_number () =
+  parens (fun () ->
+    Parseff.skip_whitespace ();
+    let n = number () in
+    Parseff.skip_whitespace ();
+    n
+  ) ()
+(* "(42)"   -> 42 *)
+(* "( 42 )" -> 42 *)
+```
+
+Works well for bracketed structures:
+
+```ocaml
+let braces p =
+  Parseff.between
+    (fun () -> Parseff.char '{')
+    (fun () -> Parseff.char '}')
+    p
+
+let brackets p =
+  Parseff.between
+    (fun () -> Parseff.char '[')
+    (fun () -> Parseff.char ']')
+    p
+```
+
+---
+
+### `end_by`
+
+```ocaml
+val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+```
+
+Parses zero or more elements, each followed by a separator. Unlike `sep_by`, the separator comes **after** each element (including the last).
+
+```ocaml
+(* Parse semicolon-terminated statements *)
+let statements () =
+  Parseff.end_by
+    (fun () -> Parseff.take_while1 (fun c -> c <> ';' && c <> '\n') ~label:"statement")
+    (fun () -> Parseff.char ';')
+    ()
+(* "a;b;c;" -> ["a"; "b"; "c"] *)
+(* ""       -> []               *)
+```
+
+---
+
+### `end_by1`
+
+```ocaml
+val end_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+```
+
+Like `end_by`, but requires at least one element.
+
+---
+
+## Operator chains
+
+These combinators parse sequences of values joined by operators, handling associativity. They're the standard tool for expression parsing with operator precedence.
+
+### `chainl1`
+
+```ocaml
+val chainl1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+```
+
+Parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values.
+
+```ocaml
+(* Parse "1-2-3" as ((1-2)-3) = -4 *)
+let subtraction () =
+  Parseff.chainl1
+    (fun () -> Parseff.digit ())    (* element *)
+    (fun () ->
+      let _ = Parseff.char '-' in
+      fun a b -> a - b)             (* operator *)
+    ()
+(* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
+```
+
+This is the workhorse for arithmetic expressions. See the [Expression Parser example](/parseff/examples/expression-parser) for a complete walkthrough.
+
+---
+
+### `chainr1`
+
+```ocaml
+val chainr1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+```
+
+Like `chainl1`, but combines **right-associatively**.
+
+```ocaml
+(* Parse "2^3^2" as 2^(3^2) = 512 *)
+let power () =
+  Parseff.chainr1
+    (fun () -> Parseff.digit ())
+    (fun () ->
+      let _ = Parseff.char '^' in
+      fun a b -> int_of_float (float_of_int a ** float_of_int b))
+    ()
+(* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
+```
+
+---
+
+### `chainl`
+
+```ocaml
+val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
+```
+
+Like `chainl1`, but takes a default value. Returns the default if zero elements match.
+
+```ocaml
+let maybe_subtract () =
+  Parseff.chainl
+    (fun () -> Parseff.digit ())
+    (fun () ->
+      let _ = Parseff.char '-' in
+      fun a b -> a - b)
+    0  (* default *)
+    ()
+(* "1-2" -> -1 *)
+(* ""    -> 0  *)
+```
+
+---
+
+### `chainr`
+
+```ocaml
+val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
+```
+
+Like `chainr1`, but with a default value for zero matches.
+
+---
+
+## Complete example: JSON array
+
+```ocaml
 let integer () =
   let sign = Parseff.optional (fun () -> Parseff.char '-') () in
-  let digits = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') "digit" in
+  let digits = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
   let n = int_of_string digits in
   match sign with Some _ -> -n | None -> n
 
 let json_array () =
   let _ = Parseff.char '[' in
   Parseff.skip_whitespace ();
-  let values = Parseff.sep_by
-    (fun () ->
-      Parseff.skip_whitespace ();
-      let n = integer () in
-      Parseff.skip_whitespace ();
-      n
-    )
-    (fun () -> Parseff.char ',')
-    ()
+  let values =
+    Parseff.sep_by
+      (fun () ->
+        Parseff.skip_whitespace ();
+        let n = integer () in
+        Parseff.skip_whitespace ();
+        n)
+      (fun () -> Parseff.char ',')
+      ()
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in
@@ -179,17 +308,12 @@ let json_array () =
   values
 
 let () =
-  match Parseff.parse "[1, 2, 3, 4, 5]" json_array with
-  | Ok (nums) -> 
-      Printf.printf "Parsed: [%s]\n" 
-        (String.concat ", " (List.map string_of_int nums))
-  | Error { pos; error = `Expected expected } ->
-      Printf.printf "Error at %d: %s\n" pos expected
+  match Parseff.parse "[1, -2, 3]" json_array with
+  | Ok nums ->
+      Printf.printf "Sum: %d\n" (List.fold_left (+) 0 nums)
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "Error at %d: %s\n" pos msg
+  | Error _ -> print_endline "Parse error"
 ```
 
----
 
-## Next Steps
-
-- Learn about [High-performance operations](/parseff/api/zero-copy)
-- See [Optimization tips](/parseff/guides/optimization) for better performance

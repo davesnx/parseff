@@ -131,7 +131,7 @@ let () =
   List.iter
     (fun (input, should_succeed) ->
       match Parseff.parse input ip_address_simple with
-      | Ok ((a, b, c, d)) ->
+      | Ok (a, b, c, d) ->
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
       | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
@@ -146,7 +146,7 @@ let () =
   List.iter
     (fun (input, should_succeed) ->
       match Parseff.parse input ip_address_with_custom_errors with
-      | Ok ((a, b, c, d)) ->
+      | Ok (a, b, c, d) ->
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
       | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Parse error at pos %d: %s\n"
@@ -169,7 +169,7 @@ let () =
   List.iter
     (fun (input, should_succeed) ->
       match Parseff.parse input expr with
-      | Ok (result) ->
+      | Ok result ->
           Printf.printf "✓ %-20s -> %s\n" input (expr_to_string result)
       | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
@@ -181,7 +181,7 @@ let () =
   Printf.printf "\nExample 4: Using one_of and one_of_labeled\n";
   Printf.printf "-------------------------------------------\n";
   (match Parseff.parse "if" keyword with
-  | Ok (s) -> Printf.printf "✓ Parsed keyword: %s\n" s
+  | Ok s -> Printf.printf "✓ Parsed keyword: %s\n" s
   | Error _ -> Printf.printf "✗ Error\n");
 
   (match Parseff.parse "xyz" keyword with
@@ -191,7 +191,7 @@ let () =
   | Error _ -> Printf.printf "✓ Failed\n");
 
   (match Parseff.parse "99" literal with
-  | Ok (e) -> Printf.printf "✓ Parsed literal: %s\n" (expr_to_string e)
+  | Ok e -> Printf.printf "✓ Parsed literal: %s\n" (expr_to_string e)
   | Error _ -> Printf.printf "✗ Error\n");
 
   (match Parseff.parse "xyz" literal with

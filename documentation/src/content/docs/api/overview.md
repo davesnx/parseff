@@ -3,127 +3,115 @@ title: API Overview
 description: Parseff API reference — types, runner, and organization
 ---
 
-## Parser Type
+## Parser type
 
 A parser in Parseff is a function `unit -> 'a`. Parsers perform algebraic effects to consume input, backtrack, and report errors. The effect handler installed by `parse` manages all state.
 
 ```ocaml
 let my_parser () =
-  let x = consume "hello" in
-  let _ = consume " " in
-  let y = consume "world" in
+  let x = Parseff.consume "hello" in
+  let _ = Parseff.consume " " in
+  let y = Parseff.consume "world" in
   (x, y)
 ```
 
-## Running Parsers
+## Running parsers
 
 ### `parse`
 
 ```ocaml
 val parse :
-  string -> (unit -> 'a) ->
+  ?max_depth:int ->
+  string ->
+  (unit -> 'a) ->
   ('a, [> `Expected of string | `Unexpected_end_of_input]) result
 ```
 
 Runs a parser on an input string. Returns `Ok value` on success, or `Error { pos; error }` on failure.
 
+The `~max_depth` parameter limits recursion depth for parsers that use `rec_` (default: 128).
+
 ```ocaml
-match parse "hello world" my_parser with
-| Ok result -> Printf.printf "Matched: %s %s\n" (fst result) (snd result)
+match Parseff.parse "hello world" my_parser with
+| Ok (x, y) -> Printf.printf "Matched: %s %s\n" x y
 | Error { pos; error = `Expected msg } ->
     Printf.printf "Error at %d: %s\n" pos msg
+| Error _ -> print_endline "Parse error"
 ```
 
 Custom errors raised via `error` are also returned through the result type:
 
 ```ocaml
 let byte () =
-  let n = parse_int () in
-  if n > 255 then error (`Out_of_range n) else n
+  let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
+  let n = int_of_string s in
+  if n > 255 then Parseff.error (`Out_of_range n) else n
 
-match parse "300" byte with
+match Parseff.parse "300" byte with
 | Error { error = `Out_of_range n; _ } ->
     Printf.printf "%d exceeds 255\n" n
 | _ -> ()
 ```
 
-## Result Type
+### `parse_source`
+
+For streaming input from files, channels, or custom byte sources. See the [Streaming API reference](/parseff/api/streaming).
+
+## Result type
 
 ```ocaml
 type ('a, 'e) result =
   | Ok of 'a
-  | Error of { pos: int; error: 'e }
+  | Error of { pos : int; error : 'e }
 ```
 
-- `Ok value` — the parsed value
-- `Error { pos; error }` — the position where parsing failed and the error value
+- `Ok value` -- the parsed value
+- `Error { pos; error }` -- position where parsing failed and the error value
 
-If you need the current input offset inside a parser, call `position ()`:
+## Position
+
+```ocaml
+val position : unit -> int
+```
+
+Returns the current parser offset in bytes from the start of the input:
 
 ```ocaml
 let with_pos p () =
+  let start = Parseff.position () in
   let value = p () in
-  let pos = position () in
-  (value, pos)
+  let end_ = Parseff.position () in
+  (value, start, end_)
 ```
 
-## Span Type
+## Span type
 
 Zero-copy string slices for high-performance parsing:
 
 ```ocaml
-type span = { buf: string; off: int; len: int }
+type span = { buf : string; off : int; len : int }
 
 val span_to_string : span -> string
 ```
 
-A `span` references a slice of the original input string without allocating a new string. Call `span_to_string` only when you need the actual string value.
+A `span` references a slice of the original input string without allocating a new string. Call `span_to_string` when you need the actual string value.
 
 ```ocaml
-let digits = take_while_span (fun c -> c >= '0' && c <= '9') in
-(* No allocation yet — span points into the input buffer *)
-let s = span_to_string digits in
-(* Now a string is allocated *)
+let fast_digits () =
+  let digits = Parseff.take_while_span (fun c -> c >= '0' && c <= '9') in
+  (* No allocation yet — span points into the input buffer *)
+  let s = Parseff.span_to_string digits in
+  (* Now a string is allocated *)
+  s
 ```
 
-## API Organization
+## API organization
 
-- **[Core Primitives](/parseff/api/primitives)** — `consume`, `char`, `satisfy`, `take_while`, `match_re`, `fail`, `error`, `end_of_input`
-- **[Combinators](/parseff/api/combinators)** — `or_`, `look_ahead`, `expect`, `one_of`, `one_of_labeled`, `optional`
-- **[Repetition](/parseff/api/repetition)** — `many`, `many1`, `sep_by`, `sep_by1`, `count`
-- **[Convenience](/parseff/api/convenience)** — `digit`, `letter`, `alphanum`, `whitespace`, `skip_whitespace`, `any_char`
-- **[Zero-Copy API](/parseff/api/zero-copy)** — `take_while_span`, `sep_by_take_span`, `fused_sep_take`, `skip_while_then_char`
-
-## Complete Example
-
-```ocaml
-let integer () =
-  let sign = Parseff.optional (fun () -> Parseff.char '-') () in
-  let digits = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') "digit" in
-  let n = int_of_string digits in
-  match sign with Some _ -> -n | None -> n
-
-let json_array () =
-  let _ = Parseff.char '[' in
-  Parseff.skip_whitespace ();
-  let values = Parseff.sep_by
-    (fun () ->
-      Parseff.skip_whitespace ();
-      let n = integer () in
-      Parseff.skip_whitespace ();
-      n)
-    (fun () -> Parseff.char ',')
-    ()
-  in
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char ']' in
-  Parseff.end_of_input ();
-  values
-
-let () =
-  match Parseff.parse "[1, -2, 3]" json_array with
-  | Ok (xs) ->
-      Printf.printf "Sum: %d\n" (List.fold_left (+) 0 xs)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Parse error at %d: %s\n" pos msg
-```
+| Section | Combinators |
+|---------|------------|
+| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `take_while1`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
+| [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `rec_` |
+| [Repetition & Separation](/parseff/api/repetition) | `many`, `many1`, `count`, `sep_by`, `sep_by1`, `between`, `end_by`, `end_by1`, `chainl`, `chainl1`, `chainr`, `chainr1` |
+| [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `whitespace1`, `skip_whitespace` |
+| [Zero-Copy & Fused Ops](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char` |
+| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source` |

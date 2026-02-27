@@ -803,7 +803,7 @@ let[@inline] char c = satisfy (Char.equal c) ~label:(String.make 1 c)
 let[@inline] match_regex re = Effect.perform (Match_re re)
 let[@inline] take_while pred = Effect.perform (Take_while pred)
 
-let[@inline] take_while1 pred label =
+let[@inline] take_while1 pred ~label =
   let s = take_while pred in
   if String.length s = 0 then Effect.perform (Fail label) else s
 
@@ -938,7 +938,7 @@ let[@inline always] is_whitespace c =
   c = ' ' || c = '\t' || c = '\n' || c = '\r'
 
 let[@inline] whitespace () = take_while is_whitespace
-let[@inline] whitespace1 () = take_while1 is_whitespace "whitespace"
+let[@inline] whitespace1 () = take_while1 is_whitespace ~label:"whitespace"
 let[@inline] skip_whitespace () = skip_while is_whitespace
 
 let alphanum () =

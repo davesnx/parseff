@@ -1,7 +1,5 @@
 open Benchmark
 
-[@@@warning "-8"]
-
 let json_input = {|[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]|}
 let is_digit_or_sign c = (c >= '0' && c <= '9') || c = '-' || c = '.'
 let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
@@ -37,12 +35,12 @@ module Parseff_JSON = struct
 
   let bench_span input =
     match Parseff.parse input json_array with
-    | Ok (result) -> Some result
+    | Ok result -> Some result
     | Error _ -> None
 
   let bench_fair input =
     match Parseff.parse input json_array_fair with
-    | Ok (result) -> Some result
+    | Ok result -> Some result
     | Error _ -> None
 end
 
