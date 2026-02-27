@@ -39,12 +39,13 @@ let rec json () =
   Parseff.rec_ (fun () ->
       let _ = ws () in
       Parseff.one_of
-        [ array_parser
-        ; object_parser
-        ; null_parser
-        ; bool_parser
-        ; number_parser
-        ; string_parser
+        [
+          array_parser;
+          object_parser;
+          null_parser;
+          bool_parser;
+          number_parser;
+          string_parser;
         ]
         ())
 
@@ -211,7 +212,7 @@ let test_deep_nesting_within_limit () =
   match Parseff.parse input json with
   | Ok (Array _, _) -> ()
   | Ok _ -> Alcotest.fail "Expected nested Array"
-  | Error { error= `Expected msg; _ } ->
+  | Error { error = `Expected msg; _ } ->
       Alcotest.fail (Printf.sprintf "Unexpected parse error: %s" msg)
   | Error _ -> Alcotest.fail "Unexpected error"
 
@@ -219,7 +220,7 @@ let test_deep_nesting_exceeds_limit () =
   let input = make_deeply_nested_arrays 256 in
   match Parseff.parse ~max_depth:128 input json with
   | Ok _ -> Alcotest.fail "Expected depth limit error, got success"
-  | Error { error= `Expected msg; _ } ->
+  | Error { error = `Expected msg; _ } ->
       let expected_msg = "maximum nesting depth 128 exceeded" in
       Alcotest.(check string) "depth error message" expected_msg msg
   | Error _ -> Alcotest.fail "Unexpected error type"
@@ -227,27 +228,32 @@ let test_deep_nesting_exceeds_limit () =
 let () =
   let open Alcotest in
   run "JSON Parser"
-    [ ( "primitives"
-      , [ test_case "null" `Quick test_null
-        ; test_case "bool true" `Quick test_bool_true
-        ; test_case "bool false" `Quick test_bool_false
-        ; test_case "number" `Quick test_number
-        ; test_case "float" `Quick test_number_float
-        ; test_case "string" `Quick test_string
-        ] )
-    ; ( "arrays"
-      , [ test_case "empty array" `Quick test_empty_array
-        ; test_case "simple array" `Quick test_simple_array
-        ] )
-    ; ( "objects"
-      , [ test_case "empty object" `Quick test_empty_object
-        ; test_case "simple object" `Quick test_simple_object
-        ; test_case "nested" `Quick test_nested
-        ] )
-    ; ( "depth limiting"
-      , [ test_case "deep nesting within limit" `Quick
-            test_deep_nesting_within_limit
-        ; test_case "deep nesting exceeds limit" `Quick
-            test_deep_nesting_exceeds_limit
-        ] )
+    [
+      ( "primitives",
+        [
+          test_case "null" `Quick test_null;
+          test_case "bool true" `Quick test_bool_true;
+          test_case "bool false" `Quick test_bool_false;
+          test_case "number" `Quick test_number;
+          test_case "float" `Quick test_number_float;
+          test_case "string" `Quick test_string;
+        ] );
+      ( "arrays",
+        [
+          test_case "empty array" `Quick test_empty_array;
+          test_case "simple array" `Quick test_simple_array;
+        ] );
+      ( "objects",
+        [
+          test_case "empty object" `Quick test_empty_object;
+          test_case "simple object" `Quick test_simple_object;
+          test_case "nested" `Quick test_nested;
+        ] );
+      ( "depth limiting",
+        [
+          test_case "deep nesting within limit" `Quick
+            test_deep_nesting_within_limit;
+          test_case "deep nesting exceeds limit" `Quick
+            test_deep_nesting_exceeds_limit;
+        ] );
     ]

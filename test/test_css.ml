@@ -1,5 +1,5 @@
-type declaration = { property: string; value: string }
-type rule = { selector: string; declarations: declaration list }
+type declaration = { property : string; value : string }
+type rule = { selector : string; declarations : declaration list }
 
 let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
 let identifier_re = Re.compile (Re.Posix.re "[a-zA-Z_-][a-zA-Z0-9_-]*")
@@ -73,10 +73,12 @@ let test_empty_rule () =
 let () =
   let open Alcotest in
   run "CSS Parser"
-    [ ( "rules"
-      , [ test_case "simple rule" `Quick test_simple_rule
-        ; test_case "multiple declarations" `Quick test_multiple_declarations
-        ; test_case "with whitespace" `Quick test_with_whitespace
-        ; test_case "empty rule" `Quick test_empty_rule
-        ] )
+    [
+      ( "rules",
+        [
+          test_case "simple rule" `Quick test_simple_rule;
+          test_case "multiple declarations" `Quick test_multiple_declarations;
+          test_case "with whitespace" `Quick test_with_whitespace;
+          test_case "empty rule" `Quick test_empty_rule;
+        ] );
     ]

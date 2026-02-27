@@ -8,10 +8,9 @@ let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
 
 module Parseff_JSON = struct
   let[@inline always] float_of_span (s : Parseff.span) =
-    if s.len = 1
-    then Float.of_int (Char.code (String.unsafe_get s.buf s.off) - Char.code '0')
-    else if s.len = 2 && String.unsafe_get s.buf s.off >= '1'
-    then
+    if s.len = 1 then
+      Float.of_int (Char.code (String.unsafe_get s.buf s.off) - Char.code '0')
+    else if s.len = 2 && String.unsafe_get s.buf s.off >= '1' then
       Float.of_int
         (((Char.code (String.unsafe_get s.buf s.off) - Char.code '0') * 10)
         + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0'))
@@ -50,15 +49,10 @@ end
 module Angstrom_JSON = struct
   open Angstrom
 
-  let ws =
-    skip_while (function
-      | ' ' | '\t' | '\n' | '\r' -> true
-      | _ -> false)
+  let ws = skip_while (function ' ' | '\t' | '\n' | '\r' -> true | _ -> false)
 
   let number =
-    take_while1 (function
-      | '0' .. '9' | '-' | '.' -> true
-      | _ -> false)
+    take_while1 (function '0' .. '9' | '-' | '.' -> true | _ -> false)
     >>| float_of_string
 
   let json_array =
@@ -80,13 +74,14 @@ let () =
 
   let results =
     latencyN ~repeat:3 100000L
-      [ ( "Parseff (span)"
-        , (fun () -> ignore (Parseff_JSON.bench_span json_input))
-        , () )
-      ; ( "Parseff (fair)"
-        , (fun () -> ignore (Parseff_JSON.bench_fair json_input))
-        , () )
-      ; ("Angstrom", (fun () -> ignore (Angstrom_JSON.bench json_input)), ())
+      [
+        ( "Parseff (span)",
+          (fun () -> ignore (Parseff_JSON.bench_span json_input)),
+          () );
+        ( "Parseff (fair)",
+          (fun () -> ignore (Parseff_JSON.bench_fair json_input)),
+          () );
+        ("Angstrom", (fun () -> ignore (Angstrom_JSON.bench json_input)), ());
       ]
   in
 

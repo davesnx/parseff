@@ -1,0 +1,135 @@
+{0 Parseff}
+
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions ([unit -> 'a]), errors are typed, and monadic let operators are optional, while algebraic effects handle control flow, backtracking, and streaming input.
+
+{{:https://davesnx.github.io/parseff/}Documentation}
+
+{1 Installation}
+
+{@bash skip[
+$ opam install parseff -y
+]}
+
+{1 Example}
+
+{@ocaml[
+let number () =
+  let digits = Parseff.many1 Parseff.digit () in
+  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  if n >= 0 && n <= 255 then n
+  else Parseff.error (`Out_of_range n)
+
+let ip_address () =
+  let a = number () in
+  let _ = Parseff.char '.' in
+  let b = number () in
+  let _ = Parseff.char '.' in
+  let c = number () in
+  let _ = Parseff.char '.' in
+  let d = number () in
+  Parseff.end_of_input ();
+  (a, b, c, d)
+
+let () =
+  match Parseff.parse "192.168.1.1" ip_address with
+  | Ok ((a, b, c, d), _) ->
+      Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
+  | Error { pos; error = `Out_of_range n } ->
+      Printf.printf "Error at %d: %d out of range (0-255)\n" pos n
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "Error at %d: unexpected end of input\n" pos
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "Error at %d: %s\n" pos msg
+]}
+
+{1 Features}
+
+- Build parsers with direct-style and [Parseff] combinators
+- {b No} monadic operators ([>>=], [>>|], [*>]), {b neither} binding operators ([let*], [let+], [and+])
+- Automatic backtracking with [Parseff.or_]
+- Typed domain errors via polymorphic variants, raise with [Parseff.error]
+- Minimal dependency footprint: only [re] for regex support
+- Streaming with [Source.of_string], [Source.of_channel], [Source.of_function]
+- Fused operations for hot paths ([Parseff.sep_by_take], [Parseff.skip_while_then_char])
+- Zero-copy span APIs for low-allocation parsing ([Parseff.take_while_span], [Parseff.sep_by_take_span], [Parseff.fused_sep_take], [Parseff.skip_while_then_char])
+
+{1 Comparison}
+
+{table
+  {tr
+    {th Feature}
+    {th Parseff}
+    {th Angstrom}
+    {th MParser}
+    {th Opal}}
+  {tr
+    {td API}
+    {td Direct-style + Composition}
+    {td Declarative + Monadic}
+    {td Monadic + }
+    {td Monadic}}
+  {tr
+    {td Backtracking by default}
+    {td Yes ✅}
+    {td Yes ✅}
+    {td No ❌}
+    {td No ❌}}
+  {tr
+    {td Unbounded lookahead}
+    {td Yes ✅}
+    {td Yes ✅}
+    {td Yes ✅}
+    {td No ❌}}
+  {tr
+    {td Custom error types}
+    {td Yes ✅}
+    {td No ❌}
+    {td No ❌}
+    {td No ❌}}
+  {tr
+    {td Zero-copy API}
+    {td Yes ✅}
+    {td Yes ✅}
+    {td No ❌}
+    {td No ❌}}
+  {tr
+    {td Streaming/incremental input}
+    {td Yes ✅}
+    {td Yes ✅}
+    {td No ❌}
+    {td No ❌}}
+  {tr
+    {td Requires OCaml 5+}
+    {td Yes ✅}
+    {td No ❌}
+    {td No ❌}
+    {td No ❌}}}
+
+{1 Performance}
+
+Benchmarked on a JSON parser over a 10-element numeric array for 100,000 iterations:
+
+- Parseff (zero-copy spans): ~4,940,000 parses/sec (4.3x faster than Angstrom)
+- Parseff (fair comparison): ~1,930,000 parses/sec (1.6x faster than Angstrom)
+- Angstrom: ~1,150,000 parses/sec (baseline)
+
+Memory: Parseff 197 MB vs Angstrom 584 MB (3x less).
+
+See {{:./bench/bench_vs_angstrom.ml}bench/bench_vs_angstrom.ml} for the benchmark source.
+
+{1 References}
+
+- {{:https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf}A Typed, Algebraic Approach to Parsing} by Krishnaswami & Yallop (PLDI '19)
+- {{:https://okmij.org/ftp/Computation/variables-effects.html}Algebraic Effects and Effect Handlers} by Kiselyov, O. et al.
+- {{:https://github.com/JavaScriptRegenerated/yieldparser}yieldparser}: JavaScript generator-based parsing
+
+{1 Contributing}
+
+- Open an issue to discuss proposed changes
+- Write tests for new features
+- Run [make fmt] before submitting
+- Ensure all tests pass with [make test]
+
+{1 License}
+
+MIT -- see {{:./LICENSE}LICENSE} for details.

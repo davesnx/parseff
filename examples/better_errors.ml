@@ -3,8 +3,7 @@ let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
 let number_0_255_simple () =
   let digits = Parseff.many1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-  if n >= 0 && n <= 255
-  then n
+  if n >= 0 && n <= 255 then n
   else
     Parseff.fail (Printf.sprintf "number %d is out of range (must be 0-255)" n)
 
@@ -91,17 +90,19 @@ let rec expr_to_string = function
 
 let keyword () =
   Parseff.one_of
-    [ (fun () -> Parseff.consume "if")
-    ; (fun () -> Parseff.consume "else")
-    ; (fun () -> Parseff.consume "while")
+    [
+      (fun () -> Parseff.consume "if");
+      (fun () -> Parseff.consume "else");
+      (fun () -> Parseff.consume "while");
     ]
     ()
 
 let literal () =
   Parseff.one_of_labeled
-    [ ("number", fun () -> Num (Parseff.digit ()))
-    ; ( "boolean"
-      , fun () ->
+    [
+      ("number", fun () -> Num (Parseff.digit ()));
+      ( "boolean",
+        fun () ->
           Parseff.or_
             (fun () ->
               let _ = Parseff.consume "true" in
@@ -109,7 +110,7 @@ let literal () =
             (fun () ->
               let _ = Parseff.consume "false" in
               Num 0)
-            () )
+            () );
     ]
     ()
 
@@ -120,10 +121,11 @@ let () =
   Printf.printf "Example 1: Using 'expect' for clear error messages\n";
   Printf.printf "---------------------------------------------------\n";
   let test_cases_simple =
-    [ ("192.168.1.1", true)
-    ; ("192.168.1.256", false)
-    ; ("192.168.1", false)
-    ; ("192.168.1.", false)
+    [
+      ("192.168.1.1", true);
+      ("192.168.1.256", false);
+      ("192.168.1", false);
+      ("192.168.1.", false);
     ]
   in
   List.iter
@@ -131,7 +133,7 @@ let () =
       match Parseff.parse input ip_address_simple with
       | Ok ((a, b, c, d), _) ->
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
-      | Error { pos; error= `Expected expected } ->
+      | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
             input pos expected
@@ -146,15 +148,15 @@ let () =
       match Parseff.parse input ip_address_with_custom_errors with
       | Ok ((a, b, c, d), _) ->
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
-      | Error { pos; error= `Expected expected } ->
+      | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Parse error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
             input pos expected
-      | Error { pos; error= `Out_of_range n } ->
+      | Error { pos; error = `Out_of_range n } ->
           Printf.printf
             "✓ %-20s -> Custom error at pos %d: octet %d out of range (0-255)\n"
             input pos n
-      | Error { pos; error= `Invalid_format msg } ->
+      | Error { pos; error = `Invalid_format msg } ->
           Printf.printf "✓ %-20s -> Custom error at pos %d: %s\n" input pos msg
       | Error _ -> Printf.printf "✗ Unknown error\n")
     test_cases_custom;
@@ -169,7 +171,7 @@ let () =
       match Parseff.parse input expr with
       | Ok (result, _) ->
           Printf.printf "✓ %-20s -> %s\n" input (expr_to_string result)
-      | Error { pos; error= `Expected expected } ->
+      | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
             input pos expected
@@ -184,7 +186,7 @@ let () =
 
   (match Parseff.parse "xyz" keyword with
   | Ok _ -> Printf.printf "✗ Should have failed\n"
-  | Error { error= `Expected expected; _ } ->
+  | Error { error = `Expected expected; _ } ->
       Printf.printf "✓ Failed as expected: %s\n" expected
   | Error _ -> Printf.printf "✓ Failed\n");
 
@@ -194,7 +196,7 @@ let () =
 
   (match Parseff.parse "xyz" literal with
   | Ok _ -> Printf.printf "✗ Should have failed\n"
-  | Error { error= `Expected expected; _ } ->
+  | Error { error = `Expected expected; _ } ->
       Printf.printf "✓ Failed with labels: %s\n" expected
   | Error _ -> Printf.printf "✓ Failed\n");
 

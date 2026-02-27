@@ -1,8 +1,7 @@
 let number () =
   let digits = Parseff.many1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-  if n >= 0 && n <= 255
-  then n
+  if n >= 0 && n <= 255 then n
   else Parseff.fail (Printf.sprintf "number out of range: %d" n)
 
 let ip_address () =
@@ -46,7 +45,7 @@ let test_valid_ip3 () =
 let test_invalid_out_of_range () =
   match Parseff.parse "1.2.3.256" ip_address with
   | Ok _ -> Alcotest.fail "Expected failure for out of range"
-  | Error { pos; error= `Expected expected } ->
+  | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 9 pos;
       Alcotest.(check bool)
         "contains 'out of range'" true
@@ -61,7 +60,7 @@ let test_invalid_incomplete () =
 let test_invalid_trailing () =
   match Parseff.parse "1.2.3.4 extra" ip_address with
   | Ok _ -> Alcotest.fail "Expected failure for trailing data"
-  | Error { error= `Expected expected; _ } ->
+  | Error { error = `Expected expected; _ } ->
       Alcotest.(check bool)
         "expected end of input" true
         (String.contains expected 'e')
@@ -70,14 +69,17 @@ let test_invalid_trailing () =
 let () =
   let open Alcotest in
   run "IP Address Parser"
-    [ ( "valid"
-      , [ test_case "1.2.3.4" `Quick test_valid_ip1
-        ; test_case "255.255.255.255" `Quick test_valid_ip2
-        ; test_case "192.168.1.100" `Quick test_valid_ip3
-        ] )
-    ; ( "invalid"
-      , [ test_case "out of range" `Quick test_invalid_out_of_range
-        ; test_case "incomplete" `Quick test_invalid_incomplete
-        ; test_case "trailing data" `Quick test_invalid_trailing
-        ] )
+    [
+      ( "valid",
+        [
+          test_case "1.2.3.4" `Quick test_valid_ip1;
+          test_case "255.255.255.255" `Quick test_valid_ip2;
+          test_case "192.168.1.100" `Quick test_valid_ip3;
+        ] );
+      ( "invalid",
+        [
+          test_case "out of range" `Quick test_invalid_out_of_range;
+          test_case "incomplete" `Quick test_invalid_incomplete;
+          test_case "trailing data" `Quick test_invalid_trailing;
+        ] );
     ]

@@ -1,18 +1,16 @@
+
 # Parseff
 
-Write parsers as plain functions. Algebraic effects handle the rest.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed, and monadic let operators are optional, while algebraic effects handle control flow, backtracking, and streaming input.
 
-Parseff is a parser combinator library for OCaml 5 where parsers are regular functions (`unit -> 'a`), not monadic values. Algebraic effects manage backtracking, error reporting, and input state behind the scenes.
+[Documentation](https://davesnx.github.io/parseff/)
 
-**[Documentation](https://davesnx.github.io/parseff/)**
 
 ## Installation
 
 ```bash
-opam install parseff
+$ opam install parseff -y
 ```
-
-Requires OCaml >= 5.3.
 
 ## Example
 
@@ -44,71 +42,54 @@ let () =
       Printf.printf "Error at %d: %s\n" pos msg
 ```
 
-No `>>=`, no `let*`, no `*>`. Just `let` and `;`.
-
 ## Features
 
-- **Imperative style** — parsers are `unit -> 'a` functions composed through ordinary `let` bindings, without monadic operators (`>>=`, `>>|`, `*>`) or binding operators (`let*`, `let+`, `and+`)
-- **Backtracking by default** — `or_` automatically saves and restores position on failure
-- **Streaming input** — parse from strings, files, channels, or custom readers with the same parser code
-- **Custom error types** — return domain-specific errors via polymorphic variants, not just strings
-- **Zero-copy parsing** — span-based APIs avoid string allocations on hot paths
-- **Fused operations** — combined primitives (`sep_by_take`, `skip_while_then_char`) reduce effect dispatches
-- **Minimal dependencies** — only `re` for regex support
+- Build parsers with direct-style and `Parseff` combinators
+- **No** monadic operators (`>>=`, `>>|`, `*>`), **neither** binding operators (`let*`, `let+`, `and+`)
+- Automatic backtracking with `Parseff.or_`
+- Typed domain errors via polymorphic variants, raise with `Parseff.error`
+- Minimal dependency footprint: only `re` for regex support
+- Streaming with `Source.of_string`, `Source.of_channel`, `Source.of_function`
+- Fused operations for hot paths (`Parseff.sep_by_take`, `Parseff.skip_while_then_char`)
+- Zero-copy span APIs for low-allocation parsing (`Parseff.take_while_span`, `Parseff.sep_by_take_span`, `Parseff.fused_sep_take`, `Parseff.skip_while_then_char`)
 
 ## Comparison
 
 | Feature | Parseff | Angstrom | MParser | Opal |
-|---|---|---|---|---|
-| Imperative-style API | Yes | No | No | No |
-| Backtracking by default | Yes | Yes | No | No |
-| Unbounded lookahead | Yes | Yes | Yes | No |
-| Custom error types | Yes | No | No | No |
-| Zero-copy API | Yes | Yes | No | No |
-| Streaming/incremental input | Yes | Yes | No | No |
-| Requires OCaml 5+ | Yes | No | No | No |
+| --- | --- | --- | --- | --- |
+| API | Direct-style \+ Composition | Declarative \+ Monadic | Monadic \+ | Monadic |
+| Backtracking by default | Yes ✅ | Yes ✅ | No ❌ | No ❌ |
+| Unbounded lookahead | Yes ✅ | Yes ✅ | Yes ✅ | No ❌ |
+| Custom error types | Yes ✅ | No ❌ | No ❌ | No ❌ |
+| Zero-copy API | Yes ✅ | Yes ✅ | No ❌ | No ❌ |
+| Streaming/incremental input | Yes ✅ | Yes ✅ | No ❌ | No ❌ |
+| Requires OCaml 5+ | Yes ✅ | No ❌ | No ❌ | No ❌ |
 
 ## Performance
 
-Benchmarked on a JSON array parser (`[1, 2, 3, ..., 10]`) over 100,000 iterations:
+Benchmarked on a JSON parser over a 10-element numeric array for 100,000 iterations:
 
-| | Parses/sec | vs. Angstrom |
-|---|---|---|
-| Parseff (zero-copy spans) | ~4,940,000 | 4.3x faster |
-| Parseff (fair comparison) | ~1,930,000 | 1.6x faster |
-| Angstrom | ~1,150,000 | baseline |
-
+- Parseff (zero-copy spans): ~4,940,000 parses/sec (4.3x faster than Angstrom)
+- Parseff (fair comparison): ~1,930,000 parses/sec (1.6x faster than Angstrom)
+- Angstrom: ~1,150,000 parses/sec (baseline)
 Memory: Parseff 197 MB vs Angstrom 584 MB (3x less).
 
-See [bench/bench_vs_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark source.
+See [bench/bench\_vs\_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark source.
 
-## API at a Glance
-
-| Category | Functions |
-|---|---|
-| Core | `consume`, `char`, `satisfy`, `take_while`, `take_while1`, `skip_while`, `match_re`, `end_of_input` |
-| Combinators | `or_`, `one_of`, `one_of_labeled`, `expect`, `look_ahead`, `optional` |
-| Repetition | `many`, `many1`, `sep_by`, `sep_by1`, `count` |
-| Errors | `fail`, `error` |
-| Convenience | `digit`, `letter`, `alphanum`, `whitespace`, `skip_whitespace`, `any_char` |
-| Zero-copy | `take_while_span`, `sep_by_take_span`, `fused_sep_take`, `skip_while_then_char` |
-| Streaming | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source` |
-
-See [`lib/parseff.mli`](./lib/parseff.mli) for the full API reference.
 
 ## References
 
-- Krishnaswami & Yallop (PLDI '19) — [A Typed, Algebraic Approach to Parsing](https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf)
-- Kiselyov, O. et al. — [Algebraic Effects and Effect Handlers](https://okmij.org/ftp/Computation/variables-effects.html)
-- [yieldparser](https://github.com/JavaScriptRegenerated/yieldparser) — JavaScript generator-based parsing (inspiration for the effects-as-communication-channel approach)
+- [A Typed, Algebraic Approach to Parsing](https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf) by Krishnaswami & Yallop (PLDI '19)
+- [Algebraic Effects and Effect Handlers](https://okmij.org/ftp/Computation/variables-effects.html) by Kiselyov, O. et al.
+- [yieldparser](https://github.com/JavaScriptRegenerated/yieldparser): JavaScript generator-based parsing
 
 ## Contributing
 
-1. Open an issue to discuss proposed changes
-2. Write tests for new features
-3. Run `make fmt` before submitting
-4. Ensure all tests pass with `make test`
+- Open an issue to discuss proposed changes
+- Write tests for new features
+- Run `make fmt` before submitting
+- Ensure all tests pass with `make test`
 
 ## License
 
-MIT — see [LICENSE](./LICENSE) file for details.
+MIT \-- see [LICENSE](./LICENSE) for details.

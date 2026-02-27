@@ -33,40 +33,41 @@ let take n () =
   Buffer.contents buf
 
 let basic_constructors =
-  [ ( "peek_char"
-    , `Quick
-    , fun () ->
+  [
+    ( "peek_char",
+      `Quick,
+      fun () ->
         check_co ~msg:"singleton input" peek_char [ "t" ] (Some 't');
         check_co ~msg:"longer input" peek_char [ "true" ] (Some 't');
-        check_co ~msg:"empty input" peek_char [ "" ] None )
-  ; ( "peek_char_fail"
-    , `Quick
-    , fun () ->
+        check_co ~msg:"empty input" peek_char [ "" ] None );
+    ( "peek_char_fail",
+      `Quick,
+      fun () ->
         check_c ~msg:"singleton input" peek_char_fail [ "t" ] 't';
         check_c ~msg:"longer input" peek_char_fail [ "true" ] 't';
-        check_fail ~msg:"empty input" peek_char_fail [ "" ] )
-  ; ( "char"
-    , `Quick
-    , fun () ->
+        check_fail ~msg:"empty input" peek_char_fail [ "" ] );
+    ( "char",
+      `Quick,
+      fun () ->
         check_c ~msg:"singleton 'a'" (fun () -> Parseff.char 'a') [ "a" ] 'a';
         check_c ~msg:"prefix 'a'" (fun () -> Parseff.char 'a') [ "asdf" ] 'a';
         check_fail ~msg:"'a' failure" (fun () -> Parseff.char 'a') [ "b" ];
-        check_fail ~msg:"empty buffer" (fun () -> Parseff.char 'a') [ "" ] )
-  ; ( "not_char"
-    , `Quick
-    , fun () ->
+        check_fail ~msg:"empty buffer" (fun () -> Parseff.char 'a') [ "" ] );
+    ( "not_char",
+      `Quick,
+      fun () ->
         check_c ~msg:"not 'a' singleton" (not_char 'a') [ "b" ] 'b';
         check_c ~msg:"not 'a' prefix" (not_char 'a') [ "baba" ] 'b';
         check_fail ~msg:"not 'a' failure" (not_char 'a') [ "a" ];
-        check_fail ~msg:"empty buffer" (not_char 'a') [ "" ] )
-  ; ( "any_char"
-    , `Quick
-    , fun () ->
+        check_fail ~msg:"empty buffer" (not_char 'a') [ "" ] );
+    ( "any_char",
+      `Quick,
+      fun () ->
         check_c ~msg:"non-empty buffer" Parseff.any_char [ "a" ] 'a';
-        check_fail ~msg:"empty buffer" Parseff.any_char [ "" ] )
-  ; ( "string"
-    , `Quick
-    , fun () ->
+        check_fail ~msg:"empty buffer" Parseff.any_char [ "" ] );
+    ( "string",
+      `Quick,
+      fun () ->
         check_s ~msg:"empty string, non-empty buffer"
           (fun () -> Parseff.consume "")
           [ "asdf" ] "";
@@ -84,10 +85,10 @@ let basic_constructors =
           [ "asd" ];
         check_fail ~msg:"non-empty string, empty input"
           (fun () -> Parseff.consume "test")
-          [ "" ] )
-  ; ( "take_while"
-    , `Quick
-    , fun () ->
+          [ "" ] );
+    ( "take_while",
+      `Quick,
+      fun () ->
         check_s ~msg:"true, non-empty input"
           (fun () -> Parseff.take_while (fun _ -> true))
           [ "asdf" ] "asdf";
@@ -99,10 +100,10 @@ let basic_constructors =
           [ "asdf" ] "";
         check_s ~msg:"false, empty input"
           (fun () -> Parseff.take_while (fun _ -> false))
-          [ "" ] "" )
-  ; ( "take_while1"
-    , `Quick
-    , fun () ->
+          [ "" ] "" );
+    ( "take_while1",
+      `Quick,
+      fun () ->
         check_s ~msg:"true, non-empty input"
           (fun () -> Parseff.take_while1 (fun _ -> true) "char")
           [ "asdf" ] "asdf";
@@ -114,37 +115,39 @@ let basic_constructors =
           [ "" ];
         check_fail ~msg:"false, empty input"
           (fun () -> Parseff.take_while1 (fun _ -> false) "char")
-          [ "" ] )
+          [ "" ] );
   ]
 
 let monadic =
-  [ ( "fail"
-    , `Quick
-    , fun () ->
+  [
+    ( "fail",
+      `Quick,
+      fun () ->
         check_fail ~msg:"non-empty input"
           (fun () -> Parseff.fail "<msg>")
           [ "asdf" ];
-        check_fail ~msg:"empty input" (fun () -> Parseff.fail "<msg>") [ "" ] )
-  ; ( "return"
-    , `Quick
-    , fun () ->
+        check_fail ~msg:"empty input" (fun () -> Parseff.fail "<msg>") [ "" ] );
+    ( "return",
+      `Quick,
+      fun () ->
         check_s ~msg:"non-empty input" (fun () -> "test") [ "asdf" ] "test";
-        check_s ~msg:"empty input" (fun () -> "test") [ "" ] "test" )
-  ; ( "bind"
-    , `Quick
-    , fun () ->
+        check_s ~msg:"empty input" (fun () -> "test") [ "" ] "test" );
+    ( "bind",
+      `Quick,
+      fun () ->
         check_s ~msg:"data dependency"
           (fun () ->
             let s = take 2 () in
             let _ = Parseff.consume s in
             s)
-          [ "asas" ] "as" )
+          [ "asas" ] "as" );
   ]
 
 let applicative =
-  [ ( "applicative"
-    , `Quick
-    , fun () ->
+  [
+    ( "applicative",
+      `Quick,
+      fun () ->
         check_s ~msg:"`foo *> bar` returns bar"
           (fun () ->
             let _ = Parseff.consume "foo" in
@@ -155,13 +158,14 @@ let applicative =
             let r = Parseff.consume "foo" in
             let _ = Parseff.consume "bar" in
             r)
-          [ "foobar" ] "foo" )
+          [ "foobar" ] "foo" );
   ]
 
 let alternative =
-  [ ( "alternative"
-    , `Quick
-    , fun () ->
+  [
+    ( "alternative",
+      `Quick,
+      fun () ->
         check_c ~msg:"char a | char b"
           (Parseff.or_
              (fun () -> Parseff.char 'a')
@@ -181,13 +185,14 @@ let alternative =
           (Parseff.or_
              (fun () -> Parseff.consume "b")
              (fun () -> Parseff.consume "a"))
-          [ "a" ] "a" )
+          [ "a" ] "a" );
   ]
 
 let combinators =
-  [ ( "many"
-    , `Quick
-    , fun () ->
+  [
+    ( "many",
+      `Quick,
+      fun () ->
         check_lc ~msg:"empty input"
           (Parseff.many (fun () -> Parseff.char 'a'))
           [ "" ] [];
@@ -196,10 +201,10 @@ let combinators =
           [ "a" ] [ 'a' ];
         check_lc ~msg:"two chars"
           (Parseff.many (fun () -> Parseff.char 'a'))
-          [ "aa" ] [ 'a'; 'a' ] )
-  ; ( "sep_by1"
-    , `Quick
-    , fun () ->
+          [ "aa" ] [ 'a'; 'a' ] );
+    ( "sep_by1",
+      `Quick,
+      fun () ->
         let parser =
           Parseff.sep_by1
             (fun () -> Parseff.char 'a')
@@ -207,10 +212,10 @@ let combinators =
         in
         check_lc ~msg:"single char" parser [ "a" ] [ 'a' ];
         check_lc ~msg:"many chars" parser [ "a,a" ] [ 'a'; 'a' ];
-        check_lc ~msg:"no trailing sep" parser [ "a," ] [ 'a' ] )
-  ; ( "count"
-    , `Quick
-    , fun () ->
+        check_lc ~msg:"no trailing sep" parser [ "a," ] [ 'a' ] );
+    ( "count",
+      `Quick,
+      fun () ->
         check_lc ~msg:"empty input"
           (Parseff.count 0 (fun () -> Parseff.char 'a'))
           [ "" ] [];
@@ -222,13 +227,14 @@ let combinators =
           [ "aaa" ] [ 'a'; 'a' ];
         check_fail ~msg:"bad input"
           (Parseff.count 2 (fun () -> Parseff.char 'a'))
-          [ "abb" ] )
+          [ "abb" ] );
   ]
 
 let count_while_regression =
-  [ ( "proper position set after take_while"
-    , `Quick
-    , fun () ->
+  [
+    ( "proper position set after take_while",
+      `Quick,
+      fun () ->
         check_s ~msg:"take_while then eof"
           (fun () ->
             let s = Parseff.take_while (fun _ -> true) in
@@ -240,13 +246,14 @@ let count_while_regression =
             let s = Parseff.take_while1 (fun _ -> true) "char" in
             Parseff.end_of_input ();
             s)
-          [ "asdf" ] "asdf" )
+          [ "asdf" ] "asdf" );
   ]
 
 let consume_semantics =
-  [ ( "consume prefix vs all"
-    , `Quick
-    , fun () ->
+  [
+    ( "consume prefix vs all",
+      `Quick,
+      fun () ->
         check_lc ~msg:"prefix succeeds"
           (Parseff.many (fun () -> Parseff.char 'a'))
           [ "aaabbb" ] [ 'a'; 'a'; 'a' ];
@@ -255,16 +262,17 @@ let consume_semantics =
             let r = Parseff.many (fun () -> Parseff.char 'a') () in
             Parseff.end_of_input ();
             r)
-          [ "aaabbb" ] )
+          [ "aaabbb" ] );
   ]
 
 let () =
   Alcotest.run "Angstrom compatibility"
-    [ ("basic constructors", basic_constructors)
-    ; ("monadic interface", monadic)
-    ; ("applicative interface", applicative)
-    ; ("alternative", alternative)
-    ; ("combinators", combinators)
-    ; ("count_while regression", count_while_regression)
-    ; ("consume semantics", consume_semantics)
+    [
+      ("basic constructors", basic_constructors);
+      ("monadic interface", monadic);
+      ("applicative interface", applicative);
+      ("alternative", alternative);
+      ("combinators", combinators);
+      ("count_while regression", count_while_regression);
+      ("consume semantics", consume_semantics);
     ]

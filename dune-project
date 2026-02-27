@@ -1,5 +1,7 @@
 (lang dune 3.20)
 
+(using mdx 0.2)
+
 (generate_opam_files true)
 
 (implicit_transitive_deps false)
@@ -17,22 +19,28 @@
 
 (package
  (name parseff)
- (synopsis "Parser combinators with OCaml 5 algebraic effects")
- (description
-  "Parseff is a parser combinator library that uses algebraic effects as the communication channel between parsers and their runner, similar to how JavaScript generators use yield.")
+ (synopsis "Direct-style parser combinator library for OCaml 5")
+  (description
+   "Parseff is a direct-style parser combinator library for OCaml 5. Write parsers as plain functions with typed errors, streaming input, and zero-copy APIs.")
  (depends
   (ocaml
    (>= 5.3))
   (re
    (>= 1.9.0))
+
   ;; Test dependencies
   (alcotest :with-test)
   (benchmark :with-test)
   (angstrom :with-test)
+
   ;; Dev dependencies
   (ocamlformat
    (and
     (>= 0.26.1)
     :with-dev-setup))
   (ocaml-lsp-server :with-dev-setup)
-  (odoc :with-doc)))
+
+  ;; Documentation dependencies
+  (odoc :with-doc)
+  (mdx :with-test)
+))

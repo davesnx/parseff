@@ -5,7 +5,7 @@
 
     {1 Quick Start}
 
-    {[
+    {@ocaml[
       let number () =
         let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
         Char.code c - Char.code '0'
@@ -30,7 +30,7 @@
 
 (** {1 Span Type} *)
 
-type span = { buf: string; off: int; len: int }
+type span = { buf : string; off : int; len : int }
 (** A zero-copy slice of the input string. Use [span_to_string] to materialize
     when needed. *)
 
@@ -53,18 +53,18 @@ val span_to_string : span -> string
     User errors raised via [error] are also returned as [Error]. *)
 type ('a, 'e) result =
   | Ok of 'a * int  (** Success: parsed value and final position *)
-  | Error of
-      { pos: int  (** Position where error occurred *)
-      ; error: 'e  (** Error value *)
-      }  (** Failure: position and error *)
+  | Error of {
+      pos : int;  (** Position where error occurred *)
+      error : 'e;  (** Error value *)
+    }  (** Failure: position and error *)
 
 (** {1 Runner} *)
 
 val parse :
-     ?max_depth:int
-  -> string
-  -> (unit -> 'a)
-  -> ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
+  ?max_depth:int ->
+  string ->
+  (unit -> 'a) ->
+  ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
 (** [parse ?max_depth input parser] runs [parser] on [input] string.
 
     [max_depth] limits the nesting depth for parsers that use {!rec_} to mark
@@ -76,10 +76,10 @@ val parse :
     result.
 
     Example:
-    {[
+    {@ocaml[
       match parse "hello" (fun () -> consume "hello") with
       | Ok (s, pos) -> Printf.printf "Matched %S at position %d\n" s pos
-      | Error { pos; error= `Expected msg } ->
+      | Error { pos; error = `Expected msg } ->
           Printf.printf "Failed at %d: %s\n" pos msg
       | Error _ -> Printf.printf "Other error\n"
     ]} *)
@@ -90,7 +90,7 @@ val consume : string -> string
 (** [consume s] matches the exact literal string [s].
 
     Example:
-    {[
+    {@ocaml[
       let parser () =
         consume "hello";
         consume " ";
@@ -103,7 +103,7 @@ val satisfy : (char -> bool) -> label:string -> char
     the error message.
 
     Example:
-    {[
+    {@ocaml[
       let vowel () = satisfy (fun c -> String.contains "aeiou" c) ~label:"vowel"
     ]} *)
 
@@ -111,7 +111,7 @@ val char : char -> char
 (** [char c] matches the exact character [c].
 
     Example:
-    {[
+    {@ocaml[
       let comma () = char ','
     ]} *)
 
@@ -120,7 +120,7 @@ val match_regex : Re.re -> string
     with [Re.compile].
 
     Example:
-    {[
+    {@ocaml[
       let identifier () =
         let re = Re.compile (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*") in
         match_regex re
@@ -133,7 +133,7 @@ val take_while : (char -> bool) -> string
     classes.
 
     Example:
-    {[
+    {@ocaml[
       let digits () = take_while (fun c -> c >= '0' && c <= '9')
     ]} *)
 
@@ -143,7 +143,7 @@ val take_while1 : (char -> bool) -> string -> string
     match.
 
     Example:
-    {[
+    {@ocaml[
       let digits1 () = take_while1 (fun c -> c >= '0' && c <= '9') "digit"
     ]} *)
 
@@ -154,7 +154,7 @@ val skip_while : (char -> bool) -> unit
     character doesn't match).
 
     Example:
-    {[
+    {@ocaml[
       let skip_spaces () = skip_while (fun c -> c = ' ')
     ]} *)
 
@@ -191,7 +191,7 @@ val fail : string -> 'a
 (** [fail msg] aborts parsing with an error message.
 
     Example:
-    {[
+    {@ocaml[
       let validate_range n =
         if n >= 0 && n <= 255 then n else fail "number out of range"
     ]} *)
@@ -201,7 +201,7 @@ val error : 'e -> 'a
 
     The error is returned as [Error { pos; error = e }]. Use polymorphic
     variants for rich error reporting:
-    {[
+    {@ocaml[
       let number () =
         let n = parse_int () in
         if n > 255 then error (`Out_of_range n)
@@ -222,7 +222,7 @@ val end_of_input : unit -> unit
     entire input has been consumed.
 
     Example:
-    {[
+    {@ocaml[
       let complete_parser () =
         let result = some_parser () in
         end_of_input ();
@@ -234,7 +234,7 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
     backtracks and tries the right parser.
 
     Example:
-    {[
+    {@ocaml[
       let bool_parser () =
         or_
           (fun () ->
@@ -252,7 +252,7 @@ val look_ahead : (unit -> 'a) -> 'a
     what comes next. Fails if [parser] fails.
 
     Example:
-    {[
+    {@ocaml[
       let check_next_is_digit () = look_ahead digit
       (* position hasn't moved *)
     ]} *)
@@ -263,7 +263,7 @@ val rec_ : (unit -> 'a) -> 'a
     [max_depth] and fail cleanly instead of overflowing the stack.
 
     Example:
-    {[
+    {@ocaml[
       let rec json () = Parseff.rec_ (fun () ->
         Parseff.one_of [ array_parser; null_parser; ... ] ()
       )
@@ -278,7 +278,7 @@ val expect : string -> (unit -> 'a) -> 'a
     error message with [description]. Reads naturally: "expect a dot separator".
 
     Example:
-    {[
+    {@ocaml[
       let dot () = expect "a dot separator" (fun () -> char '.')
       let digit_val () = expect "a digit (0-9)" digit
     ]} *)
@@ -287,12 +287,13 @@ val one_of : (unit -> 'a) list -> unit -> 'a
 (** [one_of parsers] tries each parser in order until one succeeds.
 
     Example:
-    {[
+    {@ocaml[
       let keyword () =
         one_of
-          [ (fun () -> consume "if")
-          ; (fun () -> consume "else")
-          ; (fun () -> consume "while")
+          [
+            (fun () -> consume "if");
+            (fun () -> consume "else");
+            (fun () -> consume "while");
           ]
           ()
     ]} *)
@@ -302,12 +303,13 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
     reports all labels in the error message.
 
     Example:
-    {[
+    {@ocaml[
       let literal () =
         one_of_labeled
-          [ ("number", number_parser)
-          ; ("string", string_parser)
-          ; ("boolean", bool_parser)
+          [
+            ("number", number_parser);
+            ("string", string_parser);
+            ("boolean", bool_parser);
           ]
           ()
       (* On failure: "expected one of: number, string, boolean" *)
@@ -321,7 +323,7 @@ val many : (unit -> 'a) -> unit -> 'a list
     immediately).
 
     Example:
-    {[
+    {@ocaml[
       let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
     ]} *)
 
@@ -330,7 +332,7 @@ val many1 : (unit -> 'a) -> unit -> 'a list
     Fails if [parser] doesn't succeed at least once.
 
     Example:
-    {[
+    {@ocaml[
       let non_empty_digits () = many1 digit ()
     ]} *)
 
@@ -339,7 +341,7 @@ val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     [separator] between each pair. Returns a list of the parsed elements.
 
     Example:
-    {[
+    {@ocaml[
       let csv_line () =
         sep_by
           (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
@@ -351,12 +353,42 @@ val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 (** [sep_by1 element separator] like {!sep_by} but requires at least one
     [element] to match. *)
 
+val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> unit -> 'c
+(** [between open_ close_ parser] parses [open_], then [parser], then [close_],
+    and returns the value produced by [parser]. *)
+
+val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+(** [end_by element separator] parses zero or more [element]s, each followed by
+    [separator]. *)
+
+val end_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+(** [end_by1 element separator] like {!end_by} but requires at least one
+    [element]. *)
+
+val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
+(** [chainl element op default] parses zero or more [element] values separated
+    by [op], combining them left-associatively. Returns [default] if there are
+    zero [element] values. *)
+
+val chainl1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+(** [chainl1 element op] parses one or more [element] values separated by [op],
+    combining them left-associatively. *)
+
+val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
+(** [chainr element op default] parses zero or more [element] values separated
+    by [op], combining them right-associatively. Returns [default] if there are
+    zero [element] values. *)
+
+val chainr1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+(** [chainr1 element op] parses one or more [element] values separated by [op],
+    combining them right-associatively. *)
+
 val optional : (unit -> 'a) -> unit -> 'a option
 (** [optional parser] tries to apply [parser]. Returns [Some result] if it
     succeeds, or [None] if it fails (without consuming input).
 
     Example:
-    {[
+    {@ocaml[
       let optional_sign () =
         optional (fun () -> or_ (fun () -> char '-') (fun () -> char '+') ()) ()
     ]} *)
@@ -366,7 +398,7 @@ val count : int -> (unit -> 'a) -> unit -> 'a list
     doesn't succeed [n] times.
 
     Example:
-    {[
+    {@ocaml[
       let three_digits () = count 3 digit ()
     ]} *)
 
@@ -376,7 +408,7 @@ val digit : unit -> int
 (** [digit ()] parses a decimal digit (0-9) and returns its integer value.
 
     Example:
-    {[
+    {@ocaml[
       let d = digit () in  (* parses "7" -> 7 *)
       ...
     ]} *)
@@ -430,10 +462,10 @@ module Source : sig
 end
 
 val parse_source :
-     ?max_depth:int
-  -> Source.t
-  -> (unit -> 'a)
-  -> ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
+  ?max_depth:int ->
+  Source.t ->
+  (unit -> 'a) ->
+  ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
 (** [parse_source ?max_depth source parser] runs [parser] pulling input from
     [source] on demand. Behaves identically to {!parse} but the input does not
     need to be fully available up front.
@@ -442,7 +474,7 @@ val parse_source :
     required.
 
     Example:
-    {[
+    {@ocaml[
       let ic = open_in "data.json" in
       let source = Source.of_channel ic in
       let result = parse_source source json in

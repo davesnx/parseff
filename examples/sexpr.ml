@@ -30,10 +30,11 @@ let parse_list () =
 
 let () =
   let test_cases =
-    [ ("foo", [ "foo" ])
-    ; ("()", [])
-    ; ("(a)", [ "a" ])
-    ; ("(a b c)", [ "a"; "b"; "c" ])
+    [
+      ("foo", [ "foo" ]);
+      ("()", []);
+      ("(a)", [ "a" ]);
+      ("(a b c)", [ "a"; "b"; "c" ]);
     ]
   in
   Printf.printf "Simple S-Expression Parser (atoms only)\n";
@@ -48,10 +49,9 @@ let () =
           let matches = result = expected in
           Printf.printf "✓ %-15s -> [%s] %s\n" input
             (String.concat "; " result)
-            (if matches
-             then ""
+            (if matches then ""
              else Printf.sprintf "(expected [%s])" (String.concat "; " expected))
-      | Error { pos; error= `Expected exp } ->
+      | Error { pos; error = `Expected exp } ->
           Printf.printf "✗ %-15s -> Error at %d: %s\n" input pos exp
       | Error _ -> Printf.printf "✗ Unknown error\n")
     test_cases

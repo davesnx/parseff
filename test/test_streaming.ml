@@ -12,8 +12,7 @@ let chunked_source ?(chunk_size = 1) input =
 let number () =
   let digits = Parseff.many1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-  if n >= 0 && n <= 255
-  then n
+  if n >= 0 && n <= 255 then n
   else Parseff.fail (Printf.sprintf "number out of range: %d" n)
 
 let ip_address () =
@@ -45,12 +44,13 @@ let rec json () =
   Parseff.rec_ (fun () ->
       let _ = ws () in
       Parseff.one_of
-        [ array_parser
-        ; object_parser
-        ; null_parser
-        ; bool_parser
-        ; number_parser
-        ; string_parser
+        [
+          array_parser;
+          object_parser;
+          null_parser;
+          bool_parser;
+          number_parser;
+          string_parser;
         ]
         ())
 
@@ -191,7 +191,7 @@ let test_of_string_json () =
   match Parseff.parse_source src json with
   | Ok (Object pairs, _) -> Alcotest.(check int) "pairs" 1 (List.length pairs)
   | Ok _ -> Alcotest.fail "Expected Object"
-  | Error { pos; error= `Expected msg } ->
+  | Error { pos; error = `Expected msg } ->
       Alcotest.fail (Printf.sprintf "Error at pos %d: %s" pos msg)
   | Error _ -> Alcotest.fail "Expected success (unknown error)"
 
@@ -452,7 +452,7 @@ let test_consume_failure_streaming () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match Parseff.parse_source src (fun () -> Parseff.consume "world") with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error { error= `Expected _; _ } -> ()
+  | Error { error = `Expected _; _ } -> ()
   | Error _ -> Alcotest.fail "Expected `Expected error variant"
 
 let test_take_while_span_streaming () =
@@ -472,45 +472,49 @@ let test_take_while_span_streaming () =
 let () =
   let open Alcotest in
   run "Streaming"
-    [ ( "Source.of_string"
-      , [ test_case "consume" `Quick test_of_string_consume
-        ; test_case "satisfy" `Quick test_of_string_satisfy
-        ; test_case "alternation" `Quick test_of_string_alternation
-        ; test_case "many" `Quick test_of_string_many
-        ; test_case "ip" `Quick test_of_string_ip
-        ; test_case "json" `Quick test_of_string_json
-        ; test_case "take_while" `Quick test_of_string_take_while
-        ; test_case "skip_while" `Quick test_of_string_skip_while
-        ; test_case "look_ahead" `Quick test_of_string_look_ahead
-        ; test_case "end_of_input" `Quick test_of_string_end_of_input
-        ; test_case "regex" `Quick test_of_string_regex
-        ; test_case "sep_by" `Quick test_of_string_sep_by
-        ] )
-    ; ( "chunked"
-      , [ test_case "consume 1-byte" `Quick test_chunked_consume
-        ; test_case "ip 1-byte" `Quick test_chunked_ip
-        ; test_case "ip 2-byte" `Quick test_chunked_ip_2byte
-        ; test_case "json array 1-byte" `Quick test_chunked_json
-        ; test_case "json object 2-byte" `Quick test_chunked_json_2byte
-        ; test_case "json nested 3-byte" `Quick test_chunked_json_nested
-        ; test_case "take_while 2-byte" `Quick test_chunked_take_while
-        ; test_case "alternation 2-byte" `Quick test_chunked_alternation
-        ; test_case "regex 2-byte" `Quick test_chunked_regex
-        ; test_case "skip_while_then_char 2-byte" `Quick
-            test_chunked_skip_while_then_char
-        ] )
-    ; ( "edge cases"
-      , [ test_case "empty source" `Quick test_empty_source
-        ; test_case "end_of_input with data" `Quick test_end_of_input_with_data
-        ; test_case "end_of_input after consume" `Quick
-            test_end_of_input_after_consume
-        ; test_case "backtrack across chunk" `Quick test_backtrack_across_chunk
-        ; test_case "look_ahead across chunk" `Quick
-            test_look_ahead_across_chunk
-        ; test_case "many across chunks" `Quick test_many_across_chunks
-        ; test_case "regex across chunks" `Quick test_regex_across_chunks
-        ; test_case "deep nesting streaming" `Quick test_deep_nesting_streaming
-        ; test_case "consume failure" `Quick test_consume_failure_streaming
-        ; test_case "take_while_span" `Quick test_take_while_span_streaming
-        ] )
+    [
+      ( "Source.of_string",
+        [
+          test_case "consume" `Quick test_of_string_consume;
+          test_case "satisfy" `Quick test_of_string_satisfy;
+          test_case "alternation" `Quick test_of_string_alternation;
+          test_case "many" `Quick test_of_string_many;
+          test_case "ip" `Quick test_of_string_ip;
+          test_case "json" `Quick test_of_string_json;
+          test_case "take_while" `Quick test_of_string_take_while;
+          test_case "skip_while" `Quick test_of_string_skip_while;
+          test_case "look_ahead" `Quick test_of_string_look_ahead;
+          test_case "end_of_input" `Quick test_of_string_end_of_input;
+          test_case "regex" `Quick test_of_string_regex;
+          test_case "sep_by" `Quick test_of_string_sep_by;
+        ] );
+      ( "chunked",
+        [
+          test_case "consume 1-byte" `Quick test_chunked_consume;
+          test_case "ip 1-byte" `Quick test_chunked_ip;
+          test_case "ip 2-byte" `Quick test_chunked_ip_2byte;
+          test_case "json array 1-byte" `Quick test_chunked_json;
+          test_case "json object 2-byte" `Quick test_chunked_json_2byte;
+          test_case "json nested 3-byte" `Quick test_chunked_json_nested;
+          test_case "take_while 2-byte" `Quick test_chunked_take_while;
+          test_case "alternation 2-byte" `Quick test_chunked_alternation;
+          test_case "regex 2-byte" `Quick test_chunked_regex;
+          test_case "skip_while_then_char 2-byte" `Quick
+            test_chunked_skip_while_then_char;
+        ] );
+      ( "edge cases",
+        [
+          test_case "empty source" `Quick test_empty_source;
+          test_case "end_of_input with data" `Quick test_end_of_input_with_data;
+          test_case "end_of_input after consume" `Quick
+            test_end_of_input_after_consume;
+          test_case "backtrack across chunk" `Quick test_backtrack_across_chunk;
+          test_case "look_ahead across chunk" `Quick
+            test_look_ahead_across_chunk;
+          test_case "many across chunks" `Quick test_many_across_chunks;
+          test_case "regex across chunks" `Quick test_regex_across_chunks;
+          test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
+          test_case "consume failure" `Quick test_consume_failure_streaming;
+          test_case "take_while_span" `Quick test_take_while_span_streaming;
+        ] );
     ]

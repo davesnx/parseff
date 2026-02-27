@@ -1,4 +1,4 @@
-type span = { buf: string; off: int; len: int }
+type span = { buf : string; off : int; len : int }
 
 let[@inline always] span_to_string s =
   if s.len = 0 then "" else String.sub s.buf s.off s.len
@@ -24,17 +24,17 @@ type _ Effect.t +=
       -> span list Effect.t
   | Rec_ : (unit -> 'a) -> 'a Effect.t
 
-type ('a, 'e) result = Ok of 'a * int | Error of { pos: int; error: 'e }
+type ('a, 'e) result = Ok of 'a * int | Error of { pos : int; error : 'e }
 
 exception Parse_error of int * string
 exception User_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
-type state = { mutable input: string; mutable pos: int }
+type state = { mutable input : string; mutable pos : int }
 
 (* Polymorphic record so handle_exn can be called at different types inside the
    polymorphic-recursive [go]. A plain function parameter would fix 'a. *)
-type 'e exn_handler = { handle: 'a. exn -> ('a, 'e) result }
+type 'e exn_handler = { handle : 'a. exn -> ('a, 'e) result }
 
 (* {{{ State-manipulation helpers. Each operates on [state] + [input_len],
    either returning a value or raising [Parse_error]. Shared by deep and shallow
@@ -42,19 +42,16 @@ type 'e exn_handler = { handle: 'a. exn -> ('a, 'e) result }
 
 let[@inline] handle_consume st input_len s =
   let len = String.length s in
-  if st.pos + len <= input_len
-  then begin
+  if st.pos + len <= input_len then begin
     let inp = st.input in
     let pos = st.pos in
     let rec check i =
-      if i >= len
-      then true
-      else if String.unsafe_get inp (pos + i) = String.unsafe_get s i
-      then check (i + 1)
+      if i >= len then true
+      else if String.unsafe_get inp (pos + i) = String.unsafe_get s i then
+        check (i + 1)
       else false
     in
-    if check 0
-    then begin
+    if check 0 then begin
       st.pos <- pos + len;
       s
     end
@@ -63,11 +60,9 @@ let[@inline] handle_consume st input_len s =
   else raise (Parse_error (st.pos, Printf.sprintf "expected %S (EOF)" s))
 
 let[@inline] handle_satisfy st input_len pred label =
-  if st.pos < input_len
-  then
+  if st.pos < input_len then
     let c = String.unsafe_get st.input st.pos in
-    if pred c
-    then begin
+    if pred c then begin
       st.pos <- st.pos + 1;
       c
     end
@@ -93,7 +88,7 @@ let[@inline] handle_take_while_span st input_len pred =
     pos := !pos + 1
   done;
   st.pos <- !pos;
-  { buf= inp; off= start; len= !pos - start }
+  { buf = inp; off = start; len = !pos - start }
 
 let[@inline] handle_skip_while st input_len pred =
   let inp = st.input in
@@ -109,8 +104,7 @@ let[@inline] handle_skip_while_then_char st input_len pred c =
   while !pos < input_len && pred (String.unsafe_get inp !pos) do
     pos := !pos + 1
   done;
-  if !pos < input_len && String.unsafe_get inp !pos = c
-  then st.pos <- !pos + 1
+  if !pos < input_len && String.unsafe_get inp !pos = c then st.pos <- !pos + 1
   else begin
     st.pos <- !pos;
     raise (Parse_error (!pos, Printf.sprintf "expected %C" c))
@@ -122,8 +116,7 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
   while !pos < input_len && ws_pred (String.unsafe_get inp !pos) do
     pos := !pos + 1
   done;
-  if !pos < input_len && String.unsafe_get inp !pos = sep_char
-  then begin
+  if !pos < input_len && String.unsafe_get inp !pos = sep_char then begin
     pos := !pos + 1;
     while !pos < input_len && ws_pred (String.unsafe_get inp !pos) do
       pos := !pos + 1
@@ -132,8 +125,7 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
     while !pos < input_len && take_pred (String.unsafe_get inp !pos) do
       pos := !pos + 1
     done;
-    if !pos > start
-    then begin
+    if !pos > start then begin
       st.pos <- !pos;
       String.sub inp start (!pos - start)
     end
@@ -154,8 +146,7 @@ let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
   while !pos < input_len && take_pred (String.unsafe_get inp !pos) do
     pos := !pos + 1
   done;
-  if !pos <= start
-  then begin
+  if !pos <= start then begin
     st.pos <- !pos;
     []
   end
@@ -167,8 +158,7 @@ let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
       while !sep_pos < input_len && ws_pred (String.unsafe_get inp !sep_pos) do
         sep_pos := !sep_pos + 1
       done;
-      if !sep_pos < input_len && String.unsafe_get inp !sep_pos = sep_char
-      then begin
+      if !sep_pos < input_len && String.unsafe_get inp !sep_pos = sep_char then begin
         sep_pos := !sep_pos + 1;
         while
           !sep_pos < input_len && ws_pred (String.unsafe_get inp !sep_pos)
@@ -181,8 +171,7 @@ let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
         do
           sep_pos := !sep_pos + 1
         done;
-        if !sep_pos > elem_start
-        then begin
+        if !sep_pos > elem_start then begin
           acc := String.sub inp elem_start (!sep_pos - elem_start) :: !acc;
           pos := !sep_pos
         end
@@ -201,21 +190,19 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
   while !pos < input_len && take_pred (String.unsafe_get inp !pos) do
     pos := !pos + 1
   done;
-  if !pos <= start
-  then begin
+  if !pos <= start then begin
     st.pos <- !pos;
     []
   end
   else begin
-    let acc = ref [ { buf= inp; off= start; len= !pos - start } ] in
+    let acc = ref [ { buf = inp; off = start; len = !pos - start } ] in
     let continue_loop = ref true in
     while !continue_loop do
       let sep_pos = ref !pos in
       while !sep_pos < input_len && ws_pred (String.unsafe_get inp !sep_pos) do
         sep_pos := !sep_pos + 1
       done;
-      if !sep_pos < input_len && String.unsafe_get inp !sep_pos = sep_char
-      then begin
+      if !sep_pos < input_len && String.unsafe_get inp !sep_pos = sep_char then begin
         sep_pos := !sep_pos + 1;
         while
           !sep_pos < input_len && ws_pred (String.unsafe_get inp !sep_pos)
@@ -228,10 +215,9 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
         do
           sep_pos := !sep_pos + 1
         done;
-        if !sep_pos > elem_start
-        then begin
+        if !sep_pos > elem_start then begin
           acc :=
-            { buf= inp; off= elem_start; len= !sep_pos - elem_start } :: !acc;
+            { buf = inp; off = elem_start; len = !sep_pos - elem_start } :: !acc;
           pos := !sep_pos
         end
         else continue_loop := false
@@ -246,8 +232,8 @@ let[@inline] handle_match_regex st re =
   try
     let groups = Re.exec ~pos:st.pos re st.input in
     let match_start = Re.Group.start groups 0 in
-    if match_start <> st.pos
-    then raise (Parse_error (st.pos, "regex match failed"))
+    if match_start <> st.pos then
+      raise (Parse_error (st.pos, "regex match failed"))
     else
       let matched = Re.Group.get groups 0 in
       let match_end = Re.Group.stop groups 0 in
@@ -256,8 +242,8 @@ let[@inline] handle_match_regex st re =
   with Not_found -> raise (Parse_error (st.pos, "regex match failed"))
 
 let[@inline] handle_end_of_input st input_len =
-  if st.pos <> input_len
-  then raise (Parse_error (st.pos, "expected end of input"))
+  if st.pos <> input_len then
+    raise (Parse_error (st.pos, "expected end of input"))
 
 (* }}} *)
 
@@ -265,7 +251,7 @@ let[@inline] handle_end_of_input st input_len =
 
 let run_deep (type e) ~max_depth (handler : e exn_handler) input
     (parser : unit -> 'a) : ('a, e) result =
-  let st = { input; pos= 0 } in
+  let st = { input; pos = 0 } in
   let input_len = String.length input in
   let nest_depth = ref 0 in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
@@ -350,12 +336,11 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
             st.pos <- saved;
             Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error)))
     | effect Rec_ p, k ->
-        if !nest_depth >= max_depth
-        then
+        if !nest_depth >= max_depth then
           Effect.Deep.discontinue k
             (Depth_limit_exceeded
-               ( st.pos
-               , Printf.sprintf "maximum nesting depth %d exceeded" max_depth ))
+               ( st.pos,
+                 Printf.sprintf "maximum nesting depth %d exceeded" max_depth ))
         else begin
           incr nest_depth;
           match go (Obj.magic p) with
@@ -377,39 +362,38 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
 let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
   match
     run_deep ~max_depth
-      { handle=
+      {
+        handle =
           (function
-          | Parse_error (pos, msg) -> Error { pos; error= `Expected msg }
-          | User_error (pos, obj) -> Error { pos; error= Obj.obj obj }
-          | e -> raise e)
+          | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+          | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+          | e -> raise e);
       }
       input parser
   with
   | result -> result
   | exception Depth_limit_exceeded (pos, msg) ->
-      Error { pos; error= `Expected msg }
+      Error { pos; error = `Expected msg }
 
 (* }}} *)
 
 (* {{{ Source-based streaming *)
 
-type source =
-  { mutable input: string
-  ; mutable input_len: int
-  ; read: bytes -> int -> int -> int
-  ; mutable eof: bool
-  ; tmp: bytes
-  }
+type source = {
+  mutable input : string;
+  mutable input_len : int;
+  read : bytes -> int -> int -> int;
+  mutable eof : bool;
+  tmp : bytes;
+}
 
 let default_buf_size = 4096
 
 let try_refill src =
-  if src.eof
-  then false
+  if src.eof then false
   else
     let n = src.read src.tmp 0 (Bytes.length src.tmp) in
-    if n = 0
-    then begin
+    if n = 0 then begin
       src.eof <- true;
       false
     end
@@ -427,10 +411,8 @@ let try_refill src =
 
 let ensure_bytes src pos needed =
   let rec loop () =
-    if pos + needed <= src.input_len
-    then true
-    else if not (try_refill src)
-    then false
+    if pos + needed <= src.input_len then true
+    else if not (try_refill src) then false
     else loop ()
   in
   loop ()
@@ -439,14 +421,11 @@ let handle_take_while_source src st pred =
   let start = st.pos in
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len
-    then begin
-      if pred (String.unsafe_get src.input st.pos)
-      then st.pos <- st.pos + 1
+    if st.pos < src.input_len then begin
+      if pred (String.unsafe_get src.input st.pos) then st.pos <- st.pos + 1
       else continue := false
     end
-    else if try_refill src
-    then ()
+    else if try_refill src then ()
     else continue := false
   done;
   st.input <- src.input;
@@ -456,30 +435,24 @@ let handle_take_while_span_source src st pred =
   let start = st.pos in
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len
-    then begin
-      if pred (String.unsafe_get src.input st.pos)
-      then st.pos <- st.pos + 1
+    if st.pos < src.input_len then begin
+      if pred (String.unsafe_get src.input st.pos) then st.pos <- st.pos + 1
       else continue := false
     end
-    else if try_refill src
-    then ()
+    else if try_refill src then ()
     else continue := false
   done;
   st.input <- src.input;
-  { buf= src.input; off= start; len= st.pos - start }
+  { buf = src.input; off = start; len = st.pos - start }
 
 let handle_skip_while_source src st pred =
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len
-    then begin
-      if pred (String.unsafe_get src.input st.pos)
-      then st.pos <- st.pos + 1
+    if st.pos < src.input_len then begin
+      if pred (String.unsafe_get src.input st.pos) then st.pos <- st.pos + 1
       else continue := false
     end
-    else if try_refill src
-    then ()
+    else if try_refill src then ()
     else continue := false
   done;
   st.input <- src.input
@@ -487,8 +460,8 @@ let handle_skip_while_source src st pred =
 let handle_skip_while_then_char_source src st pred c =
   handle_skip_while_source src st pred;
   ignore (ensure_bytes src st.pos 1);
-  if st.pos < src.input_len && String.unsafe_get src.input st.pos = c
-  then st.pos <- st.pos + 1
+  if st.pos < src.input_len && String.unsafe_get src.input st.pos = c then
+    st.pos <- st.pos + 1
   else raise (Parse_error (st.pos, Printf.sprintf "expected %C" c))
 
 let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
@@ -501,19 +474,16 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
     let start = st.pos in
     let continue = ref true in
     while !continue do
-      if st.pos < src.input_len
-      then begin
-        if take_pred (String.unsafe_get src.input st.pos)
-        then st.pos <- st.pos + 1
+      if st.pos < src.input_len then begin
+        if take_pred (String.unsafe_get src.input st.pos) then
+          st.pos <- st.pos + 1
         else continue := false
       end
-      else if try_refill src
-      then ()
+      else if try_refill src then ()
       else continue := false
     done;
     st.input <- src.input;
-    if st.pos > start
-    then String.sub src.input start (st.pos - start)
+    if st.pos > start then String.sub src.input start (st.pos - start)
     else raise (Parse_error (st.pos, "expected value"))
   end
   else raise (Parse_error (st.pos, Printf.sprintf "expected %C" sep_char))
@@ -522,19 +492,16 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
   let start = st.pos in
   let continue_take = ref true in
   while !continue_take do
-    if st.pos < src.input_len
-    then begin
-      if take_pred (String.unsafe_get src.input st.pos)
-      then st.pos <- st.pos + 1
+    if st.pos < src.input_len then begin
+      if take_pred (String.unsafe_get src.input st.pos) then
+        st.pos <- st.pos + 1
       else continue_take := false
     end
-    else if try_refill src
-    then ()
+    else if try_refill src then ()
     else continue_take := false
   done;
   st.input <- src.input;
-  if st.pos <= start
-  then []
+  if st.pos <= start then []
   else begin
     let acc = ref [ String.sub src.input start (st.pos - start) ] in
     let continue_loop = ref true in
@@ -549,19 +516,16 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
         let elem_start = st.pos in
         let ct = ref true in
         while !ct do
-          if st.pos < src.input_len
-          then begin
-            if take_pred (String.unsafe_get src.input st.pos)
-            then st.pos <- st.pos + 1
+          if st.pos < src.input_len then begin
+            if take_pred (String.unsafe_get src.input st.pos) then
+              st.pos <- st.pos + 1
             else ct := false
           end
-          else if try_refill src
-          then ()
+          else if try_refill src then ()
           else ct := false
         done;
         st.input <- src.input;
-        if st.pos > elem_start
-        then
+        if st.pos > elem_start then
           acc := String.sub src.input elem_start (st.pos - elem_start) :: !acc
         else begin
           st.pos <- saved_pos;
@@ -582,21 +546,18 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
   let start = st.pos in
   let continue_take = ref true in
   while !continue_take do
-    if st.pos < src.input_len
-    then begin
-      if take_pred (String.unsafe_get src.input st.pos)
-      then st.pos <- st.pos + 1
+    if st.pos < src.input_len then begin
+      if take_pred (String.unsafe_get src.input st.pos) then
+        st.pos <- st.pos + 1
       else continue_take := false
     end
-    else if try_refill src
-    then ()
+    else if try_refill src then ()
     else continue_take := false
   done;
   st.input <- src.input;
-  if st.pos <= start
-  then []
+  if st.pos <= start then []
   else begin
-    let acc = ref [ { buf= src.input; off= start; len= st.pos - start } ] in
+    let acc = ref [ { buf = src.input; off = start; len = st.pos - start } ] in
     let continue_loop = ref true in
     while !continue_loop do
       let saved_pos = st.pos in
@@ -609,21 +570,18 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
         let elem_start = st.pos in
         let ct = ref true in
         while !ct do
-          if st.pos < src.input_len
-          then begin
-            if take_pred (String.unsafe_get src.input st.pos)
-            then st.pos <- st.pos + 1
+          if st.pos < src.input_len then begin
+            if take_pred (String.unsafe_get src.input st.pos) then
+              st.pos <- st.pos + 1
             else ct := false
           end
-          else if try_refill src
-          then ()
+          else if try_refill src then ()
           else ct := false
         done;
         st.input <- src.input;
-        if st.pos > elem_start
-        then
+        if st.pos > elem_start then
           acc :=
-            { buf= src.input; off= elem_start; len= st.pos - elem_start }
+            { buf = src.input; off = elem_start; len = st.pos - elem_start }
             :: !acc
         else begin
           st.pos <- saved_pos;
@@ -646,10 +604,9 @@ let handle_match_regex_source src st re =
       let groups = Re.exec ~pos:st.pos re src.input in
       let match_start = Re.Group.start groups 0 in
       let match_end = Re.Group.stop groups 0 in
-      if match_start <> st.pos
-      then raise (Parse_error (st.pos, "regex match failed"))
-      else if match_end = src.input_len && not src.eof
-      then begin
+      if match_start <> st.pos then
+        raise (Parse_error (st.pos, "regex match failed"))
+      else if match_end = src.input_len && not src.eof then begin
         ignore (try_refill src);
         st.input <- src.input;
         loop ()
@@ -661,8 +618,7 @@ let handle_match_regex_source src st re =
         matched
       end
     with Not_found ->
-      if st.pos >= src.input_len && not src.eof
-      then begin
+      if st.pos >= src.input_len && not src.eof then begin
         ignore (try_refill src);
         st.input <- src.input;
         loop ()
@@ -673,12 +629,12 @@ let handle_match_regex_source src st re =
 
 let handle_end_of_input_source src st =
   if st.pos = src.input_len && not src.eof then ignore (try_refill src);
-  if st.pos <> src.input_len
-  then raise (Parse_error (st.pos, "expected end of input"))
+  if st.pos <> src.input_len then
+    raise (Parse_error (st.pos, "expected end of input"))
 
 let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
     (parser : unit -> 'a) : ('a, e) result =
-  let st = { input= src.input; pos= 0 } in
+  let st = { input = src.input; pos = 0 } in
   let nest_depth = ref 0 in
   let sync_to_source () = st.input <- src.input in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
@@ -777,12 +733,11 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
             sync_to_source ();
             Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error)))
     | effect Rec_ p, k ->
-        if !nest_depth >= max_depth
-        then
+        if !nest_depth >= max_depth then
           Effect.Deep.discontinue k
             (Depth_limit_exceeded
-               ( st.pos
-               , Printf.sprintf "maximum nesting depth %d exceeded" max_depth ))
+               ( st.pos,
+                 Printf.sprintf "maximum nesting depth %d exceeded" max_depth ))
         else begin
           incr nest_depth;
           match go (Obj.magic p) with
@@ -805,27 +760,30 @@ module Source = struct
   type t = source
 
   let of_string s =
-    { input= s
-    ; input_len= String.length s
-    ; read= (fun _ _ _ -> 0)
-    ; eof= true
-    ; tmp= Bytes.empty
+    {
+      input = s;
+      input_len = String.length s;
+      read = (fun _ _ _ -> 0);
+      eof = true;
+      tmp = Bytes.empty;
     }
 
   let of_channel ?(buf_size = default_buf_size) ic =
-    { input= ""
-    ; input_len= 0
-    ; read= (fun buf off len -> input ic buf off len)
-    ; eof= false
-    ; tmp= Bytes.create buf_size
+    {
+      input = "";
+      input_len = 0;
+      read = (fun buf off len -> input ic buf off len);
+      eof = false;
+      tmp = Bytes.create buf_size;
     }
 
   let of_function read =
-    { input= ""
-    ; input_len= 0
-    ; read
-    ; eof= false
-    ; tmp= Bytes.create default_buf_size
+    {
+      input = "";
+      input_len = 0;
+      read;
+      eof = false;
+      tmp = Bytes.create default_buf_size;
     }
 end
 
@@ -833,17 +791,18 @@ let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
     ('a, 'e) result =
   match
     run_deep_source ~max_depth
-      { handle=
+      {
+        handle =
           (function
-          | Parse_error (pos, msg) -> Error { pos; error= `Expected msg }
-          | User_error (pos, obj) -> Error { pos; error= Obj.obj obj }
-          | e -> raise e)
+          | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+          | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+          | e -> raise e);
       }
       src parser
   with
   | result -> result
   | exception Depth_limit_exceeded (pos, msg) ->
-      Error { pos; error= `Expected msg }
+      Error { pos; error = `Expected msg }
 
 (* }}} *)
 
@@ -913,6 +872,59 @@ let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
       ()
   in
   first :: rest
+
+let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) () : 'c
+    =
+  let _ = open_ () in
+  let value = p () in
+  let _ = close_ () in
+  value
+
+let end_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
+  many
+    (fun () ->
+      let value = p () in
+      let _ = sep () in
+      value)
+    ()
+
+let end_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
+  let first =
+    let value = p () in
+    let _ = sep () in
+    value
+  in
+  first :: end_by p sep ()
+
+let chainl1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
+  let first = p () in
+  let rest =
+    many
+      (fun () ->
+        let f = op () in
+        let rhs = p () in
+        (f, rhs))
+      ()
+  in
+  List.fold_left (fun acc (f, rhs) -> f acc rhs) first rest
+
+let chainl (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) (default : 'a) () : 'a
+    =
+  or_ (chainl1 p op) (fun () -> default) ()
+
+let rec chainr1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
+  let first = p () in
+  or_
+    (fun () ->
+      let f = op () in
+      let rhs = chainr1 p op () in
+      f first rhs)
+    (fun () -> first)
+    ()
+
+let chainr (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) (default : 'a) () : 'a
+    =
+  or_ (chainr1 p op) (fun () -> default) ()
 
 let optional (p : unit -> 'a) () : 'a option =
   or_ (fun () -> Some (p ())) (fun () -> None) ()

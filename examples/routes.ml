@@ -39,12 +39,13 @@ let route_to_string = function
 
 let () =
   let test_cases =
-    [ ("/", Home)
-    ; ("/about", About)
-    ; ("/legal/terms", Terms)
-    ; ("/blog", BlogHome)
-    ; ("/blog/hello-world", BlogArticle "hello-world")
-    ; ("/blog/ocaml-effects", BlogArticle "ocaml-effects")
+    [
+      ("/", Home);
+      ("/about", About);
+      ("/legal/terms", Terms);
+      ("/blog", BlogHome);
+      ("/blog/hello-world", BlogArticle "hello-world");
+      ("/blog/ocaml-effects", BlogArticle "ocaml-effects");
     ]
   in
   Printf.printf "Route Parser Examples\n";
@@ -55,10 +56,9 @@ let () =
       | Ok (result, _) ->
           let matches = result = expected in
           Printf.printf "✓ %-25s -> %s %s\n" input (route_to_string result)
-            (if matches
-             then ""
+            (if matches then ""
              else Printf.sprintf "(expected %s)" (route_to_string expected))
-      | Error { pos; error= `Expected exp } ->
+      | Error { pos; error = `Expected exp } ->
           Printf.printf "✗ %-25s -> Error at %d: %s\n" input pos exp
       | Error _ -> Printf.printf "✗ %-25s -> Unknown error\n" input)
     test_cases

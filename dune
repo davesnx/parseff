@@ -1,0 +1,15 @@
+(documentation
+ (package parseff)
+ (mld_files README))
+
+(mdx
+ (files README.mld lib/parseff.mli)
+ (libraries parseff))
+
+(rule
+ (alias doc-markdown)
+ (deps _doc/_markdown/parseff/README.md)
+ (mode promote)
+ (target README.md)
+ (action
+  (copy %{dep:_doc/_markdown/parseff/README.md} %{target})))

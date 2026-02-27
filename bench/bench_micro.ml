@@ -61,9 +61,7 @@ let bench_many_10x_satisfy () =
   | Error _ -> ()
 
 let bench_parse_and_return () =
-  match Parseff.parse "" (fun () -> ()) with
-  | Ok _ -> ()
-  | Error _ -> ()
+  match Parseff.parse "" (fun () -> ()) with Ok _ -> () | Error _ -> ()
 
 let () =
   for _ = 1 to 1000 do
@@ -80,12 +78,13 @@ let () =
 
   let results =
     latencyN ~repeat:3 100000L
-      [ ("baseline (parse+ret)", bench_parse_and_return, ())
-      ; ("10x satisfy", bench_10x_satisfy, ())
-      ; ("1x take_while(10)", bench_single_take_while, ())
-      ; ("1x skip_while(10)", bench_single_skip_while, ())
-      ; ("1x choose (success)", bench_choose_first_branch_succeeds, ())
-      ; ("many(10x satisfy)", bench_many_10x_satisfy, ())
+      [
+        ("baseline (parse+ret)", bench_parse_and_return, ());
+        ("10x satisfy", bench_10x_satisfy, ());
+        ("1x take_while(10)", bench_single_take_while, ());
+        ("1x skip_while(10)", bench_single_skip_while, ());
+        ("1x choose (success)", bench_choose_first_branch_succeeds, ());
+        ("many(10x satisfy)", bench_many_10x_satisfy, ());
       ]
   in
 
