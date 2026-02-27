@@ -59,8 +59,9 @@ export default defineConfig({
 						{ label: 'Error Handling', slug: 'guides/errors' },
 						{ label: 'Error Accumulation', slug: 'guides/error-accumulation' },
 						{ label: 'Making Parsers Fast', slug: 'guides/optimization' },
-						{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
-					],
+					{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
+					{ label: 'Credits', slug: 'guides/credits' },
+				],
 				},
 				{
 					label: 'Examples',

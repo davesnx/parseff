@@ -44,85 +44,31 @@ let () =
 
 {1 Features}
 
-- Build parsers with direct-style and [Parseff] combinators
-- {b No} monadic operators ([>>=], [>>|], [*>]), {b neither} binding operators ([let*], [let+], [and+])
-- Automatic backtracking with [Parseff.or_]
+- Fast: zero-copy spans, fused operations, and no monadic overhead. Up to 4.3x faster than Angstrom on JSON parsing benchmarks
+- Build parsers with direct-style and compose with [Parseff] combinators
+- API is designed to be expressive enough to {b not need monadic operators} ([>>=], [>>|], [*>]), {b nor binding operators} ([let*], [let+], [and+])
 - Typed domain errors via polymorphic variants, raise with [Parseff.error]. Parseff also adds [`Expected of string] and [`Unexpected_end_of_input] as possible parsing failures
+- Automatic backtracking with [Parseff.or_]
 - Minimal dependency footprint: only [re] for regex support
-- Streaming with [Source.of_string], [Source.of_channel], [Source.of_function]
+- Streaming support with [Source.of_string], [Source.of_channel], [Source.of_function]
+- Domain-safe: each [Parseff.parse] / [Parseff.parse_source] call is self-contained with no global mutable state, so independent parses can run in parallel across domains
 - Zero-copy span APIs for low-allocation parsing ([Parseff.take_while_span], [Parseff.sep_by_take_span], [Parseff.fused_sep_take], [Parseff.skip_while_then_char])
 - Fused operations for hot paths ([Parseff.sep_by_take], [Parseff.skip_while_then_char])
-- Domain-safe: each [Parseff.parse] / [Parseff.parse_source] call is self-contained with no global mutable state, so independent parses can run in parallel across domains
-
-{1 Comparison}
-
-{table
-  {tr
-    {th Feature}
-    {th Parseff}
-    {th Angstrom}
-    {th MParser}
-    {th Opal}}
-  {tr
-    {td API}
-    {td Direct-style + Composition}
-    {td Declarative + Monadic}
-    {td Monadic + }
-    {td Monadic}}
-  {tr
-    {td Backtracking by default}
-    {td Yes ✅}
-    {td Yes ✅}
-    {td No ❌}
-    {td No ❌}}
-  {tr
-    {td Unbounded lookahead}
-    {td Yes ✅}
-    {td Yes ✅}
-    {td Yes ✅}
-    {td No ❌}}
-  {tr
-    {td Custom error types}
-    {td Yes ✅}
-    {td No ❌}
-    {td No ❌}
-    {td No ❌}}
-  {tr
-    {td Zero-copy API}
-    {td Yes ✅}
-    {td Yes ✅}
-    {td No ❌}
-    {td No ❌}}
-  {tr
-    {td Streaming/incremental input}
-    {td Yes ✅}
-    {td Yes ✅}
-    {td No ❌}
-    {td No ❌}}
-  {tr
-    {td Requires OCaml 5+}
-    {td Yes ✅}
-    {td No ❌}
-    {td No ❌}
-    {td No ❌}}}
 
 {1 Performance}
 
-Benchmarked on a JSON parser over a 10-element numeric array for 100,000 iterations:
+With equal implementations, Parseff is ~2x faster than Angstrom and MParser. With zero-copy span APIs, that gap widens to ~4x. See the {{:https://davesnx.github.io/parseff/guides/comparison/}full comparison} for details.
 
-- Parseff (zero-copy spans): ~4,940,000 parses/sec (4.3x faster than Angstrom)
-- Parseff (fair comparison): ~1,930,000 parses/sec (1.6x faster than Angstrom)
-- Angstrom: ~1,150,000 parses/sec (baseline)
+On a JSON array benchmark ([{[1, 2, ..., 10]}], 100,000 iterations):
 
-Memory: Parseff 197 MB vs Angstrom 584 MB (3x less).
+- Parseff (zero-copy): ~5,270,000 parses/sec (168 MB minor allocs)
+- Parseff (fair): ~1,930,000 parses/sec (184 MB minor allocs)
+- MParser: ~1,330,000 parses/sec (466 MB minor allocs)
+- Angstrom: ~1,090,000 parses/sec (584 MB minor allocs)
+
+The zero-copy variant uses [sep_by_take_span] with a custom [float_of_span] that avoids [float_of_string]. The fair variant uses the same [float_of_string] call as MParser and Angstrom, isolating parsing overhead from number conversion.
 
 See {{:./bench/bench_vs_angstrom.ml}bench/bench_vs_angstrom.ml} for the benchmark source.
-
-{1 References}
-
-- {{:https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf}A Typed, Algebraic Approach to Parsing} by Krishnaswami & Yallop (PLDI '19)
-- {{:https://okmij.org/ftp/Computation/variables-effects.html}Algebraic Effects and Effect Handlers} by Kiselyov, O. et al.
-- {{:https://github.com/JavaScriptRegenerated/yieldparser}yieldparser}: JavaScript generator-based parsing
 
 {1 Contributing}
 

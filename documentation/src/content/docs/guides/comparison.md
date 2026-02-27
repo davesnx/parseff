@@ -7,19 +7,20 @@ description: How Parseff compares to Angstrom in performance, API style, and tra
 
 ## Performance
 
-Benchmarked on a JSON array parser (`[1, 2, 3, ..., 10]`) over 100,000 iterations. Source: [`bench/bench_vs_angstrom.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml).
+Benchmarked on a JSON array parser (`[1, 2, 3, ..., 10]`) over 100,000 iterations. Sources: [`bench/bench_json.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), [`bench/bench_vs_angstrom.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml).
 
-| Parser | Parses/sec | vs. Angstrom | Memory |
+| Parser | Parses/sec | vs. Angstrom | Minor allocs |
 |--------|-----------|-------------|--------|
-| Parseff (zero-copy spans) | ~4,940,000 | 4.3x faster | 197 MB |
-| Parseff (fair comparison) | ~1,930,000 | 1.6x faster | -- |
-| Angstrom | ~1,150,000 | baseline | 584 MB |
+| Parseff (zero-copy) | ~5,270,000 | 4.8x faster | 168 MB |
+| Parseff (fair) | ~1,930,000 | 1.8x faster | 184 MB |
+| MParser | ~1,330,000 | 1.2x faster | 466 MB |
+| Angstrom | ~1,090,000 | baseline | 584 MB |
 
-**Zero-copy spans** uses `sep_by_take_span` and a custom `float_of_span` that avoids `float_of_string` for small numbers. This represents the fastest path when you control the conversion logic.
+**Zero-copy** uses `sep_by_take_span` with a custom `float_of_span` that avoids `float_of_string`. This represents the fastest path when you control the conversion logic.
 
-**Fair comparison** uses the same `float_of_string` call as the Angstrom parser. This isolates parsing overhead from number conversion. Even with identical conversion logic, Parseff is 1.6x faster.
+**Fair** uses the same `float_of_string` call as MParser and Angstrom, isolating parsing overhead from number conversion.
 
-Both parsers produce the same output (`float list`) from the same input.
+All parsers produce the same output (`float list`) from the same input.
 
 ### Why Parseff is faster
 
