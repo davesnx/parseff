@@ -9,7 +9,7 @@ Source: [`test/test_ip.ml`](https://github.com/davesnx/parseff/blob/main/test/te
 
 ## What we're building
 
-An IPv4 address looks like `192.168.1.1` — four numbers from 0 to 255, separated by dots. Simple enough to parse by hand, but it's a perfect first example because it combines several core concepts:
+An IPv4 address looks like `192.168.1.1`: four numbers from 0 to 255, separated by dots. Simple enough to parse by hand, but it's a perfect first example because it combines several core concepts:
 
 - Parsing individual digits and assembling multi-digit numbers
 - Matching literal separators
@@ -53,7 +53,7 @@ let number () =
 
 The `fold_left` converts the digit list to an integer: `1*100 + 9*10 + 2 = 192`.
 
-Then we validate: if the number isn't in the 0-255 range, we call `Parseff.fail` with a descriptive message. This is the parsing-then-validation pattern — parse the structure first, then check the semantics.
+Then we validate: if the number isn't in the 0-255 range, we call `Parseff.fail` with a descriptive message. This is the parsing-then-validation pattern: parse the structure first, then check the semantics.
 
 ## Assembling the address
 
@@ -72,7 +72,7 @@ let ip_address () =
 
 This reads exactly like the format it parses: number, dot, number, dot, number, dot, number. Each `let` binding advances the cursor through the input.
 
-`char '.'` matches a single dot character. We bind it to `_` because we don't need the return value — we just need it to be there. Use `char` for single characters and `consume` for multi-character strings.
+`char '.'` matches a single dot character. We bind it to `_` because we don't need the return value; we just need it to be there. Use `char` for single characters and `consume` for multi-character strings.
 
 `end_of_input ()` at the end ensures there's no trailing data. Without it, `"1.2.3.4 extra stuff"` would parse successfully as `(1, 2, 3, 4)` and silently ignore the rest.
 
@@ -93,11 +93,11 @@ On valid input, you get an `Ok` with the four octets as a tuple. On invalid inpu
 
 Let's look at what happens with bad input:
 
-**Out of range**: `"1.2.3.256"` — parses `1`, `.`, `2`, `.`, `3`, `.`, then reads `256`. The `number` parser validates and fails with `"number out of range: 256"` at position 6 (the start of `256`).
+**Out of range**: `"1.2.3.256"` parses `1`, `.`, `2`, `.`, `3`, `.`, then reads `256`. The `number` parser validates and fails with `"number out of range: 256"` at position 6 (the start of `256`).
 
-**Incomplete**: `"1.2.3"` — parses `1`, `.`, `2`, `.`, `3`, then tries to match `'.'` and fails because the input is exhausted.
+**Incomplete**: `"1.2.3"` parses `1`, `.`, `2`, `.`, `3`, then tries to match `'.'` and fails because the input is exhausted.
 
-**Trailing data**: `"1.2.3.4 extra"` — parses all four octets, then `end_of_input` fails because there are characters remaining.
+**Trailing data**: `"1.2.3.4 extra"` parses all four octets, then `end_of_input` fails because there are characters remaining.
 
 ## Improving error messages with `expect`
 
@@ -153,16 +153,3 @@ match Parseff.parse "192.168.1.300" ip_address with
 ```
 
 `fail` is fine for errors shown directly to users. `error` is better when code needs to react differently to different failure modes.
-
-## What we covered
-
-| Concept | Combinator | Purpose |
-|---------|-----------|---------|
-| Digit matching | `digit` | Parse a single 0-9 digit |
-| Repetition | `many1` | One or more matches |
-| Character matching | `char` | Match a single character (`.`) |
-| Validation | `fail` / `error` | Reject invalid values |
-| Complete input | `end_of_input` | Reject trailing data |
-| Error messages | `expect` | Human-readable failures |
-
-

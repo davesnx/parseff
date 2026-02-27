@@ -3,7 +3,7 @@ title: "Expressions with Precedence"
 description: Build an arithmetic expression parser with operator precedence and an AST
 ---
 
-This walkthrough builds an arithmetic expression parser. We want a parser that takes strings like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence — multiplication binds tighter than addition, and parentheses can override that. The result is an AST, not a computed value, which is how real compilers and interpreters work: parse first, evaluate later.
+This walkthrough builds an arithmetic expression parser. We want a parser that takes strings like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence. Multiplication binds tighter than addition, and parentheses can override that. The result is an AST, not a computed value, which is how real compilers and interpreters work: parse first, evaluate later.
 
 Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
 
@@ -91,7 +91,7 @@ and factor () =
 
 ## Breaking it down
 
-### `expr` — the addition level
+### `expr`: the addition level
 
 ```ocaml
 let rec expr () =
@@ -112,7 +112,7 @@ First, parse a `term` (which handles multiplication). Then, `many` collects zero
 
 The `many` loop keeps consuming as long as it sees a `+`. When it doesn't (say, it hits `)` or the end of input), `many` succeeds with whatever it collected and returns.
 
-### `term` — the multiplication level
+### `term`: the multiplication level
 
 ```ocaml
 and term () =
@@ -131,7 +131,7 @@ and term () =
 
 Same structure as `expr`, but one level down. It calls `factor` for operands and builds `Mul` nodes. Because `term` is called from within `expr`, multiplication binds tighter than addition.
 
-### `factor` — atoms and parentheses
+### `factor`: atoms and parentheses
 
 ```ocaml
 and factor () =
@@ -172,17 +172,17 @@ Let's trace `1+2*3` through the parser:
 
 1. `expr()` calls `term()`
 2. `term()` calls `factor()`, which matches `1` → `Num 1`
-3. `term()` tries `many(* factor)` — no `*` follows, so `rest = []`
+3. `term()` tries `many(* factor)`, but no `*` follows, so `rest = []`
 4. `term()` returns `Num 1` to `expr()`
-5. `expr()` tries `many(+ term)` — sees `+`
+5. `expr()` tries `many(+ term)` and sees `+`
 6. Consumes `+`, calls `term()`
 7. `term()` calls `factor()`, which matches `2` → `Num 2`
-8. `term()` tries `many(* factor)` — sees `*`
+8. `term()` tries `many(* factor)` and sees `*`
 9. Consumes `*`, calls `factor()`, which matches `3` → `Num 3`
 10. `term()` builds `Mul(Num 2, Num 3)` via `fold_left`
 11. `expr()` builds `Add(Num 1, Mul(Num 2, Num 3))` via `fold_left`
 
-The key insight: `*` is consumed inside `term`, so by the time `expr` sees the result, `2*3` is already a single `Mul` node. That's how precedence works — each level "claims" its operators before the level above sees them.
+The key insight: `*` is consumed inside `term`, so by the time `expr` sees the result, `2*3` is already a single `Mul` node. That's how precedence works. Each level "claims" its operators before the level above sees them.
 
 ## An alternative: using `chainl1`
 
@@ -243,23 +243,3 @@ let rec expr_to_string = function
 (* "1+2*3" -> "(1 + (2 * 3))" *)
 (* "(1+2)*3" -> "((1 + 2) * 3)" *)
 ```
-
-## What we covered
-
-| Concept | Technique | Purpose |
-|---------|----------|---------|
-| Operator precedence | Split into `expr` / `term` / `factor` | `*` binds tighter than `+` |
-| Left-associativity | `fold_left` or `chainl1` | `1+2+3` = `(1+2)+3` |
-| Grouping | Parenthesized subexpressions in `factor` | Override precedence with `()` |
-| Error messages | `expect` | Human-readable failure messages |
-| Mutual recursion | `let rec ... and ...` | `factor` calls `expr` through `()` |
-
-## Extending this parser
-
-To add more operators (subtraction, division, exponentiation), you have two options:
-
-1. **Same precedence level**: Add more operator cases inside the existing `many` or `chainl1` call. For example, add `-` alongside `+` in `expr`.
-
-2. **New precedence level**: Add a new function between the existing ones. For example, for exponentiation (highest precedence, right-associative), add a `power` level between `term` and `factor` that uses `chainr1`.
-
-

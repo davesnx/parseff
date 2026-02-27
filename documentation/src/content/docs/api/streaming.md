@@ -3,7 +3,7 @@ title: Streaming
 description: Parse from files, channels, and custom readers
 ---
 
-The streaming API lets you parse input that isn't fully available upfront — files, network sockets, pipes, or any byte source. The same parser code works with both `parse` (strings) and `parse_source` (streams), with no changes needed.
+The streaming API lets you parse input that isn't fully available upfront: files, network sockets, pipes, or any byte source. The same parser code works with both `parse` (strings) and `parse_source` (streams), with no changes needed.
 
 ## `parse_source`
 
@@ -15,7 +15,7 @@ val parse_source :
   ('a, [> `Expected of string | `Unexpected_end_of_input]) result
 ```
 
-Runs a parser pulling input from a `Source.t` on demand. Behaves identically to `parse` — same parsers, same result type, same error handling.
+Runs a parser pulling input from a `Source.t` on demand. Behaves identically to `parse`: same parsers, same result type, same error handling.
 
 ```ocaml
 let ic = open_in "data.json" in
@@ -70,7 +70,7 @@ A larger buffer means fewer system calls but more memory. For most files, the de
 val of_function : (bytes -> int -> int -> int) -> Source.t
 ```
 
-Creates a source from a custom read function. The function signature is `read buf off len` — fill `buf` starting at `off` with up to `len` bytes, and return the number of bytes written. Return `0` to signal EOF.
+Creates a source from a custom read function. The function signature is `read buf off len`. Fill `buf` starting at `off` with up to `len` bytes, and return the number of bytes written. Return `0` to signal EOF.
 
 ```ocaml
 (* Unix file descriptor *)
@@ -100,8 +100,8 @@ let source = Parseff.Source.of_function (fun buf off len ->
 
 Parseff uses algebraic effects. Parsers are plain functions that perform effects when they need input. The effect handler interprets those effects differently depending on how you run the parser:
 
-- `parse` — the handler reads from a fixed string
-- `parse_source` — the handler reads from a `Source.t`, fetching more data on demand
+- `parse`: the handler reads from a fixed string
+- `parse_source`: the handler reads from a `Source.t`, fetching more data on demand
 
 The parser doesn't know which one it's running under. The code is identical:
 
@@ -119,13 +119,13 @@ let ic = open_in "numbers.txt" in
 Parseff.parse_source (Parseff.Source.of_channel ic) number
 ```
 
-Traditional parser combinator libraries (like Angstrom) implement streaming through CPS — every parser carries `fail` and `succ` callbacks, and suspension is encoded as closures returned in a `Partial` state. This forces the entire API into monadic style. In Parseff, effects make streaming transparent.
+Traditional parser combinator libraries (like Angstrom) implement streaming through CPS. Every parser carries `fail` and `succ` callbacks, and suspension is encoded as closures returned in a `Partial` state. This forces the entire API into monadic style. In Parseff, effects make streaming transparent.
 
 ---
 
 ## How backtracking works across chunks
 
-The internal buffer grows monotonically. When the streaming handler needs more data, it appends to the buffer — it never discards old data. This means backtracking (`or_`, `look_ahead`) works correctly even when the data spans multiple reads.
+The internal buffer grows monotonically. When the streaming handler needs more data, it appends to the buffer and never discards old data. This means backtracking (`or_`, `look_ahead`) works correctly even when the data spans multiple reads.
 
 Example: parsing `"hello"` from a source that yields 3 bytes at a time:
 
@@ -140,7 +140,7 @@ If `or_` needs to backtrack to a position before the current chunk, the data is 
 
 ## Thread safety
 
-`parse_source` (and `parse`) are safe to call from multiple OCaml 5 domains concurrently. All mutable state — the parser position, internal buffer, recursion depth counter — is created locally inside each call and never shared across calls. There is no global mutable state in the library.
+`parse_source` (and `parse`) are safe to call from multiple OCaml 5 domains concurrently. All mutable state (the parser position, internal buffer, recursion depth counter) is created locally inside each call and never shared across calls. There is no global mutable state in the library.
 
 ```ocaml
 (* Parse different files in parallel *)
@@ -163,7 +163,7 @@ The one constraint: do not share a single `Source.t` across domains. Each `Sourc
 
 ### Memory growth
 
-The buffer never shrinks. For a 100MB file, the buffer will eventually hold all 100MB. This is the price of correct backtracking — any position might need to be revisited.
+The buffer never shrinks. For a 100MB file, the buffer will eventually hold all 100MB. This is the price of correct backtracking, since any position might need to be revisited.
 
 ### Blocking reads
 

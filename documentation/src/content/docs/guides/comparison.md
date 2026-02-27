@@ -3,7 +3,7 @@ title: Comparison with Angstrom
 description: How Parseff compares to Angstrom in performance, API style, and trade-offs
 ---
 
-[Angstrom](https://github.com/inhabitedtype/angstrom) is the most widely used parser combinator library in the OCaml ecosystem. This page compares Parseff and Angstrom side by side — performance, API style, and when to use each.
+[Angstrom](https://github.com/inhabitedtype/angstrom) is the most widely used parser combinator library in the OCaml ecosystem. This page compares Parseff and Angstrom side by side: performance, API style, and when to use each.
 
 ## Performance
 
@@ -31,15 +31,6 @@ All parsers produce the same output (`float list`) from the same input.
 **Fused operations.** `sep_by_take_span` parses an entire separated list in a single effect dispatch. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
 
 **No monadic overhead.** Parsers are direct function calls. No CPS, no closure allocation for sequencing.
-
-### Optimization journey
-
-Starting from ~12,000 parses/sec (101x slower than Angstrom), systematic optimization achieved a 412x improvement:
-
-1. Replacing regex with `take_while` character scanning
-2. Fused operations that reduce effect dispatches
-3. Zero-copy span APIs that avoid `String.sub` allocations
-4. Handler-level batch operations (`sep_by_take`, `skip_while_then_char`)
 
 ## API style
 
@@ -109,7 +100,7 @@ let numbers =
     (take_while1 is_digit >>| int_of_string)
 ```
 
-Angstrom is more concise here thanks to applicative operators (`*>`, `<*`). Parseff is more explicit — whitespace handling is visible, not hidden in operator chains.
+Angstrom is more concise here thanks to applicative operators (`*>`, `<*`). Parseff is more explicit: whitespace handling is visible, not hidden in operator chains.
 
 ### A complete side-by-side
 
@@ -194,50 +185,5 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | Requires OCaml 5+ | Yes | No | No | No |
 
 MParser and Opal require explicit backtracking (like Parsec's `try`). Angstrom and Parseff backtrack automatically on alternation. MParser and Opal don't support streaming input. Only Parseff supports custom typed errors beyond strings.
-
-## When to use which
-
-**Choose Parseff when:**
-- You prefer imperative-style code over monadic operators
-- Performance is critical (Parseff's fused/zero-copy API is faster)
-- You need custom typed errors beyond strings
-- You need built-in recursion depth limiting
-- You're already on OCaml 5.3+
-
-**Choose Angstrom when:**
-- You need OCaml 4.x compatibility
-- You need incremental parsing with `Partial` results (event-driven architectures)
-- Your team is comfortable with monadic style
-- You want a battle-tested library with a large ecosystem of examples
-- You need Async/Lwt integration
-
-## Migrating from Angstrom
-
-Common patterns and their Parseff equivalents:
-
-| Angstrom | Parseff |
-|----------|---------|
-| `string "foo"` | `Parseff.consume "foo"` |
-| `char 'x'` | `Parseff.char 'x'` |
-| `satisfy f` | `Parseff.satisfy f ~label:"..."` |
-| `take_while f` | `Parseff.take_while f` |
-| `take_while1 f` | `Parseff.take_while1 f ~label:"label"` |
-| `skip_while f` | `Parseff.skip_while f` |
-| `a >>= fun x -> b` | `let x = a () in b ()` |
-| `a *> b` | `let _ = a () in b ()` |
-| `a <* b` | `let x = a () in let _ = b () in x` |
-| `a >>| f` | `f (a ())` |
-| `return x` | `x` |
-| `fail msg` | `Parseff.fail msg` |
-| `a <|> b` | `Parseff.or_ a b ()` |
-| `many p` | `Parseff.many p ()` |
-| `many1 p` | `Parseff.many1 p ()` |
-| `sep_by sep p` | `Parseff.sep_by p sep ()` |
-| `fix (fun p -> ...)` | `let rec p () = Parseff.rec_ (fun () -> ...)` |
-| `end_of_input` | `Parseff.end_of_input ()` |
-| `p <?> msg` | `Parseff.expect msg p` |
-| `peek_char` | `Parseff.optional (fun () -> Parseff.look_ahead Parseff.any_char) ()` |
-
-The main adjustment: every parser call becomes a function call with `()`. Angstrom parsers are values; Parseff parsers are functions.
 
 

@@ -1,6 +1,6 @@
 ---
 title: API Overview
-description: Parseff API reference — types, runner, and organization
+description: Parseff API reference, covering types, runner, and organization
 ---
 
 ## Parser type
@@ -29,14 +29,15 @@ val parse :
 
 Runs a parser on an input string. Returns `Ok value` on success, or `Error { pos; error }` on failure.
 
-The `~max_depth` parameter limits recursion depth for parsers that use `rec_` (default: 128).
+The `~max_depth` parameter limits recursion depth for parsers that use [`rec_`](/parseff/api/combinators#rec_) (default: 128).
 
 ```ocaml
-match Parseff.parse "hello world" my_parser with
-| Ok (x, y) -> Printf.printf "Matched: %s %s\n" x y
-| Error { pos; error = `Expected msg } ->
-    Printf.printf "Error at %d: %s\n" pos msg
-| Error _ -> print_endline "Parse error"
+let () =
+  match Parseff.parse "hello world" my_parser with
+  | Ok (x, y) -> Printf.printf "Matched: %s %s\n" x y
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "Error at %d: %s\n" pos msg
+  | Error _ -> print_endline "Parse error"
 ```
 
 Custom errors raised via `error` are also returned through the result type:
@@ -47,10 +48,11 @@ let byte () =
   let n = int_of_string s in
   if n > 255 then Parseff.error (`Out_of_range n) else n
 
-match Parseff.parse "300" byte with
-| Error { error = `Out_of_range n; _ } ->
-    Printf.printf "%d exceeds 255\n" n
-| _ -> ()
+let () =
+  match Parseff.parse "300" byte with
+  | Error { error = `Out_of_range n; _ } ->
+      Printf.printf "%d exceeds 255\n" n
+  | _ -> ()
 ```
 
 ### `parse_source`
@@ -65,8 +67,8 @@ type ('a, 'e) result =
   | Error of { pos : int; error : 'e }
 ```
 
-- `Ok value` -- the parsed value
-- `Error { pos; error }` -- position where parsing failed and the error value
+- `Ok value`: the parsed value
+- `Error { pos; error }`: position where parsing failed and the error value
 
 ## Position
 
@@ -99,10 +101,38 @@ A `span` references a slice of the original input string without allocating a ne
 ```ocaml
 let fast_digits () =
   let digits = Parseff.take_while_span (fun c -> c >= '0' && c <= '9') in
-  (* No allocation yet — span points into the input buffer *)
+  (* No allocation yet, span points into the input buffer *)
   let s = Parseff.span_to_string digits in
   (* Now a string is allocated *)
   s
+```
+
+## Quick examples
+
+Match a literal string and a character:
+
+```ocaml
+let arrow () =
+  let _ = Parseff.consume "-" in
+  let _ = Parseff.char '>' in
+  "->"
+```
+
+Try two alternatives with backtracking:
+
+```ocaml
+let bool () =
+  Parseff.or_
+    (fun () -> let _ = Parseff.consume "true" in true)
+    (fun () -> let _ = Parseff.consume "false" in false)
+    ()
+```
+
+Collect repeated matches:
+
+```ocaml
+let digits () =
+  Parseff.many1 Parseff.digit ()
 ```
 
 ## API organization

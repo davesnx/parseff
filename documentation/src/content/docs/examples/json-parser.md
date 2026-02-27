@@ -32,22 +32,9 @@ type json =
 
 Every JSON value maps to one of these constructors. This is the return type of our parser.
 
-## Helper: whitespace
-
-JSON allows whitespace between tokens. We'll use a precompiled regex for this:
-
-```ocaml
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let ws () = Parseff.match_regex ws_re
-```
-
-:::tip
-For this example we use `match_regex` since we're matching a known regex pattern. In performance-critical code, `Parseff.skip_whitespace ()` is faster because it scans characters directly without regex overhead.
-:::
-
 ## Primitive value parsers
 
-Each JSON primitive type gets its own parser. These are the leaf nodes — they don't call other parsers recursively.
+Each JSON primitive type gets its own parser. These are the leaf nodes. They don't call other parsers recursively.
 
 ### Null and booleans
 
@@ -93,7 +80,7 @@ let string_parser () =
   String s
 ```
 
-Match an opening quote, capture everything that isn't a quote, then match the closing quote. This simplified version doesn't handle escape sequences (`\"`, `\\`, etc.) — a production parser would need more work here.
+Match an opening quote, capture everything that isn't a quote, then match the closing quote. This simplified version doesn't handle escape sequences (`\"`, `\\`, etc.). A production parser would need more work here.
 
 ## The recursive entry point
 
@@ -102,7 +89,7 @@ This is where it gets interesting. A JSON value can be any of the six types, and
 ```ocaml
 let rec json () =
   Parseff.rec_ (fun () ->
-    let _ = ws () in
+    Parseff.skip_whitespace ();
     Parseff.one_of
       [
         array_parser;
@@ -129,7 +116,7 @@ Three things to notice:
 ```ocaml
 and array_parser () =
   let _ = Parseff.char '[' in
-  let _ = ws () in
+  Parseff.skip_whitespace ();
   let elements =
     Parseff.or_
       (fun () ->
@@ -137,7 +124,7 @@ and array_parser () =
         let rest =
           Parseff.many
             (fun () ->
-              let _ = ws () in
+              Parseff.skip_whitespace ();
               let _ = Parseff.char ',' in
               json ())
             ()
@@ -146,24 +133,24 @@ and array_parser () =
       (fun () -> [])
       ()
   in
-  let _ = ws () in
+  Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in
   Array elements
 ```
 
 After the opening `[`, we use `or_` to handle two cases:
 
-- **Non-empty array**: Parse the first element, then `many` parses zero or more `, element` pairs. This pattern avoids a trailing comma problem — the separator always comes before an element (except the first).
+- **Non-empty array**: Parse the first element, then `many` parses zero or more `, element` pairs. This pattern avoids a trailing comma problem, since the separator always comes before an element (except the first).
 - **Empty array**: The left branch fails (no element to parse), so we backtrack and return `[]`.
 
-Notice `json ()` is called recursively here. This is where the depth tracking from `rec_` matters — without it, deeply nested arrays like `[[[[[...]]]]]` would blow the stack.
+Notice `json ()` is called recursively here. This is where the depth tracking from `rec_` matters. Without it, deeply nested arrays like `[[[[[...]]]]]` would blow the stack.
 
 ## Objects
 
 ```ocaml
 and object_parser () =
   let _ = Parseff.char '{' in
-  let _ = ws () in
+  Parseff.skip_whitespace ();
   let pairs =
     Parseff.or_
       (fun () ->
@@ -171,7 +158,7 @@ and object_parser () =
         let rest =
           Parseff.many
             (fun () ->
-              let _ = ws () in
+              Parseff.skip_whitespace ();
               let _ = Parseff.char ',' in
               key_value ())
             ()
@@ -180,7 +167,7 @@ and object_parser () =
       (fun () -> [])
       ()
   in
-  let _ = ws () in
+  Parseff.skip_whitespace ();
   let _ = Parseff.char '}' in
   Object pairs
 ```
@@ -194,9 +181,9 @@ and key_value () =
   let _ = Parseff.char '"' in
   let key = Parseff.match_regex string_content_re in
   let _ = Parseff.char '"' in
-  let _ = ws () in
+  Parseff.skip_whitespace ();
   let _ = Parseff.char ':' in
-  let _ = ws () in
+  Parseff.skip_whitespace ();
   let value = json () in
   (key, value)
 ```
@@ -227,16 +214,16 @@ Parseff.parse input json
 Parseff.parse ~max_depth:64 input json
 ```
 
-When the limit is exceeded, parsing fails with `"maximum nesting depth 64 exceeded"` — a clean error instead of a crash.
+When the limit is exceeded, parsing fails with `"maximum nesting depth 64 exceeded"`, giving a clean error instead of a crash.
 
 Here's what happens with deeply nested input:
 
 ```ocaml
-(* 50 levels deep — within the default limit of 128 *)
+(* 50 levels deep: within the default limit of 128 *)
 let input = String.make 50 '[' ^ String.make 50 ']' in
 Parseff.parse input json  (* Ok (Array (Array (Array ...))) *)
 
-(* 256 levels deep — exceeds the limit *)
+(* 256 levels deep: exceeds the limit *)
 let input = String.make 256 '[' ^ String.make 256 ']' in
 Parseff.parse ~max_depth:128 input json
 (* Error { error = `Expected "maximum nesting depth 128 exceeded" } *)
@@ -265,16 +252,3 @@ and key_value () = ...
 ```
 
 Only the top-level entry point (`json`) needs `rec_`. The other functions participate in the recursion, but `json` is where a new nesting level begins.
-
-## What we covered
-
-| Concept | Combinator | Purpose |
-|---------|-----------|---------|
-| Multi-way alternation | `one_of` | Try six different value types |
-| Backtracking | `or_` | Empty vs. non-empty arrays/objects |
-| Recursion depth | `rec_` | Prevent stack overflow on deep nesting |
-| Exact matching | `char` / `consume` | Single characters (`[`, `]`, `{`, `}`, `:`, `,`, `"`) and keywords (`null`, `true`, `false`) |
-| Regex matching | `match_regex` | Numbers and string content |
-| Repetition | `many` | Comma-separated elements after the first |
-
-

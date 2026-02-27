@@ -91,7 +91,7 @@ let csv_to_ints () =
 val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
 ```
 
-Performs: skip whitespace, match separator, skip whitespace, take_while1 — all in a single effect dispatch. Much more efficient than separate calls.
+Performs: skip whitespace, match separator, skip whitespace, take_while1, all in a single effect dispatch. Much more efficient than separate calls.
 
 **Example:**
 ```ocaml
@@ -119,13 +119,13 @@ Skips characters matching predicate, then matches a character. Fused operation f
 
 **Example:**
 ```ocaml
-(* Inefficient — two effect dispatches *)
+(* Inefficient: two effect dispatches *)
 let skip_ws_then_comma () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   ()
 
-(* Efficient — single fused effect dispatch *)
+(* Efficient: single fused effect dispatch *)
 let skip_ws_then_comma () =
   Parseff.skip_while_then_char Parseff.is_whitespace ','
 ```
@@ -220,7 +220,7 @@ let () =
       Printf.printf "Error at %d: %s\n" pos expected
 ```
 
-The zero-copy version is roughly 2.5x faster than the standard API and uses 3x less memory. See the [Zero-Copy Performance example](/parseff/examples/zero-copy-performance) for a detailed breakdown and the [Comparison with Angstrom](/parseff/guides/comparison) for benchmark methodology.
+The zero-copy version is roughly 2.5x faster than the standard API and uses 3x less memory. See the [Comparison with Angstrom](/parseff/guides/comparison) for benchmark methodology.
 
 ---
 

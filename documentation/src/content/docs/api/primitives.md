@@ -273,12 +273,12 @@ let email () = Parseff.match_regex email_re
 **Always pre-compile regexes at module level!** Compiling regexes is expensive. Never compile inside a parser function.
 
 ```ocaml
-(* BAD — compiles on every parse *)
+(* BAD: compiles on every parse *)
 let number () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
   Parseff.match_regex re
 
-(* GOOD — compiles once *)
+(* GOOD: compiles once *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 ```

@@ -1,7 +1,15 @@
 ---
 title: Quick Start
-description: Install Parseff and write your first parser
+description: Parseff is a direct-style parser combinator library for OCaml 5. Write parsers as plain functions with typed errors, streaming input, and zero-copy APIs.
 ---
+
+Parseff is a direct-style parser combinator library for OCaml 5. Write parsers as plain functions with typed errors, streaming input, and zero-copy APIs.
+
+- **Direct-style**: parsers are plain `unit -> 'a` functions composed with `let` bindings
+- **Typed errors**: domain-specific errors via polymorphic variants
+- **Streaming input**: same parser code works with strings, channels, and custom sources
+- **Performance**: 1.6x to 4.3x faster than Angstrom on JSON benchmarks, with 3x less memory
+- **Zero-copy APIs**: span-based operations for low-allocation parsing on hot paths
 
 ## Installation
 
@@ -48,19 +56,9 @@ dune install
  (libraries parseff))
 ```
 
-## We recommend not opening Parseff
-
-We recommend always writing `Parseff.consume`, `Parseff.char`, `Parseff.many`, etc. — fully qualified.
-
-When you open the module, names like `char`, `error`, `position`, and `or_` become unqualified. In a file that also defines its own helper functions and types, it quickly becomes unclear which names come from Parseff and which are yours. The `Parseff.` prefix acts as documentation: every combinator call is visually distinct from your application logic.
-
-Parseff also defines its own `result` type (with a `pos` field on errors), which shadows `Stdlib.result`. Opening Parseff would silently break any code that uses the standard `Result` module.
-
-All examples in this documentation use the fully qualified form.
-
 ## Example: an IPv4 address parser
 
-A Parseff parser is a function `unit -> 'a` that calls combinators to consume input. Here's a complete parser that validates IPv4 addresses:
+Here's a complete parser that validates [IPv4 addresses](/parseff/examples/ip-address):
 
 ```ocaml
 let number () =
@@ -100,9 +98,9 @@ A few things to notice:
 
 ## Learn more
 
-- **[Your First Parser](/parseff/guides/first-parser)** -- a hands-on tutorial that walks through every concept from matching characters to building a complete parser
-- **[API Reference](/parseff/api/overview)** -- all combinators and their signatures
-- **[Parsing an IP Address](/parseff/examples/ip-address)** -- a detailed breakdown of the parser above with error handling variations
-- **[A JSON Parser](/parseff/examples/json-parser)** -- recursive descent, mutual recursion, and depth limiting
-- **[Error Handling](/parseff/guides/errors)** -- custom error types, `expect`, and labeled alternation
-- **[Comparison with Angstrom](/parseff/guides/comparison)** -- benchmarks, API comparison, and migration guide
+- **[Your First Parser](/parseff/guides/first-parser)**: a hands-on tutorial that walks through every concept from matching characters to building a complete parser
+- **[API Reference](/parseff/api/overview)**: all combinators and their signatures
+- **[Parsing an IP Address](/parseff/examples/ip-address)**: a detailed breakdown of the parser above with error handling variations
+- **[A JSON Parser](/parseff/examples/json-parser)**: recursive descent, mutual recursion, and depth limiting
+- **[Error Handling](/parseff/guides/errors)**: custom error types, `expect`, and labeled alternation
+- **[Comparison with Angstrom](/parseff/guides/comparison)**: benchmarks, API comparison, and migration guide

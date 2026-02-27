@@ -2,7 +2,7 @@
 
 # Parseff
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed, and monadic let operators are optional, while algebraic effects handle control flow, backtracking, and streaming input.
+Parseff is a direct-style parser combinator library for OCaml 5. Write parsers as plain functions with typed errors, streaming input, and zero-copy APIs.
 
 [Documentation](https://davesnx.github.io/parseff/)
 
@@ -50,12 +50,13 @@ let () =
 - Build parsers with direct-style and `Parseff` combinators
 - **No** monadic operators (`>>=`, `>>|`, `*>`), **neither** binding operators (`let*`, `let+`, `and+`)
 - Automatic backtracking with `Parseff.or_`
-- Typed domain errors via polymorphic variants, raise with `Parseff.error`. Parseff also adds ``Expected of string` and ``Unexpected_end_of_input` as possible parsing failures
-- Minimal dependency footprint: only `re` for regex support
-- Streaming with `Source.of_string`, `Source.of_channel`, `Source.of_function`
-- Fused operations for hot paths (`Parseff.sep_by_take`, `Parseff.skip_while_then_char`)
+- Typed domain errors via polymorphic variants, raise with `Parseff.error`. Parseff also adds `` `Expected of string`` and `` `Unexpected_end_of_input`` as possible parsing failures
+- **Streaming input** with `Source.of_string`, `Source.of_channel`, `Source.of_function` -- same parser code works with both `parse` and `parse_source`
+- **Performance** -- 1.6x to 4.3x faster than Angstrom on JSON benchmarks, with 3x less memory
 - Zero-copy span APIs for low-allocation parsing (`Parseff.take_while_span`, `Parseff.sep_by_take_span`, `Parseff.fused_sep_take`, `Parseff.skip_while_then_char`)
+- Fused operations for hot paths (`Parseff.sep_by_take`, `Parseff.skip_while_then_char`)
 - Domain-safe: each `parse` / `parse_source` call is self-contained with no global mutable state, so independent parses can run in parallel across OCaml 5 domains
+- Minimal dependency footprint: only `re` for regex support
 
 ## Thread Safety
 

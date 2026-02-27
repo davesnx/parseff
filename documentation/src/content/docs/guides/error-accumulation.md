@@ -3,7 +3,7 @@ title: Error Accumulation
 description: Tracking multiple errors across a parse
 ---
 
-By default, Parseff stops at the first error and reports it. Sometimes you want to collect all errors — for example, to show users every problem in their input at once instead of making them fix issues one at a time.
+By default, Parseff stops at the first error and reports it. Sometimes you want to collect all errors. For example, you may want to show users every problem in their input at once instead of making them fix issues one at a time.
 
 This is an advanced technique that requires some manual bookkeeping.
 
@@ -12,7 +12,7 @@ This is an advanced technique that requires some manual bookkeeping.
 A typical Parseff parser fails on the first error:
 
 ```ocaml
-(* Parses "1.2.3.256" — stops at the first out-of-range octet *)
+(* Parses "1.2.3.256": stops at the first out-of-range octet *)
 match Parseff.parse "1.2.3.256" ip_address with
 | Error { pos; error = `Expected msg } ->
     Printf.printf "Error at %d: %s\n" pos msg
@@ -39,7 +39,7 @@ let number_lenient () =
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n > 255 then (
     record_error start (Printf.sprintf "octet %d out of range (0-255)" n);
-    n  (* return the value anyway — keep parsing *)
+    n  (* return the value anyway, keep parsing *)
   ) else n
 ```
 

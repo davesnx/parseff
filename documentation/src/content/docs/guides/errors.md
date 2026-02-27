@@ -3,7 +3,7 @@ title: Error Handling
 description: Building better error messages in Parseff
 ---
 
-Parseff gives you several ways to control error messages — from simple string errors to typed domain errors with polymorphic variants. This guide shows you how to use each one and when to reach for which.
+Parseff gives you several ways to control error messages, from simple string errors to typed domain errors with polymorphic variants. This guide shows you how to use each one and when to reach for which.
 
 ## Basic errors with `fail`
 
@@ -29,7 +29,7 @@ match Parseff.parse "300" byte with
 
 ## Better messages with `expect`
 
-When a parser fails, the default error message comes from the combinator itself — `expected '.'`, `expected digit`. These are accurate but not always helpful to users who don't know the grammar.
+When a parser fails, the default error message comes from the combinator itself: `expected '.'`, `expected digit`. These are accurate but not always helpful to users who don't know the grammar.
 
 `expect` wraps a parser and replaces its error message with a description you provide:
 
@@ -44,7 +44,7 @@ let key_value () =
   (key, value)
 ```
 
-Now instead of `expected ':'` at position 4, the user sees `expected a colon separator` — which makes more sense if they don't know the parser internals. See the [IP Address example](/parseff/examples/ip-address) for a complete walkthrough using `expect`.
+Now instead of `expected ':'` at position 4, the user sees `expected a colon separator`, which makes more sense if they don't know the parser internals. See the [IP Address example](/parseff/examples/ip-address) for a complete walkthrough using `expect`.
 
 ---
 
@@ -136,7 +136,7 @@ match Parseff.parse "300" number with
 | Ok n -> Printf.printf "Got %d\n" n
 ```
 
-Polymorphic variants are a good middle ground — you get typed errors without the boilerplate of defining a separate error type. They work well for errors that callers need to handle differently (out of range vs. missing input vs. invalid format).
+Polymorphic variants are a good middle ground. You get typed errors without the boilerplate of defining a separate error type. They work well for errors that callers need to handle differently (out of range vs. missing input vs. invalid format).
 
 ---
 
@@ -198,4 +198,4 @@ let () =
   parse_expr "(1 + )";      (* Parse error at 5: expected number or '(' *)
 ```
 
-The key technique: use `expect` for better messages on structural elements (parentheses, operators), and `error` with polymorphic variants for domain validation (division by zero, invalid operators). The exhaustive `match` on the result ensures every error case is handled.
+The key technique: use `expect` for better messages on structural elements (parentheses, operators) and `error` with polymorphic variants for domain validation (division by zero, invalid operators). The exhaustive `match` on the result ensures every error case is handled.

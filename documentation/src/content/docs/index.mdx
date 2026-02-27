@@ -69,14 +69,14 @@ Requires OCaml >= 5.3. Then add it to your dune file:
 
 ## Features
 
-- **Direct-style parsers** -- write parsers with `let` bindings and function calls, no monadic plumbing
+- **Direct-style parsers**: write parsers with `let` bindings and function calls, no monadic plumbing
 - **Automatic backtracking** with `or_` and `one_of`
-- **Typed domain errors** via polymorphic variants -- raise with `Parseff.error`, pattern match on the result
-- **Streaming input** with `Source.of_string`, `Source.of_channel`, `Source.of_function` -- same parser code works with both `parse` and `parse_source`
+- **Typed domain errors** via polymorphic variants: raise with `Parseff.error`, pattern match on the result
+- **Streaming input** with `Source.of_string`, `Source.of_channel`, `Source.of_function`: same parser code works with both `parse` and `parse_source`
 - **Zero-copy spans** (`take_while_span`, `sep_by_take_span`) for low-allocation parsing on hot paths
 - **Fused operations** (`sep_by_take`, `skip_while_then_char`, `fused_sep_take`) that reduce effect dispatches
 - **Recursion depth limiting** with `rec_` and `~max_depth` to prevent stack overflows on malicious input
-- **Minimal dependencies** -- only `re` for regex support
+- **Minimal dependencies**: only `re` for regex support
 
 ## Performance
 
@@ -84,6 +84,6 @@ Requires OCaml >= 5.3. Then add it to your dune file:
 
 ## References
 
-- Krishnaswami & Yallop (PLDI '19) -- [A Typed, Algebraic Approach to Parsing](https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf)
-- Kiselyov, O. et al. -- [Algebraic Effects and Effect Handlers](https://okmij.org/ftp/Computation/variables-effects.html)
+- Krishnaswami & Yallop (PLDI '19): [A Typed, Algebraic Approach to Parsing](https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf)
+- Kiselyov, O. et al.: [Algebraic Effects and Effect Handlers](https://okmij.org/ftp/Computation/variables-effects.html)
 - Inspired by [yieldparser](https://github.com/JavaScriptRegenerated/yieldparser) and [Angstrom](https://github.com/inhabitedtype/angstrom)

@@ -55,7 +55,7 @@ Lines starting with `#` are comments. Blank lines are skipped. Everything else i
 
 ## Step 1: parsing a key-value pair
 
-A Parseff parser is a function `unit -> 'a`. It reads input by calling combinators like `Parseff.take_while1` and `Parseff.char`, and returns a value. There's no special parser type — just functions.
+Each parser reads input by calling combinators like `Parseff.take_while1` and `Parseff.char`, and returns a value.
 
 ```ocaml
 let key () =
@@ -77,7 +77,7 @@ let entry () =
 
 `take_while1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
 
-Sequencing is just `let` bindings — each line advances the cursor through the input.
+Sequencing is just `let` bindings. Each line advances the cursor through the input.
 
 To run it:
 
@@ -93,7 +93,7 @@ match Parseff.parse "host = localhost" entry with
 
 ## Step 2: comments and blank lines
 
-A comment line starts with `#`. A line can be a comment, an entry, or blank. We need alternation — try one option, and if it fails, try the next. `Parseff.or_` does this for two alternatives:
+A comment line starts with `#`. A line can be a comment, an entry, or blank. We need alternation: try one option, and if it fails, try the next. `Parseff.or_` does this for two alternatives:
 
 ```ocaml
 let comment () =
@@ -111,14 +111,14 @@ let line () =
     [
       (fun () -> comment (); None);
       (fun () -> Some (entry ()));
-      (fun () -> None);  (* blank line — always succeeds *)
+      (fun () -> None);  (* blank line: always succeeds *)
     ]
     ()
 ```
 
 `one_of` tries each parser in order until one succeeds. Here: try a comment, then try an entry, then fall through to `None` for blank lines. The last branch always succeeds, so `line` never fails.
 
-`take_while` (without the `1`) can match zero characters — it always succeeds.
+`take_while` (without the `1`) can match zero characters. It always succeeds.
 
 ## Step 3: the whole file
 
@@ -133,7 +133,7 @@ let config () =
   List.filter_map Fun.id lines
 ```
 
-`end_of_input` ensures there's no trailing data — without it, `"host = localhost\ngarbage"` could partially succeed.
+`end_of_input` ensures there's no trailing data. Without it, `"host = localhost\ngarbage"` could partially succeed.
 
 Running the full parser:
 
@@ -204,7 +204,7 @@ let typed_value () =
     ()
 ```
 
-`consume` matches a literal string (for multi-character matches like `"true"`). `or_` is shorthand when you have exactly two alternatives; `one_of` takes a list for three or more. Order matters — `bool_value` must come before `tag_list`, otherwise `"true"` would match as `Tags ["true"]`.
+`consume` matches a literal string (for multi-character matches like `"true"`). `or_` is shorthand when you have exactly two alternatives; `one_of` takes a list for three or more. Order matters: `bool_value` must come before `tag_list`, otherwise `"true"` would match as `Tags ["true"]`.
 
 Now swap `raw_value` for `typed_value` in the entry parser:
 
@@ -242,18 +242,3 @@ match Parseff.parse "port = 99999" typed_entry with
 ```
 
 `Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (wrapped as `` `Expected ``). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.
-
-## What we covered
-
-| Concept | Combinator | Where introduced |
-|---------|-----------|-----------------|
-| Character scanning | `take_while`, `take_while1` | Step 1 |
-| Character matching | `char` | Step 1 |
-| Skipping characters | `skip_while` | Step 1 |
-| Alternation | `or_`, `one_of` | Steps 2, 4 |
-| Literal matching | `consume` | Step 4 |
-| Repetition | `sep_by` | Steps 3, 4 |
-| Complete input | `end_of_input` | Step 3 |
-| Typed errors | `error`, `fail` | Step 5 |
-
-For more, see the [API Reference](/parseff/api/overview) and the [example walkthroughs](/parseff/examples/ip-address).

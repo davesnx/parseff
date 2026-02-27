@@ -28,10 +28,10 @@ let bool_parser () =
 
 On `"maybe"`, the left branch fails at position 0 (expected `"true"`, got `"m"`), backtracks, and the right branch also fails (expected `"false"`, got `"m"`). The error from the last branch attempted is reported.
 
-`or_` is ideal for two alternatives. When you have more, use [`one_of`](#one_of) — it takes a list and avoids nested `or_` calls:
+`or_` is ideal for two alternatives. When you have more, use [`one_of`](#one_of), which takes a list and avoids nested `or_` calls:
 
 ```ocaml
-(* With nested or_ — works but gets awkward with many alternatives *)
+(* With nested or_: works but gets awkward with many alternatives *)
 let keyword () =
   Parseff.or_
     (fun () -> Parseff.consume "let")
@@ -42,7 +42,7 @@ let keyword () =
         ())
     ()
 
-(* With one_of — cleaner, easier to extend *)
+(* With one_of: cleaner, easier to extend *)
 let keyword () =
   Parseff.one_of
     [ (fun () -> Parseff.consume "let")
@@ -137,7 +137,7 @@ Runs a parser without consuming input. The cursor stays where it was before the 
 ```ocaml
 let peek_open_paren () =
   let _ = Parseff.look_ahead (fun () -> Parseff.char '(') in
-  (* cursor hasn't moved — '(' is still the next character *)
+  (* cursor hasn't moved, '(' is still the next character *)
   parse_parenthesized_expr ()
 ```
 
@@ -165,7 +165,7 @@ let digit_val () =
 
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`. The difference matters when users see these messages.
 
-Use `expect` at the boundaries of your parser — the points where a user-facing description makes more sense than a raw token name:
+Use `expect` at the boundaries of your parser, at the points where a user-facing description makes more sense than a raw token name:
 
 ```ocaml
 let ip_address () =
@@ -225,7 +225,7 @@ Parseff.parse ~max_depth:64 input json
 When the limit is exceeded, parsing fails with `"maximum nesting depth N exceeded"` rather than a stack overflow.
 
 :::tip
-Only wrap the top-level recursive entry point with `rec_`. You don't need it on every mutually recursive function — just the one that represents "entering a new nesting level".
+Only wrap the top-level recursive entry point with `rec_`. You don't need it on every mutually recursive function, just the one that represents "entering a new nesting level".
 :::
 
 
