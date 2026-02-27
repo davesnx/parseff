@@ -1,5 +1,18 @@
+(library
+ (name parseff_bench)
+ (libraries parseff)
+ (modules parseff_bench)
+ (ocamlopt_flags
+  (:standard -O3 -unbox-closures)))
+
 (executables
- (names bench_vs_angstrom bench_micro)
- (libraries parseff angstrom re benchmark)
+ (names bench_vs_angstrom bench_micro bench_json bench_csv bench_arithmetic)
+ (libraries parseff parseff_bench angstrom mparser re benchmark)
+ (modules
+  bench_vs_angstrom
+  bench_micro
+  bench_json
+  bench_csv
+  bench_arithmetic)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures)))

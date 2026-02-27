@@ -57,7 +57,7 @@ install: ## Install dependencies
 
 .PHONY: pin
 pin: ## Pin dependencies
-	echo "No pins needed"
+	opam pin dune https://github.com/ocaml/dune.git#cbb83c4751de2e8fd94f5165fbb43cf7b09870fe -y
 
 .PHONY: setup-githooks
 setup-githooks: ## Setup githooks
@@ -70,6 +70,9 @@ init: setup-githooks create-switch pin install ## Create a local dev enviroment
 bench: ## Run all benchmarks
 	@$(DUNE) exec bench/bench_micro.exe --profile=release --display-separate-messages --no-print-directory
 	@$(DUNE) exec bench/bench_vs_angstrom.exe --profile=release --display-separate-messages --no-print-directory
+	@$(DUNE) exec bench/bench_json.exe --profile=release --display-separate-messages --no-print-directory
+	@$(DUNE) exec bench/bench_csv.exe --profile=release --display-separate-messages --no-print-directory
+	@$(DUNE) exec bench/bench_arithmetic.exe --profile=release --display-separate-messages --no-print-directory
 
 .PHONY: bench-micro
 bench-micro: ## Run micro benchmarks
@@ -79,13 +82,25 @@ bench-micro: ## Run micro benchmarks
 bench-vs-angstrom: ## Run benchmarks vs Angstrom
 	@$(DUNE) exec bench/bench_vs_angstrom.exe --profile=release --display-separate-messages --no-print-directory
 
+.PHONY: bench-json
+bench-json: ## Run JSON benchmark (all parsers)
+	@$(DUNE) exec bench/bench_json.exe --profile=release --display-separate-messages --no-print-directory
+
+.PHONY: bench-csv
+bench-csv: ## Run CSV benchmark (all parsers)
+	@$(DUNE) exec bench/bench_csv.exe --profile=release --display-separate-messages --no-print-directory
+
+.PHONY: bench-arithmetic
+bench-arithmetic: ## Run arithmetic benchmark (all parsers)
+	@$(DUNE) exec bench/bench_arithmetic.exe --profile=release --display-separate-messages --no-print-directory
+
 .PHONY: subst
 subst: ## Run dune substitute
 	$(DUNE) subst
 
 .PHONY: docs
 docs: ## Generate odoc documentation
-	$(DUNE) build @doc
+	$(DUNE) build @doc @doc-markdown
 
 .PHONY: docs-dev
 docs-dev: ## Run documentation dev server

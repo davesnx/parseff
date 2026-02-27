@@ -16,7 +16,6 @@ depends: [
   "benchmark" {with-test}
   "angstrom" {with-test}
   "mparser" {with-test}
-  "bark" {with-test}
   "ocamlformat" {>= "0.26.1" & with-dev-setup}
   "ocaml-lsp-server" {with-dev-setup}
   "odoc" {with-doc}

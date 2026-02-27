@@ -32,6 +32,7 @@
   (alcotest :with-test)
   (benchmark :with-test)
   (angstrom :with-test)
+  (mparser :with-test)
 
   ;; Dev dependencies
   (ocamlformat
