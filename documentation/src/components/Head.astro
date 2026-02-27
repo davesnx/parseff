@@ -1,10 +1,13 @@
 ---
 import instrumentSans400 from '@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff2?url';
+import instrumentSans500 from '@fontsource/instrument-sans/files/instrument-sans-latin-500-normal.woff2?url';
+import instrumentSans600 from '@fontsource/instrument-sans/files/instrument-sans-latin-600-normal.woff2?url';
 import ibmPlexMono400 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2?url';
+import ibmPlexMono700 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-700-normal.woff2?url';
 
 const { head } = Astro.locals.starlightRoute;
 
-const preloadFonts = [instrumentSans400, ibmPlexMono400];
+const preloadFonts = [instrumentSans400, instrumentSans500, instrumentSans600, ibmPlexMono400, ibmPlexMono700];
 ---
 
 {preloadFonts.map((href) => (
