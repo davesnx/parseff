@@ -114,9 +114,42 @@ match Parseff.parse "300" validated_byte with
 
 ---
 
-## Polymorphic variants
+## Custom errors
 
-For quick typed errors without defining a separate type:
+While `fail` produces string-based errors, `error` lets you define your own structured error types using polymorphic variants. This gives you compile-time exhaustiveness checking and the ability to carry data with each error.
+
+### Defining and pushing a custom error
+
+Call `Parseff.error` with a polymorphic variant to abort parsing with your own error:
+
+```ocaml
+let number () =
+  let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
+  let n = int_of_string s in
+  if n > 255 then Parseff.error (`Too_large n)
+  else n
+```
+
+`error` has the signature `val error : 'e -> 'a` — it accepts any value and never returns (like `fail`, it aborts the current parser). The value you pass becomes the `error` field in the result.
+
+### Handling custom errors
+
+`Parseff.parse` returns a result type with an open row: any custom variants you push with `error` appear alongside the built-in `` `Expected `` variant that comes from `fail` and combinator failures:
+
+```ocaml
+match Parseff.parse "300" number with
+| Ok n -> Printf.printf "Got %d\n" n
+| Error { pos; error = `Too_large n } ->
+    Printf.printf "Number %d too large at position %d\n" pos n
+| Error { pos; error = `Expected msg } ->
+    Printf.printf "Parse error at %d: %s\n" pos msg
+```
+
+Because OCaml's type system tracks which variants a parser can produce, the compiler warns you if you forget to handle one.
+
+### Multiple custom error cases
+
+A single parser can push different error variants for different failure modes:
 
 ```ocaml
 let number () =
@@ -136,7 +169,7 @@ match Parseff.parse "300" number with
 | Ok n -> Printf.printf "Got %d\n" n
 ```
 
-Polymorphic variants are a good middle ground. You get typed errors without the boilerplate of defining a separate error type. They work well for errors that callers need to handle differently (out of range vs. missing input vs. invalid format).
+When errors compose across parsers, the result type is the union of all variants. If parser A can produce `` `Too_large `` and parser B can produce `` `Invalid_format ``, calling both means the result type includes both — and the compiler enforces exhaustive matching on all of them.
 
 ---
 

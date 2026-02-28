@@ -2,7 +2,7 @@
 
 # Parseff
 
-Parseff is a direct-style parser combinator library for OCaml 5. Write parsers as plain functions with typed errors, streaming input, and zero-copy APIs.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed, and algebraic effects handle control flow, backtracking, and streaming input.
 
 [Documentation](https://davesnx.github.io/parseff/)
 
@@ -47,62 +47,31 @@ let () =
 
 ## Features
 
-- Build parsers with direct-style and `Parseff` combinators
-- **No** monadic operators (`>>=`, `>>|`, `*>`), **neither** binding operators (`let*`, `let+`, `and+`)
-- Automatic backtracking with `Parseff.or_`
-- Typed domain errors via polymorphic variants, raise with `Parseff.error`. Parseff also adds `` `Expected of string`` and `` `Unexpected_end_of_input`` as possible parsing failures
-- **Streaming input** with `Source.of_string`, `Source.of_channel`, `Source.of_function` -- same parser code works with both `parse` and `parse_source`
-- **Performance** -- 1.6x to 4.3x faster than Angstrom on JSON benchmarks, with 3x less memory
-- Zero-copy span APIs for low-allocation parsing (`Parseff.take_while_span`, `Parseff.sep_by_take_span`, `Parseff.fused_sep_take`, `Parseff.skip_while_then_char`)
-- Fused operations for hot paths (`Parseff.sep_by_take`, `Parseff.skip_while_then_char`)
-- Domain-safe: each `parse` / `parse_source` call is self-contained with no global mutable state, so independent parses can run in parallel across OCaml 5 domains
+- Fast: zero-copy spans, fused operations, and no monadic overhead. Up to 4\.3x faster than Angstrom on JSON parsing benchmarks
+- Build parsers with direct-style and compose with `Parseff` combinators
+- API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
+- Typed domain errors via polymorphic variants, raise with [`Parseff.error`](https://davesnx.github.io/parseff/api/primitives/#error). Parseff also adds ``Expected of string` and ``Unexpected_end_of_input` as possible parsing failures
+- Automatic backtracking with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
 - Minimal dependency footprint: only `re` for regex support
-
-## Thread Safety
-
-Parseff is safe to use from multiple OCaml 5 domains concurrently. All mutable state (the parser position, the internal buffer, the recursion depth counter) is created locally inside each `parse` or `parse_source` call and is never shared. There is no global mutable state in the library.
-
-This means you can run independent parses in parallel without synchronization:
-
-```ocaml
-let results =
-  List.init num_workers (fun i ->
-    Domain.spawn (fun () ->
-      Parseff.parse inputs.(i) my_parser))
-  |> List.map Domain.join
-```
-The only constraint is that a single `Source.t` value must not be shared across domains, since it contains mutable read state. Create a separate source per domain.
-
-
-## Comparison
-
-| Feature | Parseff | Angstrom | MParser | Opal |
-| --- | --- | --- | --- | --- |
-| API | Direct-style \+ Composition | Declarative \+ Monadic | Monadic \+ | Monadic |
-| Backtracking by default | Yes ✅ | Yes ✅ | No ❌ | No ❌ |
-| Unbounded lookahead | Yes ✅ | Yes ✅ | Yes ✅ | No ❌ |
-| Custom error types | Yes ✅ | No ❌ | No ❌ | No ❌ |
-| Zero-copy API | Yes ✅ | Yes ✅ | No ❌ | No ❌ |
-| Streaming/incremental input | Yes ✅ | Yes ✅ | No ❌ | No ❌ |
-| Requires OCaml 5+ | Yes ✅ | No ❌ | No ❌ | No ❌ |
+- Streaming support with [`Source.of_string`](https://davesnx.github.io/parseff/api/streaming/#sourceof_string), [`Source.of_channel`](https://davesnx.github.io/parseff/api/streaming/#sourceof_channel), [`Source.of_function`](https://davesnx.github.io/parseff/api/streaming/#sourceof_function)
+- Domain-safe: each [`Parseff.parse`](https://davesnx.github.io/parseff/api/overview/#parse) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- Zero-copy span APIs for low-allocation parsing ([`Parseff.take_while_span`](https://davesnx.github.io/parseff/api/zero-copy/#take_while_span), [`Parseff.sep_by_take_span`](https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take_span), [`Parseff.fused_sep_take`](https://davesnx.github.io/parseff/api/zero-copy/#fused_sep_take), [`Parseff.skip_while_then_char`](https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char))
+- Fused operations for hot paths ([`Parseff.sep_by_take`](https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take), [`Parseff.skip_while_then_char`](https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char))
 
 ## Performance
 
-Benchmarked on a JSON parser over a 10-element numeric array for 100,000 iterations:
+With equal implementations, Parseff is ~2x faster than Angstrom and MParser. With zero-copy span APIs, that gap widens to ~4x. See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for details and [bench/bench\_vs\_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark.
 
-- Parseff (zero-copy spans): ~4,940,000 parses/sec (4.3x faster than Angstrom)
-- Parseff (fair comparison): ~1,930,000 parses/sec (1.6x faster than Angstrom)
-- Angstrom: ~1,150,000 parses/sec (baseline)
-Memory: Parseff 197 MB vs Angstrom 584 MB (3x less).
+## Documentation
 
-See [bench/bench\_vs\_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark source.
-
-
-## References
-
-- [A Typed, Algebraic Approach to Parsing](https://www.cl.cam.ac.uk/~jdy22/papers/a-typed-algebraic-approach-to-parsing.pdf) by Krishnaswami & Yallop (PLDI '19)
-- [Algebraic Effects and Effect Handlers](https://okmij.org/ftp/Computation/variables-effects.html) by Kiselyov, O. et al.
-- [yieldparser](https://github.com/JavaScriptRegenerated/yieldparser): JavaScript generator-based parsing
+- [Quick start](https://davesnx.github.io/parseff/quick-start/)
+- [API overview](https://davesnx.github.io/parseff/api/overview/)
+- [Your first parser](https://davesnx.github.io/parseff/guides/first-parser/)
+- [Error handling](https://davesnx.github.io/parseff/guides/errors/)
+- [Making parsers fast](https://davesnx.github.io/parseff/guides/optimization/)
+- [Comparison with Angstrom](https://davesnx.github.io/parseff/guides/comparison/)
+- [A JSON parser](https://davesnx.github.io/parseff/examples/json-parser/)
+- [Expressions with precedence](https://davesnx.github.io/parseff/examples/expression-parser/)
 
 ## Contributing
 

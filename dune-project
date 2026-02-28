@@ -19,9 +19,9 @@
 
 (package
  (name parseff)
- (synopsis "Direct-style parser combinator library for OCaml 5")
+ (synopsis "Direct-style parser combinator library for OCaml 5 powered by algebraic effects")
   (description
-   "Parseff is a direct-style parser combinator library for OCaml 5. Write parsers as plain functions with typed errors, streaming input, and zero-copy APIs.")
+   "Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and algebraic effects handle control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.")
  (depends
   (ocaml
    (>= 5.3))
