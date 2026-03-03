@@ -1,5 +1,5 @@
 ---
-title: API Overview
+title: Overview
 description: Parseff API reference, covering types, runner, and organization
 ---
 
@@ -141,7 +141,7 @@ let digits () =
 |---------|------------|
 | [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `take_while1`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
 | [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `rec_` |
-| [Repetition & Separation](/parseff/api/repetition) | `many`, `many1`, `count`, `sep_by`, `sep_by1`, `between`, `end_by`, `end_by1`, `chainl`, `chainl1`, `chainr`, `chainr1` |
+| [Repetition and separation](/parseff/api/repetition) | `many`, `many1`, `count`, `sep_by`, `sep_by1`, `between`, `end_by`, `end_by1`, `chainl`, `chainl1`, `chainr`, `chainr1` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `whitespace1`, `skip_whitespace` |
-| [Zero-Copy & Fused Ops](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char` |
+| [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char` |
 | [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source` |

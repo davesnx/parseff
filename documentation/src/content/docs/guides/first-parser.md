@@ -5,41 +5,15 @@ description: Build a config file parser from scratch, learning Parseff along the
 
 ## Why parser combinators?
 
-Say you're building a tool that reads a custom log format. Each line looks like this:
-
-```
-[2024-03-15 14:32:01] INFO server: Request completed in 234ms (user_id=42, path="/api/users")
-```
-
-You need to extract the timestamp, level, source, message, and those key-value pairs in parentheses. The key-value pairs are optional, and there can be any number of them.
-
-Here's what a regex might look like:
-
-```ocaml
-let pattern = {|\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (\w+) (\w+): (.+?)(?:\s+\((.+)\))?$|}
-```
-
-Quick: what does `(?:\s+\((.+)\))?$` match? Even if you wrote this yesterday, you'd need to trace through it character by character. This is *write-only code*. Easy enough to produce when you're in the zone, nearly impossible to read later.
-
-And it only gets worse. Add support for nested parentheses in values, handle escaped quotes, make the timestamp format flexible, add meaningful error messages when parsing fails. Each change means editing that dense string and hoping you don't break something else. There's no way to test the "timestamp part" in isolation. It's all or nothing. When it fails, you get "no match." Good luck figuring out *where* it went wrong.
-
-### The core idea
-
-Parser combinators fix this with divide-and-conquer. Instead of one big regex that matches everything, you write tiny parsers that each handle one thing, then compose them together.
-
-Think of it like functions. You wouldn't write one giant function that does everything. You write small functions and compose them. Parser combinators are the same idea applied to parsing.
-
-A parser is a function that takes some input, tries to match something at the current position, and either succeeds or fails. When it succeeds, it returns what it matched and advances past it. The remaining input is what makes composition possible: one parser consumes its piece, then the next parser picks up where it left off.
+Parser combinators let you write small parsers that each handle one thing, then compose them. Instead of a single regex that's hard to read, test, and extend, you get modular pieces with clear error messages.
 
 There are three ways to compose parsers:
 
-- **Sequence**: parse A, then parse B
-- **Choice**: try A, if it fails try B
-- **Repetition**: parse A zero or more times
+- **Sequence**: parse A, then parse B (`let` bindings)
+- **Choice**: try A, if it fails try B (`Parseff.or_`)
+- **Repetition**: parse A zero or more times (`Parseff.many`)
 
-Everything else is built from these three. In Parseff, sequence is `let` bindings, choice is `Parseff.or_`, and repetition is `Parseff.many`.
-
-This tutorial builds a real parser from scratch so you can see these ideas in practice. We'll parse a key-value config format, adding one feature at a time.
+This tutorial builds a key-value config file parser from scratch, adding one feature at a time.
 
 ## The format
 

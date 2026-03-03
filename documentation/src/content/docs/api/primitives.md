@@ -104,12 +104,8 @@ let uppercase () =
 </div>
 
 :::caution[Error Messages]
-The label parameter is shown in error messages. Choose descriptive labels for better errors:
+The label parameter is shown in error messages. Prefer descriptive labels:
 ```ocaml
-(* BAD: *)
-Parseff.satisfy is_digit ~label:"char"  (* Error: expected 'char' *)
-
-(* GOOD: *)
 Parseff.satisfy is_digit ~label:"digit"  (* Error: expected 'digit' *)
 ```
 :::
@@ -150,18 +146,6 @@ let identifier () =
 ```
 
 </div>
-
-:::tip[Performance]
-`take_while` is **much faster** than regex for simple character class matching. Use it instead of `match_regex` when possible.
-
-```ocaml
-(* SLOW: *)
-let digits = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
-
-(* FAST: *)
-let digits = Parseff.take_while (fun c -> c >= '0' && c <= '9')
-```
-:::
 
 ---
 
@@ -221,18 +205,8 @@ let csv_value () =
 
 </div>
 
-:::tip[Use skip_while when possible]
-If you don't need the matched string, use `skip_while` instead of `take_while` for better performance:
-
-```ocaml
-(* UNNECESSARY ALLOCATION: *)
-let _ = Parseff.take_while is_space in
-do_something ()
-
-(* BETTER: *)
-Parseff.skip_while is_space;
-do_something ()
-```
+:::tip
+If you don't need the matched string, prefer `skip_while` over `take_while` to avoid allocating.
 :::
 
 ---
@@ -251,44 +225,25 @@ Matches a compiled regular expression. The regex must be compiled with `Re.compi
 
 **Example:**
 ```ocaml
-(* BAD: Compiles regex on every call *)
-let number () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
-  Parseff.match_regex re
-
-(* GOOD: Compiles once at module initialization *)
+(* Pre-compile at module level. Never inside a parser function *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 
-(* Parse email address *)
 let email_re = Re.compile (Re.Posix.re "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
 let email () = Parseff.match_regex email_re
-
-(* "user@example.com" -> "user@example.com" *)
 ```
 
 </div>
 
 :::danger[Performance Critical]
-**Always pre-compile regexes at module level!** Compiling regexes is expensive. Never compile inside a parser function.
+**Always pre-compile regexes at module level.** Compiling inside a parser function recompiles on every call (100x+ slower). For simple character classes, prefer `take_while` which avoids regex overhead entirely:
 
 ```ocaml
-(* BAD: compiles on every parse *)
-let number () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
-  Parseff.match_regex re
-
-(* GOOD: compiles once *)
+(* Regex. Use for complex patterns (alternation, grouping) *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
-```
 
-Consider using `take_while` instead of regex for simple patterns:
-```ocaml
-(* Instead of: *)
-let number () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
-
-(* Use: *)
+(* take_while. No regex overhead for simple predicates *)
 let number () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
 :::

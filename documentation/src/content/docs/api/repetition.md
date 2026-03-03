@@ -1,5 +1,5 @@
 ---
-title: Repetition & Separation
+title: Repetition and separation
 description: Looping constructs for parsing repeated and separated patterns
 ---
 

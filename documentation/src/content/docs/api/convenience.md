@@ -1,5 +1,5 @@
 ---
-title: Convenience Combinators
+title: Convenience combinators
 description: Common parsing patterns made easy
 ---
 
@@ -199,43 +199,18 @@ let flexible_list () =
 Always use `skip_whitespace` instead of `whitespace` when you don't need the matched string:
 
 ```ocaml
-(* SLOWER: *)
+(* allocates a string you don't need *)
 let _ = Parseff.whitespace () in
 parse_value ()
 
-(* FASTER: *)
+(* skips without allocating *)
 Parseff.skip_whitespace ();
 parse_value ()
 ```
 :::
 
----
 
-## Complete Example: Expression Parser
 
-```ocaml
-let number () =
-  let digits = Parseff.many1 Parseff.digit () in
-  List.fold_left (fun acc d -> acc * 10 + d) 0 digits
-
-let addition () =
-  Parseff.skip_whitespace ();
-  let first = number () in
-  Parseff.skip_whitespace ();
-  let rest = Parseff.many (fun () ->
-    let _ = Parseff.char '+' in
-    Parseff.skip_whitespace ();
-    let n = number () in
-    Parseff.skip_whitespace ();
-    n
-  ) () in
-  Parseff.end_of_input ();
-  List.fold_left (+) first rest
-
-let () =
-  match Parseff.parse "1 + 2 + 3" addition with
-  | Ok result -> Printf.printf "Result: %d\n" result
-  | Error { pos; error = `Expected expected } -> Printf.printf "Error at %d: %s\n" pos expected
-```
+For a complete example using these combinators together, see the [Expression Parser](/parseff/examples/expression-parser) walkthrough.
 
 

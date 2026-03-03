@@ -44,9 +44,10 @@ factor = number | '(' expr ')'    ← atomic values and grouping
 
 Each level calls the next one for its operands. This structure guarantees that `*` binds tighter than `+` without any explicit precedence tables.
 
-## The complete parser
+## The parser
 
 ```ocaml
+(* Addition level: lowest precedence *)
 let rec expr () =
   let left = term () in
   let rest =
@@ -60,6 +61,7 @@ let rec expr () =
   in
   List.fold_left (fun acc t -> Add (acc, t)) left rest
 
+(* Multiplication level: higher precedence *)
 and term () =
   let left = factor () in
   let rest =
@@ -73,6 +75,7 @@ and term () =
   in
   List.fold_left (fun acc f -> Mul (acc, f)) left rest
 
+(* Atoms and parenthesized groups *)
 and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
@@ -89,68 +92,9 @@ and factor () =
     ()
 ```
 
-## Breaking it down
+Each precedence level calls the next one for its operands. `expr` parses `term (('+' term)*)`, `term` parses `factor (('*' factor)*)`, and `factor` handles numbers and parenthesized sub-expressions. Because `term` is called from within `expr`, multiplication binds tighter than addition.
 
-### `expr`: the addition level
-
-```ocaml
-let rec expr () =
-  let left = term () in
-  let rest =
-    Parseff.many
-      (fun () ->
-        Parseff.skip_whitespace ();
-        let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
-        Parseff.skip_whitespace ();
-        term ())
-      ()
-  in
-  List.fold_left (fun acc t -> Add (acc, t)) left rest
-```
-
-First, parse a `term` (which handles multiplication). Then, `many` collects zero or more `+ term` pairs. The `fold_left` builds left-associative `Add` nodes: `1+2+3` becomes `Add(Add(Num 1, Num 2), Num 3)`.
-
-The `many` loop keeps consuming as long as it sees a `+`. When it doesn't (say, it hits `)` or the end of input), `many` succeeds with whatever it collected and returns.
-
-### `term`: the multiplication level
-
-```ocaml
-and term () =
-  let left = factor () in
-  let rest =
-    Parseff.many
-      (fun () ->
-        Parseff.skip_whitespace ();
-        let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
-        Parseff.skip_whitespace ();
-        factor ())
-      ()
-  in
-  List.fold_left (fun acc f -> Mul (acc, f)) left rest
-```
-
-Same structure as `expr`, but one level down. It calls `factor` for operands and builds `Mul` nodes. Because `term` is called from within `expr`, multiplication binds tighter than addition.
-
-### `factor`: atoms and parentheses
-
-```ocaml
-and factor () =
-  Parseff.skip_whitespace ();
-  Parseff.or_
-    (fun () ->
-      let _ = Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(') in
-      Parseff.skip_whitespace ();
-      let e = expr () in
-      Parseff.skip_whitespace ();
-      let _ = Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')') in
-      e)
-    (fun () ->
-      let d = Parseff.expect "a number" Parseff.digit in
-      Num d)
-    ()
-```
-
-This is the base case. It's either a parenthesized expression (which calls back into `expr`, creating the recursion) or a bare number. `or_` tries the parenthesized path first; if it doesn't start with `(`, it backtracks and tries a digit.
+`many` collects zero or more operator-operand pairs, and `fold_left` builds left-associative AST nodes: `1+2+3` becomes `Add(Add(Num 1, Num 2), Num 3)`. `or_` in `factor` tries the parenthesized path first; if the input doesn't start with `(`, it backtracks and tries a digit.
 
 ## How `expect` improves errors
 

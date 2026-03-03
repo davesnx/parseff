@@ -1,5 +1,5 @@
 ---
-title: Zero-Copy API
+title: Zero-copy API
 description: High-performance span-based parsing operations
 ---
 
@@ -29,13 +29,13 @@ Like `take_while`, but returns a zero-copy span instead of allocating a string.
 
 **Example:**
 ```ocaml
-(* Without span - allocates string *)
+(* allocates a string *)
 let digits = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
-let n = int_of_string digits  (* uses allocated string *)
+let n = int_of_string digits
 
-(* With span - no allocation until needed *)
+(* no allocation until you need it *)
 let digits = Parseff.take_while_span (fun c -> c >= '0' && c <= '9') in
-let n = int_of_span digits  (* custom function, no intermediate string *)
+let n = int_of_span digits
 ```
 
 **Real-world usage:**
@@ -77,7 +77,7 @@ let csv_line () =
   (* Only allocate strings when needed *)
   List.map Parseff.span_to_string spans
 
-(* Even better - process spans directly *)
+(* or process spans directly, avoiding string allocation entirely *)
 let csv_to_ints () =
   let spans = Parseff.sep_by_take_span Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
   List.map int_of_span spans
@@ -95,14 +95,14 @@ Performs: skip whitespace, match separator, skip whitespace, take_while1, all in
 
 **Example:**
 ```ocaml
-(* Inefficient - multiple effect dispatches *)
+(* multiple effect dispatches *)
 let parse_value () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   Parseff.skip_whitespace ();
   Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
-(* Efficient - single effect dispatch *)
+(* single effect dispatch *)
 let parse_value () =
   Parseff.fused_sep_take Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9')
 ```
@@ -119,13 +119,13 @@ Skips characters matching predicate, then matches a character. Fused operation f
 
 **Example:**
 ```ocaml
-(* Inefficient: two effect dispatches *)
+(* two effect dispatches *)
 let skip_ws_then_comma () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   ()
 
-(* Efficient: single fused effect dispatch *)
+(* single fused dispatch *)
 let skip_ws_then_comma () =
   Parseff.skip_while_then_char Parseff.is_whitespace ','
 ```
@@ -159,7 +159,7 @@ let array_values () =
 ### String Allocation
 
 ```ocaml
-(* Standard API - allocates intermediate strings *)
+(* allocates intermediate strings *)
 let parse_numbers () =
   Parseff.sep_by
     (fun () ->
@@ -170,7 +170,7 @@ let parse_numbers () =
     (fun () -> Parseff.char ',')
     ()
 
-(* Zero-copy API - no allocations until conversion *)
+(* no allocations until conversion *)
 let parse_numbers_fast () =
   let spans = Parseff.sep_by_take_span Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9') in
   List.map int_of_span spans
@@ -179,14 +179,14 @@ let parse_numbers_fast () =
 ### Effect Dispatches
 
 ```ocaml
-(* Multiple effects - slower *)
+(* multiple dispatches *)
 let value () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   Parseff.skip_whitespace ();
     Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
-(* Single effect - faster *)
+(* single dispatch *)
 let value () =
   Parseff.fused_sep_take Parseff.is_whitespace ',' (fun c -> c >= '0' && c <= '9')
 ```

@@ -86,8 +86,6 @@ let () =
       Printf.printf "Error at %d: %d out of range (0-255)\n" pos n
   | Error { pos; error = `Expected msg } ->
       Printf.printf "Error at %d: %s\n" pos msg
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "Error at %d: unexpected end of input\n" pos
 ```
 
 A few things to notice:
@@ -98,9 +96,9 @@ A few things to notice:
 
 ## Learn more
 
-- **[Your First Parser](/parseff/guides/first-parser)**: a hands-on tutorial that walks through every concept from matching characters to building a complete parser
 - **[API Reference](/parseff/api/overview)**: all combinators and their signatures
-- **[Parsing an IP Address](/parseff/examples/ip-address)**: a detailed breakdown of the parser above with error handling variations
-- **[A JSON Parser](/parseff/examples/json-parser)**: recursive descent, mutual recursion, and depth limiting
-- **[Error Handling](/parseff/guides/errors)**: custom error types, `expect`, and labeled alternation
+- **[Error Handling](/parseff/api/errors)**: custom error types, `expect`, and labeled alternation
 - **[Comparison with Angstrom](/parseff/guides/comparison)**: benchmarks, API comparison, and migration guide
+- **[Guide: Your first parser](/parseff/guides/first-parser)**: a hands-on tutorial
+- **[Example: parsing an IP Address](/parseff/examples/ip-address)**: a detailed breakdown of the parser above with error handling variations
+- **[Example: A JSON Parser](/parseff/examples/json-parser)**: recursive descent, mutual recursion, and depth limiting

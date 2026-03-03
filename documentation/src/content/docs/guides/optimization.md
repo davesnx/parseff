@@ -12,12 +12,12 @@ This guide covers practical techniques for getting the most performance out of P
 Compile regexes once at module level, not inside parser functions:
 
 ```ocaml
-(* Slow: compiles on every call *)
+(* compiles on every call -- don't do this *)
 let number () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
   Parseff.match_regex re
 
-(* Fast: compiles once at module init *)
+(* compile once at module level *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 ```
@@ -31,10 +31,10 @@ let number () = Parseff.match_regex number_re
 For simple character classes, `take_while` runs a tight loop with no regex overhead:
 
 ```ocaml
-(* Slow: regex *)
+(* with regex *)
 let digits () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
 
-(* Fast: direct scanning *)
+(* with take_while -- no regex overhead *)
 let digits () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
 
@@ -47,11 +47,11 @@ let digits () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digi
 When you just need to move past whitespace:
 
 ```ocaml
-(* Wasteful: allocates a string you discard *)
+(* allocates a string you immediately discard *)
 let _ = Parseff.whitespace () in
 parse_value ()
 
-(* Efficient: skips without allocation *)
+(* skips without allocation *)
 Parseff.skip_whitespace ();
 parse_value ()
 ```
@@ -65,14 +65,14 @@ parse_value ()
 Combined operations dispatch a single effect instead of multiple:
 
 ```ocaml
-(* Slow: 4 effect dispatches *)
+(* 4 effect dispatches *)
 Parseff.skip_whitespace ();
 let _ = Parseff.char ',' in
 Parseff.skip_whitespace ();
 let value = Parseff.take_while1 is_digit ~label:"digit" in
 ...
 
-(* Fast: 1 effect dispatch *)
+(* 1 effect dispatch *)
 let value = Parseff.fused_sep_take is_whitespace ',' is_digit
 ```
 
@@ -94,14 +94,14 @@ Available fused operations:
 Avoid intermediate string allocations when you can work with slices:
 
 ```ocaml
-(* Slow: allocates strings *)
+(* allocates a string per element *)
 let parse_values () =
   Parseff.sep_by
     (fun () -> int_of_string (Parseff.take_while1 is_digit ~label:"digit"))
     (fun () -> Parseff.char ',')
     ()
 
-(* Fast: zero-copy spans *)
+(* zero-copy: spans point into the original buffer *)
 let parse_values () =
   let spans = Parseff.sep_by_take_span is_whitespace ',' is_digit in
   List.map int_of_span spans
@@ -120,7 +120,7 @@ See the [Zero-copy API reference](/parseff/api/zero-copy) for more details.
 Each `or_` installs an effect handler for backtracking. In a `many` loop that runs thousands of times, this overhead compounds:
 
 ```ocaml
-(* Expensive: handler per alternation, per iteration *)
+(* installs a handler per alternation, per iteration *)
 let keyword () =
   Parseff.or_
     (fun () -> Parseff.consume "class")
@@ -131,7 +131,7 @@ let keyword () =
         ())
     ()
 
-(* Better: parse then validate *)
+(* parse then validate -- no backtracking overhead *)
 let keyword () =
   let w = Parseff.take_while1 (fun c -> c >= 'a' && c <= 'z') ~label:"keyword" in
   match w with
@@ -151,14 +151,14 @@ let keyword () =
 Handler-level operations run entirely inside the effect handler, avoiding the overhead of dispatching multiple effects:
 
 ```ocaml
-(* Standard: good *)
+(* using combinators *)
 let parse_list () =
   Parseff.sep_by
     (fun () -> int_of_string (Parseff.take_while1 is_digit ~label:"digit"))
     (fun () -> Parseff.char ',')
     ()
 
-(* Handler-level: better *)
+(* runs the entire scan in one operation *)
 let parse_list () =
   Parseff.sep_by_take is_whitespace ',' is_digit
   |> List.map int_of_string
