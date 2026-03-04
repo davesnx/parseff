@@ -33,13 +33,7 @@ export default defineConfig({
 				'./src/styles/custom.css',
 			],
 			sidebar: [
-				{
-					label: 'Documentation',
-					items: [
-						{ label: 'Quick start', slug: 'index' },
-						{ label: 'API overview', slug: 'api/overview' },
-					],
-				},
+				{ label: 'Quick start', slug: 'index' },
 				{
 			label: 'API reference',
 				items: [
@@ -48,6 +42,7 @@ export default defineConfig({
 					{ label: 'Repetition and separation', slug: 'api/repetition' },
 					{ label: 'Convenience', slug: 'api/convenience' },
 					{ label: 'Error handling', slug: 'api/errors' },
+					{ label: 'Diagnostics', slug: 'api/diagnostics' },
 					{ label: 'Zero-copy and fused operations', slug: 'api/zero-copy' },
 					{ label: 'Streaming', slug: 'api/streaming' },
 				],
@@ -55,21 +50,15 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-				{ label: 'Your first parser', slug: 'guides/first-parser' },
-					{ label: 'Error accumulation', slug: 'guides/error-accumulation' },
+						{ label: 'Your first parser', slug: 'guides/first-parser' },
 						{ label: 'Making parsers fast', slug: 'guides/optimization' },
 						{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
+						{ label: 'Parsing an IP address', slug: 'guides/ip-address' },
+						{ label: 'A JSON parser', slug: 'guides/json-parser' },
+						{ label: 'Expressions with precedence', slug: 'guides/expression-parser' },
 					],
 				},
-				{
-					label: 'Examples',
-					items: [
-						{ label: 'Parsing an IP address', slug: 'examples/ip-address' },
-						{ label: 'A JSON parser', slug: 'examples/json-parser' },
-						{ label: 'Expressions with precedence', slug: 'examples/expression-parser' },
-					],
-				},
-				{ label: 'Credits', slug: 'guides/credits' },
+				{ label: 'Credits', slug: 'credits' },
 			],
 		}),
 	],

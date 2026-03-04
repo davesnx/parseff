@@ -9,11 +9,11 @@ Combinators compose simple parsers into more complex ones. They handle alternati
 
 ### `or_`
 
+Tries the left parser. If it fails, backtracks (resets the cursor) and tries the right parser.
+
 ```ocaml
 val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 ```
-
-Tries the left parser. If it fails, backtracks (resets the cursor) and tries the right parser.
 
 ```ocaml
 let bool_parser () =
@@ -31,8 +31,7 @@ On `"maybe"`, the left branch fails at position 0 (expected `"true"`, got `"m"`)
 `or_` is ideal for two alternatives. When you have more, use [`one_of`](#one_of), which takes a list and avoids nested `or_` calls:
 
 ```ocaml
-(* With nested or_: works but gets awkward with many alternatives *)
-let keyword () =
+let keyword_with_or () =
   Parseff.or_
     (fun () -> Parseff.consume "let")
     (fun () ->
@@ -42,8 +41,7 @@ let keyword () =
         ())
     ()
 
-(* With one_of: cleaner, easier to extend *)
-let keyword () =
+let keyword_with_one_of () =
   Parseff.one_of
     [ (fun () -> Parseff.consume "let")
     ; (fun () -> Parseff.consume "const")
@@ -55,11 +53,11 @@ let keyword () =
 
 ### `one_of`
 
+Tries each parser in order until one succeeds. Equivalent to chaining `or_`, but cleaner for more than two alternatives.
+
 ```ocaml
 val one_of : (unit -> 'a) list -> unit -> 'a
 ```
-
-Tries each parser in order until one succeeds. Equivalent to chaining `or_`, but cleaner for more than two alternatives.
 
 ```ocaml
 let json_value () =
@@ -81,11 +79,11 @@ If all parsers fail, `one_of` fails with the error from the last parser attempte
 
 ### `one_of_labeled`
 
+Like `one_of`, but each parser has a label. On failure, the error message reports all labels:
+
 ```ocaml
 val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 ```
-
-Like `one_of`, but each parser has a label. On failure, the error message reports all labels:
 
 ```ocaml
 let literal () =
@@ -105,11 +103,11 @@ This gives users a clear picture of what was expected at a given position, witho
 
 ### `optional`
 
+Tries the parser. Returns `Some result` on success, `None` on failure (without consuming input).
+
 ```ocaml
 val optional : (unit -> 'a) -> unit -> 'a option
 ```
-
-Tries the parser. Returns `Some result` on success, `None` on failure (without consuming input).
 
 ```ocaml
 let signed_number () =
@@ -128,11 +126,11 @@ let signed_number () =
 
 ### `look_ahead`
 
+Runs a parser without consuming input. The cursor stays where it was before the call. Fails if the parser fails.
+
 ```ocaml
 val look_ahead : (unit -> 'a) -> 'a
 ```
-
-Runs a parser without consuming input. The cursor stays where it was before the call. Fails if the parser fails.
 
 ```ocaml
 let peek_open_paren () =
@@ -149,11 +147,11 @@ Useful for context-sensitive decisions: peek at what's coming, then choose which
 
 ### `expect`
 
+Run a parser and relabel its failure with a clearer message.
+
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
 ```
-
-Runs a parser. If it fails, replaces the error message with the given description. Reads naturally: "expect a digit", "expect a closing bracket".
 
 ```ocaml
 let dot () =
@@ -163,9 +161,8 @@ let digit_val () =
   Parseff.expect "a digit (0-9)" Parseff.digit
 ```
 
-Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`. The difference matters when users see these messages.
-
-Use `expect` at the boundaries of your parser, at the points where a user-facing description makes more sense than a raw token name:
+Use `expect` at grammar boundaries where user-facing wording is better than raw
+token names:
 
 ```ocaml
 let ip_address () =
@@ -180,17 +177,20 @@ let ip_address () =
   (a, b, c, d)
 ```
 
+Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it
+reports `expected a dot separator`.
+
 ---
 
 ## Recursion
 
 ### `rec_`
 
+Marks a recursive entry point for depth tracking. Wrap the body of recursive parsers with `rec_` so that `parse ~max_depth` can fail cleanly instead of overflowing the stack.
+
 ```ocaml
 val rec_ : (unit -> 'a) -> 'a
 ```
-
-Marks a recursive entry point for depth tracking. Wrap the body of recursive parsers with `rec_` so that `parse ~max_depth` can fail cleanly instead of overflowing the stack.
 
 ```ocaml
 let rec json () =
@@ -227,5 +227,3 @@ When the limit is exceeded, parsing fails with `"maximum nesting depth N exceede
 :::tip
 Only wrap the top-level recursive entry point with `rec_`. You don't need it on every mutually recursive function, just the one that represents "entering a new nesting level".
 :::
-
-

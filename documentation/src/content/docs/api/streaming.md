@@ -7,6 +7,8 @@ The streaming API lets you parse input that isn't fully available upfront: files
 
 ## `parse_source`
 
+Runs a parser pulling input from a `Source.t` on demand. Behaves identically to `parse`: same parsers, same result type, same error handling.
+
 ```ocaml
 val parse_source :
   ?max_depth:int ->
@@ -14,8 +16,6 @@ val parse_source :
   (unit -> 'a) ->
   ('a, [> `Expected of string | `Unexpected_end_of_input]) result
 ```
-
-Runs a parser pulling input from a `Source.t` on demand. Behaves identically to `parse`: same parsers, same result type, same error handling.
 
 ```ocaml
 let ic = open_in "data.json" in
@@ -27,6 +27,34 @@ result
 
 The `~max_depth` parameter works the same as in `parse`.
 
+## `parse_source_until_end`
+
+Runs a parser from a `Source.t`, enforces full input consumption implicitly, and
+returns diagnostics in both cases:
+
+- `Ok (value, diagnostics)` on success
+- `Error { pos; error; diagnostics }` on failure
+
+```ocaml
+val parse_source_until_end :
+  ?max_depth:int ->
+  Source.t ->
+  (unit -> 'a) ->
+  ('a, [> `Expected of string | `Unexpected_end_of_input], 'd)
+  result_with_diagnostics
+```
+
+Use this when you want complete parsing and non-fatal validation diagnostics in
+one run. See [Diagnostics](/parseff/api/diagnostics).
+
+```ocaml
+let ic = open_in "data.json" in
+let source = Parseff.Source.of_channel ic in
+let outcome = Parseff.parse_source_until_end source json in
+close_in ic;
+outcome
+```
+
 ---
 
 ## The Source module
@@ -35,11 +63,11 @@ The `~max_depth` parameter works the same as in `parse`.
 
 ### `Source.of_string`
 
+Creates a source from a complete string. Useful for testing streaming code paths with known input:
+
 ```ocaml
 val of_string : string -> Source.t
 ```
-
-Creates a source from a complete string. Useful for testing streaming code paths with known input:
 
 ```ocaml
 let source = Parseff.Source.of_string "[1, 2, 3]" in
@@ -48,11 +76,11 @@ Parseff.parse_source source json_array
 
 ### `Source.of_channel`
 
+Creates a source that reads from an `in_channel`. The `~buf_size` parameter controls the internal read buffer (default: 4096 bytes).
+
 ```ocaml
 val of_channel : ?buf_size:int -> in_channel -> Source.t
 ```
-
-Creates a source that reads from an `in_channel`. The `~buf_size` parameter controls the internal read buffer (default: 4096 bytes).
 
 ```ocaml
 let ic = open_in "large_dataset.json" in
@@ -66,11 +94,11 @@ A larger buffer means fewer system calls but more memory. For most files, the de
 
 ### `Source.of_function`
 
+Creates a source from a custom read function. The function signature is `read buf off len`. Fill `buf` starting at `off` with up to `len` bytes, and return the number of bytes written. Return `0` to signal EOF.
+
 ```ocaml
 val of_function : (bytes -> int -> int -> int) -> Source.t
 ```
-
-Creates a source from a custom read function. The function signature is `read buf off len`. Fill `buf` starting at `off` with up to `len` bytes, and return the number of bytes written. Return `0` to signal EOF.
 
 ```ocaml
 (* Unix file descriptor *)

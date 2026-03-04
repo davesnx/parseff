@@ -355,6 +355,143 @@ let test_count_insufficient () =
   | Ok _ -> Alcotest.fail "Expected failure"
   | Error _ -> ()
 
+let test_parse_non_enforcing () =
+  match Parseff.parse "abcXYZ" (fun () -> Parseff.consume "abc") with
+  | Ok s -> Alcotest.(check string) "parsed prefix" "abc" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_parse_until_end_requires_eof () =
+  let outcome =
+    Parseff.parse_until_end "abcXYZ" (fun () -> Parseff.consume "abc")
+  in
+  match outcome with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected _; diagnostics } ->
+      Alcotest.(check int) "error position" 3 pos;
+      Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_parse_until_end_collects_diagnostics () =
+  let parser () =
+    Parseff.warn "start";
+    let _ = Parseff.consume "ok" in
+    Parseff.warn_at ~pos:0 "forced";
+    42
+  in
+  let outcome = Parseff.parse_until_end "ok" parser in
+  match outcome with
+  | Ok (n, diagnostics) ->
+      Alcotest.(check int) "value" 42 n;
+      let got =
+        List.map
+          (fun ({ pos; diagnostic } : string Parseff.diagnostic) ->
+            (pos, diagnostic))
+          diagnostics
+      in
+      Alcotest.(check (list (pair int string)))
+        "diagnostics"
+        [ (0, "start"); (0, "forced") ]
+        got
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_diagnostics_rollback_on_or () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        Parseff.warn "left";
+        Parseff.consume "x")
+      (fun () ->
+        Parseff.warn "right";
+        Parseff.consume "b")
+      ()
+  in
+  let outcome = Parseff.parse_until_end "b" parser in
+  match outcome with
+  | Ok (_, diagnostics) ->
+      let got =
+        List.map
+          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
+          diagnostics
+      in
+      Alcotest.(check (list string)) "only right diagnostic" [ "right" ] got
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_diagnostics_rollback_on_look_ahead () =
+  let parser () =
+    let _ =
+      Parseff.look_ahead (fun () ->
+          Parseff.warn "peek";
+          Parseff.consume "a")
+    in
+    Parseff.consume "a"
+  in
+  let outcome = Parseff.parse_until_end "a" parser in
+  match outcome with
+  | Ok (_, diagnostics) ->
+      Alcotest.(check int) "no leaked diagnostics" 0 (List.length diagnostics)
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_diagnostics_rollback_on_many_stop () =
+  let parser () =
+    let ds =
+      Parseff.many
+        (fun () ->
+          Parseff.warn "iter";
+          Parseff.digit ())
+        ()
+    in
+    let _ = Parseff.char 'a' in
+    ds
+  in
+  let outcome = Parseff.parse_until_end "12a" parser in
+  match outcome with
+  | Ok (ds, diagnostics) ->
+      Alcotest.(check (list int)) "digits" [ 1; 2 ] ds;
+      Alcotest.(check int)
+        "only successful iterations" 2 (List.length diagnostics)
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_error_contains_diagnostics () =
+  let outcome =
+    Parseff.parse_until_end "y" (fun () ->
+        Parseff.warn "before-failure";
+        Parseff.consume "x")
+  in
+  match outcome with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected _; diagnostics } ->
+      Alcotest.(check int) "error position" 0 pos;
+      let got =
+        List.map
+          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
+          diagnostics
+      in
+      Alcotest.(check (list string))
+        "diagnostics preserved" [ "before-failure" ] got
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_parse_until_end_preserves_end_of_input_semantics () =
+  let ok_outcome =
+    Parseff.parse_until_end "a" (fun () ->
+        let _ = Parseff.char 'a' in
+        Parseff.end_of_input ();
+        "ok")
+  in
+  (match ok_outcome with
+  | Ok (s, _) -> Alcotest.(check string) "explicit eof still works" "ok" s
+  | Error _ -> Alcotest.fail "Expected success");
+  let fail_outcome =
+    Parseff.parse_until_end "ab" (fun () ->
+        let _ = Parseff.char 'a' in
+        Parseff.end_of_input ();
+        "unreachable")
+  in
+  match fail_outcome with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected _; _ } ->
+      Alcotest.(check int) "fails at explicit eof position" 1 pos
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
 let () =
   let open Alcotest in
   run "Parseff Primitives"
@@ -413,5 +550,22 @@ let () =
           test_case "end_of_input failure" `Quick test_end_of_input_failure;
           test_case "look_ahead success" `Quick test_look_ahead_success;
           test_case "look_ahead no consume" `Quick test_look_ahead_no_consume;
+        ] );
+      ( "diagnostics",
+        [
+          test_case "parse non-enforcing" `Quick test_parse_non_enforcing;
+          test_case "parse_until_end requires eof" `Quick
+            test_parse_until_end_requires_eof;
+          test_case "collect diagnostics" `Quick
+            test_parse_until_end_collects_diagnostics;
+          test_case "rollback on or" `Quick test_diagnostics_rollback_on_or;
+          test_case "rollback on look_ahead" `Quick
+            test_diagnostics_rollback_on_look_ahead;
+          test_case "rollback on many stop" `Quick
+            test_diagnostics_rollback_on_many_stop;
+          test_case "error includes diagnostics" `Quick
+            test_error_contains_diagnostics;
+          test_case "preserves end_of_input semantics" `Quick
+            test_parse_until_end_preserves_end_of_input_semantics;
         ] );
     ]

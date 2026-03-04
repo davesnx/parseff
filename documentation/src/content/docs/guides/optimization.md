@@ -1,50 +1,42 @@
 ---
-title: Making Parsers Fast
+title: Making parsers fast
 description: Techniques for writing high-performance parsers with Parseff
 ---
 
-This guide covers practical techniques for getting the most performance out of Parseff. Each section shows a slow pattern, a fast alternative, and the expected impact.
+This guide covers practical techniques for getting the most performance out of Parseff. Each section shows a few non-recommended slow patterns and a fast alternative with an approximate expected impact.
 
 ## Quick wins
 
 ### Pre-compile regexes
 
-Compile regexes once at module level, not inside parser functions:
+Compile regexes once at module level, not inside parser functions. Regex compilation is expensive (dozens of allocations and automaton construction per call) so hoisting it out gives roughly a 100x improvement:
 
 ```ocaml
-(* compiles on every call -- don't do this *)
 let number () =
+  (* compiles on every call *)
   let re = Re.compile (Re.Posix.re "[0-9]+") in
   Parseff.match_regex re
 
-(* compile once at module level *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 ```
-
-**Impact:** 100x+ improvement. Regex compilation is expensive, involving dozens of allocations and automaton construction per call.
 
 ---
 
 ### Use `take_while` instead of regex
 
-For simple character classes, `take_while` runs a tight loop with no regex overhead:
+For simple character classes, `take_while` runs a tight loop with no regex overhead, giving a 5–10x improvement. Use regex only when you need its pattern-matching power (alternation, repetition, grouping). For "all characters matching a predicate," `take_while` is the right tool:
 
 ```ocaml
-(* with regex *)
-let digits () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
-
-(* with take_while -- no regex overhead *)
-let digits () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+let digits_with_regex () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+let digits_with_take_while1 () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
-
-**Impact:** 5-10x improvement. Use regex only when you need its pattern-matching power (alternation, repetition, grouping). For "all characters matching a predicate," `take_while` is the right tool.
 
 ---
 
 ### Use `skip_whitespace` instead of `whitespace`
 
-When you just need to move past whitespace:
+When you just need to move past whitespace, `skip_whitespace` avoids allocating a string you'd immediately discard. The per-call saving is small, but it adds up in tight loops that skip whitespace between every token:
 
 ```ocaml
 (* allocates a string you immediately discard *)
@@ -56,13 +48,11 @@ Parseff.skip_whitespace ();
 parse_value ()
 ```
 
-**Impact:** Small per-call, but cumulative in tight loops that skip whitespace between every token.
-
 ---
 
 ### Use fused operations
 
-Combined operations dispatch a single effect instead of multiple:
+Fewer round-trips between your parser and the effect handler means less work overall. Fused operations combine several steps into one, yielding a 2–4x improvement in hot paths by doing in a single call what would otherwise require multiple:
 
 ```ocaml
 (* 4 effect dispatches *)
@@ -75,8 +65,6 @@ let value = Parseff.take_while1 is_digit ~label:"digit" in
 (* 1 effect dispatch *)
 let value = Parseff.fused_sep_take is_whitespace ',' is_digit
 ```
-
-**Impact:** 2-4x improvement in hot paths. Each effect dispatch has overhead (handler lookup, continuation management). Fusing reduces the number of dispatches.
 
 Available fused operations:
 
@@ -91,7 +79,7 @@ Available fused operations:
 
 ### Use zero-copy spans
 
-Avoid intermediate string allocations when you can work with slices:
+Avoid intermediate string allocations when you can work with slices. Spans point into the original input buffer with no allocation until you call `span_to_string`, giving a 2–3x speed improvement and roughly 3x less memory allocation:
 
 ```ocaml
 (* allocates a string per element *)
@@ -107,8 +95,6 @@ let parse_values () =
   List.map int_of_span spans
 ```
 
-**Impact:** 2-3x improvement + 3x less memory allocation. Each `take_while1` call allocates a new string via `String.sub`. Spans point into the original input buffer, with no allocation until you call `span_to_string`.
-
 See the [Zero-copy API reference](/parseff/api/zero-copy) for more details.
 
 ---
@@ -117,11 +103,11 @@ See the [Zero-copy API reference](/parseff/api/zero-copy) for more details.
 
 ### Minimize `or_` in loops
 
-Each `or_` installs an effect handler for backtracking. In a `many` loop that runs thousands of times, this overhead compounds:
+Each `or_` sets up a backtracking checkpoint, which is extra work the runtime has to do. In a `many` loop that runs thousands of times, doing less per iteration makes a real difference:
 
 ```ocaml
-(* installs a handler per alternation, per iteration *)
 let keyword () =
+  (* installs a handler per alternation, per iteration *)
   Parseff.or_
     (fun () -> Parseff.consume "class")
     (fun () ->
@@ -131,8 +117,8 @@ let keyword () =
         ())
     ()
 
-(* parse then validate -- no backtracking overhead *)
 let keyword () =
+  (* parse then validate, no backtracking *)
   let w = Parseff.take_while1 (fun c -> c >= 'a' && c <= 'z') ~label:"keyword" in
   match w with
   | "class" | "function" | "let" -> w
@@ -142,30 +128,24 @@ let keyword () =
 **When `or_` is fine:**
 - Top-level choices (not inside tight loops)
 - Complex parsers where each branch has distinct structure
-- When the number of alternatives is small (2-3)
+- When the number of alternatives is small
 
 ---
 
 ### Push work into handler-level operations
 
-Handler-level operations run entirely inside the effect handler, avoiding the overhead of dispatching multiple effects:
+The less your parser has to bounce back and forth with the effect handler, the faster it runs. Handler-level operations do the entire scan in one go instead of making repeated round-trips:
 
 ```ocaml
-(* using combinators *)
 let parse_list () =
+  (* using combinators *)
   Parseff.sep_by
     (fun () -> int_of_string (Parseff.take_while1 is_digit ~label:"digit"))
     (fun () -> Parseff.char ',')
     ()
 
-(* runs the entire scan in one operation *)
 let parse_list () =
+  (* runs the entire scan in one operation *)
   Parseff.sep_by_take is_whitespace ',' is_digit
   |> List.map int_of_string
 ```
-
-The handler-level version runs the entire separator-delimited scan in a single operation, then you map over the results.
-
----
-
-

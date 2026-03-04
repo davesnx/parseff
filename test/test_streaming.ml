@@ -472,6 +472,61 @@ let test_take_while_span_streaming () =
       Alcotest.(check int) "pos" 3 pos
   | Error _ -> Alcotest.fail "Expected success"
 
+let test_parse_source_until_end_requires_eof () =
+  let src = Parseff.Source.of_string "abcXYZ" in
+  let outcome =
+    Parseff.parse_source_until_end src (fun () -> Parseff.consume "abc")
+  in
+  match outcome with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected _; diagnostics } ->
+      Alcotest.(check int) "error position" 3 pos;
+      Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_parse_source_until_end_error_has_diagnostics () =
+  let src = chunked_source ~chunk_size:1 "x" in
+  let outcome =
+    Parseff.parse_source_until_end src (fun () ->
+        Parseff.warn "streaming-warning";
+        Parseff.consume "y")
+  in
+  match outcome with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { error = `Expected _; diagnostics; _ } ->
+      let got =
+        List.map
+          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
+          diagnostics
+      in
+      Alcotest.(check (list string))
+        "diagnostics preserved" [ "streaming-warning" ] got
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_parse_source_until_end_preserves_end_of_input_semantics () =
+  let ok_src = Parseff.Source.of_string "a" in
+  let ok_outcome =
+    Parseff.parse_source_until_end ok_src (fun () ->
+        let _ = Parseff.char 'a' in
+        Parseff.end_of_input ();
+        "ok")
+  in
+  (match ok_outcome with
+  | Ok (s, _) -> Alcotest.(check string) "explicit eof still works" "ok" s
+  | Error _ -> Alcotest.fail "Expected success");
+  let fail_src = Parseff.Source.of_string "ab" in
+  let fail_outcome =
+    Parseff.parse_source_until_end fail_src (fun () ->
+        let _ = Parseff.char 'a' in
+        Parseff.end_of_input ();
+        "unreachable")
+  in
+  match fail_outcome with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected _; _ } ->
+      Alcotest.(check int) "fails at explicit eof position" 1 pos
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
 (* }}} *)
 
 let () =
@@ -521,5 +576,11 @@ let () =
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
           test_case "consume failure" `Quick test_consume_failure_streaming;
           test_case "take_while_span" `Quick test_take_while_span_streaming;
+          test_case "parse_source_until_end requires eof" `Quick
+            test_parse_source_until_end_requires_eof;
+          test_case "parse_source_until_end error diagnostics" `Quick
+            test_parse_source_until_end_error_has_diagnostics;
+          test_case "parse_source_until_end preserves end_of_input" `Quick
+            test_parse_source_until_end_preserves_end_of_input_semantics;
         ] );
     ]

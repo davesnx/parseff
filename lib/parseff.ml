@@ -11,6 +11,8 @@ type _ Effect.t +=
   | Choose : (unit -> 'a) * (unit -> 'a) -> 'a Effect.t
   | Fail : string -> 'a Effect.t
   | Error_val : 'e -> 'a Effect.t
+  | Warn : 'd -> unit Effect.t
+  | Warn_at : int * 'd -> unit Effect.t
   | Look_ahead : (unit -> 'a) -> 'a Effect.t
   | End_of_input : unit Effect.t
   | Take_while : (char -> bool) -> string Effect.t
@@ -26,12 +28,26 @@ type _ Effect.t +=
   | Rec_ : (unit -> 'a) -> 'a Effect.t
 
 type ('a, 'e) result = Ok of 'a | Error of { pos : int; error : 'e }
+type 'd diagnostic = { pos : int; diagnostic : 'd }
+
+type ('e, 'd) error_with_diagnostics = {
+  pos : int;
+  error : 'e;
+  diagnostics : 'd diagnostic list;
+}
+
+type ('a, 'e, 'd) result_with_diagnostics =
+  ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 
 exception Parse_error of int * string
 exception User_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
-type state = { mutable input : string; mutable pos : int }
+type state = {
+  mutable input : string;
+  mutable pos : int;
+  mutable diagnostics_rev : (int * Obj.t) list;
+}
 
 (* Polymorphic record so handle_exn can be called at different types inside the
    polymorphic-recursive [go]. A plain function parameter would fix 'a. *)
@@ -250,9 +266,9 @@ let[@inline] handle_end_of_input st input_len =
 
 (* {{{ Deep handler *)
 
-let run_deep (type e) ~max_depth (handler : e exn_handler) input
-    (parser : unit -> 'a) : ('a, e) result =
-  let st = { input; pos = 0 } in
+let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
+    input (parser : unit -> 'a) : ('a, e) result =
+  let st = { input; pos = 0; diagnostics_rev = [] } in
   let input_len = String.length input in
   let nest_depth = ref 0 in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
@@ -297,22 +313,27 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
     | effect Greedy_many p, k ->
         let acc = ref [] in
         let saved = ref st.pos in
+        let saved_diagnostics = ref st.diagnostics_rev in
         let failed = ref false in
         while not !failed do
           saved := st.pos;
+          saved_diagnostics := st.diagnostics_rev;
           match go (Obj.magic p) with
           | Ok v -> acc := Obj.magic v :: !acc
           | Error _ ->
               st.pos <- !saved;
+              st.diagnostics_rev <- !saved_diagnostics;
               failed := true
         done;
         Effect.Deep.continue k (Obj.magic (List.rev !acc))
     | effect Choose (left, right), k -> (
         let saved = st.pos in
+        let saved_diagnostics = st.diagnostics_rev in
         match go (Obj.magic left) with
         | Ok v -> Effect.Deep.continue k (Obj.magic v)
         | Error _ -> (
             st.pos <- saved;
+            st.diagnostics_rev <- saved_diagnostics;
             match go (Obj.magic right) with
             | Ok v -> Effect.Deep.continue k (Obj.magic v)
             | Error e ->
@@ -322,14 +343,23 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
         Effect.Deep.discontinue k (Parse_error (st.pos, msg))
     | effect Error_val e, k ->
         Effect.Deep.discontinue k (User_error (st.pos, Obj.repr e))
+    | effect Warn d, k ->
+        st.diagnostics_rev <- (st.pos, Obj.repr d) :: st.diagnostics_rev;
+        Effect.Deep.continue k ()
+    | effect Warn_at (pos, d), k ->
+        st.diagnostics_rev <- (pos, Obj.repr d) :: st.diagnostics_rev;
+        Effect.Deep.continue k ()
     | effect Look_ahead p, k -> (
         let saved = st.pos in
+        let saved_diagnostics = st.diagnostics_rev in
         match go (Obj.magic p) with
         | Ok v ->
             st.pos <- saved;
+            st.diagnostics_rev <- saved_diagnostics;
             Effect.Deep.continue k (Obj.magic v)
         | Error e ->
             st.pos <- saved;
+            st.diagnostics_rev <- saved_diagnostics;
             Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error)))
     | effect Rec_ p, k ->
         if !nest_depth >= max_depth then
@@ -352,7 +382,12 @@ let run_deep (type e) ~max_depth (handler : e exn_handler) input
         | () -> Effect.Deep.continue k ()
         | exception exn -> Effect.Deep.discontinue k exn)
   in
-  go parser
+  Fun.protect
+    ~finally:(fun () ->
+      match diagnostics_out with
+      | Some out -> out := st.diagnostics_rev
+      | None -> ())
+    (fun () -> go parser)
 
 let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
   match
@@ -369,6 +404,45 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
   | result -> result
   | exception Depth_limit_exceeded (pos, msg) ->
       Error { pos; error = `Expected msg }
+
+let to_diagnostics diagnostics_rev =
+  List.rev_map
+    (fun (pos, diagnostic) -> { pos; diagnostic = Obj.obj diagnostic })
+    diagnostics_rev
+
+let attach_diagnostics result diagnostics =
+  match result with
+  | Ok value -> Stdlib.Ok (value, diagnostics)
+  | Error { pos; error } -> Stdlib.Error { pos; error; diagnostics }
+
+let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
+    ( 'a,
+      [> `Expected of string | `Unexpected_end_of_input ],
+      'd )
+    result_with_diagnostics =
+  let diagnostics_out = ref [] in
+  let result =
+    match
+      run_deep ~max_depth ~diagnostics_out
+        {
+          handle =
+            (function
+            | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+            | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+            | e -> raise e);
+        }
+        input
+        (fun () ->
+          let v = parser () in
+          ignore (Effect.perform End_of_input);
+          v)
+    with
+    | result -> result
+    | exception Depth_limit_exceeded (pos, msg) ->
+        Error { pos; error = `Expected msg }
+  in
+  let diagnostics = to_diagnostics !diagnostics_out in
+  attach_diagnostics result diagnostics
 
 (* }}} *)
 
@@ -627,9 +701,10 @@ let handle_end_of_input_source src st =
   if st.pos <> src.input_len then
     raise (Parse_error (st.pos, "expected end of input"))
 
-let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
-    (parser : unit -> 'a) : ('a, e) result =
-  let st = { input = src.input; pos = 0 } in
+let run_deep_source (type e) ?diagnostics_out ~max_depth
+    (handler : e exn_handler) (src : source) (parser : unit -> 'a) :
+    ('a, e) result =
+  let st = { input = src.input; pos = 0; diagnostics_rev = [] } in
   let nest_depth = ref 0 in
   let sync_to_source () = st.input <- src.input in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
@@ -684,23 +759,28 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
     | effect Greedy_many p, k ->
         let acc = ref [] in
         let saved = ref st.pos in
+        let saved_diagnostics = ref st.diagnostics_rev in
         let failed = ref false in
         while not !failed do
           saved := st.pos;
+          saved_diagnostics := st.diagnostics_rev;
           match go (Obj.magic p) with
           | Ok v -> acc := Obj.magic v :: !acc
           | Error _ ->
               st.pos <- !saved;
+              st.diagnostics_rev <- !saved_diagnostics;
               sync_to_source ();
               failed := true
         done;
         Effect.Deep.continue k (Obj.magic (List.rev !acc))
     | effect Choose (left, right), k -> (
         let saved = st.pos in
+        let saved_diagnostics = st.diagnostics_rev in
         match go (Obj.magic left) with
         | Ok v -> Effect.Deep.continue k (Obj.magic v)
         | Error _ -> (
             st.pos <- saved;
+            st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
             match go (Obj.magic right) with
             | Ok v -> Effect.Deep.continue k (Obj.magic v)
@@ -711,15 +791,24 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
         Effect.Deep.discontinue k (Parse_error (st.pos, msg))
     | effect Error_val e, k ->
         Effect.Deep.discontinue k (User_error (st.pos, Obj.repr e))
+    | effect Warn d, k ->
+        st.diagnostics_rev <- (st.pos, Obj.repr d) :: st.diagnostics_rev;
+        Effect.Deep.continue k ()
+    | effect Warn_at (pos, d), k ->
+        st.diagnostics_rev <- (pos, Obj.repr d) :: st.diagnostics_rev;
+        Effect.Deep.continue k ()
     | effect Look_ahead p, k -> (
         let saved = st.pos in
+        let saved_diagnostics = st.diagnostics_rev in
         match go (Obj.magic p) with
         | Ok v ->
             st.pos <- saved;
+            st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
             Effect.Deep.continue k (Obj.magic v)
         | Error e ->
             st.pos <- saved;
+            st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
             Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error)))
     | effect Rec_ p, k ->
@@ -743,7 +832,12 @@ let run_deep_source (type e) ~max_depth (handler : e exn_handler) (src : source)
         | () -> Effect.Deep.continue k ()
         | exception exn -> Effect.Deep.discontinue k exn)
   in
-  go parser
+  Fun.protect
+    ~finally:(fun () ->
+      match diagnostics_out with
+      | Some out -> out := st.diagnostics_rev
+      | None -> ())
+    (fun () -> go parser)
 
 module Source = struct
   type t = source
@@ -793,6 +887,36 @@ let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
   | exception Depth_limit_exceeded (pos, msg) ->
       Error { pos; error = `Expected msg }
 
+let parse_source_until_end ?(max_depth = 128) (src : Source.t)
+    (parser : unit -> 'a) :
+    ( 'a,
+      [> `Expected of string | `Unexpected_end_of_input ],
+      'd )
+    result_with_diagnostics =
+  let diagnostics_out = ref [] in
+  let result =
+    match
+      run_deep_source ~max_depth ~diagnostics_out
+        {
+          handle =
+            (function
+            | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+            | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+            | e -> raise e);
+        }
+        src
+        (fun () ->
+          let v = parser () in
+          ignore (Effect.perform End_of_input);
+          v)
+    with
+    | result -> result
+    | exception Depth_limit_exceeded (pos, msg) ->
+        Error { pos; error = `Expected msg }
+  in
+  let diagnostics = to_diagnostics !diagnostics_out in
+  attach_diagnostics result diagnostics
+
 (* }}} *)
 
 (* {{{ Combinators *)
@@ -825,6 +949,11 @@ let[@inline] fused_sep_take ws_pred sep_char take_pred =
 
 let[@inline] fail msg = Effect.perform (Fail msg)
 let[@inline] error e = Effect.perform (Error_val e)
+let[@inline] warn diagnostic = Effect.perform (Warn diagnostic)
+
+let[@inline] warn_at ~pos diagnostic =
+  Effect.perform (Warn_at (pos, diagnostic))
+
 let[@inline] position () = Effect.perform Position
 let[@inline] end_of_input () = Effect.perform End_of_input
 let[@inline] or_ p q () = Effect.perform (Choose (p, q))

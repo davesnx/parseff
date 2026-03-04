@@ -9,11 +9,11 @@ Core primitives are the building blocks of all parsers. These operations match i
 
 ### `consume`
 
+Matches an exact literal string. Returns the matched string.
+
 ```ocaml
 val consume : string -> string
 ```
-
-Matches an exact literal string. Returns the matched string.
 
 <div class="api-example">
 
@@ -36,11 +36,11 @@ let parser () =
 
 ### `char`
 
+Matches an exact character. Returns the matched character.
+
 ```ocaml
 val char : char -> char
 ```
-
-Matches an exact character. Returns the matched character.
 
 <div class="api-example">
 
@@ -72,11 +72,11 @@ Use `char` for single characters and `consume` for multi-character strings. They
 
 ### `satisfy`
 
+Matches a character satisfying the given predicate. The `~label` parameter is used in error messages.
+
 ```ocaml
 val satisfy : (char -> bool) -> label:string -> char
 ```
-
-Matches a character satisfying the given predicate. The `~label` parameter is used in error messages.
 
 <div class="api-example">
 
@@ -118,11 +118,11 @@ These operations scan multiple characters efficiently.
 
 ### `take_while`
 
+Consumes characters while the predicate holds. Returns the matched string (may be empty). Always succeeds.
+
 ```ocaml
 val take_while : (char -> bool) -> string
 ```
-
-Consumes characters while the predicate holds. Returns the matched string (may be empty). Always succeeds.
 
 <div class="api-example">
 
@@ -151,11 +151,11 @@ let identifier () =
 
 ### `take_while1`
 
+Like `take_while`, but requires at least one character. Fails if no characters match.
+
 ```ocaml
 val take_while1 : (char -> bool) -> label:string -> string
 ```
-
-Like `take_while`, but requires at least one character. Fails if no characters match.
 
 <div class="api-example">
 
@@ -180,11 +180,11 @@ let identifier () =
 
 ### `skip_while`
 
+Skips characters while the predicate holds (returns unit). Always succeeds. More efficient than `take_while` when you don't need the matched string.
+
 ```ocaml
 val skip_while : (char -> bool) -> unit
 ```
-
-Skips characters while the predicate holds (returns unit). Always succeeds. More efficient than `take_while` when you don't need the matched string.
 
 <div class="api-example">
 
@@ -215,11 +215,11 @@ If you don't need the matched string, prefer `skip_while` over `take_while` to a
 
 ### `match_regex`
 
+Matches a compiled regular expression. The regex must be compiled with `Re.compile`.
+
 ```ocaml
 val match_regex : Re.re -> string
 ```
-
-Matches a compiled regular expression. The regex must be compiled with `Re.compile`.
 
 <div class="api-example">
 
@@ -254,11 +254,11 @@ let number () = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digi
 
 ### `fail`
 
+Aborts parsing with an error message.
+
 ```ocaml
 val fail : string -> 'a
 ```
-
-Aborts parsing with an error message.
 
 <div class="api-example">
 
@@ -280,11 +280,11 @@ let byte () =
 
 ### `error`
 
+Aborts parsing with a user-defined error value. Custom errors are caught by `parse` and returned in the result.
+
 ```ocaml
 val error : 'e -> 'a
 ```
-
-Aborts parsing with a user-defined error value. Custom errors are caught by `parse` and returned in the result.
 
 <div class="api-example">
 
@@ -326,11 +326,11 @@ let number () =
 
 ### `end_of_input`
 
+Succeeds only if no input remains. Use this to ensure the entire input has been consumed.
+
 ```ocaml
 val end_of_input : unit -> unit
 ```
-
-Succeeds only if no input remains. Use this to ensure the entire input has been consumed.
 
 <div class="api-example">
 

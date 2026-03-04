@@ -21,11 +21,11 @@ A `span` is a zero-copy slice of the input string. It holds a reference to the o
 
 ### `take_while_span`
 
+Like `take_while`, but returns a zero-copy span instead of allocating a string.
+
 ```ocaml
 val take_while_span : (char -> bool) -> span
 ```
-
-Like `take_while`, but returns a zero-copy span instead of allocating a string.
 
 **Example:**
 ```ocaml
@@ -59,11 +59,11 @@ let fast_integer () =
 
 ### `sep_by_take_span`
 
+Like `sep_by_take`, but returns zero-copy spans. No `String.sub` allocations per element.
+
 ```ocaml
 val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
 ```
-
-Like `sep_by_take`, but returns zero-copy spans. No `String.sub` allocations per element.
 
 **Example:**
 ```ocaml
@@ -87,11 +87,11 @@ let csv_to_ints () =
 
 ### `fused_sep_take`
 
+Performs: skip whitespace, match separator, skip whitespace, take_while1, all in a single effect dispatch. Much more efficient than separate calls.
+
 ```ocaml
 val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
 ```
-
-Performs: skip whitespace, match separator, skip whitespace, take_while1, all in a single effect dispatch. Much more efficient than separate calls.
 
 **Example:**
 ```ocaml
@@ -111,11 +111,11 @@ let parse_value () =
 
 ### `skip_while_then_char`
 
+Skips characters matching predicate, then matches a character. Fused operation for efficiency.
+
 ```ocaml
 val skip_while_then_char : (char -> bool) -> char -> unit
 ```
-
-Skips characters matching predicate, then matches a character. Fused operation for efficiency.
 
 **Example:**
 ```ocaml
@@ -134,11 +134,11 @@ let skip_ws_then_comma () =
 
 ### `sep_by_take`
 
+Parses zero or more separated values entirely in the handler. Returns list of matched strings. Zero intermediate effect dispatches.
+
 ```ocaml
 val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
 ```
-
-Parses zero or more separated values entirely in the handler. Returns list of matched strings. Zero intermediate effect dispatches.
 
 **Example:**
 ```ocaml

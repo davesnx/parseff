@@ -9,11 +9,11 @@ Convenience combinators provide ready-to-use parsers for common patterns like di
 
 ### `digit`
 
+Parses a decimal digit (0-9) and returns its integer value.
+
 ```ocaml
 val digit : unit -> int
 ```
-
-Parses a decimal digit (0-9) and returns its integer value.
 
 **Example:**
 ```ocaml
@@ -33,11 +33,11 @@ let two_digits () =
 
 ### `letter`
 
+Parses an ASCII letter (a-z or A-Z).
+
 ```ocaml
 val letter : unit -> char
 ```
-
-Parses an ASCII letter (a-z or A-Z).
 
 **Example:**
 ```ocaml
@@ -52,11 +52,11 @@ let initial () = Parseff.letter ()
 
 ### `alphanum`
 
+Parses an alphanumeric character (letter or digit).
+
 ```ocaml
 val alphanum : unit -> char
 ```
-
-Parses an alphanumeric character (letter or digit).
 
 **Example:**
 ```ocaml
@@ -73,11 +73,11 @@ let username () =
 
 ### `any_char`
 
+Parses any character. Fails only at end of input.
+
 ```ocaml
 val any_char : unit -> char
 ```
-
-Parses any character. Fails only at end of input.
 
 **Example:**
 ```ocaml
@@ -97,11 +97,11 @@ let peek () =
 
 ### `is_whitespace`
 
+Returns true for whitespace characters (space, tab, newline, carriage return).
+
 ```ocaml
 val is_whitespace : char -> bool
 ```
-
-Returns true for whitespace characters (space, tab, newline, carriage return).
 
 **Example:**
 ```ocaml
@@ -118,11 +118,11 @@ let trim_parser () =
 
 ### `whitespace`
 
+Parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
+
 ```ocaml
 val whitespace : unit -> string
 ```
-
-Parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
 
 **Example:**
 ```ocaml
@@ -141,11 +141,11 @@ let spaced_values () =
 
 ### `whitespace1`
 
+Parses one or more whitespace characters. Fails if no whitespace found.
+
 ```ocaml
 val whitespace1 : unit -> string
 ```
-
-Parses one or more whitespace characters. Fails if no whitespace found.
 
 **Example:**
 ```ocaml
@@ -163,11 +163,11 @@ let words () =
 
 ### `skip_whitespace`
 
+Skips zero or more whitespace characters (returns unit). More efficient than `whitespace` when you don't need the matched string.
+
 ```ocaml
 val skip_whitespace : unit -> unit
 ```
-
-Skips zero or more whitespace characters (returns unit). More efficient than `whitespace` when you don't need the matched string.
 
 **Example:**
 ```ocaml
@@ -211,6 +211,6 @@ parse_value ()
 
 
 
-For a complete example using these combinators together, see the [Expression Parser](/parseff/examples/expression-parser) walkthrough.
+For a complete example using these combinators together, see the [Expression Parser](/parseff/guides/expression-parser) walkthrough.
 
 

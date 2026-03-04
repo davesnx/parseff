@@ -57,6 +57,19 @@ type ('a, 'e) result =
       error : 'e;  (** Error value *)
     }  (** Failure: position and error *)
 
+type 'd diagnostic = { pos : int; diagnostic : 'd }
+(** Non-fatal diagnostic emitted during parsing. *)
+
+type ('e, 'd) error_with_diagnostics = {
+  pos : int;
+  error : 'e;
+  diagnostics : 'd diagnostic list;
+}
+
+type ('a, 'e, 'd) result_with_diagnostics =
+  ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
+(** Parse outcome with diagnostics in both success and failure cases. *)
+
 (** {1 Runner} *)
 
 val parse :
@@ -70,6 +83,9 @@ val parse :
     recursive entry points. Defaults to [128]. When exceeded, parsing fails with
     an error instead of risking a stack overflow.
 
+    This function does not require consuming the full input; call
+    {!end_of_input} in your parser when you want full-consumption behavior.
+
     Returns [Ok result] on success, or [Error { pos; error }] on failure. All
     errors (parse errors and user errors) are returned in the result.
 
@@ -81,6 +97,20 @@ val parse :
           Printf.printf "Failed at %d: %s\n" pos msg
       | Error _ -> Printf.printf "Other error\n"
     ]} *)
+
+val parse_until_end :
+  ?max_depth:int ->
+  string ->
+  (unit -> 'a) ->
+  ( 'a,
+    [> `Expected of string | `Unexpected_end_of_input ],
+    'd )
+  result_with_diagnostics
+(** [parse_until_end ?max_depth input parser] runs [parser] on [input], requires
+    that all input is consumed, and returns diagnostics on both success and
+    failure.
+
+    Non-fatal diagnostics can be emitted with {!warn} and {!warn_at}. *)
 
 (** {1 Primitive Combinators} *)
 
@@ -215,6 +245,14 @@ val error : 'e -> 'a
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
     ]} *)
+
+val warn : 'd -> unit
+(** [warn diagnostic] records a non-fatal diagnostic at the current position and
+    continues parsing. *)
+
+val warn_at : pos:int -> 'd -> unit
+(** [warn_at ~pos diagnostic] records a non-fatal diagnostic at [pos] and
+    continues parsing. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -483,4 +521,25 @@ val parse_source :
       let result = parse_source source json in
       close_in ic;
       result
+    ]} *)
+
+val parse_source_until_end :
+  ?max_depth:int ->
+  Source.t ->
+  (unit -> 'a) ->
+  ( 'a,
+    [> `Expected of string | `Unexpected_end_of_input ],
+    'd )
+  result_with_diagnostics
+(** [parse_source_until_end ?max_depth source parser] is the streaming
+    equivalent of {!parse_until_end}. It enforces full consumption and returns
+    diagnostics on both success and failure.
+
+    Example:
+    {@ocaml[
+      let ic = open_in "data.json" in
+      let source = Source.of_channel ic in
+      let outcome = parse_source_until_end source json in
+      close_in ic;
+      outcome
     ]} *)
