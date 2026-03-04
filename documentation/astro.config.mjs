@@ -36,8 +36,7 @@ export default defineConfig({
 				{
 					label: 'Documentation',
 					items: [
-						{ label: 'Introduction', slug: 'index' },
-						{ label: 'Quick start', slug: 'quick-start' },
+						{ label: 'Quick start', slug: 'index' },
 						{ label: 'API overview', slug: 'api/overview' },
 					],
 				},

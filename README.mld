@@ -61,7 +61,7 @@ With equal implementations, Parseff is ~2x faster than Angstrom and MParser. Wit
 
 {1 Documentation}
 
-- {{:https://davesnx.github.io/parseff/quick-start/}Quick start}
+- {{:https://davesnx.github.io/parseff/}Quick start}
 - {{:https://davesnx.github.io/parseff/api/overview/}API overview}
 - {{:https://davesnx.github.io/parseff/guides/first-parser/}Your first parser}
 - {{:https://davesnx.github.io/parseff/guides/errors/}Error handling}
