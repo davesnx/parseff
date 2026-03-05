@@ -3,55 +3,61 @@ title: Diagnostics
 description: Non-fatal diagnostics and full-consumption runners
 ---
 
-Use diagnostics when you want to keep parsing and report multiple validation
-problems instead of stopping at the first one.
+<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->
+
+# Diagnostics
+
+Use diagnostics when you want to keep parsing and report multiple validation problems instead of stopping at the first one.
+
 
 ## Types
 
+The result types for diagnostics-aware parsing:
+
 ```ocaml
 type 'd diagnostic = { pos : int; diagnostic : 'd }
+```
+A non-fatal diagnostic emitted during parsing.
 
+```ocaml
 type ('e, 'd) error_with_diagnostics = {
   pos : int;
   error : 'e;
   diagnostics : 'd diagnostic list;
 }
+```
+An error with collected diagnostics.
 
+```ocaml
 type ('a, 'e, 'd) result_with_diagnostics =
   ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) result
 ```
+Parse outcome with diagnostics in both success and failure cases.
 
-## Emitting diagnostics
+
+## Emitting Diagnostics
+
 
 ### `warn`
-
-Records a non-fatal diagnostic at the current parser position.
 
 ```ocaml
 val warn : 'd -> unit
 ```
+`Parseff.warn` records a non-fatal diagnostic at the current parser position.
+
 
 ### `warn_at`
-
-Records a non-fatal diagnostic at an explicit position.
 
 ```ocaml
 val warn_at : pos:int -> 'd -> unit
 ```
+`Parseff.warn_at` records a non-fatal diagnostic at an explicit position.
+
 
 ## Runners
 
+
 ### `parse_until_end`
-
-Runs a parser on a string, enforces full input consumption implicitly, and
-returns both:
-
-- `Ok (value, diagnostics)` on success
-- `Error { pos; error; diagnostics }` on failure
-
-Semantically, this is equivalent to running your parser and then calling
-`end_of_input` once more at the end. It does not change how explicit
-`Parseff.end_of_input ()` calls behave inside your parser.
 
 ```ocaml
 val parse_until_end :
@@ -61,25 +67,28 @@ val parse_until_end :
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics
 ```
+`Parseff.parse_until_end` runs a parser on a string, enforces full input consumption implicitly, and returns both:
+
+- `Ok (value, diagnostics)` on success
+- `Error { pos; error; diagnostics }` on failure
+Semantically, this is equivalent to running your parser and then calling `Parseff.end_of_input` once more at the end. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser.
+
 
 ### `parse_source_until_end`
-
-Streaming equivalent of `parse_until_end` for `Source.t` inputs.
-
-In plain terms: `parse_source_until_end` always does one extra
-`Parseff.end_of_input ()` check after your parser returns.
-
-If your parser already calls `Parseff.end_of_input ()` itself, that call keeps
-the same behavior as before. The runner just adds a final safety check.
 
 ```ocaml
 val parse_source_until_end :
   ?max_depth:int ->
-  Parseff.Source.t ->
+  Source.t ->
   (unit -> 'a) ->
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics
 ```
+`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end` for `Parseff.Source.t` inputs.
+
+In plain terms: `parse_source_until_end` always does one extra `Parseff.end_of_input` check after your parser returns.
+
+If your parser already calls `Parseff.end_of_input` itself, that call keeps the same behavior as before. The runner just adds a final safety check.
 
 
 ## Example
@@ -105,7 +114,9 @@ let ip_address_lenient () =
   (a, b, c, d)
 
 let () =
-  let outcome = Parseff.parse_until_end "999.2.3.256" ip_address_lenient in
+  let outcome =
+    Parseff.parse_until_end "999.2.3.256" ip_address_lenient
+  in
   match outcome with
   | Ok ((a, b, c, d), diagnostics) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d;
@@ -123,16 +134,14 @@ let () =
           | `Octet_out_of_range n ->
               Printf.printf "  noted at %d: octet %d out of range\n" pos n)
         diagnostics
-  | Error _ ->
-      Printf.printf "Parse failed\n"
+  | Error _ -> Printf.printf "Parse failed\n"
 ```
 
-## Backtracking semantics
+## Backtracking Semantics
 
 Diagnostics are transactional with parser control flow:
 
-- `or_`: diagnostics from failed branches are rolled back
-- `many`: diagnostics from the final failing attempt are rolled back
-- `look_ahead`: diagnostics are rolled back
-
+- `Parseff.or_`: diagnostics from failed branches are rolled back
+- `Parseff.many`: diagnostics from the final failing attempt are rolled back
+- `Parseff.look_ahead`: diagnostics are rolled back
 This prevents diagnostics from leaking out of speculative branches.

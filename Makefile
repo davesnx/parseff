@@ -57,7 +57,8 @@ install: ## Install dependencies
 
 .PHONY: pin
 pin: ## Pin dependencies
-	opam pin dune https://github.com/ocaml/dune.git#cbb83c4751de2e8fd94f5165fbb43cf7b09870fe -y
+	opam pin dune https://github.com/ocaml/dune.git#cae07ff85a372a46a4862237a16db3fa8873d25d -y
+	opam pin odoc https://github.com/davesnx/odoc.git#markdown-types -y
 
 .PHONY: setup-githooks
 setup-githooks: ## Setup githooks
@@ -99,21 +100,21 @@ subst: ## Run dune substitute
 	$(DUNE) subst
 
 .PHONY: docs
-docs: ## Generate odoc documentation
+docs: ## Generate odoc documentation and markdown
 	$(DUNE) build @doc @doc-markdown
 
-.PHONY: docs-dev
-docs-dev: ## Run documentation dev server
-	cd documentation && npm run dev
+.PHONY: website-dev
+website-dev: ## Run website dev server (generated from .mld)
+	cd website && npm run dev
 
-.PHONY: docs-build
-docs-build: ## Build documentation site
-	@if [ ! -d documentation/node_modules ]; then \
-		echo "Installing documentation dependencies..."; \
-		cd documentation && npm ci; \
+.PHONY: website-build
+website-build: docs ## Build website (generates markdown from .mld then builds Astro)
+	@if [ ! -d website/node_modules ]; then \
+		echo "Installing website dependencies..."; \
+		cd website && npm ci; \
 	fi
-	cd documentation && npm run build
+	cd website && npm run build
 
-.PHONY: docs-preview
-docs-preview: ## Preview built documentation
-	cd documentation && npm run preview
+.PHONY: website-preview
+website-preview: ## Preview built website
+	cd website && npm run preview

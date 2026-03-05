@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   DUNE_PROFILE: release
@@ -16,6 +17,8 @@ env:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -50,6 +53,9 @@ jobs:
           dune-cache: false
           opam-disable-sandboxing: true
 
+      - name: Pin dependencies
+        run: make pin
+
       - name: Install opam deps
         run: make install
 
@@ -65,13 +71,77 @@ jobs:
       - name: Run benchmarks
         run: make bench
 
+  deploy:
+    name: Deploy website
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use OCaml 5.3.0
+        uses: ocaml/setup-ocaml@v3.4.5
+        with:
+          ocaml-compiler: 5.3.0
+          dune-cache: false
+          opam-disable-sandboxing: true
+
+      - name: Pin dependencies
+        run: make pin
+
+      - name: Install opam deps
+        run: make install
+
+      - name: Generate documentation markdown
+        run: make docs
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Build website
+        run: make website-build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    name: Release to opam
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use OCaml 5.3.0
+        uses: ocaml/setup-ocaml@v3.4.5
+        with:
+          ocaml-compiler: 5.3.0
+          dune-cache: false
+          opam-disable-sandboxing: true
+
+      - name: Pin dependencies
+        run: make pin
+
+      - name: Install opam deps
+        run: make install
+
       - name: Install dune-release
-        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest'
         run: opam install dune-release -y
 
       - name: Release
         uses: davesnx/dune-release-action@v0.2.14
-        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest'
         with:
           packages: 'parseff'
           changelog: './CHANGES.md'

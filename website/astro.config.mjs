@@ -2,16 +2,21 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightThemeFlexoki from 'starlight-theme-flexoki';
+import remarkBoldAsides from './src/plugins/remark-bold-asides.mjs';
 
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://davesnx.github.io',
 	base: '/parseff',
+	markdown: {
+		remarkPlugins: [remarkBoldAsides],
+	},
 	integrations: [
 		starlight({
 			plugins: [starlightThemeFlexoki()],
 			components: {
 				Head: './src/components/Head.astro',
+				PageTitle: './src/components/PageTitle.astro',
 			},
 			title: 'Parseff',
 			description: 'Parser combinators with OCaml 5 algebraic effects',

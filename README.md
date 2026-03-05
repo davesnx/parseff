@@ -47,7 +47,6 @@ let () =
 
 ## Features
 
-- Fast: zero-copy spans, fused operations, and no monadic overhead. Up to 4\.3x faster than Angstrom on JSON parsing benchmarks
 - Build parsers with direct-style and compose with `Parseff` combinators
 - API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
 - Typed domain errors via polymorphic variants, raise with [`Parseff.error`](https://davesnx.github.io/parseff/api/primitives/#error). Parseff also adds ``Expected of string` and ``Unexpected_end_of_input` as possible parsing failures
@@ -60,7 +59,7 @@ let () =
 
 ## Performance
 
-With equal implementations, Parseff is ~2x faster than Angstrom and MParser. With zero-copy span APIs, that gap widens to ~4x. See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for details and [bench/bench\_vs\_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark.
+Parseff is faster than Angstrom and MParser by a factor of 2 to 4x. In case of equal implementations, Parseff is ~2x faster than Angstrom and MParser. With an optimized version using zero-copy span APIs, that gap widens to ~4x. See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for details and [bench/bench\_vs\_angstrom.ml](./bench/bench_vs_angstrom.ml) for the benchmark.
 
 
 ## Documentation

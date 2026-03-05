@@ -1,0 +1,15 @@
+(documentation
+ (package parseff)
+ (mld_files core combinators repetition convenience errors diagnostics zero-copy streaming))
+
+(mdx
+ (files
+  core.mld
+  combinators.mld
+  repetition.mld
+  convenience.mld
+  errors.mld
+  diagnostics.mld
+  zero-copy.mld
+  streaming.mld)
+ (libraries parseff re))

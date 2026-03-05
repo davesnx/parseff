@@ -1,0 +1,177 @@
+{0 Convenience Combinators}
+
+Convenience combinators provide ready-to-use parsers for common patterns like
+digits, letters, and whitespace.
+
+{1 Character Classes}
+
+{2 [digit]}
+
+{@ocaml skip[val digit : unit -> int]}
+
+{!val:Parseff.digit} parses a decimal digit (0-9) and returns its integer value.
+
+{@ocaml[
+(* Parse two-digit number *)
+let two_digits () =
+  let a = Parseff.digit () in
+  let b = Parseff.digit () in
+  a * 10 + b
+
+(* Matches "42" -> 42 *)
+]}
+
+{2 [letter]}
+
+{@ocaml skip[val letter : unit -> char]}
+
+{!val:Parseff.letter} parses an ASCII letter (a-z or A-Z).
+
+{@ocaml[
+let initial () = Parseff.letter ()
+
+(* Matches "A" -> 'A' *)
+(* Matches "z" -> 'z' *)
+(* Fails on "1" *)
+]}
+
+{2 [alphanum]}
+
+{@ocaml skip[val alphanum : unit -> char]}
+
+{!val:Parseff.alphanum} parses an alphanumeric character (letter or digit).
+
+{@ocaml[
+let username () =
+  let first = Parseff.letter () in
+  let rest = Parseff.many Parseff.alphanum () in
+  String.make 1 first ^ String.of_seq (List.to_seq rest)
+
+(* Matches "user123" -> "user123" *)
+(* Fails on "123user" (must start with letter) *)
+]}
+
+{2 [any_char]}
+
+{@ocaml skip[val any_char : unit -> char]}
+
+{!val:Parseff.any_char} parses any character. Fails only at end of input.
+
+{@ocaml[
+(* Skip past a single unknown character *)
+let skip_one () =
+  let _ = Parseff.any_char () in
+  ()
+
+(* Peek at the next character without consuming it *)
+let peek () = Parseff.look_ahead Parseff.any_char
+]}
+
+{1 Whitespace}
+
+{2 [is_whitespace]}
+
+{@ocaml skip[val is_whitespace : char -> bool]}
+
+{!val:Parseff.is_whitespace} returns true for whitespace characters (space, tab,
+newline, carriage return). This is a predicate, not a parser.
+
+{@ocaml[
+let trim_parser () =
+  Parseff.skip_while Parseff.is_whitespace;
+  let value =
+    Parseff.take_while1
+      (fun c -> not (Parseff.is_whitespace c))
+      ~label:"value"
+  in
+  Parseff.skip_while Parseff.is_whitespace;
+  value
+
+(* Matches "  hello  " -> "hello" *)
+]}
+
+{2 [whitespace]}
+
+{@ocaml skip[val whitespace : unit -> string]}
+
+{!val:Parseff.whitespace} parses zero or more whitespace characters. Returns the
+matched string. Always succeeds (returns empty string if no whitespace).
+
+{@ocaml[
+let spaced_values () =
+  let a = Parseff.digit () in
+  let _ = Parseff.whitespace () in
+  let b = Parseff.digit () in
+  (a, b)
+
+(* Matches "1 2" -> (1, 2) *)
+(* Matches "1    2" -> (1, 2) *)
+(* Matches "12" -> (1, 2) *)
+]}
+
+{2 [whitespace1]}
+
+{@ocaml skip[val whitespace1 : unit -> string]}
+
+{!val:Parseff.whitespace1} parses one or more whitespace characters. Fails if no
+whitespace found.
+
+{@ocaml[
+let words () =
+  Parseff.sep_by1
+    (fun () ->
+      Parseff.take_while1
+        (fun c -> not (Parseff.is_whitespace c))
+        ~label:"word")
+    (fun () -> Parseff.whitespace1 ())
+    ()
+
+(* Matches "hello world" -> ["hello"; "world"] *)
+(* Fails on "helloworld" (no whitespace separator) *)
+]}
+
+{2 [skip_whitespace]}
+
+{@ocaml skip[val skip_whitespace : unit -> unit]}
+
+{!val:Parseff.skip_whitespace} skips zero or more whitespace characters (returns
+unit). More efficient than {!val:Parseff.whitespace} when you don't need the
+matched string.
+
+{@ocaml[
+(* Parse comma-separated list with flexible spacing *)
+let flexible_list () =
+  let _ = Parseff.char '[' in
+  Parseff.skip_whitespace ();
+  let values =
+    Parseff.sep_by
+      (fun () ->
+        Parseff.skip_whitespace ();
+        let n = Parseff.digit () in
+        Parseff.skip_whitespace ();
+        n)
+      (fun () -> Parseff.char ',')
+      ()
+  in
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char ']' in
+  values
+
+(* All of these parse to [1; 2; 3]: *)
+(* "[1,2,3]" *)
+(* "[ 1 , 2 , 3 ]" *)
+(* "[  1  ,  2  ,  3  ]" *)
+]}
+
+{b Tip:} Always use [skip_whitespace] instead of [whitespace] when you don't
+need the matched string:
+
+{@ocaml skip[
+(* allocates a string you don't need *)
+let _ = Parseff.whitespace () in
+parse_value ()
+
+(* skips without allocating *)
+Parseff.skip_whitespace ();
+parse_value ()
+]}

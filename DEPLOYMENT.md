@@ -4,7 +4,7 @@ This guide explains how to deploy the Parseff documentation website to GitHub Pa
 
 ## Overview
 
-The documentation is built with Astro and Starlight and automatically deploys to GitHub Pages via GitHub Actions.
+The documentation is built with Astro and Starlight and automatically deploys to GitHub Pages via GitHub Actions. API reference pages are auto-generated from the `doc/*.mld` files via odoc.
 
 ## Prerequisites
 
@@ -17,23 +17,28 @@ The documentation is built with Astro and Starlight and automatically deploys to
 
 The site automatically deploys when you push to the `main` branch.
 
-The GitHub Actions workflow (`.github/workflows/deploy-docs.yml`) will:
+The GitHub Actions workflow (`.github/workflows/ci.yml`) will:
 1. Check out the code
-2. Install Node.js dependencies
-3. Build the Astro site
-4. Deploy to GitHub Pages
+2. Set up OCaml and install dependencies
+3. Generate documentation markdown from `.mld` files via odoc
+4. Install Node.js dependencies
+5. Build the Astro site
+6. Deploy to GitHub Pages
 
 ## Manual Deployment
 
 To deploy manually:
 
 ```bash
-# 1. Build the site
-cd documentation
+# 1. Generate odoc markdown
+make docs
+
+# 2. Build the site
+cd website
 npm install
 npm run build
 
-# 2. Deploy the dist/ folder to gh-pages branch
+# 3. Deploy the dist/ folder to gh-pages branch
 # (using your preferred deployment method)
 ```
 
@@ -43,7 +48,7 @@ npm run build
 
 Before deploying, update these files with your repository information:
 
-1. **`documentation/astro.config.mjs`**:
+1. **`website/astro.config.mjs`**:
    ```js
    site: 'https://davesnx.github.io',
    base: '/parseff',  // or your repo name
@@ -61,14 +66,14 @@ Before deploying, update these files with your repository information:
    **[View Full Documentation](https://davesnx.github.io/parseff/)**
    ```
 
-3. **`documentation/src/content/docs/index.mdx`** and other pages:
+3. **`website/src/content/docs/index.md`** and other pages:
    - Update GitHub links to `https://github.com/davesnx/parseff`
 
 ### Custom Domain (Optional)
 
 To use a custom domain:
 
-1. Add a `public/CNAME` file in the `documentation` directory:
+1. Add a `public/CNAME` file in the `website` directory:
    ```
    docs.yourdomain.com
    ```
@@ -97,7 +102,7 @@ After deployment:
 
 ```bash
 # Check for errors locally
-cd documentation
+cd website
 npm run build
 ```
 
@@ -123,7 +128,7 @@ If custom styles don't apply:
 Test the site locally before deploying:
 
 ```bash
-cd documentation
+cd website
 
 # Development server with hot reload
 npm run dev
@@ -139,7 +144,7 @@ npm run preview
 ### Updating Dependencies
 
 ```bash
-cd documentation
+cd website
 npm update
 npm audit fix
 ```

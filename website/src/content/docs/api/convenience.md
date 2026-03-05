@@ -3,23 +3,24 @@ title: Convenience combinators
 description: Common parsing patterns made easy
 ---
 
+<!-- This file is generated from doc/convenience.mld. Do not edit directly. -->
+
+# Convenience Combinators
+
 Convenience combinators provide ready-to-use parsers for common patterns like digits, letters, and whitespace.
+
 
 ## Character Classes
 
-### `digit`
 
-Parses a decimal digit (0-9) and returns its integer value.
+### `digit`
 
 ```ocaml
 val digit : unit -> int
 ```
+`Parseff.digit` parses a decimal digit (0-9) and returns its integer value.
 
-**Example:**
 ```ocaml
-let d = Parseff.digit () in  (* parses "7" -> 7 *)
-Printf.printf "Got digit: %d\n" d
-
 (* Parse two-digit number *)
 let two_digits () =
   let a = Parseff.digit () in
@@ -29,17 +30,13 @@ let two_digits () =
 (* Matches "42" -> 42 *)
 ```
 
----
-
 ### `letter`
-
-Parses an ASCII letter (a-z or A-Z).
 
 ```ocaml
 val letter : unit -> char
 ```
+`Parseff.letter` parses an ASCII letter (a-z or A-Z).
 
-**Example:**
 ```ocaml
 let initial () = Parseff.letter ()
 
@@ -48,17 +45,13 @@ let initial () = Parseff.letter ()
 (* Fails on "1" *)
 ```
 
----
-
 ### `alphanum`
-
-Parses an alphanumeric character (letter or digit).
 
 ```ocaml
 val alphanum : unit -> char
 ```
+`Parseff.alphanum` parses an alphanumeric character (letter or digit).
 
-**Example:**
 ```ocaml
 let username () =
   let first = Parseff.letter () in
@@ -69,17 +62,13 @@ let username () =
 (* Fails on "123user" (must start with letter) *)
 ```
 
----
-
 ### `any_char`
-
-Parses any character. Fails only at end of input.
 
 ```ocaml
 val any_char : unit -> char
 ```
+`Parseff.any_char` parses any character. Fails only at end of input.
 
-**Example:**
 ```ocaml
 (* Skip past a single unknown character *)
 let skip_one () =
@@ -87,44 +76,40 @@ let skip_one () =
   ()
 
 (* Peek at the next character without consuming it *)
-let peek () =
-  Parseff.look_ahead Parseff.any_char
+let peek () = Parseff.look_ahead Parseff.any_char
 ```
-
----
 
 ## Whitespace
 
-### `is_whitespace`
 
-Returns true for whitespace characters (space, tab, newline, carriage return).
+### `is_whitespace`
 
 ```ocaml
 val is_whitespace : char -> bool
 ```
+`Parseff.is_whitespace` returns true for whitespace characters (space, tab, newline, carriage return). This is a predicate, not a parser.
 
-**Example:**
 ```ocaml
 let trim_parser () =
   Parseff.skip_while Parseff.is_whitespace;
-  let value = Parseff.take_while1 (fun c -> not (Parseff.is_whitespace c)) ~label:"value" in
+  let value =
+    Parseff.take_while1
+      (fun c -> not (Parseff.is_whitespace c))
+      ~label:"value"
+  in
   Parseff.skip_while Parseff.is_whitespace;
   value
 
 (* Matches "  hello  " -> "hello" *)
 ```
 
----
-
 ### `whitespace`
-
-Parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
 
 ```ocaml
 val whitespace : unit -> string
 ```
+`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
 
-**Example:**
 ```ocaml
 let spaced_values () =
   let a = Parseff.digit () in
@@ -137,21 +122,20 @@ let spaced_values () =
 (* Matches "12" -> (1, 2) *)
 ```
 
----
-
 ### `whitespace1`
-
-Parses one or more whitespace characters. Fails if no whitespace found.
 
 ```ocaml
 val whitespace1 : unit -> string
 ```
+`Parseff.whitespace1` parses one or more whitespace characters. Fails if no whitespace found.
 
-**Example:**
 ```ocaml
 let words () =
   Parseff.sep_by1
-    (fun () -> Parseff.take_while1 (fun c -> not (Parseff.is_whitespace c)) ~label:"word")
+    (fun () ->
+      Parseff.take_while1
+        (fun c -> not (Parseff.is_whitespace c))
+        ~label:"word")
     (fun () -> Parseff.whitespace1 ())
     ()
 
@@ -159,31 +143,27 @@ let words () =
 (* Fails on "helloworld" (no whitespace separator) *)
 ```
 
----
-
 ### `skip_whitespace`
-
-Skips zero or more whitespace characters (returns unit). More efficient than `whitespace` when you don't need the matched string.
 
 ```ocaml
 val skip_whitespace : unit -> unit
 ```
+`Parseff.skip_whitespace` skips zero or more whitespace characters (returns unit). More efficient than `Parseff.whitespace` when you don't need the matched string.
 
-**Example:**
 ```ocaml
 (* Parse comma-separated list with flexible spacing *)
 let flexible_list () =
   let _ = Parseff.char '[' in
   Parseff.skip_whitespace ();
-  let values = Parseff.sep_by
-    (fun () ->
-      Parseff.skip_whitespace ();
-      let n = Parseff.digit () in
-      Parseff.skip_whitespace ();
-      n
-    )
-    (fun () -> Parseff.char ',')
-    ()
+  let values =
+    Parseff.sep_by
+      (fun () ->
+        Parseff.skip_whitespace ();
+        let n = Parseff.digit () in
+        Parseff.skip_whitespace ();
+        n)
+      (fun () -> Parseff.char ',')
+      ()
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in
@@ -194,9 +174,7 @@ let flexible_list () =
 (* "[ 1 , 2 , 3 ]" *)
 (* "[  1  ,  2  ,  3  ]" *)
 ```
-
-:::tip[Performance]
-Always use `skip_whitespace` instead of `whitespace` when you don't need the matched string:
+**Tip:** Always use `skip_whitespace` instead of `whitespace` when you don't need the matched string:
 
 ```ocaml
 (* allocates a string you don't need *)
@@ -207,10 +185,3 @@ parse_value ()
 Parseff.skip_whitespace ();
 parse_value ()
 ```
-:::
-
-
-
-For a complete example using these combinators together, see the [Expression Parser](/parseff/guides/expression-parser) walkthrough.
-
-

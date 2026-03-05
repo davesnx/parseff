@@ -1,0 +1,120 @@
+---
+const PAGE_TITLE_ID = '_top';
+
+const route = Astro.locals.starlightRoute;
+const body = route.entry.body ?? '';
+// Prepend frontmatter title as a heading so the copied markdown is self-contained
+const markdown = `${body}`;
+---
+
+<div class="page-title-wrapper">
+	<button
+		class="copy-md-btn"
+		aria-label="Copy page as Markdown"
+		title="Copy page as Markdown"
+	>
+		<svg class="icon-copy" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+			<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+		</svg>
+		<svg class="icon-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<polyline points="20 6 9 17 4 12"></polyline>
+		</svg>
+		<span class="label-copy">Copy MD</span>
+		<span class="label-copied">Copied!</span>
+	</button>
+</div>
+
+<script is:inline id="page-md-source" type="application/json" set:html={JSON.stringify(markdown)} />
+
+<script>
+	const btn = document.querySelector('.copy-md-btn') as HTMLButtonElement | null;
+	const src = document.querySelector('#page-md-source') as HTMLScriptElement | null;
+
+	btn?.addEventListener('click', async () => {
+		const md = src?.textContent ? JSON.parse(src.textContent) : '';
+		try {
+			await navigator.clipboard.writeText(md);
+			btn.classList.add('copied');
+			setTimeout(() => btn.classList.remove('copied'), 2000);
+		} catch {
+			// Fallback for older browsers
+			const textarea = document.createElement('textarea');
+			textarea.value = md;
+			textarea.style.position = 'fixed';
+			textarea.style.opacity = '0';
+			document.body.appendChild(textarea);
+			textarea.select();
+			document.execCommand('copy');
+			document.body.removeChild(textarea);
+			btn.classList.add('copied');
+			setTimeout(() => btn.classList.remove('copied'), 2000);
+		}
+	});
+</script>
+
+<style>
+	.page-title-wrapper {
+		position: relative;
+	}
+
+	h1 {
+		margin-top: 1rem;
+		font-size: var(--sl-text-h1);
+		line-height: var(--sl-line-height-headings);
+		font-weight: 600;
+		color: var(--sl-color-white);
+	}
+
+	.copy-md-btn {
+		position: absolute;
+		top: 1rem;
+		right: 0;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		padding: 0.2rem 0.5rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.375rem;
+		background: transparent;
+		color: var(--sl-color-gray-3);
+		font-size: 0.7rem;
+		font-family: var(--sl-font);
+		cursor: pointer;
+		transition: color 0.15s, border-color 0.15s, opacity 0.15s;
+		white-space: nowrap;
+		opacity: 0;
+	}
+
+	.page-title-wrapper:hover .copy-md-btn,
+	.copy-md-btn:focus-visible {
+		opacity: 1;
+	}
+
+	.copy-md-btn:hover {
+		color: var(--sl-color-white);
+		border-color: var(--sl-color-gray-3);
+	}
+
+	/* Toggle icons and labels */
+	.copy-md-btn .icon-check,
+	.copy-md-btn .label-copied {
+		display: none;
+	}
+
+	.copy-md-btn.copied .icon-copy,
+	.copy-md-btn.copied .label-copy {
+		display: none;
+	}
+
+	.copy-md-btn.copied .icon-check,
+	.copy-md-btn.copied .label-copied {
+		display: inline;
+	}
+
+	.copy-md-btn.copied {
+		color: var(--sl-color-green-high, #4ade80);
+		border-color: var(--sl-color-green-high, #4ade80);
+		opacity: 1;
+	}
+</style>
