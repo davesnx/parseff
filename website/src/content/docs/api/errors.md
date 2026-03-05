@@ -5,7 +5,7 @@ description: Building better error messages in Parseff
 
 <!-- This file is generated from doc/errors.mld. Do not edit directly. -->
 
-# Error Handling
+# Error handling
 
 Parseff exposes three main APIs for error handling:
 
@@ -15,11 +15,11 @@ Parseff exposes three main APIs for error handling:
 
 ## `fail`
 
+Abort parsing with a message. The message is returned as `Error { error = `Expected msg; ... }`.
+
 ```ocaml
 val fail : string -> 'a
 ```
-Abort parsing with a message. The message is returned as `Error { error = `Expected msg; ... }`.
-
 ```ocaml
 let byte () =
   let n =
@@ -44,11 +44,11 @@ Use this when a human-readable string is enough.
 
 ## `error`
 
+Abort parsing with a typed custom error value.
+
 ```ocaml
 val error : 'e -> 'a
 ```
-Abort parsing with a typed custom error value.
-
 ```ocaml
 let number () =
   let s =
@@ -87,11 +87,11 @@ let number_quick () =
 
 ## `expect`
 
+Run a parser and replace its failure message with a clearer description.
+
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
 ```
-Run a parser and replace its failure message with a clearer description.
-
 ```ocaml
 let dot () =
   Parseff.expect "a dot separator" (fun () -> Parseff.char '.')

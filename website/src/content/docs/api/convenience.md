@@ -5,21 +5,21 @@ description: Common parsing patterns made easy
 
 <!-- This file is generated from doc/convenience.mld. Do not edit directly. -->
 
-# Convenience Combinators
+# Convenience combinators
 
 Convenience combinators provide ready-to-use parsers for common patterns like digits, letters, and whitespace.
 
 
-## Character Classes
+## Character classes
 
 
 ### `digit`
 
+`Parseff.digit` parses a decimal digit (0-9) and returns its integer value.
+
 ```ocaml
 val digit : unit -> int
 ```
-`Parseff.digit` parses a decimal digit (0-9) and returns its integer value.
-
 ```ocaml
 (* Parse two-digit number *)
 let two_digits () =
@@ -32,11 +32,11 @@ let two_digits () =
 
 ### `letter`
 
+`Parseff.letter` parses an ASCII letter (a-z or A-Z).
+
 ```ocaml
 val letter : unit -> char
 ```
-`Parseff.letter` parses an ASCII letter (a-z or A-Z).
-
 ```ocaml
 let initial () = Parseff.letter ()
 
@@ -47,11 +47,11 @@ let initial () = Parseff.letter ()
 
 ### `alphanum`
 
+`Parseff.alphanum` parses an alphanumeric character (letter or digit).
+
 ```ocaml
 val alphanum : unit -> char
 ```
-`Parseff.alphanum` parses an alphanumeric character (letter or digit).
-
 ```ocaml
 let username () =
   let first = Parseff.letter () in
@@ -64,11 +64,11 @@ let username () =
 
 ### `any_char`
 
+`Parseff.any_char` parses any character. Fails only at end of input.
+
 ```ocaml
 val any_char : unit -> char
 ```
-`Parseff.any_char` parses any character. Fails only at end of input.
-
 ```ocaml
 (* Skip past a single unknown character *)
 let skip_one () =
@@ -84,11 +84,11 @@ let peek () = Parseff.look_ahead Parseff.any_char
 
 ### `is_whitespace`
 
+`Parseff.is_whitespace` returns true for whitespace characters (space, tab, newline, carriage return). This is a predicate, not a parser.
+
 ```ocaml
 val is_whitespace : char -> bool
 ```
-`Parseff.is_whitespace` returns true for whitespace characters (space, tab, newline, carriage return). This is a predicate, not a parser.
-
 ```ocaml
 let trim_parser () =
   Parseff.skip_while Parseff.is_whitespace;
@@ -105,11 +105,11 @@ let trim_parser () =
 
 ### `whitespace`
 
+`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
+
 ```ocaml
 val whitespace : unit -> string
 ```
-`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
-
 ```ocaml
 let spaced_values () =
   let a = Parseff.digit () in
@@ -124,11 +124,11 @@ let spaced_values () =
 
 ### `whitespace1`
 
+`Parseff.whitespace1` parses one or more whitespace characters. Fails if no whitespace found.
+
 ```ocaml
 val whitespace1 : unit -> string
 ```
-`Parseff.whitespace1` parses one or more whitespace characters. Fails if no whitespace found.
-
 ```ocaml
 let words () =
   Parseff.sep_by1
@@ -145,11 +145,11 @@ let words () =
 
 ### `skip_whitespace`
 
+`Parseff.skip_whitespace` skips zero or more whitespace characters (returns unit). More efficient than `Parseff.whitespace` when you don't need the matched string.
+
 ```ocaml
 val skip_whitespace : unit -> unit
 ```
-`Parseff.skip_whitespace` skips zero or more whitespace characters (returns unit). More efficient than `Parseff.whitespace` when you don't need the matched string.
-
 ```ocaml
 (* Parse comma-separated list with flexible spacing *)
 let flexible_list () =

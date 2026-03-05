@@ -15,11 +15,11 @@ Combinators compose simple parsers into more complex ones. They handle alternati
 
 ### `or_`
 
+`Parseff.or_` tries the left parser. If it fails, backtracks (resets the cursor) and tries the right parser.
+
 ```ocaml
 val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 ```
-`Parseff.or_` tries the left parser. If it fails, backtracks (resets the cursor) and tries the right parser.
-
 ```ocaml
 let bool_parser () =
   Parseff.or_
@@ -61,11 +61,11 @@ let keyword_with_one_of () =
 
 ### `one_of`
 
+`Parseff.one_of` tries each parser in order until one succeeds. Equivalent to chaining `or_`, but cleaner for more than two alternatives.
+
 ```ocaml
 val one_of : (unit -> 'a) list -> unit -> 'a
 ```
-`Parseff.one_of` tries each parser in order until one succeeds. Equivalent to chaining `or_`, but cleaner for more than two alternatives.
-
 ```ocaml
 let json_value () =
   Parseff.one_of
@@ -84,11 +84,11 @@ If all parsers fail, `one_of` fails with the error from the last parser attempte
 
 ### `one_of_labeled`
 
+`Parseff.one_of_labeled` is like `Parseff.one_of`, but each parser has a label. On failure, the error message reports all labels:
+
 ```ocaml
 val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 ```
-`Parseff.one_of_labeled` is like `Parseff.one_of`, but each parser has a label. On failure, the error message reports all labels:
-
 ```ocaml
 let literal () =
   Parseff.one_of_labeled
@@ -105,11 +105,11 @@ This gives users a clear picture of what was expected at a given position, witho
 
 ### `optional`
 
+`Parseff.optional` tries the parser. Returns `Some result` on success, `None` on failure (without consuming input).
+
 ```ocaml
 val optional : (unit -> 'a) -> unit -> 'a option
 ```
-`Parseff.optional` tries the parser. Returns `Some result` on success, `None` on failure (without consuming input).
-
 ```ocaml
 let signed_number () =
   let sign = Parseff.optional (fun () -> Parseff.char '-') () in
@@ -126,11 +126,11 @@ let signed_number () =
 
 ### `look_ahead`
 
+`Parseff.look_ahead` runs a parser without consuming input. The cursor stays where it was before the call. Fails if the parser fails.
+
 ```ocaml
 val look_ahead : (unit -> 'a) -> 'a
 ```
-`Parseff.look_ahead` runs a parser without consuming input. The cursor stays where it was before the call. Fails if the parser fails.
-
 ```ocaml
 let peek_open_paren () =
   let _ = Parseff.look_ahead (fun () -> Parseff.char '(') in
@@ -140,16 +140,16 @@ let peek_open_paren () =
 Useful for context-sensitive decisions: peek at what's coming, then choose which parser to run.
 
 
-## Error Labeling
+## Error labeling
 
 
 ### `expect`
 
+`Parseff.expect` runs a parser and relabels its failure with a clearer message.
+
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
 ```
-`Parseff.expect` runs a parser and relabels its failure with a clearer message.
-
 ```ocaml
 let dot () =
   Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
@@ -178,11 +178,11 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 
 ### `rec_`
 
+`Parseff.rec_` marks a recursive entry point for depth tracking. Wrap the body of recursive parsers with `rec_` so that `Parseff.parse` can enforce `max_depth` and fail cleanly instead of overflowing the stack.
+
 ```ocaml
 val rec_ : (unit -> 'a) -> 'a
 ```
-`Parseff.rec_` marks a recursive entry point for depth tracking. Wrap the body of recursive parsers with `rec_` so that `Parseff.parse` can enforce `max_depth` and fail cleanly instead of overflowing the stack.
-
 ```ocaml
 let rec json () =
   Parseff.rec_ (fun () ->

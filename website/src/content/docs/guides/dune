@@ -1,0 +1,77 @@
+; Promote generated guide markdown from odoc into the website.
+; Each rule adds Starlight frontmatter, strips the odoc h1 heading and
+; description (already in the frontmatter), then runs fix-odoc-md.sh to
+; normalise cross-references, escapes, and whitespace.
+; Source of truth: doc/guides/*.mld files.
+
+(rule
+ (alias doc-markdown)
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/first-parser.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets first-parser.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: Your First Parser' 'description: Build a config file parser from scratch, learning Parseff along the way' '---' '' > %{targets} && tail -n +6 %{workspace_root}/_doc/_markdown/parseff/first-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+
+(rule
+ (alias doc-markdown)
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/ip-address.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets ip-address.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: \"Parsing an IP Address\"' 'description: Build a validated IPv4 address parser step by step' '---' '' > %{targets} && tail -n +6 %{workspace_root}/_doc/_markdown/parseff/ip-address.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+
+(rule
+ (alias doc-markdown)
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/expression-parser.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets expression-parser.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: \"Expressions with Precedence\"' 'description: Build an arithmetic expression parser with operator precedence and an AST' '---' '' > %{targets} && tail -n +6 %{workspace_root}/_doc/_markdown/parseff/expression-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+
+(rule
+ (alias doc-markdown)
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/json-parser.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets json-parser.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: \"A JSON Parser\"' 'description: Build a complete recursive-descent JSON parser with depth limiting' '---' '' > %{targets} && tail -n +6 %{workspace_root}/_doc/_markdown/parseff/json-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+
+(rule
+ (alias doc-markdown)
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/optimization.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets optimization.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: Making parsers fast' 'description: Techniques for writing high-performance parsers with Parseff' '---' '' > %{targets} && tail -n +6 %{workspace_root}/_doc/_markdown/parseff/optimization.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+
+(rule
+ (alias doc-markdown)
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/comparison.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets comparison.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: Comparison with Angstrom' 'description: How Parseff compares to Angstrom in performance, API style, and trade-offs' '---' '' > %{targets} && tail -n +6 %{workspace_root}/_doc/_markdown/parseff/comparison.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))

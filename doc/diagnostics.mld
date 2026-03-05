@@ -30,24 +30,27 @@ type ('a, 'e, 'd) result_with_diagnostics =
 
 Parse outcome with diagnostics in both success and failure cases.
 
-{1 Emitting Diagnostics}
+{1 Emitting diagnostics}
 
 {2 [warn]}
-
-{@ocaml skip[val warn : 'd -> unit]}
 
 {!val:Parseff.warn} records a non-fatal diagnostic at the current parser
 position.
 
+{@ocaml skip[val warn : 'd -> unit]}
+
 {2 [warn_at]}
 
-{@ocaml skip[val warn_at : pos:int -> 'd -> unit]}
-
 {!val:Parseff.warn_at} records a non-fatal diagnostic at an explicit position.
+
+{@ocaml skip[val warn_at : pos:int -> 'd -> unit]}
 
 {1 Runners}
 
 {2 [parse_until_end]}
+
+{!val:Parseff.parse_until_end} runs a parser on a string, enforces full input
+consumption implicitly, and returns both:
 
 {@ocaml skip[val parse_until_end :
   ?max_depth:int ->
@@ -55,9 +58,6 @@ position.
   (unit -> 'a) ->
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics]}
-
-{!val:Parseff.parse_until_end} runs a parser on a string, enforces full input
-consumption implicitly, and returns both:
 
 - [Ok (value, diagnostics)] on success
 - [Error { pos; error; diagnostics }] on failure
@@ -68,15 +68,15 @@ explicit {!val:Parseff.end_of_input} calls behave inside your parser.
 
 {2 [parse_source_until_end]}
 
+{!val:Parseff.parse_source_until_end} is the streaming equivalent of
+{!val:Parseff.parse_until_end} for {!type:Parseff.Source.t} inputs.
+
 {@ocaml skip[val parse_source_until_end :
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics]}
-
-{!val:Parseff.parse_source_until_end} is the streaming equivalent of
-{!val:Parseff.parse_until_end} for {!type:Parseff.Source.t} inputs.
 
 In plain terms: [parse_source_until_end] always does one extra
 {!val:Parseff.end_of_input} check after your parser returns.
@@ -130,7 +130,7 @@ let () =
   | Error _ -> Printf.printf "Parse failed\n"
 ]}
 
-{1 Backtracking Semantics}
+{1 Backtracking semantics}
 
 Diagnostics are transactional with parser control flow:
 

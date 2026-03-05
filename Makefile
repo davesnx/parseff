@@ -104,7 +104,7 @@ docs: ## Generate odoc documentation and markdown
 	$(DUNE) build @doc @doc-markdown
 
 .PHONY: website-dev
-website-dev: ## Run website dev server (generated from .mld)
+website-dev: docs ## Run website dev server (generated from .mld)
 	cd website && npm run dev
 
 .PHONY: website-build

@@ -7,14 +7,15 @@ description: How Parseff compares to Angstrom in performance, API style, and tra
 
 ## Performance
 
-Benchmarked on a JSON array parser (`[1, 2, 3, ..., 10]`) over 100,000 iterations. Sources: [`bench/bench_json.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), [`bench/bench_vs_angstrom.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml).
+Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 100,000 iterations. Sources: [bench/bench_json.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), [bench/bench_vs_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml).
 
-| Parser | Parses/sec | vs. Angstrom | Minor allocs |
-|--------|-----------|-------------|--------|
-| Parseff (zero-copy) | ~5,270,000 | 4.8x faster | 168 MB |
-| Parseff (fair) | ~1,930,000 | 1.8x faster | 184 MB |
-| MParser | ~1,330,000 | 1.2x faster | 466 MB |
-| Angstrom | ~1,090,000 | baseline | 584 MB |
+```
+                        Parses/sec     vs. Angstrom   Minor allocs
+Parseff (zero-copy)     ~5,270,000     4.8x faster    168 MB
+Parseff (fair)          ~1,930,000     1.8x faster    184 MB
+MParser                 ~1,330,000     1.2x faster    466 MB
+Angstrom                ~1,090,000     baseline       584 MB
+```
 
 **Zero-copy** uses `sep_by_take_span` with a custom `float_of_span` that avoids `float_of_string`. This represents the fastest path when you control the conversion logic.
 
@@ -24,11 +25,11 @@ All parsers produce the same output (`float list`) from the same input.
 
 ### Why Parseff is faster
 
-**Direct character scanning.** `take_while` runs a tight `while` loop with character predicates. No regex compilation, no automaton overhead.
+**Direct character scanning.** `Parseff.take_while` runs a tight `while` loop with character predicates. No regex compilation, no automaton overhead.
 
 **Fewer allocations.** Span-based APIs return `{ buf; off; len }` slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
 
-**Fused operations.** `sep_by_take_span` parses an entire separated list in a single effect dispatch. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
+**Fused operations.** `Parseff.sep_by_take_span` parses an entire separated list in a single effect dispatch. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
 
 **No monadic overhead.** Parsers are direct function calls. No CPS, no closure allocation for sequencing.
 
@@ -39,6 +40,7 @@ The fundamental difference: Parseff uses direct-style imperative code. Angstrom 
 ### Sequencing
 
 **Parseff:**
+
 ```ocaml
 let key_value () =
   let key = Parseff.take_while1 (fun c -> c <> ':') ~label:"key" in
@@ -49,6 +51,7 @@ let key_value () =
 ```
 
 **Angstrom:**
+
 ```ocaml
 let key_value =
   take_while1 (fun c -> c <> ':') >>= fun key ->
@@ -63,6 +66,7 @@ Both do the same thing. Parseff reads like sequential OCaml code. Angstrom threa
 ### Alternation
 
 **Parseff:**
+
 ```ocaml
 let value () =
   Parseff.one_of
@@ -71,16 +75,18 @@ let value () =
 ```
 
 **Angstrom:**
+
 ```ocaml
 let value =
   null_parser <|> bool_parser <|> number_parser <|> string_parser
 ```
 
-Similar readability. Angstrom's `<|>` is more concise. Parseff's `one_of` is explicit about the list structure.
+Similar readability. Angstrom's `<|>` is more concise. Parseff's `Parseff.one_of` is explicit about the list structure.
 
 ### Repetition
 
 **Parseff:**
+
 ```ocaml
 let numbers () =
   Parseff.sep_by
@@ -94,6 +100,7 @@ let numbers () =
 ```
 
 **Angstrom:**
+
 ```ocaml
 let numbers =
   sep_by (ws *> char ',' <* ws)
@@ -107,6 +114,7 @@ Angstrom is more concise here thanks to applicative operators (`*>`, `<*`). Pars
 Here's the same expression parser in both libraries:
 
 **Parseff:**
+
 ```ocaml
 let rec expr () =
   Parseff.chainl1
@@ -140,6 +148,7 @@ and factor () =
 ```
 
 **Angstrom:**
+
 ```ocaml
 let expr =
   fix (fun expr ->
@@ -159,31 +168,28 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 ## Feature comparison
 
 | Feature | Parseff | Angstrom |
-|---------|---------|----------|
-| OCaml version | 5.3+ | 4.x+ |
+| --- | --- | --- |
+| OCaml version | 5\.3+ | 4\.x+ |
 | API style | Imperative (direct effects) | Monadic (CPS-based) |
-| Streaming | `parse_source` with `Source.t` | `Buffered` / `Unbuffered` modules |
+| Streaming | `parse_source` with `Source.t` | Buffered / Unbuffered modules |
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
 | Zero-copy | `span` type + fused ops | Not built-in |
 | Recursion safety | `rec_` with `~max_depth` | Manual (no built-in depth limit) |
 | Custom errors | `error` with polymorphic variants | Limited (string-based) |
 | Error labels | `expect`, `one_of_labeled` | `<?>` operator |
-| Async support | Not built-in (wrap in Domain) | Incremental API with `Partial` |
+| Async support | Not built-in (wrap in Domain) | Incremental API with Partial |
 | Maturity | New | Battle-tested, widely used |
 
 ## Broader comparison
 
-| Feature | Parseff | [Angstrom](https://github.com/inhabitedtype/angstrom) | [MParser](https://github.com/cakeplus/mparser) | [Opal](https://github.com/pyrocat101/opal) |
-|---|---|---|---|---|
+| Feature | Parseff | Angstrom | MParser | Opal |
+| --- | --- | --- | --- | --- |
 | Imperative-style API | Yes | No | No | No |
 | Monadic interface | No | Yes | Yes | Yes |
 | Backtracking by default | Yes | Yes | No | No |
 | Unbounded lookahead | Yes | Yes | Yes | No |
 | Custom error types | Yes | No | No | No |
 | Zero-copy API | Yes | Yes | No | No |
-| Streaming/incremental input | Yes | Yes | No | No |
+| Streaming/incremental | Yes | Yes | No | No |
 | Requires OCaml 5+ | Yes | No | No | No |
-
-MParser and Opal require explicit backtracking (like Parsec's `try`). Angstrom and Parseff backtrack automatically on alternation. MParser and Opal don't support streaming input. Only Parseff supports custom typed errors beyond strings.
-
-
+**Note:** MParser and Opal require explicit backtracking (like Parsec's `try`). Angstrom and Parseff backtrack automatically on alternation. MParser and Opal don't support streaming input. Only Parseff supports custom typed errors beyond strings.

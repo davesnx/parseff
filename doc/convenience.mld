@@ -1,15 +1,15 @@
-{0 Convenience Combinators}
+{0 Convenience combinators}
 
 Convenience combinators provide ready-to-use parsers for common patterns like
 digits, letters, and whitespace.
 
-{1 Character Classes}
+{1 Character classes}
 
 {2 [digit]}
 
-{@ocaml skip[val digit : unit -> int]}
-
 {!val:Parseff.digit} parses a decimal digit (0-9) and returns its integer value.
+
+{@ocaml skip[val digit : unit -> int]}
 
 {@ocaml[
 (* Parse two-digit number *)
@@ -23,9 +23,9 @@ let two_digits () =
 
 {2 [letter]}
 
-{@ocaml skip[val letter : unit -> char]}
-
 {!val:Parseff.letter} parses an ASCII letter (a-z or A-Z).
+
+{@ocaml skip[val letter : unit -> char]}
 
 {@ocaml[
 let initial () = Parseff.letter ()
@@ -37,9 +37,9 @@ let initial () = Parseff.letter ()
 
 {2 [alphanum]}
 
-{@ocaml skip[val alphanum : unit -> char]}
-
 {!val:Parseff.alphanum} parses an alphanumeric character (letter or digit).
+
+{@ocaml skip[val alphanum : unit -> char]}
 
 {@ocaml[
 let username () =
@@ -53,9 +53,9 @@ let username () =
 
 {2 [any_char]}
 
-{@ocaml skip[val any_char : unit -> char]}
-
 {!val:Parseff.any_char} parses any character. Fails only at end of input.
+
+{@ocaml skip[val any_char : unit -> char]}
 
 {@ocaml[
 (* Skip past a single unknown character *)
@@ -71,10 +71,10 @@ let peek () = Parseff.look_ahead Parseff.any_char
 
 {2 [is_whitespace]}
 
-{@ocaml skip[val is_whitespace : char -> bool]}
-
 {!val:Parseff.is_whitespace} returns true for whitespace characters (space, tab,
 newline, carriage return). This is a predicate, not a parser.
+
+{@ocaml skip[val is_whitespace : char -> bool]}
 
 {@ocaml[
 let trim_parser () =
@@ -92,10 +92,10 @@ let trim_parser () =
 
 {2 [whitespace]}
 
-{@ocaml skip[val whitespace : unit -> string]}
-
 {!val:Parseff.whitespace} parses zero or more whitespace characters. Returns the
 matched string. Always succeeds (returns empty string if no whitespace).
+
+{@ocaml skip[val whitespace : unit -> string]}
 
 {@ocaml[
 let spaced_values () =
@@ -111,10 +111,10 @@ let spaced_values () =
 
 {2 [whitespace1]}
 
-{@ocaml skip[val whitespace1 : unit -> string]}
-
 {!val:Parseff.whitespace1} parses one or more whitespace characters. Fails if no
 whitespace found.
+
+{@ocaml skip[val whitespace1 : unit -> string]}
 
 {@ocaml[
 let words () =
@@ -132,11 +132,11 @@ let words () =
 
 {2 [skip_whitespace]}
 
-{@ocaml skip[val skip_whitespace : unit -> unit]}
-
 {!val:Parseff.skip_whitespace} skips zero or more whitespace characters (returns
 unit). More efficient than {!val:Parseff.whitespace} when you don't need the
 matched string.
+
+{@ocaml skip[val skip_whitespace : unit -> unit]}
 
 {@ocaml[
 (* Parse comma-separated list with flexible spacing *)

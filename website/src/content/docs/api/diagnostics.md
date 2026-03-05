@@ -35,29 +35,31 @@ type ('a, 'e, 'd) result_with_diagnostics =
 Parse outcome with diagnostics in both success and failure cases.
 
 
-## Emitting Diagnostics
+## Emitting diagnostics
 
 
 ### `warn`
 
+`Parseff.warn` records a non-fatal diagnostic at the current parser position.
+
 ```ocaml
 val warn : 'd -> unit
 ```
-`Parseff.warn` records a non-fatal diagnostic at the current parser position.
-
 
 ### `warn_at`
+
+`Parseff.warn_at` records a non-fatal diagnostic at an explicit position.
 
 ```ocaml
 val warn_at : pos:int -> 'd -> unit
 ```
-`Parseff.warn_at` records a non-fatal diagnostic at an explicit position.
-
 
 ## Runners
 
 
 ### `parse_until_end`
+
+`Parseff.parse_until_end` runs a parser on a string, enforces full input consumption implicitly, and returns both:
 
 ```ocaml
 val parse_until_end :
@@ -67,14 +69,14 @@ val parse_until_end :
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics
 ```
-`Parseff.parse_until_end` runs a parser on a string, enforces full input consumption implicitly, and returns both:
-
 - `Ok (value, diagnostics)` on success
 - `Error { pos; error; diagnostics }` on failure
 Semantically, this is equivalent to running your parser and then calling `Parseff.end_of_input` once more at the end. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser.
 
 
 ### `parse_source_until_end`
+
+`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end` for `Parseff.Source.t` inputs.
 
 ```ocaml
 val parse_source_until_end :
@@ -84,8 +86,6 @@ val parse_source_until_end :
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics
 ```
-`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end` for `Parseff.Source.t` inputs.
-
 In plain terms: `parse_source_until_end` always does one extra `Parseff.end_of_input` check after your parser returns.
 
 If your parser already calls `Parseff.end_of_input` itself, that call keeps the same behavior as before. The runner just adds a final safety check.
@@ -137,7 +137,7 @@ let () =
   | Error _ -> Printf.printf "Parse failed\n"
 ```
 
-## Backtracking Semantics
+## Backtracking semantics
 
 Diagnostics are transactional with parser control flow:
 

@@ -12,12 +12,11 @@
  (alias doc-markdown)
  (mode
   (promote (until-clean)))
- (deps %{workspace_root}/_doc/_markdown/parseff/core.md)
+ (deps %{workspace_root}/_doc/_markdown/parseff/primitives.md)
  (targets primitives.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Core' 'description: Basic parsing operations in Parseff' '---' '' '<!-- This file is generated from doc/core.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/core.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Primitives' 'description: Basic parsing operations in Parseff' '---' '' '<!-- This file is generated from doc/primitives.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/primitives.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -27,8 +26,7 @@
  (targets combinators.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Combinators' 'description: Composition operators for building complex parsers' '---' '' '<!-- This file is generated from doc/combinators.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/combinators.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Combinators' 'description: Composition operators for building complex parsers' '---' '' '<!-- This file is generated from doc/combinators.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/combinators.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -38,8 +36,7 @@
  (targets repetition.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Repetition and separation' 'description: Looping constructs for parsing repeated and separated patterns' '---' '' '<!-- This file is generated from doc/repetition.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/repetition.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Repetition and separation' 'description: Looping constructs for parsing repeated and separated patterns' '---' '' '<!-- This file is generated from doc/repetition.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/repetition.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -49,8 +46,7 @@
  (targets convenience.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Convenience combinators' 'description: Common parsing patterns made easy' '---' '' '<!-- This file is generated from doc/convenience.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/convenience.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Convenience combinators' 'description: Common parsing patterns made easy' '---' '' '<!-- This file is generated from doc/convenience.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/convenience.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -60,8 +56,7 @@
  (targets errors.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Error handling' 'description: Building better error messages in Parseff' '---' '' '<!-- This file is generated from doc/errors.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/errors.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Error handling' 'description: Building better error messages in Parseff' '---' '' '<!-- This file is generated from doc/errors.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/errors.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -71,8 +66,7 @@
  (targets diagnostics.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Diagnostics' 'description: Non-fatal diagnostics and full-consumption runners' '---' '' '<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/diagnostics.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Diagnostics' 'description: Non-fatal diagnostics and full-consumption runners' '---' '' '<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/diagnostics.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -82,8 +76,7 @@
  (targets zero-copy.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Zero-copy API' 'description: High-performance span-based parsing operations' '---' '' '<!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/zero-copy.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Zero-copy API' 'description: High-performance span-based parsing operations' '---' '' '<!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/zero-copy.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
 
 (rule
  (alias doc-markdown)
@@ -93,5 +86,4 @@
  (targets streaming.md)
  (action
   (system
-    "printf '%s\\n' '---' 'title: Streaming' 'description: Parse from files, channels, and custom readers' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))
-
+   "printf '%s\\n' '---' 'title: Streaming' 'description: Parse from files, channels, and custom readers' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && tail -n +2 %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && sed -i 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} && sed -i 's|\\\\=|=|g' %{targets}")))

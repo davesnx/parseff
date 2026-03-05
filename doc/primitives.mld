@@ -1,16 +1,16 @@
-{0 Core}
+{0 Primitives}
 
-Core primitives are the building blocks of all parsers. These operations match
+Primitives are the building blocks of all parsers. These operations match
 input directly and form the foundation of more complex parsers.
 
-{1 String and Character Matching}
+{1 String and character matching}
 
 {2 [consume]}
 
-{@ocaml skip[val consume : string -> string]}
-
 {!val:Parseff.consume} matches an exact literal string. Returns the matched
 string.
+
+{@ocaml skip[val consume : string -> string]}
 
 {@ocaml[
 let parser () =
@@ -25,9 +25,9 @@ faster than using regex for exact matches.
 
 {2 [char]}
 
-{@ocaml skip[val char : char -> char]}
-
 {!val:Parseff.char} matches an exact character. Returns the matched character.
+
+{@ocaml skip[val char : char -> char]}
 
 {@ocaml[
 let comma () = Parseff.char ','
@@ -52,10 +52,10 @@ string allocation for a single byte.
 
 {2 [satisfy]}
 
-{@ocaml skip[val satisfy : (char -> bool) -> label:string -> char]}
-
 {!val:Parseff.satisfy} matches a character satisfying the given predicate. The
 [~label] parameter is used in error messages.
+
+{@ocaml skip[val satisfy : (char -> bool) -> label:string -> char]}
 
 {@ocaml[
 (* Match any vowel *)
@@ -80,16 +80,16 @@ let uppercase () =
 {b Tip:} The label parameter is shown in error messages. Prefer descriptive
 labels.
 
-{1 Character Scanning}
+{1 Character scanning}
 
 These operations scan multiple characters efficiently.
 
 {2 [take_while]}
 
-{@ocaml skip[val take_while : (char -> bool) -> string]}
-
 {!val:Parseff.take_while} consumes characters while the predicate holds. Returns
 the matched string (may be empty). Always succeeds.
+
+{@ocaml skip[val take_while : (char -> bool) -> string]}
 
 {@ocaml[
 (* Parse digits *)
@@ -114,10 +114,10 @@ let identifier () =
 
 {2 [take_while1]}
 
-{@ocaml skip[val take_while1 : (char -> bool) -> label:string -> string]}
-
 {!val:Parseff.take_while1} is like {!val:Parseff.take_while} but requires at
 least one character. Fails if no characters match.
+
+{@ocaml skip[val take_while1 : (char -> bool) -> label:string -> string]}
 
 {@ocaml[
 (* Parse non-empty digits *)
@@ -136,11 +136,11 @@ let identifier1 () =
 
 {2 [skip_while]}
 
-{@ocaml skip[val skip_while : (char -> bool) -> unit]}
-
 {!val:Parseff.skip_while} skips characters while the predicate holds (returns
 unit). Always succeeds. More efficient than {!val:Parseff.take_while} when you
 don't need the matched string.
+
+{@ocaml skip[val skip_while : (char -> bool) -> unit]}
 
 {@ocaml[
 (* Skip spaces *)
@@ -159,14 +159,14 @@ let csv_value () =
 {b Tip:} If you don't need the matched string, prefer [skip_while] over
 [take_while] to avoid allocating.
 
-{1 Regular Expressions}
+{1 Regular expressions}
 
 {2 [match_regex]}
 
-{@ocaml skip[val match_regex : Re.re -> string]}
-
 {!val:Parseff.match_regex} matches a compiled regular expression. The regex must
 be compiled with [Re.compile].
+
+{@ocaml skip[val match_regex : Re.re -> string]}
 
 {@ocaml[
 (* Pre-compile at module level. Never inside a parser function *)
@@ -188,13 +188,13 @@ let number () =
   Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ]}
 
-{1 Control Flow}
+{1 Control flow}
 
 {2 [fail]}
 
-{@ocaml skip[val fail : string -> 'a]}
-
 {!val:Parseff.fail} aborts parsing with an error message.
+
+{@ocaml skip[val fail : string -> 'a]}
 
 {@ocaml[
 (* Validate range *)
@@ -214,10 +214,10 @@ let byte () =
 
 {2 [error]}
 
-{@ocaml skip[val error : 'e -> 'a]}
-
 {!val:Parseff.error} aborts parsing with a user-defined error value. Custom
 errors are caught by {!val:Parseff.parse} and returned in the result.
+
+{@ocaml skip[val error : 'e -> 'a]}
 
 {@ocaml[
 let validated_number () =
@@ -254,10 +254,10 @@ let number_checked () =
 
 {2 [end_of_input]}
 
-{@ocaml skip[val end_of_input : unit -> unit]}
-
 {!val:Parseff.end_of_input} succeeds only if no input remains. Use this to
 ensure the entire input has been consumed.
+
+{@ocaml skip[val end_of_input : unit -> unit]}
 
 {@ocaml[
 (* Parse complete input *)
@@ -279,7 +279,7 @@ leftover input.
 
 {2 [position]}
 
-{@ocaml skip[val position : unit -> int]}
-
 {!val:Parseff.position} returns the current parser offset in bytes from the
 start of the input.
+
+{@ocaml skip[val position : unit -> int]}

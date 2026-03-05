@@ -7,10 +7,10 @@ alternation, error labeling, lookahead, and recursion.
 
 {2 [or_]}
 
-{@ocaml skip[val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a]}
-
 {!val:Parseff.or_} tries the left parser. If it fails, backtracks (resets the
 cursor) and tries the right parser.
+
+{@ocaml skip[val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a]}
 
 {@ocaml[
 let bool_parser () =
@@ -57,10 +57,10 @@ let keyword_with_one_of () =
 
 {2 [one_of]}
 
-{@ocaml skip[val one_of : (unit -> 'a) list -> unit -> 'a]}
-
 {!val:Parseff.one_of} tries each parser in order until one succeeds. Equivalent
 to chaining [or_], but cleaner for more than two alternatives.
+
+{@ocaml skip[val one_of : (unit -> 'a) list -> unit -> 'a]}
 
 {@ocaml skip[
 let json_value () =
@@ -81,10 +81,10 @@ attempted.
 
 {2 [one_of_labeled]}
 
-{@ocaml skip[val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a]}
-
 {!val:Parseff.one_of_labeled} is like {!val:Parseff.one_of}, but each parser has
 a label. On failure, the error message reports all labels:
+
+{@ocaml skip[val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a]}
 
 {@ocaml skip[
 let literal () =
@@ -103,10 +103,10 @@ without exposing internal parser details.
 
 {2 [optional]}
 
-{@ocaml skip[val optional : (unit -> 'a) -> unit -> 'a option]}
-
 {!val:Parseff.optional} tries the parser. Returns [Some result] on success,
 [None] on failure (without consuming input).
+
+{@ocaml skip[val optional : (unit -> 'a) -> unit -> 'a option]}
 
 {@ocaml skip[
 let signed_number () =
@@ -123,10 +123,10 @@ let signed_number () =
 
 {2 [look_ahead]}
 
-{@ocaml skip[val look_ahead : (unit -> 'a) -> 'a]}
-
 {!val:Parseff.look_ahead} runs a parser without consuming input. The cursor
 stays where it was before the call. Fails if the parser fails.
+
+{@ocaml skip[val look_ahead : (unit -> 'a) -> 'a]}
 
 {@ocaml skip[
 let peek_open_paren () =
@@ -138,14 +138,14 @@ let peek_open_paren () =
 Useful for context-sensitive decisions: peek at what's coming, then choose which
 parser to run.
 
-{1 Error Labeling}
+{1 Error labeling}
 
 {2 [expect]}
 
-{@ocaml skip[val expect : string -> (unit -> 'a) -> 'a]}
-
 {!val:Parseff.expect} runs a parser and relabels its failure with a clearer
 message.
+
+{@ocaml skip[val expect : string -> (unit -> 'a) -> 'a]}
 
 {@ocaml[
 let dot () =
@@ -177,11 +177,11 @@ reports [expected a dot separator].
 
 {2 [rec_]}
 
-{@ocaml skip[val rec_ : (unit -> 'a) -> 'a]}
-
 {!val:Parseff.rec_} marks a recursive entry point for depth tracking. Wrap the
 body of recursive parsers with [rec_] so that {!val:Parseff.parse} can enforce
 [max_depth] and fail cleanly instead of overflowing the stack.
+
+{@ocaml skip[val rec_ : (unit -> 'a) -> 'a]}
 
 {@ocaml skip[
 let rec json () =

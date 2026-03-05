@@ -1,0 +1,172 @@
+---
+import MobileTableOfContents from '@astrojs/starlight/components/MobileTableOfContents.astro';
+import TableOfContents from '@astrojs/starlight/components/TableOfContents.astro';
+
+const route = Astro.locals.starlightRoute;
+const title = route.entry.data.title;
+const body = route.entry.body ?? '';
+const markdown = `# ${title}\n\n${body}`;
+
+// Build the "Edit this page" URL from the entry's file path
+const editUrl = `https://github.com/davesnx/parseff/edit/main/website/src/content/docs/${route.entry.id}`;
+---
+
+{
+	route.toc && (
+		<>
+			<div class="lg:sl-hidden">
+				<MobileTableOfContents />
+			</div>
+			<div class="right-sidebar-panel sl-hidden lg:sl-block">
+				<div class="sl-container">
+					<TableOfContents />
+					<div class="sidebar-actions">
+						<button
+							class="sidebar-action copy-md-btn"
+							aria-label="Copy page as Markdown"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+								<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+							</svg>
+							<span class="label-copy">Copy as Markdown</span>
+							<svg class="icon-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="20 6 9 17 4 12" />
+							</svg>
+							<span class="label-copied">Copied!</span>
+						</button>
+						<a class="sidebar-action" href={editUrl} target="_blank" rel="noopener">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+								<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+							</svg>
+							Edit this page
+						</a>
+						<a class="sidebar-action" href="https://x.com/davesnx" target="_blank" rel="noopener">
+							<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+							</svg>
+							Share feedback
+						</a>
+					</div>
+				</div>
+			</div>
+		</>
+	)
+}
+
+<script is:inline id="page-md-source" type="application/json" set:html={JSON.stringify(markdown)} />
+
+<script>
+	const btn = document.querySelector('.copy-md-btn') as HTMLButtonElement | null;
+	const src = document.querySelector('#page-md-source') as HTMLScriptElement | null;
+
+	btn?.addEventListener('click', async () => {
+		const md = src?.textContent ? JSON.parse(src.textContent) : '';
+		try {
+			await navigator.clipboard.writeText(md);
+			btn.classList.add('copied');
+			setTimeout(() => btn.classList.remove('copied'), 2000);
+		} catch {
+			const textarea = document.createElement('textarea');
+			textarea.value = md;
+			textarea.style.position = 'fixed';
+			textarea.style.opacity = '0';
+			document.body.appendChild(textarea);
+			textarea.select();
+			document.execCommand('copy');
+			document.body.removeChild(textarea);
+			btn.classList.add('copied');
+			setTimeout(() => btn.classList.remove('copied'), 2000);
+		}
+	});
+</script>
+
+<style>
+	/* Preserve the default Starlight right-sidebar styles we replaced */
+	@layer starlight.core {
+		.right-sidebar-panel {
+			padding: 1rem var(--sl-sidebar-pad-x);
+		}
+		.sl-container {
+			width: calc(var(--sl-sidebar-width) - 2 * var(--sl-sidebar-pad-x));
+		}
+		.right-sidebar-panel :global(h2) {
+			color: var(--sl-color-white);
+			font-size: var(--sl-text-h5);
+			font-weight: 600;
+			line-height: var(--sl-line-height-headings);
+			margin-bottom: 0.5rem;
+		}
+		.right-sidebar-panel :global(:where(a)) {
+			display: block;
+			font-size: var(--sl-text-xs);
+			text-decoration: none;
+			color: var(--sl-color-gray-3);
+			overflow-wrap: anywhere;
+		}
+		.right-sidebar-panel :global(:where(a):hover) {
+			color: var(--sl-color-white);
+		}
+		@media (min-width: 72rem) {
+			.sl-container {
+				max-width: calc(
+					(
+						(
+								100vw - var(--sl-sidebar-width) - 2 * var(--sl-content-pad-x) - 2 *
+									var(--sl-sidebar-pad-x)
+							) * 0.25
+					)
+				);
+			}
+		}
+	}
+
+	.sidebar-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		margin-top: 1rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--sl-color-gray-6);
+	}
+
+	.sidebar-action {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.25rem 0;
+		border: none;
+		background: transparent;
+		color: var(--sl-color-gray-3);
+		font-size: 13px;
+		font-family: var(--sl-font);
+		text-decoration: none;
+		cursor: pointer;
+		transition: color 0.15s;
+	}
+
+	.sidebar-action:hover {
+		color: var(--sl-color-white);
+	}
+
+	/* Copy button states */
+	.copy-md-btn .icon-check,
+	.copy-md-btn .label-copied {
+		display: none;
+	}
+
+	.copy-md-btn.copied .icon-check,
+	.copy-md-btn.copied .label-copied {
+		display: inline;
+	}
+
+	.copy-md-btn.copied svg:first-of-type,
+	.copy-md-btn.copied .label-copy {
+		display: none;
+	}
+
+	.copy-md-btn.copied {
+		color: var(--sl-color-green-high, #4ade80);
+	}
+</style>

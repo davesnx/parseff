@@ -5,52 +5,52 @@ description: Looping constructs for parsing repeated and separated patterns
 
 <!-- This file is generated from doc/repetition.mld. Do not edit directly. -->
 
-# Repetition and Separation
+# Repetition and separation
 
 These combinators handle patterns that repeat: lists, separated values, delimited blocks, and operator chains.
 
 
-## Basic Repetition
+## Basic repetition
 
 
 ### `many`
 
-```ocaml
-val many : (unit -> 'a) -> unit -> 'a list
-```
 `Parseff.many` applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately).
 
 ```ocaml
+val many : (unit -> 'a) -> unit -> 'a list
+```
+```ocaml
 let digits () = Parseff.many Parseff.digit ()
-(* "123"  -> [1; 2; 3] *)
+(* "123"  -> [1; 2; 3]  *)
 (* ""     -> []         *)
 (* "abc"  -> []         *)
 ```
 
 ### `many1`
 
-```ocaml
-val many1 : (unit -> 'a) -> unit -> 'a list
-```
 `Parseff.many1` is like `Parseff.many` but requires at least one match. Fails if the parser doesn't succeed at least once.
 
 ```ocaml
+val many1 : (unit -> 'a) -> unit -> 'a list
+```
+```ocaml
 let digits1 () = Parseff.many1 Parseff.digit ()
-(* "123" -> [1; 2; 3] *)
+(* "123" -> [1; 2; 3]  *)
 (* ""    -> Error      *)
 (* "abc" -> Error      *)
 ```
 
 ### `count`
 
-```ocaml
-val count : int -> (unit -> 'a) -> unit -> 'a list
-```
 `Parseff.count` applies a parser exactly `n` times. Fails if the parser doesn't match `n` times.
 
 ```ocaml
+val count : int -> (unit -> 'a) -> unit -> 'a list
+```
+```ocaml
 let three_digits () = Parseff.count 3 Parseff.digit ()
-(* "123"  -> [1; 2; 3] *)
+(* "123"  -> [1; 2; 3]  *)
 (* "12"   -> Error      *)
 ```
 Useful for fixed-width formats:
@@ -74,16 +74,16 @@ let hex_color () =
 (* "#ff00aa" -> (['f';'f'], ['0';'0'], ['a';'a']) *)
 ```
 
-## Separated Lists
+## Separated lists
 
 
 ### `sep_by`
 
+`Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds.
+
 ```ocaml
 val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
-`Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds.
-
 ```ocaml
 let csv_line () =
   Parseff.sep_by
@@ -96,11 +96,11 @@ let csv_line () =
 
 ### `sep_by1`
 
+`Parseff.sep_by1` is like `Parseff.sep_by` but requires at least one element.
+
 ```ocaml
 val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
-`Parseff.sep_by1` is like `Parseff.sep_by` but requires at least one element.
-
 ```ocaml
 let csv_line1 () =
   Parseff.sep_by1
@@ -115,16 +115,16 @@ let csv_line1 () =
 (* ""      -> Error            *)
 ```
 
-## Delimiters and Terminators
+## Delimiters and terminators
 
 
 ### `between`
 
+`Parseff.between` parses an opening delimiter, then the body, then a closing delimiter. Returns the body's value.
+
 ```ocaml
 val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> unit -> 'c
 ```
-`Parseff.between` parses an opening delimiter, then the body, then a closing delimiter. Returns the body's value.
-
 ```ocaml
 let parens p =
   Parseff.between
@@ -161,11 +161,11 @@ let brackets p =
 
 ### `end_by`
 
+`Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last).
+
 ```ocaml
 val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
-`Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last).
-
 ```ocaml
 (* Parse semicolon-terminated statements *)
 let statements () =
@@ -182,24 +182,24 @@ let statements () =
 
 ### `end_by1`
 
+`Parseff.end_by1` is like `Parseff.end_by` but requires at least one element.
+
 ```ocaml
 val end_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
-`Parseff.end_by1` is like `Parseff.end_by` but requires at least one element.
 
-
-## Operator Chains
+## Operator chains
 
 These combinators parse sequences of values joined by operators, handling associativity. They're the standard tool for expression parsing with operator precedence.
 
 
 ### `chainl1`
 
+`Parseff.chainl1` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values.
+
 ```ocaml
 val chainl1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
 ```
-`Parseff.chainl1` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values.
-
 ```ocaml
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
 let subtraction () =
@@ -214,11 +214,11 @@ let subtraction () =
 
 ### `chainr1`
 
+`Parseff.chainr1` is like `Parseff.chainl1` but combines **right-associatively**.
+
 ```ocaml
 val chainr1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
 ```
-`Parseff.chainr1` is like `Parseff.chainl1` but combines **right-associatively**.
-
 ```ocaml
 (* Parse "2^3^2" as 2^(3^2) = 512 *)
 let power () =
@@ -233,11 +233,11 @@ let power () =
 
 ### `chainl`
 
+`Parseff.chainl` is like `Parseff.chainl1` but takes a default value. Returns the default if zero elements match.
+
 ```ocaml
 val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
 ```
-`Parseff.chainl` is like `Parseff.chainl1` but takes a default value. Returns the default if zero elements match.
-
 ```ocaml
 let maybe_subtract () =
   Parseff.chainl
@@ -253,13 +253,13 @@ let maybe_subtract () =
 
 ### `chainr`
 
+`Parseff.chainr` is like `Parseff.chainr1` but with a default value for zero matches.
+
 ```ocaml
 val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
 ```
-`Parseff.chainr` is like `Parseff.chainr1` but with a default value for zero matches.
 
-
-## Complete Example: JSON Array
+## Complete example: JSON array
 
 ```ocaml
 let integer () =

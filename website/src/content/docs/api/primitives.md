@@ -1,25 +1,25 @@
 ---
-title: Core
+title: Primitives
 description: Basic parsing operations in Parseff
 ---
 
-<!-- This file is generated from doc/core.mld. Do not edit directly. -->
+<!-- This file is generated from doc/primitives.mld. Do not edit directly. -->
 
-# Core
+# Primitives
 
-Core primitives are the building blocks of all parsers. These operations match input directly and form the foundation of more complex parsers.
+Primitives are the building blocks of all parsers. These operations match input directly and form the foundation of more complex parsers.
 
 
-## String and Character Matching
+## String and character matching
 
 
 ### `consume`
 
+`Parseff.consume` matches an exact literal string. Returns the matched string.
+
 ```ocaml
 val consume : string -> string
 ```
-`Parseff.consume` matches an exact literal string. Returns the matched string.
-
 ```ocaml
 let parser () =
   let _ = Parseff.consume "hello" in
@@ -32,11 +32,11 @@ let parser () =
 
 ### `char`
 
+`Parseff.char` matches an exact character. Returns the matched character.
+
 ```ocaml
 val char : char -> char
 ```
-`Parseff.char` matches an exact character. Returns the matched character.
-
 ```ocaml
 let comma () = Parseff.char ','
 let left_paren () = Parseff.char '('
@@ -58,11 +58,11 @@ let pair () =
 
 ### `satisfy`
 
+`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages.
+
 ```ocaml
 val satisfy : (char -> bool) -> label:string -> char
 ```
-`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages.
-
 ```ocaml
 (* Match any vowel *)
 let vowel () =
@@ -85,18 +85,18 @@ let uppercase () =
 **Tip:** The label parameter is shown in error messages. Prefer descriptive labels.
 
 
-## Character Scanning
+## Character scanning
 
 These operations scan multiple characters efficiently.
 
 
 ### `take_while`
 
+`Parseff.take_while` consumes characters while the predicate holds. Returns the matched string (may be empty). Always succeeds.
+
 ```ocaml
 val take_while : (char -> bool) -> string
 ```
-`Parseff.take_while` consumes characters while the predicate holds. Returns the matched string (may be empty). Always succeeds.
-
 ```ocaml
 (* Parse digits *)
 let digits () = Parseff.take_while (fun c -> c >= '0' && c <= '9')
@@ -120,11 +120,11 @@ let identifier () =
 
 ### `take_while1`
 
+`Parseff.take_while1` is like `Parseff.take_while` but requires at least one character. Fails if no characters match.
+
 ```ocaml
 val take_while1 : (char -> bool) -> label:string -> string
 ```
-`Parseff.take_while1` is like `Parseff.take_while` but requires at least one character. Fails if no characters match.
-
 ```ocaml
 (* Parse non-empty digits *)
 let digits1 () =
@@ -142,11 +142,11 @@ let identifier1 () =
 
 ### `skip_while`
 
+`Parseff.skip_while` skips characters while the predicate holds (returns unit). Always succeeds. More efficient than `Parseff.take_while` when you don't need the matched string.
+
 ```ocaml
 val skip_while : (char -> bool) -> unit
 ```
-`Parseff.skip_while` skips characters while the predicate holds (returns unit). Always succeeds. More efficient than `Parseff.take_while` when you don't need the matched string.
-
 ```ocaml
 (* Skip spaces *)
 let skip_spaces () = Parseff.skip_while (fun c -> c = ' ')
@@ -163,16 +163,16 @@ let csv_value () =
 **Tip:** If you don't need the matched string, prefer `skip_while` over `take_while` to avoid allocating.
 
 
-## Regular Expressions
+## Regular expressions
 
 
 ### `match_regex`
 
+`Parseff.match_regex` matches a compiled regular expression. The regex must be compiled with `Re.compile`.
+
 ```ocaml
 val match_regex : Re.re -> string
 ```
-`Parseff.match_regex` matches a compiled regular expression. The regex must be compiled with `Re.compile`.
-
 ```ocaml
 (* Pre-compile at module level. Never inside a parser function *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
@@ -190,16 +190,16 @@ let number () =
   Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
 
-## Control Flow
+## Control flow
 
 
 ### `fail`
 
+`Parseff.fail` aborts parsing with an error message.
+
 ```ocaml
 val fail : string -> 'a
 ```
-`Parseff.fail` aborts parsing with an error message.
-
 ```ocaml
 (* Validate range *)
 let byte () =
@@ -218,11 +218,11 @@ let byte () =
 
 ### `error`
 
+`Parseff.error` aborts parsing with a user-defined error value. Custom errors are caught by `Parseff.parse` and returned in the result.
+
 ```ocaml
 val error : 'e -> 'a
 ```
-`Parseff.error` aborts parsing with a user-defined error value. Custom errors are caught by `Parseff.parse` and returned in the result.
-
 ```ocaml
 let validated_number () =
   let s =
@@ -257,11 +257,11 @@ let number_checked () =
 
 ### `end_of_input`
 
+`Parseff.end_of_input` succeeds only if no input remains. Use this to ensure the entire input has been consumed.
+
 ```ocaml
 val end_of_input : unit -> unit
 ```
-`Parseff.end_of_input` succeeds only if no input remains. Use this to ensure the entire input has been consumed.
-
 ```ocaml
 (* Parse complete input *)
 let complete_number () =
@@ -280,7 +280,8 @@ let complete_number () =
 
 ### `position`
 
+`Parseff.position` returns the current parser offset in bytes from the start of the input.
+
 ```ocaml
 val position : unit -> int
 ```
-`Parseff.position` returns the current parser offset in bytes from the start of the input.

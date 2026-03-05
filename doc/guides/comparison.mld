@@ -1,0 +1,297 @@
+{0 Comparison with Angstrom}
+
+How Parseff compares to Angstrom in performance, API style, and trade-offs.
+
+{{:https://github.com/inhabitedtype/angstrom} Angstrom} is the most widely used
+parser combinator library in the OCaml ecosystem. This page compares Parseff and
+Angstrom side by side: performance, API style, and when to use each.
+
+{1 Performance}
+
+Benchmarked on a JSON array parser ([{[1, 2, 3, ..., 10]}]) over 100,000
+iterations. Sources:
+{{:https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml} bench/bench_json.ml},
+{{:https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml} bench/bench_vs_angstrom.ml}.
+
+{v
+                        Parses/sec     vs. Angstrom   Minor allocs
+Parseff (zero-copy)     ~5,270,000     4.8x faster    168 MB
+Parseff (fair)          ~1,930,000     1.8x faster    184 MB
+MParser                 ~1,330,000     1.2x faster    466 MB
+Angstrom                ~1,090,000     baseline       584 MB
+v}
+
+{b Zero-copy} uses [sep_by_take_span] with a custom [float_of_span] that avoids
+[float_of_string]. This represents the fastest path when you control the
+conversion logic.
+
+{b Fair} uses the same [float_of_string] call as MParser and Angstrom, isolating
+parsing overhead from number conversion.
+
+All parsers produce the same output ([float list]) from the same input.
+
+{2 Why Parseff is faster}
+
+{b Direct character scanning.} {!val:Parseff.take_while} runs a tight [while]
+loop with character predicates. No regex compilation, no automaton overhead.
+
+{b Fewer allocations.} Span-based APIs return [{ buf; off; len }] slices of the
+input string without calling [String.sub]. Angstrom's [take_while1] allocates a
+new string per call.
+
+{b Fused operations.} {!val:Parseff.sep_by_take_span} parses an entire separated
+list in a single effect dispatch. Angstrom's equivalent chains [sep_by], [char],
+[skip_while], and [take_while1] through monadic operators, each creating
+closures.
+
+{b No monadic overhead.} Parsers are direct function calls. No CPS, no closure
+allocation for sequencing.
+
+{1 API style}
+
+The fundamental difference: Parseff uses direct-style imperative code. Angstrom
+uses monadic composition.
+
+{2 Sequencing}
+
+{b Parseff:}
+
+{@ocaml skip[
+let key_value () =
+  let key = Parseff.take_while1 (fun c -> c <> ':') ~label:"key" in
+  let _ = Parseff.char ':' in
+  Parseff.skip_whitespace ();
+  let value = Parseff.take_while1 (fun c -> c <> '\n') ~label:"value" in
+  (key, value)
+]}
+
+{b Angstrom:}
+
+{@ocaml skip[
+let key_value =
+  take_while1 (fun c -> c <> ':') >>= fun key ->
+  char ':' >>= fun _ ->
+  skip_while is_ws >>= fun () ->
+  take_while1 (fun c -> c <> '\n') >>= fun value ->
+  return (key, value)
+]}
+
+Both do the same thing. Parseff reads like sequential OCaml code. Angstrom
+threads results through [>>=] and [return].
+
+{2 Alternation}
+
+{b Parseff:}
+
+{@ocaml skip[
+let value () =
+  Parseff.one_of
+    [ null_parser; bool_parser; number_parser; string_parser ]
+    ()
+]}
+
+{b Angstrom:}
+
+{@ocaml skip[
+let value =
+  null_parser <|> bool_parser <|> number_parser <|> string_parser
+]}
+
+Similar readability. Angstrom's [<|>] is more concise. Parseff's
+{!val:Parseff.one_of} is explicit about the list structure.
+
+{2 Repetition}
+
+{b Parseff:}
+
+{@ocaml skip[
+let numbers () =
+  Parseff.sep_by
+    (fun () ->
+      Parseff.skip_whitespace ();
+      let s = Parseff.take_while1 is_digit ~label:"digit" in
+      Parseff.skip_whitespace ();
+      int_of_string s)
+    (fun () -> Parseff.char ',')
+    ()
+]}
+
+{b Angstrom:}
+
+{@ocaml skip[
+let numbers =
+  sep_by (ws *> char ',' <* ws)
+    (take_while1 is_digit >>| int_of_string)
+]}
+
+Angstrom is more concise here thanks to applicative operators ([*>], [<*]).
+Parseff is more explicit: whitespace handling is visible, not hidden in operator
+chains.
+
+{2 A complete side-by-side}
+
+Here's the same expression parser in both libraries:
+
+{b Parseff:}
+
+{@ocaml skip[
+let rec expr () =
+  Parseff.chainl1
+    term
+    (fun () ->
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char '+' in
+      Parseff.skip_whitespace ();
+      fun a b -> a + b)
+    ()
+
+and term () =
+  Parseff.chainl1
+    factor
+    (fun () ->
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char '*' in
+      Parseff.skip_whitespace ();
+      fun a b -> a * b)
+    ()
+
+and factor () =
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.char '(' in
+      let e = expr () in
+      let _ = Parseff.char ')' in
+      e)
+    (fun () -> Parseff.digit ())
+    ()
+]}
+
+{b Angstrom:}
+
+{@ocaml skip[
+let expr =
+  fix (fun expr ->
+    let factor =
+      char '(' *> expr <* char ')'
+      <|> (satisfy is_digit >>| fun c -> Char.code c - 48)
+    in
+    let term =
+      chainl1 factor (ws *> char '*' <* ws >>| fun _ -> ( * ))
+    in
+    chainl1 term (ws *> char '+' <* ws >>| fun _ -> ( + ))
+  )
+]}
+
+Angstrom is denser. Parseff is more readable for people who aren't fluent in
+monadic/applicative operators.
+
+{1 Feature comparison}
+
+{table
+  {tr
+    {th Feature}
+    {th Parseff}
+    {th Angstrom}}
+  {tr
+    {td OCaml version}
+    {td 5.3+}
+    {td 4.x+}}
+  {tr
+    {td API style}
+    {td Imperative (direct effects)}
+    {td Monadic (CPS-based)}}
+  {tr
+    {td Streaming}
+    {td [parse_source] with [Source.t]}
+    {td Buffered / Unbuffered modules}}
+  {tr
+    {td Backtracking}
+    {td Automatic via [or_]}
+    {td Automatic via [<|>]}}
+  {tr
+    {td Zero-copy}
+    {td [span] type + fused ops}
+    {td Not built-in}}
+  {tr
+    {td Recursion safety}
+    {td [rec_] with [~max_depth]}
+    {td Manual (no built-in depth limit)}}
+  {tr
+    {td Custom errors}
+    {td [error] with polymorphic variants}
+    {td Limited (string-based)}}
+  {tr
+    {td Error labels}
+    {td [expect], [one_of_labeled]}
+    {td [<?>] operator}}
+  {tr
+    {td Async support}
+    {td Not built-in (wrap in Domain)}
+    {td Incremental API with Partial}}
+  {tr
+    {td Maturity}
+    {td New}
+    {td Battle-tested, widely used}}}
+
+{1 Broader comparison}
+
+{table
+  {tr
+    {th Feature}
+    {th Parseff}
+    {th Angstrom}
+    {th MParser}
+    {th Opal}}
+  {tr
+    {td Imperative-style API}
+    {td Yes}
+    {td No}
+    {td No}
+    {td No}}
+  {tr
+    {td Monadic interface}
+    {td No}
+    {td Yes}
+    {td Yes}
+    {td Yes}}
+  {tr
+    {td Backtracking by default}
+    {td Yes}
+    {td Yes}
+    {td No}
+    {td No}}
+  {tr
+    {td Unbounded lookahead}
+    {td Yes}
+    {td Yes}
+    {td Yes}
+    {td No}}
+  {tr
+    {td Custom error types}
+    {td Yes}
+    {td No}
+    {td No}
+    {td No}}
+  {tr
+    {td Zero-copy API}
+    {td Yes}
+    {td Yes}
+    {td No}
+    {td No}}
+  {tr
+    {td Streaming/incremental}
+    {td Yes}
+    {td Yes}
+    {td No}
+    {td No}}
+  {tr
+    {td Requires OCaml 5+}
+    {td Yes}
+    {td No}
+    {td No}
+    {td No}}}
+
+  {b Note:} MParser and Opal require explicit backtracking (like Parsec's [try]). Angstrom
+and Parseff backtrack automatically on alternation. MParser and Opal don't
+support streaming input. Only Parseff supports custom typed errors beyond
+strings.

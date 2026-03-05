@@ -16,6 +16,7 @@ export default defineConfig({
 			plugins: [starlightThemeFlexoki()],
 			components: {
 				Head: './src/components/Head.astro',
+				PageSidebar: './src/components/PageSidebar.astro',
 				PageTitle: './src/components/PageTitle.astro',
 			},
 			title: 'Parseff',
@@ -42,7 +43,7 @@ export default defineConfig({
 				{
 			label: 'API reference',
 				items: [
-					{ label: 'Core', slug: 'api/primitives' },
+					{ label: 'Primitives', slug: 'api/primitives' },
 					{ label: 'Combinators', slug: 'api/combinators' },
 					{ label: 'Repetition and separation', slug: 'api/repetition' },
 					{ label: 'Convenience', slug: 'api/convenience' },

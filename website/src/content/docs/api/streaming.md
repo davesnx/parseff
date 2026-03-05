@@ -12,6 +12,8 @@ The streaming API lets you parse input that isn't fully available upfront: files
 
 ## `parse_source`
 
+`Parseff.parse_source` runs a parser pulling input from a `Parseff.Source.t` on demand. Behaves identically to `Parseff.parse`: same parsers, same result type, same error handling.
+
 ```ocaml
 val parse_source :
   ?max_depth:int ->
@@ -19,8 +21,6 @@ val parse_source :
   (unit -> 'a) ->
   ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
 ```
-`Parseff.parse_source` runs a parser pulling input from a `Parseff.Source.t` on demand. Behaves identically to `Parseff.parse`: same parsers, same result type, same error handling.
-
 ```ocaml
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
@@ -33,6 +33,8 @@ The `~max_depth` parameter works the same as in `Parseff.parse`.
 
 ## `parse_source_until_end`
 
+`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end`. It enforces full input consumption and returns diagnostics in both cases. See [`diagnostics`](./diagnostics.md).
+
 ```ocaml
 val parse_source_until_end :
   ?max_depth:int ->
@@ -41,8 +43,6 @@ val parse_source_until_end :
   ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
   result_with_diagnostics
 ```
-`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end`. It enforces full input consumption and returns diagnostics in both cases. See [`diagnostics`](./diagnostics.md).
-
 ```ocaml
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
@@ -51,18 +51,18 @@ val parse_source_until_end :
   outcome
 ```
 
-## The Source Module
+## The Source module
 
 `Parseff.Source` wraps a readable byte stream behind a uniform interface. Three constructors cover the common cases.
 
 
 ### `Source.of_string`
 
+`Parseff.Source.of_string` creates a source from a complete string. Useful for testing streaming code paths with known input:
+
 ```ocaml
 val of_string : string -> Source.t
 ```
-`Parseff.Source.of_string` creates a source from a complete string. Useful for testing streaming code paths with known input:
-
 ```ocaml
   let source = Parseff.Source.of_string "[1, 2, 3]" in
   Parseff.parse_source source json_array
@@ -70,11 +70,11 @@ val of_string : string -> Source.t
 
 ### `Source.of_channel`
 
+`Parseff.Source.of_channel` creates a source that reads from an `in_channel`. The `~buf_size` parameter controls the internal read buffer (default: 4096 bytes).
+
 ```ocaml
 val of_channel : ?buf_size:int -> in_channel -> Source.t
 ```
-`Parseff.Source.of_channel` creates a source that reads from an `in_channel`. The `~buf_size` parameter controls the internal read buffer (default: 4096 bytes).
-
 ```ocaml
   let ic = open_in "large_dataset.json" in
   let source = Parseff.Source.of_channel ~buf_size:8192 ic in
@@ -87,11 +87,11 @@ A larger buffer means fewer system calls but more memory. For most files, the de
 
 ### `Source.of_function`
 
+`Parseff.Source.of_function` creates a source from a custom read function. The function signature is `read buf off len`. Fill `buf` starting at `off` with up to `len` bytes, and return the number of bytes written. Return `0` to signal EOF.
+
 ```ocaml
 val of_function : (bytes -> int -> int -> int) -> Source.t
 ```
-`Parseff.Source.of_function` creates a source from a custom read function. The function signature is `read buf off len`. Fill `buf` starting at `off` with up to `len` bytes, and return the number of bytes written. Return `0` to signal EOF.
-
 ```ocaml
   (* Unix file descriptor *)
   let source = Parseff.Source.of_function (fun buf off len ->
@@ -113,7 +113,7 @@ This is the escape hatch for any byte source not covered by the other constructo
   )
 ```
 
-## Why the Same Parser Works for Both
+## Why the same parser works for both
 
 Parseff uses algebraic effects. Parsers are plain functions that perform effects when they need input. The effect handler interprets those effects differently depending on how you run the parser:
 
@@ -139,7 +139,7 @@ The parser doesn't know which one it's running under. The code is identical:
 Traditional parser combinator libraries (like Angstrom) implement streaming through CPS. Every parser carries `fail` and `succ` callbacks, and suspension is encoded as closures returned in a `Partial` state. This forces the entire API into monadic style. In Parseff, effects make streaming transparent.
 
 
-## How Backtracking Works across Chunks
+## How backtracking works across chunks
 
 The internal buffer grows monotonically. When the streaming handler needs more data, it appends to the buffer and never discards old data. This means backtracking (`Parseff.or_`, `Parseff.look_ahead`) works correctly even when the data spans multiple reads.
 
@@ -152,7 +152,7 @@ Example: parsing `"hello"` from a source that yields 3 bytes at a time:
 If `Parseff.or_` needs to backtrack to a position before the current chunk, the data is still there in the buffer.
 
 
-## Thread Safety
+## Thread safety
 
 `Parseff.parse_source` (and `Parseff.parse`) are safe to call from multiple OCaml 5 domains concurrently. All mutable state (the parser position, internal buffer, recursion depth counter) is created locally inside each call and never shared across calls. There is no global mutable state in the library.
 
@@ -174,12 +174,12 @@ The one constraint: do not share a single `Parseff.Source.t` across domains. Eac
 ## Limitations
 
 
-### Memory Growth
+### Memory growth
 
 The buffer never shrinks. For a 100MB file, the buffer will eventually hold all 100MB. This is the price of correct backtracking, since any position might need to be revisited.
 
 
-### Blocking Reads
+### Blocking reads
 
 `Parseff.Source.of_channel` and `Parseff.Source.of_function` block the calling thread when waiting for data. For async/event-driven architectures, wrap the parse call in a thread:
 
@@ -189,12 +189,12 @@ The buffer never shrinks. For a 100MB file, the buffer will eventually hold all 
   ) |> Domain.join
 ```
 
-### Regex at Chunk Boundaries
+### Regex at chunk boundaries
 
 When a regex match extends to the end of the current buffer, the handler refills and retries until the match no longer touches the boundary (or EOF). This is correct for typical patterns but may behave unexpectedly with zero-width matches at the end of input.
 
 
-### No Partial Results
+### No partial results
 
 `Parseff.parse_source` runs the parser to completion and returns a single result. There's no way to get partial results as data arrives. For incremental processing (e.g., streaming JSON objects from a newline-delimited file), parse one unit at a time:
 

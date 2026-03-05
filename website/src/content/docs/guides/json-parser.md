@@ -106,9 +106,7 @@ let rec json () =
 Three things to notice:
 
 1. **`rec_` wraps the body.** This registers a recursion entry point for depth tracking. Every time `json` calls itself (through arrays or objects), the depth counter increments. When it exceeds `max_depth`, parsing fails cleanly instead of overflowing the stack.
-
 2. **`one_of` tries each parser in order.** Array and object parsers come first because they start with distinctive characters (`[` and `{`). If those fail, we fall through to the simpler alternatives.
-
 3. **Whitespace is consumed before the value.** This means individual parsers don't need to worry about leading whitespace.
 
 ## Arrays

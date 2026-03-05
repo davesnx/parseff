@@ -1,4 +1,4 @@
-{0 Error Handling}
+{0 Error handling}
 
 Parseff exposes three main APIs for error handling:
 
@@ -8,10 +8,10 @@ Parseff exposes three main APIs for error handling:
 
 {1 [fail]}
 
-{@ocaml skip[val fail : string -> 'a]}
-
 Abort parsing with a message. The message is returned as
 [Error { error = `Expected msg; ... }].
+
+{@ocaml skip[val fail : string -> 'a]}
 
 {@ocaml[
 let byte () =
@@ -37,9 +37,9 @@ Use this when a human-readable string is enough.
 
 {1 [error]}
 
-{@ocaml skip[val error : 'e -> 'a]}
-
 Abort parsing with a typed custom error value.
+
+{@ocaml skip[val error : 'e -> 'a]}
 
 {@ocaml[
 let number () =
@@ -80,9 +80,9 @@ let number_quick () =
 
 {1 [expect]}
 
-{@ocaml skip[val expect : string -> (unit -> 'a) -> 'a]}
-
 Run a parser and replace its failure message with a clearer description.
+
+{@ocaml skip[val expect : string -> (unit -> 'a) -> 'a]}
 
 {@ocaml[
 let dot () =

@@ -10,7 +10,7 @@ description: High-performance span-based parsing operations
 The zero-copy API allows you to parse without allocating intermediate strings, significantly improving performance and reducing memory usage.
 
 
-## Span Type
+## Span type
 
 ```ocaml
 type span = { buf : string; off : int; len : int }
@@ -21,16 +21,16 @@ A `Parseff.span` is a zero-copy slice of the input string. It holds a reference 
 val span_to_string : span -> string
 ```
 
-## Span-Based Operations
+## Span-based operations
 
 
 ### `take_while_span`
 
+`Parseff.take_while_span` is like `Parseff.take_while` but returns a zero-copy `Parseff.span` instead of allocating a string. No memory allocation until you call `Parseff.span_to_string`.
+
 ```ocaml
 val take_while_span : (char -> bool) -> span
 ```
-`Parseff.take_while_span` is like `Parseff.take_while` but returns a zero-copy `Parseff.span` instead of allocating a string. No memory allocation until you call `Parseff.span_to_string`.
-
 ```ocaml
 (* no allocation until you need it *)
 let digits_span =
@@ -59,11 +59,11 @@ let fast_integer () =
 
 ### `sep_by_take_span`
 
+`Parseff.sep_by_take_span` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.span`s. No `String.sub` allocations per element.
+
 ```ocaml
 val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
 ```
-`Parseff.sep_by_take_span` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.span`s. No `String.sub` allocations per element.
-
 ```ocaml
 let int_of_span (span : Parseff.span) =
   let rec loop i acc =
@@ -92,16 +92,16 @@ let csv_to_ints () =
   List.map int_of_span spans
 ```
 
-## Fused Operations
+## Fused operations
 
 
 ### `fused_sep_take`
 
+`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while1, all in a single effect dispatch. Much more efficient than separate calls.
+
 ```ocaml
 val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
 ```
-`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while1, all in a single effect dispatch. Much more efficient than separate calls.
-
 ```ocaml
 (* multiple effect dispatches *)
 let parse_value_slow () =
@@ -118,11 +118,11 @@ let parse_value_fast () =
 
 ### `skip_while_then_char`
 
+`Parseff.skip_while_then_char` skips characters matching predicate, then matches a character. Fused operation for efficiency.
+
 ```ocaml
 val skip_while_then_char : (char -> bool) -> char -> unit
 ```
-`Parseff.skip_while_then_char` skips characters matching predicate, then matches a character. Fused operation for efficiency.
-
 ```ocaml
 (* two effect dispatches *)
 let skip_ws_then_comma_slow () =
@@ -137,11 +137,11 @@ let skip_ws_then_comma_fast () =
 
 ### `sep_by_take`
 
+`Parseff.sep_by_take` parses zero or more separated values entirely in the handler. Returns a list of matched strings. Zero intermediate effect dispatches.
+
 ```ocaml
 val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
 ```
-`Parseff.sep_by_take` parses zero or more separated values entirely in the handler. Returns a list of matched strings. Zero intermediate effect dispatches.
-
 ```ocaml
 (* Parse array values efficiently *)
 let array_values () =
@@ -156,7 +156,7 @@ let array_values () =
 (* Matches "[1, 2, 3]" -> [1; 2; 3] *)
 ```
 
-## Performance Comparison
+## Performance comparison
 
 String allocation:
 
@@ -197,7 +197,7 @@ let value () =
     (fun c -> c >= '0' && c <= '9')
 ```
 
-## Complete Example: High-Performance JSON Array
+## Complete example: high-performance JSON array
 
 ```ocaml
 let int_of_span (span : Parseff.span) =
@@ -230,7 +230,7 @@ let () =
 The zero-copy version is roughly 2\.5x faster than the standard API and uses 3x less memory.
 
 
-## When to Use Zero-Copy
+## When to use zero-copy
 
 **Use zero-copy when:**
 

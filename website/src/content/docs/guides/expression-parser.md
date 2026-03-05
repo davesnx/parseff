@@ -3,21 +3,17 @@ title: "Expressions with Precedence"
 description: Build an arithmetic expression parser with operator precedence and an AST
 ---
 
-This walkthrough builds an arithmetic expression parser. We want a parser that takes strings like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence. Multiplication binds tighter than addition, and parentheses can override that. The result is an AST, not a computed value, which is how real compilers and interpreters work: parse first, evaluate later.
-
-Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
-
-Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
-
 ## What we're building
 
-A parser that handles expressions like:
+This walkthrough builds an arithmetic expression parser. A parser that handles expressions like:
 
 - `1+2*3` parses as `1 + (2 * 3)` (multiplication binds tighter)
 - `(1+2)*3` parses as `(1 + 2) * 3` (parentheses override precedence)
 - `1+2+3` parses as `(1 + 2) + 3` (left-associative)
 
-The result is an AST (abstract syntax tree), not a computed value.
+The result is an AST (abstract syntax tree), not a computed value. Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
+
+Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
 
 ## The AST type
 
@@ -184,6 +180,6 @@ let rec expr_to_string = function
 ```
 
 ```ocaml
-(* "1+2*3" -> "(1 + (2 * 3))" *)
+(* "1+2*3" -> "(1 + (2 * 3))"   *)
 (* "(1+2)*3" -> "((1 + 2) * 3)" *)
 ```
