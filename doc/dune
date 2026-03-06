@@ -1,23 +1,6 @@
 (documentation
- (package parseff)
- (mld_files
-  primitives
-  combinators
-  repetition
-  convenience
-  errors
-  diagnostics
-  zero-copy
-  streaming))
+ (package parseff))
 
 (mdx
- (files
-  primitives.mld
-  combinators.mld
-  repetition.mld
-  convenience.mld
-  errors.mld
-  diagnostics.mld
-  zero-copy.mld
-  streaming.mld)
+ (files *.mld)
  (libraries parseff re))

@@ -1,19 +1,6 @@
 (documentation
- (package parseff)
- (mld_files
-  first-parser
-  ip-address
-  expression-parser
-  json-parser
-  optimization
-  comparison))
+ (package parseff))
 
 (mdx
- (files
-  first-parser.mld
-  ip-address.mld
-  expression-parser.mld
-  json-parser.mld
-  optimization.mld
-  comparison.mld)
+ (files *.mld)
  (libraries parseff re))
