@@ -5,6 +5,7 @@ description: Non-fatal diagnostics and full-consumption runners
 
 <!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->
 
+
 # Diagnostics
 
 Use diagnostics when you want to keep parsing and report multiple validation problems instead of stopping at the first one.

@@ -3,6 +3,10 @@ title: Making parsers fast
 description: Techniques for writing high-performance parsers with Parseff
 ---
 
+# Making parsers fast
+
+Techniques for writing high-performance parsers with Parseff.
+
 This guide covers practical techniques for getting the most performance out of Parseff. Each section shows a few non-recommended slow patterns and a fast alternative with an approximate expected impact.
 
 ## Quick wins

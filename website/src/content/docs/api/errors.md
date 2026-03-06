@@ -5,6 +5,7 @@ description: Building better error messages in Parseff
 
 <!-- This file is generated from doc/errors.mld. Do not edit directly. -->
 
+
 # Error handling
 
 Parseff exposes three main APIs for error handling:

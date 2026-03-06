@@ -5,6 +5,7 @@ description: Basic parsing operations in Parseff
 
 <!-- This file is generated from doc/primitives.mld. Do not edit directly. -->
 
+
 # Primitives
 
 Primitives are the building blocks of all parsers. These operations match input directly and form the foundation of more complex parsers.

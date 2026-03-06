@@ -5,6 +5,7 @@ description: Composition operators for building complex parsers
 
 <!-- This file is generated from doc/combinators.mld. Do not edit directly. -->
 
+
 # Combinators
 
 Combinators compose simple parsers into more complex ones. They handle alternation, error labeling, lookahead, and recursion.

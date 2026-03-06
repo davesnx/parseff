@@ -3,6 +3,10 @@ title: "A JSON Parser"
 description: Build a complete recursive-descent JSON parser with depth limiting
 ---
 
+# A JSON parser
+
+Build a complete recursive-descent JSON parser with depth limiting.
+
 This walkthrough builds a full JSON parser that handles all JSON value types: null, booleans, numbers, strings, arrays, and objects. It demonstrates recursive descent parsing, mutual recursion between parsers, and depth limiting with `rec_`.
 
 Source: [`test/test_json.ml`](https://github.com/davesnx/parseff/blob/main/test/test_json.ml)

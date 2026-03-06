@@ -3,6 +3,10 @@ title: Comparison with Angstrom
 description: How Parseff compares to Angstrom in performance, API style, and trade-offs
 ---
 
+# Comparison with Angstrom
+
+How Parseff compares to Angstrom in performance, API style, and trade-offs.
+
 [Angstrom](https://github.com/inhabitedtype/angstrom) is the most widely used parser combinator library in the OCaml ecosystem. This page compares Parseff and Angstrom side by side: performance, API style, and when to use each.
 
 ## Performance

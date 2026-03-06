@@ -3,6 +3,10 @@ title: "Expressions with Precedence"
 description: Build an arithmetic expression parser with operator precedence and an AST
 ---
 
+# Expressions with precedence
+
+This walkthrough builds an arithmetic expression parser that handles expressions like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence.
+
 Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
 
 Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)

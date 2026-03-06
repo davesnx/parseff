@@ -5,6 +5,7 @@ description: Parse from files, channels, and custom readers
 
 <!-- This file is generated from doc/streaming.mld. Do not edit directly. -->
 
+
 # Streaming
 
 The streaming API lets you parse input that isn't fully available upfront: files, network sockets, pipes, or any byte source. The same parser code works with both `Parseff.parse` (strings) and `Parseff.parse_source` (streams), with no changes needed.

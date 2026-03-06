@@ -5,6 +5,7 @@ description: Common parsing patterns made easy
 
 <!-- This file is generated from doc/convenience.mld. Do not edit directly. -->
 
+
 # Convenience combinators
 
 Convenience combinators provide ready-to-use parsers for common patterns like digits, letters, and whitespace.

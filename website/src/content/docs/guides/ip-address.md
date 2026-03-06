@@ -3,6 +3,10 @@ title: "Parsing an IP Address"
 description: Build a validated IPv4 address parser step by step
 ---
 
+# Parsing an IP Address
+
+Build a validated IPv4 address parser step by step.
+
 This walkthrough builds an IPv4 address parser from scratch. It covers digit matching, multi-character numbers, range validation, error reporting, and ensuring complete input consumption.
 
 Source: [`test/test_ip.ml`](https://github.com/davesnx/parseff/blob/main/test/test_ip.ml) and [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)

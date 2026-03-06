@@ -5,6 +5,7 @@ description: High-performance span-based parsing operations
 
 <!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->
 
+
 # Zero-copy API
 
 The zero-copy API allows you to parse without allocating intermediate strings, significantly improving performance and reducing memory usage.

@@ -3,6 +3,10 @@ title: Your First Parser
 description: Build a config file parser from scratch, learning Parseff along the way
 ---
 
+# Your first parser
+
+Build a config file parser from scratch, learning Parseff along the way.
+
 ## Why parser combinators?
 
 Parser combinators let you write small parsers that each handle one thing, then compose them. Instead of a single regex that's hard to read, test, and extend, you get modular pieces with clear error messages.
