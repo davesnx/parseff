@@ -20,6 +20,7 @@ depends: [
   "ocamlformat" {>= "0.26.1" & with-dev-setup}
   "ocaml-lsp-server" {with-dev-setup}
   "odoc" {with-doc}
+  "odoc-parser" {with-doc}
   "mdx" {with-test}
 ]
 build: [

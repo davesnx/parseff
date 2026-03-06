@@ -14,24 +14,30 @@
 
 FILE="$1"
 
+# Portable sed -i: BSD sed (macOS) requires -i '' while GNU sed does not.
+# Use a temp file to avoid the incompatibility.
+sedi() {
+  sed "$1" "$2" > "$2.sedtmp" && mv "$2.sedtmp" "$2"
+}
+
 # 1-2. sed text replacements
-sed -i 's|\[`\([^`]*\)`\](\./Parseff[^)]*)|`\1`|g' "$FILE"
-sed -i 's|\\=|=|g' "$FILE"
-sed -i 's|\\_|_|g' "$FILE"
-sed -i 's|\\--|--|g' "$FILE"
-sed -i 's|\\+|+|g' "$FILE"
-sed -i 's|\\-\\>|→|g' "$FILE"
+sedi 's|\[`\([^`]*\)`\](\./Parseff[^)]*)|`\1`|g' "$FILE"
+sedi 's|\\=|=|g' "$FILE"
+sedi 's|\\_|_|g' "$FILE"
+sedi 's|\\--|--|g' "$FILE"
+sedi 's|\\+|+|g' "$FILE"
+sedi 's|\\-\\>|→|g' "$FILE"
 # 3. Replace placeholder text with proper markdown
-sed -i 's|`backslash-quote`|`\\"`|g' "$FILE"
-sed -i 's|`backslash-backslash`|`\\\\`|g' "$FILE"
-sed -i 's|`LBRACE`|`{`|g' "$FILE"
-sed -i 's|`LBRACKET`|`[`|g' "$FILE"
+sedi 's|`backslash-quote`|`\\"`|g' "$FILE"
+sedi 's|`backslash-backslash`|`\\\\`|g' "$FILE"
+sedi 's|`LBRACE`|`{`|g' "$FILE"
+sedi 's|`LBRACKET`|`[`|g' "$FILE"
 # Tag plain ``` blocks that contain OCaml code with the ocaml language
 # (for {v ... v} blocks used to work around odoc code block escaping)
-sed -i '/^```$/{N;/^```\nlet /s/^```/```ocaml/;}' "$FILE"
-sed -i '/^```$/{N;/^```\n(\*/s/^```/```ocaml/;}' "$FILE"
-sed -i '/^```$/{N;/^```\nParseff\./s/^```/```ocaml/;}' "$FILE"
-sed -i '/^```$/{N;/^```\nand /s/^```/```ocaml/;}' "$FILE"
+sedi '/^```$/{N;/^```\nlet /s/^```/```ocaml/;}' "$FILE"
+sedi '/^```$/{N;/^```\n(\*/s/^```/```ocaml/;}' "$FILE"
+sedi '/^```$/{N;/^```\nParseff\./s/^```/```ocaml/;}' "$FILE"
+sedi '/^```$/{N;/^```\nand /s/^```/```ocaml/;}' "$FILE"
 # 4. Fix odoc inline code spans that contain backticks:
 #    ``X` at end/mid-line -> `` `X `` (double-backtick code span missing spaces)
 #    Only match when NOT at start of line (excludes code fences ```)
