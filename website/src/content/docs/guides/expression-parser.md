@@ -3,17 +3,19 @@ title: "Expressions with Precedence"
 description: Build an arithmetic expression parser with operator precedence and an AST
 ---
 
+Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
+
+Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
+
 ## What we're building
 
-This walkthrough builds an arithmetic expression parser. A parser that handles expressions like:
+A parser that handles expressions like:
 
 - `1+2*3` parses as `1 + (2 * 3)` (multiplication binds tighter)
 - `(1+2)*3` parses as `(1 + 2) * 3` (parentheses override precedence)
 - `1+2+3` parses as `(1 + 2) + 3` (left-associative)
 
-The result is an AST (abstract syntax tree), not a computed value. Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
-
-Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
+The result is an AST (abstract syntax tree), not a computed value.
 
 ## The AST type
 
@@ -35,7 +37,7 @@ For our two operators:
 ```
 expr   = term   (('+' term)*)      ← lowest precedence: addition
 term   = factor (('*' factor)*)    ← higher precedence: multiplication
-factor = number | '(' expr ')'    ← atomic values and grouping
+factor = number | '(' expr ')'     ← atomic values and grouping
 ```
 
 Each level calls the next one for its operands. This structure guarantees that `*` binds tighter than `+` without any explicit precedence tables.

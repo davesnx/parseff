@@ -1077,7 +1077,7 @@ let alphanum () =
     ~label:"alphanumeric"
 
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
-let expect msg p = try p () with _ -> fail msg
+let expect msg p = try p () with Parse_error _ -> fail msg
 
 let one_of parsers () =
   let rec try_all = function
@@ -1091,7 +1091,7 @@ let one_of_labeled labeled_parsers () =
   let labels = List.map fst labeled_parsers in
   let parsers = List.map snd labeled_parsers in
   try one_of parsers ()
-  with _ ->
+  with Parse_error _ ->
     let expected = String.concat ", " labels in
     fail (Printf.sprintf "expected one of: %s" expected)
 

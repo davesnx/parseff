@@ -315,8 +315,23 @@ val rec_ : (unit -> 'a) -> 'a
     ]} *)
 
 val expect : string -> (unit -> 'a) -> 'a
-(** [expect description parser] runs [parser] and, if it fails, replaces the
-    error message with [description]. Reads naturally: "expect a dot separator".
+(** [expect description parser] runs [parser] and, if it fails with a parse
+    error, replaces the error message with [description]. Reads naturally:
+    "expect a dot separator".
+
+    Only parse errors (from {!fail}, {!consume}, {!satisfy}, etc.) are
+    relabeled. User errors raised via {!val-error} propagate unchanged — this
+    lets you use [expect] around parsers that perform validation without losing
+    the structured error:
+
+    {@ocaml[
+      let octet () =
+        expect "an octet (0-255)" (fun () ->
+            let n = number () in
+            if n > 255 then error (`Out_of_range n) else n)
+      (* A non-digit input gives: "expected an octet (0-255)" *)
+      (* Input "300" gives: `Out_of_range 300 — not swallowed *)
+    ]}
 
     Example:
     {@ocaml[
@@ -342,6 +357,9 @@ val one_of : (unit -> 'a) list -> unit -> 'a
 val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 (** [one_of_labeled labeled_parsers] tries each parser in order. On failure,
     reports all labels in the error message.
+
+    Like {!expect}, only parse errors are relabeled. User errors raised via
+    {!val-error} inside any branch propagate unchanged.
 
     Example:
     {@ocaml[

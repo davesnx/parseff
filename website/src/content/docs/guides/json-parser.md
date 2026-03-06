@@ -205,10 +205,6 @@ let () =
 Without `rec_`, a malicious input with 10,000 nested arrays would crash your program with a stack overflow. With it, you can set a limit:
 
 ```ocaml
-(* Allow up to 128 levels of nesting (the default) *)
-Parseff.parse input json
-
-(* Be stricter *)
 Parseff.parse ~max_depth:64 input json
 ```
 
@@ -219,7 +215,8 @@ Here's what happens with deeply nested input:
 ```ocaml
 (* 50 levels deep: within the default limit of 128 *)
 let input = String.make 50 '[' ^ String.make 50 ']' in
-Parseff.parse input json  (* Ok (Array (Array (Array ...))) *)
+Parseff.parse input json_array
+(* Ok (Array (Array (Array ...))) *)
 
 (* 256 levels deep: exceeds the limit *)
 let input = String.make 256 '[' ^ String.make 256 ']' in
@@ -232,12 +229,12 @@ Parseff.parse ~max_depth:128 input json
 This parser uses five mutually recursive functions:
 
 ```
-json ──→ one_of ──→ array_parser ──→ json (recursive)
-                 ──→ object_parser ──→ key_value ──→ json (recursive)
-                 ──→ null_parser
-                 ──→ bool_parser
-                 ──→ number_parser
-                 ──→ string_parser
+json ──→ one_of ──→ array_parser  ──→ json (recursive)
+                ──→ object_parser ──→ key_value ──→ json (recursive)
+                ──→ null_parser
+                ──→ bool_parser
+                ──→ number_parser
+                ──→ string_parser
 ```
 
 In OCaml, mutually recursive functions are defined with `let rec ... and ...`:
