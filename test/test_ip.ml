@@ -47,23 +47,23 @@ let test_invalid_out_of_range () =
   | Ok _ -> Alcotest.fail "Expected failure for out of range"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 9 pos;
-      Alcotest.(check bool)
-        "contains 'out of range'" true
-        (String.contains expected 'r')
+      Alcotest.(check string)
+        "error message" "number out of range: 256" expected
   | Error _ -> Alcotest.fail "Unexpected error type"
 
 let test_invalid_incomplete () =
   match Parseff.parse "1.2.3" ip_address with
   | Ok _ -> Alcotest.fail "Expected failure for incomplete IP"
-  | Error _ -> ()
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 5 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_invalid_trailing () =
   match Parseff.parse "1.2.3.4 extra" ip_address with
   | Ok _ -> Alcotest.fail "Expected failure for trailing data"
-  | Error { error = `Expected expected; _ } ->
-      Alcotest.(check bool)
-        "expected end of input" true
-        (String.contains expected 'e')
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 7 pos;
+      Alcotest.(check string) "error message" "expected end of input" expected
   | Error _ -> Alcotest.fail "Unexpected error type"
 
 let () =

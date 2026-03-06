@@ -83,7 +83,9 @@ let test_alternation_failure () =
   in
   match Parseff.parse "baz" parser with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error { error = `Expected _; _ } -> ()
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected \"bar\"" expected
   | Error _ -> Alcotest.fail "Expected `Expected error variant"
 
 let test_one_of_failure () =
@@ -97,8 +99,10 @@ let test_one_of_failure () =
   in
   match Parseff.parse "xyz" parser with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error { error = `Expected _; _ } -> ()
-  | Error _ -> Alcotest.fail "Expected `Expected error variant from one_of"
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      (* "xyz" is shorter than "while", so last branch fails at EOF *)
+      Alcotest.(check int) "error position" 0 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_many_empty () =
   match Parseff.parse "" (Parseff.many Parseff.digit) with
@@ -120,7 +124,10 @@ let test_many1_success () =
 let test_many1_failure () =
   match Parseff.parse "abc" (Parseff.many1 Parseff.digit) with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected digit" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
 
 let test_optional_some () =
   match Parseff.parse "x" (Parseff.optional Parseff.letter) with
@@ -142,7 +149,10 @@ let test_end_of_input_success () =
 let test_end_of_input_failure () =
   match Parseff.parse "x" Parseff.end_of_input with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected end of input" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
 
 let test_look_ahead_success () =
   let parser () =
@@ -208,12 +218,9 @@ let test_between_failure_missing_close () =
   in
   match Parseff.parse "(7" parser with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
-      Alcotest.(check int) "error position" 2 pos;
-      Alcotest.(check bool)
-        "error message present" true
-        (String.length expected > 0)
-  | Error _ -> Alcotest.fail "Unexpected error type"
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 2 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_end_by () =
   let parser = Parseff.end_by Parseff.digit (fun () -> Parseff.char ',') in
@@ -235,7 +242,9 @@ let test_end_by1_failure () =
   let parser = Parseff.end_by1 Parseff.digit (fun () -> Parseff.char ',') in
   match Parseff.parse "" parser with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 0 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_end_by1_success () =
   let parser = Parseff.end_by1 Parseff.digit (fun () -> Parseff.char ',') in
@@ -333,7 +342,9 @@ let test_chainl1_requires_one () =
   in
   match Parseff.parse "" parser with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 0 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_chainr1_requires_one () =
   let parser =
@@ -343,7 +354,9 @@ let test_chainr1_requires_one () =
   in
   match Parseff.parse "" parser with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 0 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_count () =
   match Parseff.parse "abc" (Parseff.count 3 Parseff.letter) with
@@ -353,7 +366,9 @@ let test_count () =
 let test_count_insufficient () =
   match Parseff.parse "ab" (Parseff.count 3 Parseff.letter) with
   | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 2 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_parse_non_enforcing () =
   match Parseff.parse "abcXYZ" (fun () -> Parseff.consume "abc") with
@@ -492,6 +507,431 @@ let test_parse_until_end_preserves_end_of_input_semantics () =
       Alcotest.(check int) "fails at explicit eof position" 1 pos
   | Error _ -> Alcotest.fail "Unexpected error type"
 
+(* {{{ Phase 2: Missing test dimensions *)
+
+let test_satisfy_failure () =
+  match
+    Parseff.parse "a" (fun () ->
+        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit")
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected digit" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_satisfy_eof () =
+  match
+    Parseff.parse "" (fun () ->
+        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit")
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 0 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
+
+let test_char_failure () =
+  match Parseff.parse "b" (fun () -> Parseff.char 'a') with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected a" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_look_ahead_failure () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.look_ahead (fun () -> Parseff.consume "xyz"))
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected \"xyz\"" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_one_of_success () =
+  let parser =
+    Parseff.one_of
+      [
+        (fun () -> Parseff.consume "if");
+        (fun () -> Parseff.consume "else");
+        (fun () -> Parseff.consume "while");
+      ]
+  in
+  match Parseff.parse "else" parser with
+  | Ok s -> Alcotest.(check string) "matched second" "else" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_warn_at_nonzero_pos () =
+  let outcome =
+    Parseff.parse_until_end "ab" (fun () ->
+        let _ = Parseff.consume "ab" in
+        Parseff.warn_at ~pos:5 "at-five";
+        42)
+  in
+  match outcome with
+  | Ok (n, diagnostics) ->
+      Alcotest.(check int) "value" 42 n;
+      let got =
+        List.map
+          (fun ({ pos; diagnostic } : string Parseff.diagnostic) ->
+            (pos, diagnostic))
+          diagnostics
+      in
+      Alcotest.(check (list (pair int string)))
+        "diagnostics"
+        [ (5, "at-five") ]
+        got
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_letter_success () =
+  match Parseff.parse "a" Parseff.letter with
+  | Ok c -> Alcotest.(check char) "lowercase" 'a' c
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_letter_failure () =
+  match Parseff.parse "1" Parseff.letter with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected letter" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_skip_while () =
+  match
+    parse_with_pos "   hello" (fun () ->
+        Parseff.skip_while (fun c -> c = ' ');
+        Parseff.consume "hello")
+  with
+  | Ok (s, pos) ->
+      Alcotest.(check string) "matched" "hello" s;
+      Alcotest.(check int) "final position" 8 pos
+  | Error _ -> Alcotest.fail "Expected success"
+
+(* }}} *)
+
+(* {{{ Phase 3: Tests for previously untested combinators *)
+
+(* --- expect --- *)
+
+let test_expect_relabels_parse_error () =
+  match
+    Parseff.parse "abc" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "a digit (0-9)" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_expect_success () =
+  match
+    Parseff.parse "5" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
+  with
+  | Ok n -> Alcotest.(check int) "digit value" 5 n
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_expect_user_error_passthrough () =
+  match
+    Parseff.parse "5" (fun () ->
+        Parseff.expect "a small number" (fun () ->
+            let n = Parseff.digit () in
+            if n > 3 then Parseff.error (`Too_big n) else n))
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Too_big n } ->
+      Alcotest.(check int) "error position" 1 pos;
+      Alcotest.(check int) "user error value" 5 n
+  | Error { error = `Expected _; _ } ->
+      Alcotest.fail "User error was swallowed by expect"
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_expect_relabels_or_error () =
+  match
+    Parseff.parse "xyz" (fun () ->
+        Parseff.expect "a keyword"
+          (Parseff.one_of
+             [
+               (fun () -> Parseff.consume "if");
+               (fun () -> Parseff.consume "else");
+             ]))
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "a keyword" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+(* --- one_of_labeled --- *)
+
+let test_one_of_labeled_success () =
+  match
+    Parseff.parse "hello"
+      (Parseff.one_of_labeled
+         [
+           ("number", fun () -> Parseff.consume "123");
+           ("greeting", fun () -> Parseff.consume "hello");
+         ])
+  with
+  | Ok s -> Alcotest.(check string) "matched second" "hello" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_one_of_labeled_failure () =
+  match
+    Parseff.parse "xyz"
+      (Parseff.one_of_labeled
+         [
+           ("number", fun () -> Parseff.consume "123");
+           ("greeting", fun () -> Parseff.consume "hello");
+         ])
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string)
+        "error message" "expected one of: number, greeting" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_one_of_labeled_user_error_passthrough () =
+  match
+    Parseff.parse "5"
+      (Parseff.one_of_labeled
+         [
+           ( "validated",
+             fun () ->
+               let n = Parseff.digit () in
+               if n > 3 then Parseff.error (`Too_big n) else n );
+         ])
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { error = `Too_big n; _ } ->
+      Alcotest.(check int) "user error value" 5 n
+  | Error { error = `Expected _; _ } ->
+      Alcotest.fail "User error was swallowed by one_of_labeled"
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+(* --- error --- *)
+
+let test_error_custom_type () =
+  match
+    Parseff.parse "abc" (fun () ->
+        let _ = Parseff.consume "abc" in
+        Parseff.error (`Custom_error "bad"))
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Custom_error msg } ->
+      Alcotest.(check int) "error position" 3 pos;
+      Alcotest.(check string) "error message" "bad" msg
+  | Error { error = `Expected _; _ } ->
+      Alcotest.fail "error should not produce `Expected"
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_error_distinct_from_fail () =
+  let fail_result = Parseff.parse "" (fun () -> Parseff.fail "boom") in
+  let error_result =
+    Parseff.parse "" (fun () -> Parseff.error (`Boom "boom"))
+  in
+  (match fail_result with
+  | Error { error = `Expected msg; _ } ->
+      Alcotest.(check string) "fail message" "boom" msg
+  | _ -> Alcotest.fail "Expected `Expected from fail");
+  match error_result with
+  | Error { error = `Boom msg; _ } ->
+      Alcotest.(check string) "error message" "boom" msg
+  | _ -> Alcotest.fail "Expected `Boom from error"
+
+(* --- whitespace / whitespace1 --- *)
+
+let test_whitespace () =
+  match Parseff.parse "  \t\nX" (fun () -> Parseff.whitespace ()) with
+  | Ok s -> Alcotest.(check string) "whitespace" "  \t\n" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_whitespace_empty () =
+  match Parseff.parse "abc" (fun () -> Parseff.whitespace ()) with
+  | Ok s -> Alcotest.(check string) "no whitespace" "" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_whitespace1_success () =
+  match Parseff.parse "  \tX" (fun () -> Parseff.whitespace1 ()) with
+  | Ok s -> Alcotest.(check string) "whitespace" "  \t" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_whitespace1_failure () =
+  match Parseff.parse "abc" (fun () -> Parseff.whitespace1 ()) with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "whitespace" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+(* --- alphanum --- *)
+
+let test_alphanum_letter () =
+  match Parseff.parse "a" Parseff.alphanum with
+  | Ok c -> Alcotest.(check char) "letter" 'a' c
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_alphanum_digit () =
+  match Parseff.parse "5" Parseff.alphanum with
+  | Ok c -> Alcotest.(check char) "digit" '5' c
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_alphanum_failure () =
+  match Parseff.parse "!" Parseff.alphanum with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected alphanumeric" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+(* --- match_regex --- *)
+
+let test_match_regex_success () =
+  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  match Parseff.parse "12345abc" (fun () -> Parseff.match_regex re) with
+  | Ok s -> Alcotest.(check string) "matched digits" "12345" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_match_regex_failure () =
+  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  match Parseff.parse "abc" (fun () -> Parseff.match_regex re) with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "regex match failed" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_match_regex_anchored () =
+  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  match
+    parse_with_pos "abc123" (fun () ->
+        let _ = Parseff.consume "abc" in
+        Parseff.match_regex re)
+  with
+  | Ok (s, pos) ->
+      Alcotest.(check string) "matched from current pos" "123" s;
+      Alcotest.(check int) "final position" 6 pos
+  | Error _ -> Alcotest.fail "Expected success"
+
+(* --- sep_by_take --- *)
+
+let test_sep_by_take_empty () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse "" (fun () ->
+        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok lst -> Alcotest.(check (list string)) "empty" [] lst
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_sep_by_take_single () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse "hello" (fun () ->
+        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok lst -> Alcotest.(check (list string)) "single" [ "hello" ] lst
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_sep_by_take_several () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse "a , b , c" (fun () ->
+        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok lst -> Alcotest.(check (list string)) "three items" [ "a"; "b"; "c" ] lst
+  | Error _ -> Alcotest.fail "Expected success"
+
+(* --- sep_by_take_span --- *)
+
+let test_sep_by_take_span_empty () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse "" (fun () ->
+        Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok lst -> Alcotest.(check int) "empty" 0 (List.length lst)
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_sep_by_take_span_several () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse "aa , bb , cc" (fun () ->
+        Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok spans ->
+      let strs = List.map Parseff.span_to_string spans in
+      Alcotest.(check (list string)) "three items" [ "aa"; "bb"; "cc" ] strs;
+      let offsets = List.map (fun (s : Parseff.span) -> s.off) spans in
+      Alcotest.(check (list int)) "offsets" [ 0; 5; 10 ] offsets;
+      let lengths = List.map (fun (s : Parseff.span) -> s.len) spans in
+      Alcotest.(check (list int)) "lengths" [ 2; 2; 2 ] lengths
+  | Error _ -> Alcotest.fail "Expected success"
+
+(* --- fused_sep_take --- *)
+
+let test_fused_sep_take_success () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse ", hello" (fun () ->
+        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok s -> Alcotest.(check string) "taken value" "hello" s
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_fused_sep_take_missing_sep () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected ','" expected
+  | Error _ -> Alcotest.fail "Unexpected error type"
+
+let test_fused_sep_take_missing_value () =
+  let is_alpha c = c >= 'a' && c <= 'z' in
+  match
+    Parseff.parse ", " (fun () ->
+        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha)
+  with
+  | Ok _ -> Alcotest.fail "Expected failure"
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      (* After ",_" whitespace is skipped, pos is at EOF *)
+      Alcotest.(check int) "error position" 2 pos
+  | Error _ -> Alcotest.fail "Expected `Unexpected_end_of_input"
+
+(* --- take_while_span --- *)
+
+let test_take_while_span () =
+  match
+    parse_with_pos "aaabbb" (fun () ->
+        let sp = Parseff.take_while_span (fun c -> c = 'a') in
+        (Parseff.span_to_string sp, sp.off, sp.len))
+  with
+  | Ok ((s, off, len), pos) ->
+      Alcotest.(check string) "span string" "aaa" s;
+      Alcotest.(check int) "span offset" 0 off;
+      Alcotest.(check int) "span length" 3 len;
+      Alcotest.(check int) "parser position" 3 pos
+  | Error _ -> Alcotest.fail "Expected success"
+
+let test_take_while_span_empty () =
+  match
+    Parseff.parse "xyz" (fun () ->
+        let sp = Parseff.take_while_span (fun c -> c = 'a') in
+        (Parseff.span_to_string sp, sp.len))
+  with
+  | Ok (s, len) ->
+      Alcotest.(check string) "empty span" "" s;
+      Alcotest.(check int) "zero length" 0 len
+  | Error _ -> Alcotest.fail "Expected success"
+
+(* }}} *)
+
 let () =
   let open Alcotest in
   run "Parseff Primitives"
@@ -501,8 +941,20 @@ let () =
           test_case "consume success" `Quick test_consume_success;
           test_case "consume failure" `Quick test_consume_failure;
           test_case "char success" `Quick test_char_success;
+          test_case "char failure" `Quick test_char_failure;
           test_case "satisfy" `Quick test_satisfy;
+          test_case "satisfy failure" `Quick test_satisfy_failure;
+          test_case "satisfy eof" `Quick test_satisfy_eof;
           test_case "digit" `Quick test_digit;
+          test_case "letter success" `Quick test_letter_success;
+          test_case "letter failure" `Quick test_letter_failure;
+          test_case "alphanum letter" `Quick test_alphanum_letter;
+          test_case "alphanum digit" `Quick test_alphanum_digit;
+          test_case "alphanum failure" `Quick test_alphanum_failure;
+          test_case "any_char" `Quick (fun () ->
+              match Parseff.parse "x" Parseff.any_char with
+              | Ok c -> Alcotest.(check char) "any" 'x' c
+              | Error _ -> Alcotest.fail "Expected success");
         ] );
       ( "sequencing",
         [
@@ -510,6 +962,7 @@ let () =
           test_case "alternation left" `Quick test_alternation_left;
           test_case "alternation right" `Quick test_alternation_right;
           test_case "alternation failure" `Quick test_alternation_failure;
+          test_case "one_of success" `Quick test_one_of_success;
           test_case "one_of failure" `Quick test_one_of_failure;
         ] );
       ( "repetition",
@@ -550,6 +1003,58 @@ let () =
           test_case "end_of_input failure" `Quick test_end_of_input_failure;
           test_case "look_ahead success" `Quick test_look_ahead_success;
           test_case "look_ahead no consume" `Quick test_look_ahead_no_consume;
+          test_case "look_ahead failure" `Quick test_look_ahead_failure;
+          test_case "skip_while" `Quick test_skip_while;
+        ] );
+      ( "expect",
+        [
+          test_case "relabels parse error" `Quick
+            test_expect_relabels_parse_error;
+          test_case "success passthrough" `Quick test_expect_success;
+          test_case "user error passthrough" `Quick
+            test_expect_user_error_passthrough;
+          test_case "relabels or_ error" `Quick test_expect_relabels_or_error;
+        ] );
+      ( "one_of_labeled",
+        [
+          test_case "success" `Quick test_one_of_labeled_success;
+          test_case "failure message" `Quick test_one_of_labeled_failure;
+          test_case "user error passthrough" `Quick
+            test_one_of_labeled_user_error_passthrough;
+        ] );
+      ( "error combinator",
+        [
+          test_case "custom error type" `Quick test_error_custom_type;
+          test_case "distinct from fail" `Quick test_error_distinct_from_fail;
+        ] );
+      ( "whitespace",
+        [
+          test_case "whitespace" `Quick test_whitespace;
+          test_case "whitespace empty" `Quick test_whitespace_empty;
+          test_case "whitespace1 success" `Quick test_whitespace1_success;
+          test_case "whitespace1 failure" `Quick test_whitespace1_failure;
+        ] );
+      ( "match_regex",
+        [
+          test_case "success" `Quick test_match_regex_success;
+          test_case "failure" `Quick test_match_regex_failure;
+          test_case "anchored at position" `Quick test_match_regex_anchored;
+        ] );
+      ( "fused operations",
+        [
+          test_case "sep_by_take empty" `Quick test_sep_by_take_empty;
+          test_case "sep_by_take single" `Quick test_sep_by_take_single;
+          test_case "sep_by_take several" `Quick test_sep_by_take_several;
+          test_case "sep_by_take_span empty" `Quick test_sep_by_take_span_empty;
+          test_case "sep_by_take_span several" `Quick
+            test_sep_by_take_span_several;
+          test_case "fused_sep_take success" `Quick test_fused_sep_take_success;
+          test_case "fused_sep_take missing sep" `Quick
+            test_fused_sep_take_missing_sep;
+          test_case "fused_sep_take missing value" `Quick
+            test_fused_sep_take_missing_value;
+          test_case "take_while_span" `Quick test_take_while_span;
+          test_case "take_while_span empty" `Quick test_take_while_span_empty;
         ] );
       ( "diagnostics",
         [
@@ -567,5 +1072,6 @@ let () =
             test_error_contains_diagnostics;
           test_case "preserves end_of_input semantics" `Quick
             test_parse_until_end_preserves_end_of_input_semantics;
+          test_case "warn_at nonzero pos" `Quick test_warn_at_nonzero_pos;
         ] );
     ]

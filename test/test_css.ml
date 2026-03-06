@@ -37,9 +37,7 @@ let test_simple_rule () =
       Alcotest.(check int) "one declaration" 1 (List.length r.declarations);
       let decl = List.hd r.declarations in
       Alcotest.(check string) "property" "color" decl.property;
-      Alcotest.(check bool)
-        "value contains red" true
-        (String.contains decl.value 'r')
+      Alcotest.(check string) "value" "red" decl.value
   | Error _ -> Alcotest.fail "Parse failed"
 
 let test_multiple_declarations () =

@@ -46,10 +46,13 @@ val span_to_string : span -> string
     - ['e] is the type of errors
 
     Built-in errors are polymorphic variants:
-    - [`Expected of string] — a specific token or pattern was expected
-    - [`Unexpected_end_of_input] — input ended before the parse completed
+    - [`Expected of string] — a specific token or pattern was expected but the
+      input contained something else
+    - [`Unexpected_end_of_input] — input ended before the parser could match
+    - [`Depth_limit_exceeded of string] — recursive nesting exceeded [max_depth]
+      (see {!rec_})
 
-    User errors raised via [error] are also returned as [Error]. *)
+    User errors raised via {!val-error} are also returned as [Error]. *)
 type ('a, 'e) result =
   | Ok of 'a  (** Success: parsed value *)
   | Error of {
@@ -76,18 +79,26 @@ val parse :
   ?max_depth:int ->
   string ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
+  ( 'a,
+    [> `Expected of string
+    | `Unexpected_end_of_input
+    | `Depth_limit_exceeded of string ] )
+  result
 (** [parse ?max_depth input parser] runs [parser] on [input] string.
 
     [max_depth] limits the nesting depth for parsers that use {!rec_} to mark
     recursive entry points. Defaults to [128]. When exceeded, parsing fails with
-    an error instead of risking a stack overflow.
+    [`Depth_limit_exceeded] instead of risking a stack overflow.
 
     This function does not require consuming the full input; call
     {!end_of_input} in your parser when you want full-consumption behavior.
 
-    Returns [Ok result] on success, or [Error { pos; error }] on failure. All
-    errors (parse errors and user errors) are returned in the result.
+    Returns [Ok result] on success, or [Error { pos; error }] on failure. Errors
+    are:
+    - [`Expected msg] — the input contained something unexpected
+    - [`Unexpected_end_of_input] — the input ended before the parser could match
+    - [`Depth_limit_exceeded msg] — recursive nesting exceeded [max_depth]
+    - Any user error raised via {!val-error}
 
     Example:
     {@ocaml[
@@ -95,6 +106,8 @@ val parse :
       | Ok s -> Printf.printf "Matched %S\n" s
       | Error { pos; error = `Expected msg } ->
           Printf.printf "Failed at %d: %s\n" pos msg
+      | Error { error = `Unexpected_end_of_input; _ } ->
+          Printf.printf "Input ended too early\n"
       | Error _ -> Printf.printf "Other error\n"
     ]} *)
 
@@ -103,7 +116,9 @@ val parse_until_end :
   string ->
   (unit -> 'a) ->
   ( 'a,
-    [> `Expected of string | `Unexpected_end_of_input ],
+    [> `Expected of string
+    | `Unexpected_end_of_input
+    | `Depth_limit_exceeded of string ],
     'd )
   result_with_diagnostics
 (** [parse_until_end ?max_depth input parser] runs [parser] on [input], requires
@@ -244,7 +259,14 @@ val error : 'e -> 'a
       | Error { error = `Negative n; _ } ->
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
-    ]} *)
+    ]}
+
+    {b Note:} User errors from [error] pass through {!val:expect} and
+    {!val:one_of_labeled} without being caught or relabeled. However,
+    backtracking combinators ({!val:or_}, {!val:many}, {!val:one_of},
+    {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
+    like any other parse failure. If you need an error to escape backtracking,
+    raise an OCaml exception instead. *)
 
 val warn : 'd -> unit
 (** [warn diagnostic] records a non-fatal diagnostic at the current position and
@@ -524,7 +546,11 @@ val parse_source :
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
+  ( 'a,
+    [> `Expected of string
+    | `Unexpected_end_of_input
+    | `Depth_limit_exceeded of string ] )
+  result
 (** [parse_source ?max_depth source parser] runs [parser] pulling input from
     [source] on demand. Behaves identically to {!parse} but the input does not
     need to be fully available up front.
@@ -546,7 +572,9 @@ val parse_source_until_end :
   Source.t ->
   (unit -> 'a) ->
   ( 'a,
-    [> `Expected of string | `Unexpected_end_of_input ],
+    [> `Expected of string
+    | `Unexpected_end_of_input
+    | `Depth_limit_exceeded of string ],
     'd )
   result_with_diagnostics
 (** [parse_source_until_end ?max_depth source parser] is the streaming

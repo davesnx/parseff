@@ -60,5 +60,7 @@ let () =
              else Printf.sprintf "(expected %s)" (route_to_string expected))
       | Error { pos; error = `Expected exp } ->
           Printf.printf "✗ %-25s -> Error at %d: %s\n" input pos exp
+      | Error { pos; error = `Unexpected_end_of_input } ->
+          Printf.printf "✗ %-25s -> Unexpected end of input at %d\n" input pos
       | Error _ -> Printf.printf "✗ %-25s -> Unknown error\n" input)
     test_cases

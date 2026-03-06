@@ -114,3 +114,13 @@ let ip_address () =
   (a, b, c, d)
 ```
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.
+
+
+## Built-in error variants
+
+Parseff adds three built-in error variants to every parse result:
+
+- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by `Parseff.fail`, primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
+- ``Unexpected_end_of_input`: The input ended before the parser could finish. Produced when primitives like `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input but have reached the end.
+- ``Depth_limit_exceeded of string`: A `Parseff.rec_` call exceeded the `~max_depth` limit. The message contains the depth that was exceeded.
+Your own error types from `Parseff.error` are merged with these via polymorphic variant row extension.

@@ -19,7 +19,7 @@ val parse_source :
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ]) result
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ]) result
 ```
 ```ocaml
   let ic = open_in "data.json" in
@@ -40,7 +40,7 @@ val parse_source_until_end :
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
   result_with_diagnostics
 ```
 ```ocaml

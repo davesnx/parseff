@@ -15,7 +15,7 @@ same parsers, same result type, same error handling.
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ]) result]}
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ]) result]}
 
 {@ocaml skip[
   let ic = open_in "data.json" in
@@ -37,7 +37,7 @@ diagnostics in both cases. See {!page:diagnostics}.
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
   result_with_diagnostics]}
 
 {@ocaml skip[

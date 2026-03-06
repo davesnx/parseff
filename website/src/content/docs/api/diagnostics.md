@@ -66,7 +66,7 @@ val parse_until_end :
   ?max_depth:int ->
   string ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
   result_with_diagnostics
 ```
 - `Ok (value, diagnostics)` on success
@@ -83,7 +83,7 @@ val parse_source_until_end :
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input ], 'd)
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
   result_with_diagnostics
 ```
 In plain terms: `parse_source_until_end` always does one extra `Parseff.end_of_input` check after your parser returns.
@@ -134,6 +134,8 @@ let () =
           | `Octet_out_of_range n ->
               Printf.printf "  noted at %d: octet %d out of range\n" pos n)
         diagnostics
+  | Error { pos; error = `Unexpected_end_of_input; _ } ->
+      Printf.printf "Unexpected end of input at %d\n" pos
   | Error _ -> Printf.printf "Parse failed\n"
 ```
 

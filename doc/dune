@@ -1,6 +1,14 @@
 (documentation
  (package parseff)
- (mld_files primitives combinators repetition convenience errors diagnostics zero-copy streaming))
+ (mld_files
+  primitives
+  combinators
+  repetition
+  convenience
+  errors
+  diagnostics
+  zero-copy
+  streaming))
 
 (mdx
  (files

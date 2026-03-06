@@ -5,10 +5,22 @@ let check_ok ~msg typ parser inputs expected =
   | Ok v -> Alcotest.(check typ) msg expected v
   | Error _ -> Alcotest.fail (Printf.sprintf "%s: expected success" msg)
 
-let check_fail ~msg parser inputs =
+let check_expected ~msg parser inputs =
   match run inputs parser with
   | Ok _ -> Alcotest.fail (Printf.sprintf "%s: expected failure" msg)
-  | Error _ -> ()
+  | Error { error = `Expected _; _ } -> ()
+  | Error e ->
+      Alcotest.fail
+        (Printf.sprintf "%s: expected `Expected error, got pos=%d" msg e.pos)
+
+let check_eof ~msg parser inputs =
+  match run inputs parser with
+  | Ok _ -> Alcotest.fail (Printf.sprintf "%s: expected failure" msg)
+  | Error { error = `Unexpected_end_of_input; _ } -> ()
+  | Error e ->
+      Alcotest.fail
+        (Printf.sprintf "%s: expected `Unexpected_end_of_input, got pos=%d" msg
+           e.pos)
 
 let check_c ~msg p is r = check_ok ~msg Alcotest.char p is r
 let check_co ~msg p is r = check_ok ~msg Alcotest.(option char) p is r
@@ -45,26 +57,26 @@ let basic_constructors =
       fun () ->
         check_c ~msg:"singleton input" peek_char_fail [ "t" ] 't';
         check_c ~msg:"longer input" peek_char_fail [ "true" ] 't';
-        check_fail ~msg:"empty input" peek_char_fail [ "" ] );
+        check_eof ~msg:"empty input" peek_char_fail [ "" ] );
     ( "char",
       `Quick,
       fun () ->
         check_c ~msg:"singleton 'a'" (fun () -> Parseff.char 'a') [ "a" ] 'a';
         check_c ~msg:"prefix 'a'" (fun () -> Parseff.char 'a') [ "asdf" ] 'a';
-        check_fail ~msg:"'a' failure" (fun () -> Parseff.char 'a') [ "b" ];
-        check_fail ~msg:"empty buffer" (fun () -> Parseff.char 'a') [ "" ] );
+        check_expected ~msg:"'a' failure" (fun () -> Parseff.char 'a') [ "b" ];
+        check_eof ~msg:"empty buffer" (fun () -> Parseff.char 'a') [ "" ] );
     ( "not_char",
       `Quick,
       fun () ->
         check_c ~msg:"not 'a' singleton" (not_char 'a') [ "b" ] 'b';
         check_c ~msg:"not 'a' prefix" (not_char 'a') [ "baba" ] 'b';
-        check_fail ~msg:"not 'a' failure" (not_char 'a') [ "a" ];
-        check_fail ~msg:"empty buffer" (not_char 'a') [ "" ] );
+        check_expected ~msg:"not 'a' failure" (not_char 'a') [ "a" ];
+        check_eof ~msg:"empty buffer" (not_char 'a') [ "" ] );
     ( "any_char",
       `Quick,
       fun () ->
         check_c ~msg:"non-empty buffer" Parseff.any_char [ "a" ] 'a';
-        check_fail ~msg:"empty buffer" Parseff.any_char [ "" ] );
+        check_eof ~msg:"empty buffer" Parseff.any_char [ "" ] );
     ( "string",
       `Quick,
       fun () ->
@@ -80,10 +92,10 @@ let basic_constructors =
         check_s ~msg:"string is prefix of input"
           (fun () -> Parseff.consume "as")
           [ "asdf" ] "as";
-        check_fail ~msg:"input is prefix of string"
+        check_eof ~msg:"input is prefix of string"
           (fun () -> Parseff.consume "asdf")
           [ "asd" ];
-        check_fail ~msg:"non-empty string, empty input"
+        check_eof ~msg:"non-empty string, empty input"
           (fun () -> Parseff.consume "test")
           [ "" ] );
     ( "take_while",
@@ -107,13 +119,13 @@ let basic_constructors =
         check_s ~msg:"true, non-empty input"
           (fun () -> Parseff.take_while1 (fun _ -> true) ~label:"char")
           [ "asdf" ] "asdf";
-        check_fail ~msg:"false, non-empty input"
+        check_expected ~msg:"false, non-empty input"
           (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
           [ "asdf" ];
-        check_fail ~msg:"true, empty input"
+        check_expected ~msg:"true, empty input"
           (fun () -> Parseff.take_while1 (fun _ -> true) ~label:"char")
           [ "" ];
-        check_fail ~msg:"false, empty input"
+        check_expected ~msg:"false, empty input"
           (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
           [ "" ] );
   ]
@@ -123,10 +135,12 @@ let monadic =
     ( "fail",
       `Quick,
       fun () ->
-        check_fail ~msg:"non-empty input"
+        check_expected ~msg:"non-empty input"
           (fun () -> Parseff.fail "<msg>")
           [ "asdf" ];
-        check_fail ~msg:"empty input" (fun () -> Parseff.fail "<msg>") [ "" ] );
+        check_expected ~msg:"empty input"
+          (fun () -> Parseff.fail "<msg>")
+          [ "" ] );
     ( "return",
       `Quick,
       fun () ->
@@ -225,7 +239,7 @@ let combinators =
         check_lc ~msg:"additional input"
           (Parseff.count 2 (fun () -> Parseff.char 'a'))
           [ "aaa" ] [ 'a'; 'a' ];
-        check_fail ~msg:"bad input"
+        check_expected ~msg:"bad input"
           (Parseff.count 2 (fun () -> Parseff.char 'a'))
           [ "abb" ] );
   ]
@@ -257,7 +271,7 @@ let consume_semantics =
         check_lc ~msg:"prefix succeeds"
           (Parseff.many (fun () -> Parseff.char 'a'))
           [ "aaabbb" ] [ 'a'; 'a'; 'a' ];
-        check_fail ~msg:"all fails"
+        check_expected ~msg:"all fails"
           (fun () ->
             let r = Parseff.many (fun () -> Parseff.char 'a') () in
             Parseff.end_of_input ();

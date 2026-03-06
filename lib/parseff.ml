@@ -40,7 +40,9 @@ type ('a, 'e, 'd) result_with_diagnostics =
   ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 
 exception Parse_error of int * string
+exception Unexpected_eof of int
 exception User_error of int * Obj.t
+exception Propagated_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
 type state = {
@@ -74,7 +76,7 @@ let[@inline] handle_consume st input_len s =
     end
     else raise (Parse_error (pos, Printf.sprintf "expected %S" s))
   end
-  else raise (Parse_error (st.pos, Printf.sprintf "expected %S (EOF)" s))
+  else raise (Unexpected_eof st.pos)
 
 let[@inline] handle_satisfy st input_len pred label =
   if st.pos < input_len then
@@ -84,7 +86,7 @@ let[@inline] handle_satisfy st input_len pred label =
       c
     end
     else raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
-  else raise (Parse_error (st.pos, Printf.sprintf "expected %s (EOF)" label))
+  else raise (Unexpected_eof st.pos)
 
 let[@inline] handle_take_while st input_len pred =
   let start = st.pos in
@@ -124,7 +126,8 @@ let[@inline] handle_skip_while_then_char st input_len pred c =
   if !pos < input_len && String.unsafe_get inp !pos = c then st.pos <- !pos + 1
   else begin
     st.pos <- !pos;
-    raise (Parse_error (!pos, Printf.sprintf "expected %C" c))
+    if !pos >= input_len then raise (Unexpected_eof !pos)
+    else raise (Parse_error (!pos, Printf.sprintf "expected %C" c))
   end
 
 let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
@@ -148,12 +151,14 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
     end
     else begin
       st.pos <- !pos;
-      raise (Parse_error (!pos, "expected value"))
+      if !pos >= input_len then raise (Unexpected_eof !pos)
+      else raise (Parse_error (!pos, "expected value"))
     end
   end
   else begin
     st.pos <- !pos;
-    raise (Parse_error (!pos, Printf.sprintf "expected %C" sep_char))
+    if !pos >= input_len then raise (Unexpected_eof !pos)
+    else raise (Parse_error (!pos, Printf.sprintf "expected %C" sep_char))
   end
 
 let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
@@ -245,7 +250,7 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
     List.rev !acc
   end
 
-let[@inline] handle_match_regex st re =
+let[@inline] handle_match_regex st input_len re =
   try
     let groups = Re.exec ~pos:st.pos re st.input in
     let match_start = Re.Group.start groups 0 in
@@ -256,7 +261,9 @@ let[@inline] handle_match_regex st re =
       let match_end = Re.Group.stop groups 0 in
       st.pos <- match_end;
       matched
-  with Not_found -> raise (Parse_error (st.pos, "regex match failed"))
+  with Not_found ->
+    if st.pos >= input_len then raise (Unexpected_eof st.pos)
+    else raise (Parse_error (st.pos, "regex match failed"))
 
 let[@inline] handle_end_of_input st input_len =
   if st.pos <> input_len then
@@ -307,7 +314,7 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         Effect.Deep.continue k
           (handle_sep_by_take_span st input_len ws_pred sep_char take_pred)
     | effect Match_re re, k -> (
-        match handle_match_regex st re with
+        match handle_match_regex st input_len re with
         | v -> Effect.Deep.continue k v
         | exception exn -> Effect.Deep.discontinue k exn)
     | effect Greedy_many p, k ->
@@ -337,8 +344,8 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
             match go (Obj.magic right) with
             | Ok v -> Effect.Deep.continue k (Obj.magic v)
             | Error e ->
-                Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error))
-            ))
+                Effect.Deep.discontinue k
+                  (Propagated_error (e.pos, Obj.repr e.error))))
     | effect Fail msg, k ->
         Effect.Deep.discontinue k (Parse_error (st.pos, msg))
     | effect Error_val e, k ->
@@ -360,7 +367,8 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | Error e ->
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
-            Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error)))
+            Effect.Deep.discontinue k
+              (Propagated_error (e.pos, Obj.repr e.error)))
     | effect Rec_ p, k ->
         if !nest_depth >= max_depth then
           Effect.Deep.discontinue k
@@ -375,7 +383,8 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
               Effect.Deep.continue k (Obj.magic v)
           | Error e ->
               decr nest_depth;
-              Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error))
+              Effect.Deep.discontinue k
+                (Propagated_error (e.pos, Obj.repr e.error))
         end
     | effect End_of_input, k -> (
         match handle_end_of_input st input_len with
@@ -396,14 +405,17 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
         handle =
           (function
           | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+          | Unexpected_eof pos ->
+              Error { pos; error = `Unexpected_end_of_input }
           | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+          | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
           | e -> raise e);
       }
       input parser
   with
   | result -> result
   | exception Depth_limit_exceeded (pos, msg) ->
-      Error { pos; error = `Expected msg }
+      Error { pos; error = `Depth_limit_exceeded msg }
 
 let to_diagnostics diagnostics_rev =
   List.rev_map
@@ -428,7 +440,10 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
           handle =
             (function
             | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+            | Unexpected_eof pos ->
+                Error { pos; error = `Unexpected_end_of_input }
             | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+            | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
             | e -> raise e);
         }
         input
@@ -439,7 +454,7 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
     with
     | result -> result
     | exception Depth_limit_exceeded (pos, msg) ->
-        Error { pos; error = `Expected msg }
+        Error { pos; error = `Depth_limit_exceeded msg }
   in
   let diagnostics = to_diagnostics !diagnostics_out in
   attach_diagnostics result diagnostics
@@ -531,6 +546,7 @@ let handle_skip_while_then_char_source src st pred c =
   ignore (ensure_bytes src st.pos 1);
   if st.pos < src.input_len && String.unsafe_get src.input st.pos = c then
     st.pos <- st.pos + 1
+  else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
   else raise (Parse_error (st.pos, Printf.sprintf "expected %C" c))
 
 let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
@@ -553,8 +569,10 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
     done;
     st.input <- src.input;
     if st.pos > start then String.sub src.input start (st.pos - start)
+    else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
     else raise (Parse_error (st.pos, "expected value"))
   end
+  else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
   else raise (Parse_error (st.pos, Printf.sprintf "expected %C" sep_char))
 
 let handle_sep_by_take_source src st ws_pred sep_char take_pred =
@@ -692,6 +710,7 @@ let handle_match_regex_source src st re =
         st.input <- src.input;
         loop ()
       end
+      else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
       else raise (Parse_error (st.pos, "regex match failed"))
   in
   loop ()
@@ -785,8 +804,8 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
             match go (Obj.magic right) with
             | Ok v -> Effect.Deep.continue k (Obj.magic v)
             | Error e ->
-                Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error))
-            ))
+                Effect.Deep.discontinue k
+                  (Propagated_error (e.pos, Obj.repr e.error))))
     | effect Fail msg, k ->
         Effect.Deep.discontinue k (Parse_error (st.pos, msg))
     | effect Error_val e, k ->
@@ -810,7 +829,8 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
-            Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error)))
+            Effect.Deep.discontinue k
+              (Propagated_error (e.pos, Obj.repr e.error)))
     | effect Rec_ p, k ->
         if !nest_depth >= max_depth then
           Effect.Deep.discontinue k
@@ -825,7 +845,8 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k (Obj.magic v)
           | Error e ->
               decr nest_depth;
-              Effect.Deep.discontinue k (User_error (e.pos, Obj.repr e.error))
+              Effect.Deep.discontinue k
+                (Propagated_error (e.pos, Obj.repr e.error))
         end
     | effect End_of_input, k -> (
         match handle_end_of_input_source src st with
@@ -878,14 +899,17 @@ let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
         handle =
           (function
           | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+          | Unexpected_eof pos ->
+              Error { pos; error = `Unexpected_end_of_input }
           | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+          | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
           | e -> raise e);
       }
       src parser
   with
   | result -> result
   | exception Depth_limit_exceeded (pos, msg) ->
-      Error { pos; error = `Expected msg }
+      Error { pos; error = `Depth_limit_exceeded msg }
 
 let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     (parser : unit -> 'a) :
@@ -901,7 +925,10 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
           handle =
             (function
             | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+            | Unexpected_eof pos ->
+                Error { pos; error = `Unexpected_end_of_input }
             | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
+            | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
             | e -> raise e);
         }
         src
@@ -912,7 +939,7 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     with
     | result -> result
     | exception Depth_limit_exceeded (pos, msg) ->
-        Error { pos; error = `Expected msg }
+        Error { pos; error = `Depth_limit_exceeded msg }
   in
   let diagnostics = to_diagnostics !diagnostics_out in
   attach_diagnostics result diagnostics
@@ -1077,7 +1104,10 @@ let alphanum () =
     ~label:"alphanumeric"
 
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
-let expect msg p = try p () with Parse_error _ -> fail msg
+
+let expect msg p =
+  try p ()
+  with Parse_error _ | Unexpected_eof _ | Propagated_error _ -> fail msg
 
 let one_of parsers () =
   let rec try_all = function
@@ -1091,7 +1121,7 @@ let one_of_labeled labeled_parsers () =
   let labels = List.map fst labeled_parsers in
   let parsers = List.map snd labeled_parsers in
   try one_of parsers ()
-  with Parse_error _ ->
+  with Parse_error _ | Unexpected_eof _ | Propagated_error _ ->
     let expected = String.concat ", " labels in
     fail (Printf.sprintf "expected one of: %s" expected)
 

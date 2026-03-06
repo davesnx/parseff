@@ -40,13 +40,15 @@ let () =
       Printf.printf "Error at %d: unexpected end of input\n" pos
   | Error { pos; error = `Expected msg } ->
       Printf.printf "Error at %d: %s\n" pos msg
+  | Error { pos; error = `Depth_limit_exceeded msg } ->
+      Printf.printf "Error at %d: %s\n" pos msg
 ]}
 
 {1 Features}
 
 - Build parsers with direct-style and compose with [Parseff] combinators
 - API is designed to be expressive enough to {b not need monadic operators} ([>>=], [>>|], [*>]), {b nor binding operators} ([let*], [let+], [and+])
-- Typed domain errors via polymorphic variants, raise with {{:https://davesnx.github.io/parseff/api/primitives/#error}[Parseff.error]}. Parseff also adds [`Expected of string] and [`Unexpected_end_of_input] as possible parsing failures
+- Typed domain errors via polymorphic variants, raise with {{:https://davesnx.github.io/parseff/api/primitives/#error}[Parseff.error]}. Parseff also adds [`Expected of string], [`Unexpected_end_of_input], and [`Depth_limit_exceeded of string] as possible parsing failures
 - Automatic backtracking with {{:https://davesnx.github.io/parseff/api/combinators/#or_}[Parseff.or_]}
 - Minimal dependency footprint: only [re] for regex support
 - Streaming support with {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_string}[Source.of_string]}, {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_channel}[Source.of_channel]}, {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_function}[Source.of_function]}

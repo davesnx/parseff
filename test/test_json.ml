@@ -219,10 +219,10 @@ let test_deep_nesting_exceeds_limit () =
   let input = make_deeply_nested_arrays 256 in
   match Parseff.parse ~max_depth:128 input json with
   | Ok _ -> Alcotest.fail "Expected depth limit error, got success"
-  | Error { error = `Expected msg; _ } ->
+  | Error { error = `Depth_limit_exceeded msg; _ } ->
       let expected_msg = "maximum nesting depth 128 exceeded" in
       Alcotest.(check string) "depth error message" expected_msg msg
-  | Error _ -> Alcotest.fail "Unexpected error type"
+  | Error _ -> Alcotest.fail "Expected `Depth_limit_exceeded"
 
 let () =
   let open Alcotest in

@@ -137,6 +137,10 @@ let () =
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
             input pos expected
+      | Error { pos; error = `Unexpected_end_of_input } ->
+          Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
+            (if should_succeed then "✗" else "✓")
+            input pos
       | Error _ -> Printf.printf "✗ Unknown error\n")
     test_cases_simple;
 
@@ -152,12 +156,14 @@ let () =
           Printf.printf "%s %-20s -> Parse error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
             input pos expected
+      | Error { pos; error = `Unexpected_end_of_input } ->
+          Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
+            (if should_succeed then "✗" else "✓")
+            input pos
       | Error { pos; error = `Out_of_range n } ->
           Printf.printf
             "✓ %-20s -> Custom error at pos %d: octet %d out of range (0-255)\n"
             input pos n
-      | Error { pos; error = `Invalid_format msg } ->
-          Printf.printf "✓ %-20s -> Custom error at pos %d: %s\n" input pos msg
       | Error _ -> Printf.printf "✗ Unknown error\n")
     test_cases_custom;
 
@@ -175,6 +181,10 @@ let () =
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
             (if should_succeed then "✗" else "✓")
             input pos expected
+      | Error { pos; error = `Unexpected_end_of_input } ->
+          Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
+            (if should_succeed then "✗" else "✓")
+            input pos
       | Error _ -> Printf.printf "✗ Unknown error\n")
     expr_tests;
 
