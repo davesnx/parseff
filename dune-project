@@ -43,5 +43,6 @@
 
   ;; Documentation dependencies
   (odoc :with-doc)
+  (odoc-parser :with-doc)
   (mdx :with-test)
 ))

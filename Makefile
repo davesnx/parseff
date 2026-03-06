@@ -58,6 +58,7 @@ install: ## Install dependencies
 .PHONY: pin
 pin: ## Pin dependencies
 	opam pin dune https://github.com/ocaml/dune.git#cae07ff85a372a46a4862237a16db3fa8873d25d -y
+	opam pin odoc-parser https://github.com/davesnx/odoc.git#markdown-types -y
 	opam pin odoc https://github.com/davesnx/odoc.git#markdown-types -y
 
 .PHONY: setup-githooks
