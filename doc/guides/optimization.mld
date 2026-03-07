@@ -1,4 +1,4 @@
-{0 Making parsers fast}
+{0 Guide: Making parsers fast}
 
 Techniques for writing high-performance parsers with Parseff.
 

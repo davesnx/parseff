@@ -1,4 +1,4 @@
-{0 A JSON parser}
+{0 Guide: A JSON parser}
 
 Build a complete recursive-descent JSON parser with depth limiting.
 

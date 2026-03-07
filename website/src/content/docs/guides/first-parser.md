@@ -3,7 +3,7 @@ title: Your First Parser
 description: Build a config file parser from scratch, learning Parseff along the way
 ---
 
-# Your first parser
+# Guide: Your first parser
 
 Build a config file parser from scratch, learning Parseff along the way.
 

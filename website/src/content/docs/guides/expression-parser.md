@@ -3,7 +3,7 @@ title: "Expressions with Precedence"
 description: Build an arithmetic expression parser with operator precedence and an AST
 ---
 
-# Expressions with precedence
+# Guide: Expressions with precedence
 
 This walkthrough builds an arithmetic expression parser that handles expressions like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence.
 
@@ -186,6 +186,6 @@ let rec expr_to_string = function
 ```
 
 ```ocaml
-(* "1+2*3" -> "(1 + (2 * 3))"   *)
+(* "1+2*3"   -> "(1 + (2 * 3))" *)
 (* "(1+2)*3" -> "((1 + 2) * 3)" *)
 ```

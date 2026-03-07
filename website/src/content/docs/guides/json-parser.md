@@ -3,7 +3,7 @@ title: "A JSON Parser"
 description: Build a complete recursive-descent JSON parser with depth limiting
 ---
 
-# A JSON parser
+# Guide: A JSON parser
 
 Build a complete recursive-descent JSON parser with depth limiting.
 
