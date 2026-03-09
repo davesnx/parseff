@@ -2,25 +2,32 @@ let run inputs parser = Parseff.parse (String.concat "" inputs) parser
 
 let check_ok ~msg typ parser inputs expected =
   match run inputs parser with
-  | Ok v -> Alcotest.(check typ) msg expected v
-  | Error _ -> Alcotest.fail (Printf.sprintf "%s: expected success" msg)
+  | Ok v ->
+      Alcotest.(check typ) msg expected v
+  | Error _ ->
+      Alcotest.fail (Printf.sprintf "%s: expected success" msg)
 
 let check_expected ~msg parser inputs =
   match run inputs parser with
-  | Ok _ -> Alcotest.fail (Printf.sprintf "%s: expected failure" msg)
-  | Error { error = `Expected _; _ } -> ()
+  | Ok _ ->
+      Alcotest.fail (Printf.sprintf "%s: expected failure" msg)
+  | Error { error = `Expected _; _ } ->
+      ()
   | Error e ->
       Alcotest.fail
         (Printf.sprintf "%s: expected `Expected error, got pos=%d" msg e.pos)
 
 let check_eof ~msg parser inputs =
   match run inputs parser with
-  | Ok _ -> Alcotest.fail (Printf.sprintf "%s: expected failure" msg)
-  | Error { error = `Unexpected_end_of_input; _ } -> ()
+  | Ok _ ->
+      Alcotest.fail (Printf.sprintf "%s: expected failure" msg)
+  | Error { error = `Unexpected_end_of_input; _ } ->
+      ()
   | Error e ->
       Alcotest.fail
         (Printf.sprintf "%s: expected `Unexpected_end_of_input, got pos=%d" msg
-           e.pos)
+           e.pos
+        )
 
 let check_c ~msg p is r = check_ok ~msg Alcotest.char p is r
 let check_co ~msg p is r = check_ok ~msg Alcotest.(option char) p is r
@@ -32,7 +39,9 @@ let not_char c () =
 
 let peek_char () =
   (Parseff.optional (fun () ->
-       Parseff.look_ahead (fun () -> Parseff.any_char ())))
+       Parseff.look_ahead (fun () -> Parseff.any_char ())
+   )
+  )
     ()
 
 let peek_char_fail () = Parseff.look_ahead (fun () -> Parseff.any_char ())
@@ -51,32 +60,37 @@ let basic_constructors =
       fun () ->
         check_co ~msg:"singleton input" peek_char [ "t" ] (Some 't');
         check_co ~msg:"longer input" peek_char [ "true" ] (Some 't');
-        check_co ~msg:"empty input" peek_char [ "" ] None );
+        check_co ~msg:"empty input" peek_char [ "" ] None
+    );
     ( "peek_char_fail",
       `Quick,
       fun () ->
         check_c ~msg:"singleton input" peek_char_fail [ "t" ] 't';
         check_c ~msg:"longer input" peek_char_fail [ "true" ] 't';
-        check_eof ~msg:"empty input" peek_char_fail [ "" ] );
+        check_eof ~msg:"empty input" peek_char_fail [ "" ]
+    );
     ( "char",
       `Quick,
       fun () ->
         check_c ~msg:"singleton 'a'" (fun () -> Parseff.char 'a') [ "a" ] 'a';
         check_c ~msg:"prefix 'a'" (fun () -> Parseff.char 'a') [ "asdf" ] 'a';
         check_expected ~msg:"'a' failure" (fun () -> Parseff.char 'a') [ "b" ];
-        check_eof ~msg:"empty buffer" (fun () -> Parseff.char 'a') [ "" ] );
+        check_eof ~msg:"empty buffer" (fun () -> Parseff.char 'a') [ "" ]
+    );
     ( "not_char",
       `Quick,
       fun () ->
         check_c ~msg:"not 'a' singleton" (not_char 'a') [ "b" ] 'b';
         check_c ~msg:"not 'a' prefix" (not_char 'a') [ "baba" ] 'b';
         check_expected ~msg:"not 'a' failure" (not_char 'a') [ "a" ];
-        check_eof ~msg:"empty buffer" (not_char 'a') [ "" ] );
+        check_eof ~msg:"empty buffer" (not_char 'a') [ "" ]
+    );
     ( "any_char",
       `Quick,
       fun () ->
         check_c ~msg:"non-empty buffer" Parseff.any_char [ "a" ] 'a';
-        check_eof ~msg:"empty buffer" Parseff.any_char [ "" ] );
+        check_eof ~msg:"empty buffer" Parseff.any_char [ "" ]
+    );
     ( "string",
       `Quick,
       fun () ->
@@ -97,7 +111,8 @@ let basic_constructors =
           [ "asd" ];
         check_eof ~msg:"non-empty string, empty input"
           (fun () -> Parseff.consume "test")
-          [ "" ] );
+          [ "" ]
+    );
     ( "take_while",
       `Quick,
       fun () ->
@@ -112,7 +127,8 @@ let basic_constructors =
           [ "asdf" ] "";
         check_s ~msg:"false, empty input"
           (fun () -> Parseff.take_while (fun _ -> false))
-          [ "" ] "" );
+          [ "" ] ""
+    );
     ( "take_while1",
       `Quick,
       fun () ->
@@ -127,7 +143,8 @@ let basic_constructors =
           [ "" ];
         check_expected ~msg:"false, empty input"
           (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
-          [ "" ] );
+          [ "" ]
+    );
   ]
 
 let monadic =
@@ -140,12 +157,14 @@ let monadic =
           [ "asdf" ];
         check_expected ~msg:"empty input"
           (fun () -> Parseff.fail "<msg>")
-          [ "" ] );
+          [ "" ]
+    );
     ( "return",
       `Quick,
       fun () ->
         check_s ~msg:"non-empty input" (fun () -> "test") [ "asdf" ] "test";
-        check_s ~msg:"empty input" (fun () -> "test") [ "" ] "test" );
+        check_s ~msg:"empty input" (fun () -> "test") [ "" ] "test"
+    );
     ( "bind",
       `Quick,
       fun () ->
@@ -153,8 +172,10 @@ let monadic =
           (fun () ->
             let s = take 2 () in
             let _ = Parseff.consume s in
-            s)
-          [ "asas" ] "as" );
+            s
+          )
+          [ "asas" ] "as"
+    );
   ]
 
 let applicative =
@@ -165,14 +186,17 @@ let applicative =
         check_s ~msg:"`foo *> bar` returns bar"
           (fun () ->
             let _ = Parseff.consume "foo" in
-            Parseff.consume "bar")
+            Parseff.consume "bar"
+          )
           [ "foobar" ] "bar";
         check_s ~msg:"`foo <* bar` returns foo"
           (fun () ->
             let r = Parseff.consume "foo" in
             let _ = Parseff.consume "bar" in
-            r)
-          [ "foobar" ] "foo" );
+            r
+          )
+          [ "foobar" ] "foo"
+    );
   ]
 
 let alternative =
@@ -181,25 +205,24 @@ let alternative =
       `Quick,
       fun () ->
         check_c ~msg:"char a | char b"
-          (Parseff.or_
-             (fun () -> Parseff.char 'a')
-             (fun () -> Parseff.char 'b'))
+          (Parseff.or_ (fun () -> Parseff.char 'a') (fun () -> Parseff.char 'b'))
           [ "a" ] 'a';
         check_c ~msg:"char b | char a"
-          (Parseff.or_
-             (fun () -> Parseff.char 'b')
-             (fun () -> Parseff.char 'a'))
+          (Parseff.or_ (fun () -> Parseff.char 'b') (fun () -> Parseff.char 'a'))
           [ "a" ] 'a';
         check_s ~msg:"string 'a' | string 'b'"
           (Parseff.or_
              (fun () -> Parseff.consume "a")
-             (fun () -> Parseff.consume "b"))
+             (fun () -> Parseff.consume "b")
+          )
           [ "a" ] "a";
         check_s ~msg:"string 'b' | string 'a'"
           (Parseff.or_
              (fun () -> Parseff.consume "b")
-             (fun () -> Parseff.consume "a"))
-          [ "a" ] "a" );
+             (fun () -> Parseff.consume "a")
+          )
+          [ "a" ] "a"
+    );
   ]
 
 let combinators =
@@ -215,7 +238,8 @@ let combinators =
           [ "a" ] [ 'a' ];
         check_lc ~msg:"two chars"
           (Parseff.many (fun () -> Parseff.char 'a'))
-          [ "aa" ] [ 'a'; 'a' ] );
+          [ "aa" ] [ 'a'; 'a' ]
+    );
     ( "sep_by1",
       `Quick,
       fun () ->
@@ -226,7 +250,8 @@ let combinators =
         in
         check_lc ~msg:"single char" parser [ "a" ] [ 'a' ];
         check_lc ~msg:"many chars" parser [ "a,a" ] [ 'a'; 'a' ];
-        check_lc ~msg:"no trailing sep" parser [ "a," ] [ 'a' ] );
+        check_lc ~msg:"no trailing sep" parser [ "a," ] [ 'a' ]
+    );
     ( "count",
       `Quick,
       fun () ->
@@ -241,7 +266,8 @@ let combinators =
           [ "aaa" ] [ 'a'; 'a' ];
         check_expected ~msg:"bad input"
           (Parseff.count 2 (fun () -> Parseff.char 'a'))
-          [ "abb" ] );
+          [ "abb" ]
+    );
   ]
 
 let count_while_regression =
@@ -253,14 +279,17 @@ let count_while_regression =
           (fun () ->
             let s = Parseff.take_while (fun _ -> true) in
             Parseff.end_of_input ();
-            s)
+            s
+          )
           [ "asdf" ] "asdf";
         check_s ~msg:"take_while1 then eof"
           (fun () ->
             let s = Parseff.take_while1 (fun _ -> true) ~label:"char" in
             Parseff.end_of_input ();
-            s)
-          [ "asdf" ] "asdf" );
+            s
+          )
+          [ "asdf" ] "asdf"
+    );
   ]
 
 let consume_semantics =
@@ -275,8 +304,10 @@ let consume_semantics =
           (fun () ->
             let r = Parseff.many (fun () -> Parseff.char 'a') () in
             Parseff.end_of_input ();
-            r)
-          [ "aaabbb" ] );
+            r
+          )
+          [ "aaabbb" ]
+    );
   ]
 
 let () =

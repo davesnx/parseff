@@ -11,8 +11,10 @@ module Parseff_JSON = struct
     else if s.len = 2 && String.unsafe_get s.buf s.off >= '1' then
       Float.of_int
         (((Char.code (String.unsafe_get s.buf s.off) - Char.code '0') * 10)
-        + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0'))
-    else float_of_string (Parseff.span_to_string s)
+        + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0')
+        )
+    else
+      float_of_string (Parseff.span_to_string s)
 
   let[@inline] float_of_span_fair (s : Parseff.span) =
     float_of_string (Parseff.span_to_string s)
@@ -35,13 +37,17 @@ module Parseff_JSON = struct
 
   let bench_span input =
     match Parseff.parse input json_array with
-    | Ok result -> Some result
-    | Error _ -> None
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
 
   let bench_fair input =
     match Parseff.parse input json_array_fair with
-    | Ok result -> Some result
-    | Error _ -> None
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
 end
 
 module Angstrom_JSON = struct
@@ -75,10 +81,12 @@ let () =
       [
         ( "Parseff (span)",
           (fun () -> ignore (Parseff_JSON.bench_span json_input)),
-          () );
+          ()
+        );
         ( "Parseff (fair)",
           (fun () -> ignore (Parseff_JSON.bench_fair json_input)),
-          () );
+          ()
+        );
         ("Angstrom", (fun () -> ignore (Angstrom_JSON.bench json_input)), ());
       ]
   in

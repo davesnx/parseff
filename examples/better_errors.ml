@@ -3,7 +3,8 @@ let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
 let number_0_255_simple () =
   let digits = Parseff.many1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-  if n >= 0 && n <= 255 then n
+  if n >= 0 && n <= 255 then
+    n
   else
     Parseff.fail (Printf.sprintf "number %d is out of range (must be 0-255)" n)
 
@@ -21,7 +22,10 @@ let ip_address_simple () =
 let number_0_255_with_error () =
   let digits = Parseff.many1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-  if n >= 0 && n <= 255 then n else Parseff.error (`Out_of_range n)
+  if n >= 0 && n <= 255 then
+    n
+  else
+    Parseff.error (`Out_of_range n)
 
 let ip_address_with_custom_errors () =
   let a = number_0_255_with_error () in
@@ -44,7 +48,8 @@ let rec expr () =
         let _ = Parseff.whitespace () in
         let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
         let _ = Parseff.whitespace () in
-        term ())
+        term ()
+      )
       ()
   in
   List.fold_left (fun acc t -> Add (acc, t)) left rest
@@ -57,7 +62,8 @@ and term () =
         let _ = Parseff.whitespace () in
         let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
         let _ = Parseff.whitespace () in
-        factor ())
+        factor ()
+      )
       ()
   in
   List.fold_left (fun acc f -> Mul (acc, f)) left rest
@@ -75,14 +81,17 @@ and factor () =
       let _ =
         Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')')
       in
-      e)
+      e
+    )
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
-      Num d)
+      Num d
+    )
     ()
 
 let rec expr_to_string = function
-  | Num n -> string_of_int n
+  | Num n ->
+      string_of_int n
   | Add (l, r) ->
       Printf.sprintf "(%s + %s)" (expr_to_string l) (expr_to_string r)
   | Mul (l, r) ->
@@ -106,11 +115,14 @@ let literal () =
           Parseff.or_
             (fun () ->
               let _ = Parseff.consume "true" in
-              Num 1)
+              Num 1
+            )
             (fun () ->
               let _ = Parseff.consume "false" in
-              Num 0)
-            () );
+              Num 0
+            )
+            ()
+      );
     ]
     ()
 
@@ -135,13 +147,23 @@ let () =
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
       | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
-            (if should_succeed then "✗" else "✓")
+            ( if should_succeed then
+                "✗"
+              else
+                "✓"
+            )
             input pos expected
       | Error { pos; error = `Unexpected_end_of_input } ->
           Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
-            (if should_succeed then "✗" else "✓")
+            ( if should_succeed then
+                "✗"
+              else
+                "✓"
+            )
             input pos
-      | Error _ -> Printf.printf "✗ Unknown error\n")
+      | Error _ ->
+          Printf.printf "✗ Unknown error\n"
+    )
     test_cases_simple;
 
   Printf.printf "\nExample 2: Custom error types with polymorphic variants\n";
@@ -154,17 +176,27 @@ let () =
           Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
       | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Parse error at pos %d: %s\n"
-            (if should_succeed then "✗" else "✓")
+            ( if should_succeed then
+                "✗"
+              else
+                "✓"
+            )
             input pos expected
       | Error { pos; error = `Unexpected_end_of_input } ->
           Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
-            (if should_succeed then "✗" else "✓")
+            ( if should_succeed then
+                "✗"
+              else
+                "✓"
+            )
             input pos
       | Error { pos; error = `Out_of_range n } ->
           Printf.printf
             "✓ %-20s -> Custom error at pos %d: octet %d out of range (0-255)\n"
             input pos n
-      | Error _ -> Printf.printf "✗ Unknown error\n")
+      | Error _ ->
+          Printf.printf "✗ Unknown error\n"
+    )
     test_cases_custom;
 
   Printf.printf "\nExample 3: Expression parser with precedence\n";
@@ -179,36 +211,58 @@ let () =
           Printf.printf "✓ %-20s -> %s\n" input (expr_to_string result)
       | Error { pos; error = `Expected expected } ->
           Printf.printf "%s %-20s -> Error at pos %d: %s\n"
-            (if should_succeed then "✗" else "✓")
+            ( if should_succeed then
+                "✗"
+              else
+                "✓"
+            )
             input pos expected
       | Error { pos; error = `Unexpected_end_of_input } ->
           Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
-            (if should_succeed then "✗" else "✓")
+            ( if should_succeed then
+                "✗"
+              else
+                "✓"
+            )
             input pos
-      | Error _ -> Printf.printf "✗ Unknown error\n")
+      | Error _ ->
+          Printf.printf "✗ Unknown error\n"
+    )
     expr_tests;
 
   Printf.printf "\nExample 4: Using one_of and one_of_labeled\n";
   Printf.printf "-------------------------------------------\n";
-  (match Parseff.parse "if" keyword with
-  | Ok s -> Printf.printf "✓ Parsed keyword: %s\n" s
-  | Error _ -> Printf.printf "✗ Error\n");
+  ( match Parseff.parse "if" keyword with
+  | Ok s ->
+      Printf.printf "✓ Parsed keyword: %s\n" s
+  | Error _ ->
+      Printf.printf "✗ Error\n"
+  );
 
-  (match Parseff.parse "xyz" keyword with
-  | Ok _ -> Printf.printf "✗ Should have failed\n"
+  ( match Parseff.parse "xyz" keyword with
+  | Ok _ ->
+      Printf.printf "✗ Should have failed\n"
   | Error { error = `Expected expected; _ } ->
       Printf.printf "✓ Failed as expected: %s\n" expected
-  | Error _ -> Printf.printf "✓ Failed\n");
+  | Error _ ->
+      Printf.printf "✓ Failed\n"
+  );
 
-  (match Parseff.parse "99" literal with
-  | Ok e -> Printf.printf "✓ Parsed literal: %s\n" (expr_to_string e)
-  | Error _ -> Printf.printf "✗ Error\n");
+  ( match Parseff.parse "99" literal with
+  | Ok e ->
+      Printf.printf "✓ Parsed literal: %s\n" (expr_to_string e)
+  | Error _ ->
+      Printf.printf "✗ Error\n"
+  );
 
-  (match Parseff.parse "xyz" literal with
-  | Ok _ -> Printf.printf "✗ Should have failed\n"
+  ( match Parseff.parse "xyz" literal with
+  | Ok _ ->
+      Printf.printf "✗ Should have failed\n"
   | Error { error = `Expected expected; _ } ->
       Printf.printf "✓ Failed with labels: %s\n" expected
-  | Error _ -> Printf.printf "✓ Failed\n");
+  | Error _ ->
+      Printf.printf "✓ Failed\n"
+  );
 
   Printf.printf "\nConclusion:\n";
   Printf.printf "-----------\n";

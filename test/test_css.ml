@@ -38,7 +38,8 @@ let test_simple_rule () =
       let decl = List.hd r.declarations in
       Alcotest.(check string) "property" "color" decl.property;
       Alcotest.(check string) "value" "red" decl.value
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_multiple_declarations () =
   let input = "p { margin: 0; padding: 10px; color: blue; }" in
@@ -46,7 +47,8 @@ let test_multiple_declarations () =
   | Ok r ->
       Alcotest.(check string) "selector" "p" r.selector;
       Alcotest.(check int) "three declarations" 3 (List.length r.declarations)
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_with_whitespace () =
   let input = "\n   div {\n     width: 100%;\n     height: 50px;\n   }\n   " in
@@ -58,7 +60,8 @@ let test_with_whitespace () =
   | Ok r ->
       Alcotest.(check string) "selector" "div" r.selector;
       Alcotest.(check int) "two declarations" 2 (List.length r.declarations)
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_empty_rule () =
   let input = "section {}" in
@@ -66,7 +69,8 @@ let test_empty_rule () =
   | Ok r ->
       Alcotest.(check string) "selector" "section" r.selector;
       Alcotest.(check int) "no declarations" 0 (List.length r.declarations)
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let () =
   let open Alcotest in
@@ -78,5 +82,6 @@ let () =
           test_case "multiple declarations" `Quick test_multiple_declarations;
           test_case "with whitespace" `Quick test_with_whitespace;
           test_case "empty rule" `Quick test_empty_rule;
-        ] );
+        ]
+      );
     ]

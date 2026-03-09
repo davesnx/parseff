@@ -31,11 +31,16 @@ let blog_article () =
 let route () = Parseff.one_of [ home; about; terms; blog_home; blog_article ] ()
 
 let route_to_string = function
-  | Home -> "Home"
-  | About -> "About"
-  | Terms -> "Terms"
-  | BlogHome -> "BlogHome"
-  | BlogArticle slug -> Printf.sprintf "BlogArticle(%s)" slug
+  | Home ->
+      "Home"
+  | About ->
+      "About"
+  | Terms ->
+      "Terms"
+  | BlogHome ->
+      "BlogHome"
+  | BlogArticle slug ->
+      Printf.sprintf "BlogArticle(%s)" slug
 
 let () =
   let test_cases =
@@ -56,11 +61,16 @@ let () =
       | Ok result ->
           let matches = result = expected in
           Printf.printf "✓ %-25s -> %s %s\n" input (route_to_string result)
-            (if matches then ""
-             else Printf.sprintf "(expected %s)" (route_to_string expected))
+            ( if matches then
+                ""
+              else
+                Printf.sprintf "(expected %s)" (route_to_string expected)
+            )
       | Error { pos; error = `Expected exp } ->
           Printf.printf "✗ %-25s -> Error at %d: %s\n" input pos exp
       | Error { pos; error = `Unexpected_end_of_input } ->
           Printf.printf "✗ %-25s -> Unexpected end of input at %d\n" input pos
-      | Error _ -> Printf.printf "✗ %-25s -> Unknown error\n" input)
+      | Error _ ->
+          Printf.printf "✗ %-25s -> Unknown error\n" input
+    )
     test_cases

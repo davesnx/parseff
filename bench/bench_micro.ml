@@ -16,28 +16,37 @@ let bench_10x_satisfy () =
         let _ = Parseff.satisfy is_a ~label:"a" in
         let _ = Parseff.satisfy is_a ~label:"a" in
         let _ = Parseff.satisfy is_a ~label:"a" in
-        ())
+        ()
+    )
   with
-  | Ok _ -> ()
-  | Error _ -> ()
+  | Ok _ ->
+      ()
+  | Error _ ->
+      ()
 
 let bench_single_take_while () =
   match
     Parseff.parse ten_a_chars (fun () ->
         let _ = Parseff.take_while is_a in
-        ())
+        ()
+    )
   with
-  | Ok _ -> ()
-  | Error _ -> ()
+  | Ok _ ->
+      ()
+  | Error _ ->
+      ()
 
 let bench_single_skip_while () =
   match
     Parseff.parse ten_a_chars (fun () ->
         Parseff.skip_while is_a;
-        ())
+        ()
+    )
   with
-  | Ok _ -> ()
-  | Error _ -> ()
+  | Ok _ ->
+      ()
+  | Error _ ->
+      ()
 
 let bench_choose_first_branch_succeeds () =
   match
@@ -45,20 +54,27 @@ let bench_choose_first_branch_succeeds () =
         Parseff.or_
           (fun () ->
             let _ = Parseff.consume "a" in
-            "a")
+            "a"
+          )
           (fun () -> Parseff.consume "b")
-          ())
+          ()
+    )
   with
-  | Ok _ -> ()
-  | Error _ -> ()
+  | Ok _ ->
+      ()
+  | Error _ ->
+      ()
 
 let bench_many_10x_satisfy () =
   match
     Parseff.parse ten_a_chars (fun () ->
-        Parseff.many (fun () -> Parseff.satisfy is_a ~label:"a") ())
+        Parseff.many (fun () -> Parseff.satisfy is_a ~label:"a") ()
+    )
   with
-  | Ok _ -> ()
-  | Error _ -> ()
+  | Ok _ ->
+      ()
+  | Error _ ->
+      ()
 
 let bench_parse_and_return () =
   match Parseff.parse "" (fun () -> ()) with Ok _ -> () | Error _ -> ()

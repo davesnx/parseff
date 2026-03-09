@@ -82,7 +82,8 @@ val parse :
   ( 'a,
     [> `Expected of string
     | `Unexpected_end_of_input
-    | `Depth_limit_exceeded of string ] )
+    | `Depth_limit_exceeded of string ]
+  )
   result
 (** [parse ?max_depth input parser] runs [parser] on [input] string.
 
@@ -103,12 +104,14 @@ val parse :
     Example:
     {@ocaml[
       match parse "hello" (fun () -> consume "hello") with
-      | Ok s -> Printf.printf "Matched %S\n" s
+      | Ok s ->
+          Printf.printf "Matched %S\n" s
       | Error { pos; error = `Expected msg } ->
           Printf.printf "Failed at %d: %s\n" pos msg
       | Error { error = `Unexpected_end_of_input; _ } ->
           Printf.printf "Input ended too early\n"
-      | Error _ -> Printf.printf "Other error\n"
+      | Error _ ->
+          Printf.printf "Other error\n"
     ]} *)
 
 val parse_until_end :
@@ -119,7 +122,8 @@ val parse_until_end :
     [> `Expected of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ],
-    'd )
+    'd
+  )
   result_with_diagnostics
 (** [parse_until_end ?max_depth input parser] runs [parser] on [input], requires
     that all input is consumed, and returns diagnostics on both success and
@@ -237,7 +241,10 @@ val fail : string -> 'a
     Example:
     {@ocaml[
       let validate_range n =
-        if n >= 0 && n <= 255 then n else fail "number out of range"
+        if n >= 0 && n <= 255 then
+          n
+        else
+          fail "number out of range"
     ]} *)
 
 val error : 'e -> 'a
@@ -302,10 +309,12 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
         or_
           (fun () ->
             consume "true";
-            true)
+            true
+          )
           (fun () ->
             consume "false";
-            false)
+            false
+          )
           ()
     ]} *)
 
@@ -350,7 +359,11 @@ val expect : string -> (unit -> 'a) -> 'a
       let octet () =
         expect "an octet (0-255)" (fun () ->
             let n = number () in
-            if n > 255 then error (`Out_of_range n) else n)
+            if n > 255 then
+              error (`Out_of_range n)
+            else
+              n
+        )
       (* A non-digit input gives: "expected an octet (0-255)" *)
       (* Input "300" gives: `Out_of_range 300 — not swallowed *)
     ]}
@@ -549,7 +562,8 @@ val parse_source :
   ( 'a,
     [> `Expected of string
     | `Unexpected_end_of_input
-    | `Depth_limit_exceeded of string ] )
+    | `Depth_limit_exceeded of string ]
+  )
   result
 (** [parse_source ?max_depth source parser] runs [parser] pulling input from
     [source] on demand. Behaves identically to {!parse} but the input does not
@@ -575,7 +589,8 @@ val parse_source_until_end :
     [> `Expected of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ],
-    'd )
+    'd
+  )
   result_with_diagnostics
 (** [parse_source_until_end ?max_depth source parser] is the streaming
     equivalent of {!parse_until_end}. It enforces full consumption and returns

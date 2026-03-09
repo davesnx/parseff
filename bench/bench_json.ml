@@ -39,8 +39,10 @@ module MParser_JSON = struct
 
   let bench input =
     match parse_string json_array input () with
-    | MParser.Success result -> Some result
-    | MParser.Failed _ -> None
+    | MParser.Success result ->
+        Some result
+    | MParser.Failed _ ->
+        None
 end
 
 (** {1 Runner} *)
@@ -62,7 +64,8 @@ let () =
       [
         ( "Parseff",
           (fun () -> ignore (Parseff_bench.parse_json_array json_input)),
-          () );
+          ()
+        );
         ("Angstrom", (fun () -> ignore (Angstrom_JSON.bench json_input)), ());
         ("MParser", (fun () -> ignore (MParser_JSON.bench json_input)), ());
       ]

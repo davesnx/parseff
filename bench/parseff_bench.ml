@@ -9,8 +9,10 @@ let[@inline always] float_of_span (s : Parseff.span) =
   else if s.len = 2 && String.unsafe_get s.buf s.off >= '1' then
     Float.of_int
       (((Char.code (String.unsafe_get s.buf s.off) - Char.code '0') * 10)
-      + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0'))
-  else float_of_string (Parseff.span_to_string s)
+      + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0')
+      )
+  else
+    float_of_string (Parseff.span_to_string s)
 
 (** {1 JSON array} *)
 
@@ -24,8 +26,10 @@ let json_array () =
 
 let parse_json_array input =
   match Parseff.parse input json_array with
-  | Ok result -> Some result
-  | Error _ -> None
+  | Ok result ->
+      Some result
+  | Error _ ->
+      None
 
 (** {1 CSV} *)
 
@@ -35,14 +39,17 @@ let csv () =
 
 let parse_csv input =
   match Parseff.parse input csv with
-  | Ok result -> Some result
-  | Error _ -> None
+  | Ok result ->
+      Some result
+  | Error _ ->
+      None
 
 (** {1 Arithmetic} *)
 
 let[@inline] int_of_span (s : Parseff.span) =
   let rec go acc i =
-    if i >= s.off + s.len then acc
+    if i >= s.off + s.len then
+      acc
     else
       let d = Char.code (String.unsafe_get s.buf i) - Char.code '0' in
       go ((acc * 10) + d) (i + 1)
@@ -58,7 +65,8 @@ let expr () =
   (* Collect all (op, number) pairs *)
   let rec collect_ops nums ops =
     let op_span = Parseff.take_while_span is_arith_op in
-    if op_span.len = 0 then (nums, ops)
+    if op_span.len = 0 then
+      (nums, ops)
     else
       let op_char = String.unsafe_get op_span.buf op_span.off in
       let num_span = Parseff.take_while_span is_digit in
@@ -72,27 +80,36 @@ let expr () =
   (* Pass 1: evaluate * and / left-to-right, collecting + and - *)
   let rec pass1 acc nums ops =
     match (nums, ops) with
-    | n :: rest_nums, '*' :: rest_ops -> pass1 (acc * n) rest_nums rest_ops
-    | n :: rest_nums, '/' :: rest_ops -> pass1 (acc / n) rest_nums rest_ops
-    | _, ('+' | '-') :: _ -> (acc, nums, ops)
-    | [], [] -> (acc, [], [])
-    | _ -> (acc, nums, ops)
+    | n :: rest_nums, '*' :: rest_ops ->
+        pass1 (acc * n) rest_nums rest_ops
+    | n :: rest_nums, '/' :: rest_ops ->
+        pass1 (acc / n) rest_nums rest_ops
+    | _, ('+' | '-') :: _ ->
+        (acc, nums, ops)
+    | [], [] ->
+        (acc, [], [])
+    | _ ->
+        (acc, nums, ops)
   in
   let rec pass2 result nums ops =
     match (nums, ops) with
-    | [], [] -> result
+    | [], [] ->
+        result
     | n :: rest_nums, '+' :: rest_ops ->
         let term, rest_nums', rest_ops' = pass1 n rest_nums rest_ops in
         pass2 (result + term) rest_nums' rest_ops'
     | n :: rest_nums, '-' :: rest_ops ->
         let term, rest_nums', rest_ops' = pass1 n rest_nums rest_ops in
         pass2 (result - term) rest_nums' rest_ops'
-    | _ -> result
+    | _ ->
+        result
   in
   let first_term, rest_nums, rest_ops = pass1 first nums ops in
   pass2 first_term rest_nums rest_ops
 
 let parse_arithmetic input =
   match Parseff.parse input expr with
-  | Ok result -> Some result
-  | Error _ -> None
+  | Ok result ->
+      Some result
+  | Error _ ->
+      None

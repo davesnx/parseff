@@ -5,20 +5,24 @@ let chunked_source ?(chunk_size = 1) input =
       let n = min (min chunk_size len) available in
       Bytes.blit_string input !pos buf off n;
       pos := !pos + n;
-      n)
+      n
+  )
 
 let parse_source_with_pos src parser =
   Parseff.parse_source src (fun () ->
       let value = parser () in
-      (value, Parseff.position ()))
+      (value, Parseff.position ())
+  )
 
 (* {{{ Parsers reused across tests *)
 
 let number () =
   let digits = Parseff.many1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
-  if n >= 0 && n <= 255 then n
-  else Parseff.fail (Printf.sprintf "number out of range: %d" n)
+  if n >= 0 && n <= 255 then
+    n
+  else
+    Parseff.fail (Printf.sprintf "number out of range: %d" n)
 
 let ip_address () =
   let a = number () in
@@ -57,7 +61,8 @@ let rec json () =
           number_parser;
           string_parser;
         ]
-        ())
+        ()
+  )
 
 and null_parser () =
   let _ = Parseff.consume "null" in
@@ -67,10 +72,12 @@ and bool_parser () =
   Parseff.or_
     (fun () ->
       let _ = Parseff.consume "true" in
-      Bool true)
+      Bool true
+    )
     (fun () ->
       let _ = Parseff.consume "false" in
-      Bool false)
+      Bool false
+    )
     ()
 
 and number_parser () =
@@ -95,10 +102,12 @@ and array_parser () =
             (fun () ->
               let _ = ws () in
               let _ = Parseff.consume "," in
-              json ())
+              json ()
+            )
             ()
         in
-        first :: rest)
+        first :: rest
+      )
       (fun () -> [])
       ()
   in
@@ -118,10 +127,12 @@ and object_parser () =
             (fun () ->
               let _ = ws () in
               let _ = Parseff.consume "," in
-              key_value ())
+              key_value ()
+            )
             ()
         in
-        first :: rest)
+        first :: rest
+      )
       (fun () -> [])
       ()
   in
@@ -149,16 +160,20 @@ let test_of_string_consume () =
   | Ok (s, pos) ->
       Alcotest.(check string) "matched" "hello" s;
       Alcotest.(check int) "pos" 5 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_satisfy () =
   let src = Parseff.Source.of_string "7" in
   match
     Parseff.parse_source src (fun () ->
-        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit")
+        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    )
   with
-  | Ok c -> Alcotest.(check char) "digit" '7' c
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok c ->
+      Alcotest.(check char) "digit" '7' c
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_alternation () =
   let parser () =
@@ -169,8 +184,10 @@ let test_of_string_alternation () =
   in
   let src = Parseff.Source.of_string "bar" in
   match Parseff.parse_source src parser with
-  | Ok s -> Alcotest.(check string) "matched" "bar" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "bar" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_many () =
   let src = Parseff.Source.of_string "123" in
@@ -178,7 +195,8 @@ let test_of_string_many () =
   | Ok (lst, pos) ->
       Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst;
       Alcotest.(check int) "pos" 3 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_ip () =
   let src = Parseff.Source.of_string "192.168.1.100" in
@@ -188,17 +206,21 @@ let test_of_string_ip () =
       Alcotest.(check int) "b" 168 b;
       Alcotest.(check int) "c" 1 c;
       Alcotest.(check int) "d" 100 d
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_json () =
   let input = "{\"a\": [1, 2, null]}" in
   let src = Parseff.Source.of_string input in
   match Parseff.parse_source src json with
-  | Ok (Object pairs) -> Alcotest.(check int) "pairs" 1 (List.length pairs)
-  | Ok _ -> Alcotest.fail "Expected Object"
+  | Ok (Object pairs) ->
+      Alcotest.(check int) "pairs" 1 (List.length pairs)
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
   | Error { pos; error = `Expected msg } ->
       Alcotest.fail (Printf.sprintf "Error at pos %d: %s" pos msg)
-  | Error _ -> Alcotest.fail "Expected success (unknown error)"
+  | Error _ ->
+      Alcotest.fail "Expected success (unknown error)"
 
 let test_of_string_take_while () =
   let src = Parseff.Source.of_string "aaabbb" in
@@ -208,40 +230,51 @@ let test_of_string_take_while () =
   | Ok (s, pos) ->
       Alcotest.(check string) "taken" "aaa" s;
       Alcotest.(check int) "pos" 3 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_skip_while () =
   let src = Parseff.Source.of_string "   hello" in
   match
     Parseff.parse_source src (fun () ->
         Parseff.skip_whitespace ();
-        Parseff.consume "hello")
+        Parseff.consume "hello"
+    )
   with
-  | Ok s -> Alcotest.(check string) "matched" "hello" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_look_ahead () =
   let src = Parseff.Source.of_string "hello" in
   match
     Parseff.parse_source src (fun () ->
         let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
-        Parseff.consume "hello")
+        Parseff.consume "hello"
+    )
   with
-  | Ok s -> Alcotest.(check string) "matched" "hello" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_end_of_input () =
   let src = Parseff.Source.of_string "" in
   match Parseff.parse_source src Parseff.end_of_input with
-  | Ok () -> ()
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok () ->
+      ()
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_regex () =
   let re = Re.compile (Re.Posix.re "[a-z]+") in
   let src = Parseff.Source.of_string "hello" in
   match Parseff.parse_source src (fun () -> Parseff.match_regex re) with
-  | Ok s -> Alcotest.(check string) "matched" "hello" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_of_string_sep_by () =
   let src = Parseff.Source.of_string "1,2,3" in
@@ -249,8 +282,10 @@ let test_of_string_sep_by () =
     Parseff.parse_source src
       (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
-  | Ok lst -> Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok lst ->
+      Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 (* }}} *)
 
@@ -262,7 +297,8 @@ let test_chunked_consume () =
   | Ok (s, pos) ->
       Alcotest.(check string) "matched" "hello" s;
       Alcotest.(check int) "pos" 5 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_ip () =
   let src = chunked_source ~chunk_size:1 "192.168.1.100" in
@@ -272,7 +308,8 @@ let test_chunked_ip () =
       Alcotest.(check int) "b" 168 b;
       Alcotest.(check int) "c" 1 c;
       Alcotest.(check int) "d" 100 d
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_ip_2byte () =
   let src = chunked_source ~chunk_size:2 "192.168.1.100" in
@@ -282,15 +319,19 @@ let test_chunked_ip_2byte () =
       Alcotest.(check int) "b" 168 b;
       Alcotest.(check int) "c" 1 c;
       Alcotest.(check int) "d" 100 d
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_json () =
   let input = "[1, 2, 3]" in
   let src = chunked_source ~chunk_size:1 input in
   match Parseff.parse_source src json with
-  | Ok (Array lst) -> Alcotest.(check int) "length" 3 (List.length lst)
-  | Ok _ -> Alcotest.fail "Expected Array"
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok (Array lst) ->
+      Alcotest.(check int) "length" 3 (List.length lst)
+  | Ok _ ->
+      Alcotest.fail "Expected Array"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_json_2byte () =
   let input = "{\"key\": \"value\"}" in
@@ -300,16 +341,21 @@ let test_chunked_json_2byte () =
       Alcotest.(check int) "pairs" 1 (List.length pairs);
       let key, _ = List.hd pairs in
       Alcotest.(check string) "key" "key" key
-  | Ok _ -> Alcotest.fail "Expected Object"
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_json_nested () =
   let input = "{\"a\": {\"b\": null}}" in
   let src = chunked_source ~chunk_size:3 input in
   match Parseff.parse_source src json with
-  | Ok (Object _) -> ()
-  | Ok _ -> Alcotest.fail "Expected Object"
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok (Object _) ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_take_while () =
   let src = chunked_source ~chunk_size:2 "aaabbbccc" in
@@ -317,13 +363,15 @@ let test_chunked_take_while () =
     parse_source_with_pos src (fun () ->
         let a = Parseff.take_while (fun c -> c = 'a') in
         let b = Parseff.take_while (fun c -> c = 'b') in
-        (a, b))
+        (a, b)
+    )
   with
   | Ok ((a, b), pos) ->
       Alcotest.(check string) "a" "aaa" a;
       Alcotest.(check string) "b" "bbb" b;
       Alcotest.(check int) "pos" 6 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_alternation () =
   let parser () =
@@ -334,8 +382,10 @@ let test_chunked_alternation () =
   in
   let src = chunked_source ~chunk_size:2 "foobaz" in
   match Parseff.parse_source src parser with
-  | Ok s -> Alcotest.(check string) "matched" "foobaz" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "foobaz" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_regex () =
   let re = Re.compile (Re.Posix.re "[a-z]+") in
@@ -345,21 +395,26 @@ let test_chunked_regex () =
         let a = Parseff.match_regex re in
         Parseff.skip_whitespace ();
         let b = Parseff.match_regex re in
-        (a, b))
+        (a, b)
+    )
   with
   | Ok (a, b) ->
       Alcotest.(check string) "a" "hello" a;
       Alcotest.(check string) "b" "world" b
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_chunked_skip_while_then_char () =
   let src = chunked_source ~chunk_size:2 "   :" in
   match
     parse_source_with_pos src (fun () ->
-        Parseff.skip_while_then_char Parseff.is_whitespace ':')
+        Parseff.skip_while_then_char Parseff.is_whitespace ':'
+    )
   with
-  | Ok ((), pos) -> Alcotest.(check int) "pos" 4 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok ((), pos) ->
+      Alcotest.(check int) "pos" 4 pos
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 (* }}} *)
 
@@ -368,24 +423,31 @@ let test_chunked_skip_while_then_char () =
 let test_empty_source () =
   let src = Parseff.Source.of_function (fun _ _ _ -> 0) in
   match Parseff.parse_source src Parseff.end_of_input with
-  | Ok () -> ()
-  | Error _ -> Alcotest.fail "Expected success on empty source"
+  | Ok () ->
+      ()
+  | Error _ ->
+      Alcotest.fail "Expected success on empty source"
 
 let test_end_of_input_with_data () =
   let src = Parseff.Source.of_string "x" in
   match Parseff.parse_source src Parseff.end_of_input with
-  | Ok _ -> Alcotest.fail "Expected failure"
-  | Error _ -> ()
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error _ ->
+      ()
 
 let test_end_of_input_after_consume () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
     Parseff.parse_source src (fun () ->
         let _ = Parseff.consume "hello" in
-        Parseff.end_of_input ())
+        Parseff.end_of_input ()
+    )
   with
-  | Ok () -> ()
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok () ->
+      ()
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_backtrack_across_chunk () =
   let parser () =
@@ -393,33 +455,42 @@ let test_backtrack_across_chunk () =
       (fun () ->
         let _ = Parseff.consume "abc" in
         let _ = Parseff.consume "def" in
-        "abcdef")
+        "abcdef"
+      )
       (fun () ->
         let _ = Parseff.consume "abc" in
         let _ = Parseff.consume "xyz" in
-        "abcxyz")
+        "abcxyz"
+      )
       ()
   in
   let src = chunked_source ~chunk_size:2 "abcxyz" in
   match Parseff.parse_source src parser with
-  | Ok s -> Alcotest.(check string) "matched" "abcxyz" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "abcxyz" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_look_ahead_across_chunk () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
     Parseff.parse_source src (fun () ->
         let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
-        Parseff.consume "hello")
+        Parseff.consume "hello"
+    )
   with
-  | Ok s -> Alcotest.(check string) "matched" "hello" s
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_many_across_chunks () =
   let src = chunked_source ~chunk_size:1 "12345" in
   match Parseff.parse_source src (Parseff.many Parseff.digit) with
-  | Ok lst -> Alcotest.(check (list int)) "digits" [ 1; 2; 3; 4; 5 ] lst
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok lst ->
+      Alcotest.(check (list int)) "digits" [ 1; 2; 3; 4; 5 ] lst
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_regex_across_chunks () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
@@ -428,12 +499,14 @@ let test_regex_across_chunks () =
     Parseff.parse_source src (fun () ->
         let n = Parseff.match_regex re in
         let rest = Parseff.take_while (fun c -> c >= 'a' && c <= 'z') in
-        (n, rest))
+        (n, rest)
+    )
   with
   | Ok (n, rest) ->
       Alcotest.(check string) "number" "12345" n;
       Alcotest.(check string) "rest" "abc" rest
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_deep_nesting_streaming () =
   let make_nested depth =
@@ -449,28 +522,36 @@ let test_deep_nesting_streaming () =
   let input = make_nested 50 in
   let src = chunked_source ~chunk_size:3 input in
   match Parseff.parse_source src json with
-  | Ok (Array _) -> ()
-  | Ok _ -> Alcotest.fail "Expected nested Array"
-  | Error _ -> Alcotest.fail "Expected success"
+  | Ok (Array _) ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected nested Array"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_consume_failure_streaming () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match Parseff.parse_source src (fun () -> Parseff.consume "world") with
-  | Ok _ -> Alcotest.fail "Expected failure"
-  | Error { error = `Expected _; _ } -> ()
-  | Error _ -> Alcotest.fail "Expected `Expected error variant"
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error { error = `Expected _; _ } ->
+      ()
+  | Error _ ->
+      Alcotest.fail "Expected `Expected error variant"
 
 let test_take_while_span_streaming () =
   let src = chunked_source ~chunk_size:2 "aaabbb" in
   match
     parse_source_with_pos src (fun () ->
         let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        Parseff.span_to_string sp)
+        Parseff.span_to_string sp
+    )
   with
   | Ok (s, pos) ->
       Alcotest.(check string) "span" "aaa" s;
       Alcotest.(check int) "pos" 3 pos
-  | Error _ -> Alcotest.fail "Expected success"
+  | Error _ ->
+      Alcotest.fail "Expected success"
 
 let test_parse_source_until_end_requires_eof () =
   let src = Parseff.Source.of_string "abcXYZ" in
@@ -478,21 +559,25 @@ let test_parse_source_until_end_requires_eof () =
     Parseff.parse_source_until_end src (fun () -> Parseff.consume "abc")
   in
   match outcome with
-  | Ok _ -> Alcotest.fail "Expected failure"
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected _; diagnostics } ->
       Alcotest.(check int) "error position" 3 pos;
       Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
-  | Error _ -> Alcotest.fail "Unexpected error type"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
 
 let test_parse_source_until_end_error_has_diagnostics () =
   let src = chunked_source ~chunk_size:1 "x" in
   let outcome =
     Parseff.parse_source_until_end src (fun () ->
         Parseff.warn "streaming-warning";
-        Parseff.consume "y")
+        Parseff.consume "y"
+    )
   in
   match outcome with
-  | Ok _ -> Alcotest.fail "Expected failure"
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
   | Error { error = `Expected _; diagnostics; _ } ->
       let got =
         List.map
@@ -501,7 +586,8 @@ let test_parse_source_until_end_error_has_diagnostics () =
       in
       Alcotest.(check (list string))
         "diagnostics preserved" [ "streaming-warning" ] got
-  | Error _ -> Alcotest.fail "Unexpected error type"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
 
 let test_parse_source_until_end_preserves_end_of_input_semantics () =
   let ok_src = Parseff.Source.of_string "a" in
@@ -509,23 +595,30 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
     Parseff.parse_source_until_end ok_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
-        "ok")
+        "ok"
+    )
   in
-  (match ok_outcome with
-  | Ok (s, _) -> Alcotest.(check string) "explicit eof still works" "ok" s
-  | Error _ -> Alcotest.fail "Expected success");
+  ( match ok_outcome with
+  | Ok (s, _) ->
+      Alcotest.(check string) "explicit eof still works" "ok" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
   let fail_src = Parseff.Source.of_string "ab" in
   let fail_outcome =
     Parseff.parse_source_until_end fail_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
-        "unreachable")
+        "unreachable"
+    )
   in
   match fail_outcome with
-  | Ok _ -> Alcotest.fail "Expected failure"
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected _; _ } ->
       Alcotest.(check int) "fails at explicit eof position" 1 pos
-  | Error _ -> Alcotest.fail "Unexpected error type"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
 
 (* }}} *)
 
@@ -547,7 +640,8 @@ let () =
           test_case "end_of_input" `Quick test_of_string_end_of_input;
           test_case "regex" `Quick test_of_string_regex;
           test_case "sep_by" `Quick test_of_string_sep_by;
-        ] );
+        ]
+      );
       ( "chunked",
         [
           test_case "consume 1-byte" `Quick test_chunked_consume;
@@ -561,7 +655,8 @@ let () =
           test_case "regex 2-byte" `Quick test_chunked_regex;
           test_case "skip_while_then_char 2-byte" `Quick
             test_chunked_skip_while_then_char;
-        ] );
+        ]
+      );
       ( "edge cases",
         [
           test_case "empty source" `Quick test_empty_source;
@@ -582,5 +677,6 @@ let () =
             test_parse_source_until_end_error_has_diagnostics;
           test_case "parse_source_until_end preserves end_of_input" `Quick
             test_parse_source_until_end_preserves_end_of_input_semantics;
-        ] );
+        ]
+      );
     ]

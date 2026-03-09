@@ -22,8 +22,10 @@ module MParser_CSV = struct
 
   let bench input =
     match parse_string csv input () with
-    | MParser.Success result -> Some result
-    | MParser.Failed _ -> None
+    | MParser.Success result ->
+        Some result
+    | MParser.Failed _ ->
+        None
 end
 
 (** {1 Runner} *)

@@ -1,7 +1,10 @@
 type span = { buf : string; off : int; len : int }
 
 let[@inline always] span_to_string s =
-  if s.len = 0 then "" else String.sub s.buf s.off s.len
+  if s.len = 0 then
+    ""
+  else
+    String.sub s.buf s.off s.len
 
 type _ Effect.t +=
   | Consume : string -> string Effect.t
@@ -65,18 +68,20 @@ let[@inline] handle_consume st input_len s =
     let inp = st.input in
     let pos = st.pos in
     let rec check i =
-      if i >= len then true
+      if i >= len then
+        true
       else if String.unsafe_get inp (pos + i) = String.unsafe_get s i then
         check (i + 1)
-      else false
+      else
+        false
     in
     if check 0 then begin
       st.pos <- pos + len;
       s
-    end
-    else raise (Parse_error (pos, Printf.sprintf "expected %S" s))
-  end
-  else raise (Unexpected_eof st.pos)
+    end else
+      raise (Parse_error (pos, Printf.sprintf "expected %S" s))
+  end else
+    raise (Unexpected_eof st.pos)
 
 let[@inline] handle_satisfy st input_len pred label =
   if st.pos < input_len then
@@ -84,9 +89,10 @@ let[@inline] handle_satisfy st input_len pred label =
     if pred c then begin
       st.pos <- st.pos + 1;
       c
-    end
-    else raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
-  else raise (Unexpected_eof st.pos)
+    end else
+      raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
+  else
+    raise (Unexpected_eof st.pos)
 
 let[@inline] handle_take_while st input_len pred =
   let start = st.pos in
@@ -97,7 +103,10 @@ let[@inline] handle_take_while st input_len pred =
   done;
   let end_pos = !pos in
   st.pos <- end_pos;
-  if end_pos > start then String.sub inp start (end_pos - start) else ""
+  if end_pos > start then
+    String.sub inp start (end_pos - start)
+  else
+    ""
 
 let[@inline] handle_take_while_span st input_len pred =
   let start = st.pos in
@@ -123,11 +132,14 @@ let[@inline] handle_skip_while_then_char st input_len pred c =
   while !pos < input_len && pred (String.unsafe_get inp !pos) do
     pos := !pos + 1
   done;
-  if !pos < input_len && String.unsafe_get inp !pos = c then st.pos <- !pos + 1
+  if !pos < input_len && String.unsafe_get inp !pos = c then
+    st.pos <- !pos + 1
   else begin
     st.pos <- !pos;
-    if !pos >= input_len then raise (Unexpected_eof !pos)
-    else raise (Parse_error (!pos, Printf.sprintf "expected %C" c))
+    if !pos >= input_len then
+      raise (Unexpected_eof !pos)
+    else
+      raise (Parse_error (!pos, Printf.sprintf "expected %C" c))
   end
 
 let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
@@ -148,17 +160,19 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
     if !pos > start then begin
       st.pos <- !pos;
       String.sub inp start (!pos - start)
-    end
-    else begin
+    end else begin
       st.pos <- !pos;
-      if !pos >= input_len then raise (Unexpected_eof !pos)
-      else raise (Parse_error (!pos, "expected value"))
+      if !pos >= input_len then
+        raise (Unexpected_eof !pos)
+      else
+        raise (Parse_error (!pos, "expected value"))
     end
-  end
-  else begin
+  end else begin
     st.pos <- !pos;
-    if !pos >= input_len then raise (Unexpected_eof !pos)
-    else raise (Parse_error (!pos, Printf.sprintf "expected %C" sep_char))
+    if !pos >= input_len then
+      raise (Unexpected_eof !pos)
+    else
+      raise (Parse_error (!pos, Printf.sprintf "expected %C" sep_char))
   end
 
 let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
@@ -171,8 +185,7 @@ let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
   if !pos <= start then begin
     st.pos <- !pos;
     []
-  end
-  else begin
+  end else begin
     let acc = ref [ String.sub inp start (!pos - start) ] in
     let continue_loop = ref true in
     while !continue_loop do
@@ -196,10 +209,10 @@ let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
         if !sep_pos > elem_start then begin
           acc := String.sub inp elem_start (!sep_pos - elem_start) :: !acc;
           pos := !sep_pos
-        end
-        else continue_loop := false
-      end
-      else continue_loop := false
+        end else
+          continue_loop := false
+      end else
+        continue_loop := false
     done;
     st.pos <- !pos;
     List.rev !acc
@@ -215,8 +228,7 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
   if !pos <= start then begin
     st.pos <- !pos;
     []
-  end
-  else begin
+  end else begin
     let acc = ref [ { buf = inp; off = start; len = !pos - start } ] in
     let continue_loop = ref true in
     while !continue_loop do
@@ -241,10 +253,10 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
           acc :=
             { buf = inp; off = elem_start; len = !sep_pos - elem_start } :: !acc;
           pos := !sep_pos
-        end
-        else continue_loop := false
-      end
-      else continue_loop := false
+        end else
+          continue_loop := false
+      end else
+        continue_loop := false
     done;
     st.pos <- !pos;
     List.rev !acc
@@ -262,8 +274,10 @@ let[@inline] handle_match_regex st input_len re =
       st.pos <- match_end;
       matched
   with Not_found ->
-    if st.pos >= input_len then raise (Unexpected_eof st.pos)
-    else raise (Parse_error (st.pos, "regex match failed"))
+    if st.pos >= input_len then
+      raise (Unexpected_eof st.pos)
+    else
+      raise (Parse_error (st.pos, "regex match failed"))
 
 let[@inline] handle_end_of_input st input_len =
   if st.pos <> input_len then
@@ -281,17 +295,26 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
     match p () with
-    | v -> Ok v
-    | exception exn -> handler.handle exn
-    | effect Position, k -> Effect.Deep.continue k st.pos
+    | v ->
+        Ok v
+    | exception exn ->
+        handler.handle exn
+    | effect Position, k ->
+        Effect.Deep.continue k st.pos
     | effect Consume s, k -> (
         match handle_consume st input_len s with
-        | v -> Effect.Deep.continue k v
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Satisfy (pred, label), k -> (
         match handle_satisfy st input_len pred label with
-        | v -> Effect.Deep.continue k v
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Take_while pred, k ->
         Effect.Deep.continue k (handle_take_while st input_len pred)
     | effect Take_while_span pred, k ->
@@ -301,12 +324,18 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         Effect.Deep.continue k ()
     | effect Skip_while_then_char (pred, c), k -> (
         match handle_skip_while_then_char st input_len pred c with
-        | () -> Effect.Deep.continue k ()
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | () ->
+            Effect.Deep.continue k ()
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Fused_sep_take (ws_pred, sep_char, take_pred), k -> (
         match handle_fused_sep_take st input_len ws_pred sep_char take_pred with
-        | v -> Effect.Deep.continue k v
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Sep_by_take (ws_pred, sep_char, take_pred), k ->
         Effect.Deep.continue k
           (handle_sep_by_take st input_len ws_pred sep_char take_pred)
@@ -315,8 +344,11 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
           (handle_sep_by_take_span st input_len ws_pred sep_char take_pred)
     | effect Match_re re, k -> (
         match handle_match_regex st input_len re with
-        | v -> Effect.Deep.continue k v
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Greedy_many p, k ->
         let acc = ref [] in
         let saved = ref st.pos in
@@ -326,7 +358,8 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
           saved := st.pos;
           saved_diagnostics := st.diagnostics_rev;
           match go (Obj.magic p) with
-          | Ok v -> acc := Obj.magic v :: !acc
+          | Ok v ->
+              acc := Obj.magic v :: !acc
           | Error _ ->
               st.pos <- !saved;
               st.diagnostics_rev <- !saved_diagnostics;
@@ -337,15 +370,19 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         let saved = st.pos in
         let saved_diagnostics = st.diagnostics_rev in
         match go (Obj.magic left) with
-        | Ok v -> Effect.Deep.continue k (Obj.magic v)
+        | Ok v ->
+            Effect.Deep.continue k (Obj.magic v)
         | Error _ -> (
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             match go (Obj.magic right) with
-            | Ok v -> Effect.Deep.continue k (Obj.magic v)
+            | Ok v ->
+                Effect.Deep.continue k (Obj.magic v)
             | Error e ->
                 Effect.Deep.discontinue k
-                  (Propagated_error (e.pos, Obj.repr e.error))))
+                  (Propagated_error (e.pos, Obj.repr e.error))
+          )
+      )
     | effect Fail msg, k ->
         Effect.Deep.discontinue k (Parse_error (st.pos, msg))
     | effect Error_val e, k ->
@@ -368,13 +405,16 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             Effect.Deep.discontinue k
-              (Propagated_error (e.pos, Obj.repr e.error)))
+              (Propagated_error (e.pos, Obj.repr e.error))
+      )
     | effect Rec_ p, k ->
         if !nest_depth >= max_depth then
           Effect.Deep.discontinue k
             (Depth_limit_exceeded
                ( st.pos,
-                 Printf.sprintf "maximum nesting depth %d exceeded" max_depth ))
+                 Printf.sprintf "maximum nesting depth %d exceeded" max_depth
+               )
+            )
         else begin
           incr nest_depth;
           match go (Obj.magic p) with
@@ -388,14 +428,20 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         end
     | effect End_of_input, k -> (
         match handle_end_of_input st input_len with
-        | () -> Effect.Deep.continue k ()
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | () ->
+            Effect.Deep.continue k ()
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
   in
   Fun.protect
     ~finally:(fun () ->
       match diagnostics_out with
-      | Some out -> out := st.diagnostics_rev
-      | None -> ())
+      | Some out ->
+          out := st.diagnostics_rev
+      | None ->
+          ()
+    )
     (fun () -> go parser)
 
 let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
@@ -404,16 +450,22 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
       {
         handle =
           (function
-          | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+          | Parse_error (pos, msg) ->
+              Error { pos; error = `Expected msg }
           | Unexpected_eof pos ->
               Error { pos; error = `Unexpected_end_of_input }
-          | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-          | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-          | e -> raise e);
+          | User_error (pos, obj) ->
+              Error { pos; error = Obj.obj obj }
+          | Propagated_error (pos, obj) ->
+              Error { pos; error = Obj.obj obj }
+          | e ->
+              raise e
+          );
       }
       input parser
   with
-  | result -> result
+  | result ->
+      result
   | exception Depth_limit_exceeded (pos, msg) ->
       Error { pos; error = `Depth_limit_exceeded msg }
 
@@ -424,13 +476,16 @@ let to_diagnostics diagnostics_rev =
 
 let attach_diagnostics result diagnostics =
   match result with
-  | Ok value -> Stdlib.Ok (value, diagnostics)
-  | Error { pos; error } -> Stdlib.Error { pos; error; diagnostics }
+  | Ok value ->
+      Stdlib.Ok (value, diagnostics)
+  | Error { pos; error } ->
+      Stdlib.Error { pos; error; diagnostics }
 
 let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
     ( 'a,
       [> `Expected of string | `Unexpected_end_of_input ],
-      'd )
+      'd
+    )
     result_with_diagnostics =
   let diagnostics_out = ref [] in
   let result =
@@ -439,20 +494,27 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
         {
           handle =
             (function
-            | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+            | Parse_error (pos, msg) ->
+                Error { pos; error = `Expected msg }
             | Unexpected_eof pos ->
                 Error { pos; error = `Unexpected_end_of_input }
-            | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-            | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-            | e -> raise e);
+            | User_error (pos, obj) ->
+                Error { pos; error = Obj.obj obj }
+            | Propagated_error (pos, obj) ->
+                Error { pos; error = Obj.obj obj }
+            | e ->
+                raise e
+            );
         }
         input
         (fun () ->
           let v = parser () in
           ignore (Effect.perform End_of_input);
-          v)
+          v
+        )
     with
-    | result -> result
+    | result ->
+        result
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
   in
@@ -474,14 +536,14 @@ type source = {
 let default_buf_size = 4096
 
 let try_refill src =
-  if src.eof then false
+  if src.eof then
+    false
   else
     let n = src.read src.tmp 0 (Bytes.length src.tmp) in
     if n = 0 then begin
       src.eof <- true;
       false
-    end
-    else begin
+    end else begin
       let old = src.input in
       let old_len = src.input_len in
       let new_len = old_len + n in
@@ -495,9 +557,12 @@ let try_refill src =
 
 let ensure_bytes src pos needed =
   let rec loop () =
-    if pos + needed <= src.input_len then true
-    else if not (try_refill src) then false
-    else loop ()
+    if pos + needed <= src.input_len then
+      true
+    else if not (try_refill src) then
+      false
+    else
+      loop ()
   in
   loop ()
 
@@ -506,25 +571,34 @@ let handle_take_while_source src st pred =
   let continue = ref true in
   while !continue do
     if st.pos < src.input_len then begin
-      if pred (String.unsafe_get src.input st.pos) then st.pos <- st.pos + 1
-      else continue := false
-    end
-    else if try_refill src then ()
-    else continue := false
+      if pred (String.unsafe_get src.input st.pos) then
+        st.pos <- st.pos + 1
+      else
+        continue := false
+    end else if try_refill src then
+      ()
+    else
+      continue := false
   done;
   st.input <- src.input;
-  if st.pos > start then String.sub src.input start (st.pos - start) else ""
+  if st.pos > start then
+    String.sub src.input start (st.pos - start)
+  else
+    ""
 
 let handle_take_while_span_source src st pred =
   let start = st.pos in
   let continue = ref true in
   while !continue do
     if st.pos < src.input_len then begin
-      if pred (String.unsafe_get src.input st.pos) then st.pos <- st.pos + 1
-      else continue := false
-    end
-    else if try_refill src then ()
-    else continue := false
+      if pred (String.unsafe_get src.input st.pos) then
+        st.pos <- st.pos + 1
+      else
+        continue := false
+    end else if try_refill src then
+      ()
+    else
+      continue := false
   done;
   st.input <- src.input;
   { buf = src.input; off = start; len = st.pos - start }
@@ -533,11 +607,14 @@ let handle_skip_while_source src st pred =
   let continue = ref true in
   while !continue do
     if st.pos < src.input_len then begin
-      if pred (String.unsafe_get src.input st.pos) then st.pos <- st.pos + 1
-      else continue := false
-    end
-    else if try_refill src then ()
-    else continue := false
+      if pred (String.unsafe_get src.input st.pos) then
+        st.pos <- st.pos + 1
+      else
+        continue := false
+    end else if try_refill src then
+      ()
+    else
+      continue := false
   done;
   st.input <- src.input
 
@@ -546,8 +623,10 @@ let handle_skip_while_then_char_source src st pred c =
   ignore (ensure_bytes src st.pos 1);
   if st.pos < src.input_len && String.unsafe_get src.input st.pos = c then
     st.pos <- st.pos + 1
-  else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
-  else raise (Parse_error (st.pos, Printf.sprintf "expected %C" c))
+  else if st.pos >= src.input_len then
+    raise (Unexpected_eof st.pos)
+  else
+    raise (Parse_error (st.pos, Printf.sprintf "expected %C" c))
 
 let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
   handle_skip_while_source src st ws_pred;
@@ -562,18 +641,24 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
       if st.pos < src.input_len then begin
         if take_pred (String.unsafe_get src.input st.pos) then
           st.pos <- st.pos + 1
-        else continue := false
-      end
-      else if try_refill src then ()
-      else continue := false
+        else
+          continue := false
+      end else if try_refill src then
+        ()
+      else
+        continue := false
     done;
     st.input <- src.input;
-    if st.pos > start then String.sub src.input start (st.pos - start)
-    else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
-    else raise (Parse_error (st.pos, "expected value"))
-  end
-  else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
-  else raise (Parse_error (st.pos, Printf.sprintf "expected %C" sep_char))
+    if st.pos > start then
+      String.sub src.input start (st.pos - start)
+    else if st.pos >= src.input_len then
+      raise (Unexpected_eof st.pos)
+    else
+      raise (Parse_error (st.pos, "expected value"))
+  end else if st.pos >= src.input_len then
+    raise (Unexpected_eof st.pos)
+  else
+    raise (Parse_error (st.pos, Printf.sprintf "expected %C" sep_char))
 
 let handle_sep_by_take_source src st ws_pred sep_char take_pred =
   let start = st.pos in
@@ -582,13 +667,16 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
     if st.pos < src.input_len then begin
       if take_pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
-      else continue_take := false
-    end
-    else if try_refill src then ()
-    else continue_take := false
+      else
+        continue_take := false
+    end else if try_refill src then
+      ()
+    else
+      continue_take := false
   done;
   st.input <- src.input;
-  if st.pos <= start then []
+  if st.pos <= start then
+    []
   else begin
     let acc = ref [ String.sub src.input start (st.pos - start) ] in
     let continue_loop = ref true in
@@ -606,10 +694,12 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
           if st.pos < src.input_len then begin
             if take_pred (String.unsafe_get src.input st.pos) then
               st.pos <- st.pos + 1
-            else ct := false
-          end
-          else if try_refill src then ()
-          else ct := false
+            else
+              ct := false
+          end else if try_refill src then
+            ()
+          else
+            ct := false
         done;
         st.input <- src.input;
         if st.pos > elem_start then
@@ -619,8 +709,7 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
           st.input <- src.input;
           continue_loop := false
         end
-      end
-      else begin
+      end else begin
         st.pos <- saved_pos;
         st.input <- src.input;
         continue_loop := false
@@ -636,13 +725,16 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
     if st.pos < src.input_len then begin
       if take_pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
-      else continue_take := false
-    end
-    else if try_refill src then ()
-    else continue_take := false
+      else
+        continue_take := false
+    end else if try_refill src then
+      ()
+    else
+      continue_take := false
   done;
   st.input <- src.input;
-  if st.pos <= start then []
+  if st.pos <= start then
+    []
   else begin
     let acc = ref [ { buf = src.input; off = start; len = st.pos - start } ] in
     let continue_loop = ref true in
@@ -660,10 +752,12 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
           if st.pos < src.input_len then begin
             if take_pred (String.unsafe_get src.input st.pos) then
               st.pos <- st.pos + 1
-            else ct := false
-          end
-          else if try_refill src then ()
-          else ct := false
+            else
+              ct := false
+          end else if try_refill src then
+            ()
+          else
+            ct := false
         done;
         st.input <- src.input;
         if st.pos > elem_start then
@@ -675,8 +769,7 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
           st.input <- src.input;
           continue_loop := false
         end
-      end
-      else begin
+      end else begin
         st.pos <- saved_pos;
         st.input <- src.input;
         continue_loop := false
@@ -697,8 +790,7 @@ let handle_match_regex_source src st re =
         ignore (try_refill src);
         st.input <- src.input;
         loop ()
-      end
-      else begin
+      end else begin
         let matched = Re.Group.get groups 0 in
         st.pos <- match_end;
         st.input <- src.input;
@@ -709,9 +801,10 @@ let handle_match_regex_source src st re =
         ignore (try_refill src);
         st.input <- src.input;
         loop ()
-      end
-      else if st.pos >= src.input_len then raise (Unexpected_eof st.pos)
-      else raise (Parse_error (st.pos, "regex match failed"))
+      end else if st.pos >= src.input_len then
+        raise (Unexpected_eof st.pos)
+      else
+        raise (Parse_error (st.pos, "regex match failed"))
   in
   loop ()
 
@@ -729,25 +822,34 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
     match p () with
-    | v -> Ok v
-    | exception exn -> handler.handle exn
-    | effect Position, k -> Effect.Deep.continue k st.pos
+    | v ->
+        Ok v
+    | exception exn ->
+        handler.handle exn
+    | effect Position, k ->
+        Effect.Deep.continue k st.pos
     | effect Consume s, k -> (
         try
           ignore (ensure_bytes src st.pos (String.length s));
           sync_to_source ();
           match handle_consume st src.input_len s with
-          | v -> Effect.Deep.continue k v
-          | exception exn -> Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn)
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
     | effect Satisfy (pred, label), k -> (
         try
           ignore (ensure_bytes src st.pos 1);
           sync_to_source ();
           match handle_satisfy st src.input_len pred label with
-          | v -> Effect.Deep.continue k v
-          | exception exn -> Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn)
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
     | effect Take_while pred, k ->
         Effect.Deep.continue k (handle_take_while_source src st pred)
     | effect Take_while_span pred, k ->
@@ -757,14 +859,20 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         Effect.Deep.continue k ()
     | effect Skip_while_then_char (pred, c), k -> (
         match handle_skip_while_then_char_source src st pred c with
-        | () -> Effect.Deep.continue k ()
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | () ->
+            Effect.Deep.continue k ()
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Fused_sep_take (ws_pred, sep_char, take_pred), k -> (
         match
           handle_fused_sep_take_source src st ws_pred sep_char take_pred
         with
-        | v -> Effect.Deep.continue k v
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Sep_by_take (ws_pred, sep_char, take_pred), k ->
         Effect.Deep.continue k
           (handle_sep_by_take_source src st ws_pred sep_char take_pred)
@@ -773,8 +881,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
           (handle_sep_by_take_span_source src st ws_pred sep_char take_pred)
     | effect Match_re re, k -> (
         match handle_match_regex_source src st re with
-        | v -> Effect.Deep.continue k v
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
     | effect Greedy_many p, k ->
         let acc = ref [] in
         let saved = ref st.pos in
@@ -784,7 +895,8 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
           saved := st.pos;
           saved_diagnostics := st.diagnostics_rev;
           match go (Obj.magic p) with
-          | Ok v -> acc := Obj.magic v :: !acc
+          | Ok v ->
+              acc := Obj.magic v :: !acc
           | Error _ ->
               st.pos <- !saved;
               st.diagnostics_rev <- !saved_diagnostics;
@@ -796,16 +908,20 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         let saved = st.pos in
         let saved_diagnostics = st.diagnostics_rev in
         match go (Obj.magic left) with
-        | Ok v -> Effect.Deep.continue k (Obj.magic v)
+        | Ok v ->
+            Effect.Deep.continue k (Obj.magic v)
         | Error _ -> (
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
             match go (Obj.magic right) with
-            | Ok v -> Effect.Deep.continue k (Obj.magic v)
+            | Ok v ->
+                Effect.Deep.continue k (Obj.magic v)
             | Error e ->
                 Effect.Deep.discontinue k
-                  (Propagated_error (e.pos, Obj.repr e.error))))
+                  (Propagated_error (e.pos, Obj.repr e.error))
+          )
+      )
     | effect Fail msg, k ->
         Effect.Deep.discontinue k (Parse_error (st.pos, msg))
     | effect Error_val e, k ->
@@ -830,13 +946,16 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
             st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
             Effect.Deep.discontinue k
-              (Propagated_error (e.pos, Obj.repr e.error)))
+              (Propagated_error (e.pos, Obj.repr e.error))
+      )
     | effect Rec_ p, k ->
         if !nest_depth >= max_depth then
           Effect.Deep.discontinue k
             (Depth_limit_exceeded
                ( st.pos,
-                 Printf.sprintf "maximum nesting depth %d exceeded" max_depth ))
+                 Printf.sprintf "maximum nesting depth %d exceeded" max_depth
+               )
+            )
         else begin
           incr nest_depth;
           match go (Obj.magic p) with
@@ -850,14 +969,20 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         end
     | effect End_of_input, k -> (
         match handle_end_of_input_source src st with
-        | () -> Effect.Deep.continue k ()
-        | exception exn -> Effect.Deep.discontinue k exn)
+        | () ->
+            Effect.Deep.continue k ()
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
   in
   Fun.protect
     ~finally:(fun () ->
       match diagnostics_out with
-      | Some out -> out := st.diagnostics_rev
-      | None -> ())
+      | Some out ->
+          out := st.diagnostics_rev
+      | None ->
+          ()
+    )
     (fun () -> go parser)
 
 module Source = struct
@@ -898,16 +1023,22 @@ let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
       {
         handle =
           (function
-          | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+          | Parse_error (pos, msg) ->
+              Error { pos; error = `Expected msg }
           | Unexpected_eof pos ->
               Error { pos; error = `Unexpected_end_of_input }
-          | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-          | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-          | e -> raise e);
+          | User_error (pos, obj) ->
+              Error { pos; error = Obj.obj obj }
+          | Propagated_error (pos, obj) ->
+              Error { pos; error = Obj.obj obj }
+          | e ->
+              raise e
+          );
       }
       src parser
   with
-  | result -> result
+  | result ->
+      result
   | exception Depth_limit_exceeded (pos, msg) ->
       Error { pos; error = `Depth_limit_exceeded msg }
 
@@ -915,7 +1046,8 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     (parser : unit -> 'a) :
     ( 'a,
       [> `Expected of string | `Unexpected_end_of_input ],
-      'd )
+      'd
+    )
     result_with_diagnostics =
   let diagnostics_out = ref [] in
   let result =
@@ -924,20 +1056,27 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
         {
           handle =
             (function
-            | Parse_error (pos, msg) -> Error { pos; error = `Expected msg }
+            | Parse_error (pos, msg) ->
+                Error { pos; error = `Expected msg }
             | Unexpected_eof pos ->
                 Error { pos; error = `Unexpected_end_of_input }
-            | User_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-            | Propagated_error (pos, obj) -> Error { pos; error = Obj.obj obj }
-            | e -> raise e);
+            | User_error (pos, obj) ->
+                Error { pos; error = Obj.obj obj }
+            | Propagated_error (pos, obj) ->
+                Error { pos; error = Obj.obj obj }
+            | e ->
+                raise e
+            );
         }
         src
         (fun () ->
           let v = parser () in
           ignore (Effect.perform End_of_input);
-          v)
+          v
+        )
     with
-    | result -> result
+    | result ->
+        result
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
   in
@@ -956,7 +1095,10 @@ let[@inline] take_while pred = Effect.perform (Take_while pred)
 
 let[@inline] take_while1 pred ~label =
   let s = take_while pred in
-  if String.length s = 0 then Effect.perform (Fail label) else s
+  if String.length s = 0 then
+    Effect.perform (Fail label)
+  else
+    s
 
 let[@inline] skip_while pred = Effect.perform (Skip_while pred)
 
@@ -978,8 +1120,7 @@ let[@inline] fail msg = Effect.perform (Fail msg)
 let[@inline] error e = Effect.perform (Error_val e)
 let[@inline] warn diagnostic = Effect.perform (Warn diagnostic)
 
-let[@inline] warn_at ~pos diagnostic =
-  Effect.perform (Warn_at (pos, diagnostic))
+let[@inline] warn_at ~pos diagnostic = Effect.perform (Warn_at (pos, diagnostic))
 
 let[@inline] position () = Effect.perform Position
 let[@inline] end_of_input () = Effect.perform End_of_input
@@ -1001,10 +1142,12 @@ let sep_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
         many
           (fun () ->
             let _ = sep () in
-            p ())
+            p ()
+          )
           ()
       in
-      first :: rest)
+      first :: rest
+    )
     (fun () -> [])
     ()
 
@@ -1014,7 +1157,8 @@ let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
     many
       (fun () ->
         let _ = sep () in
-        p ())
+        p ()
+      )
       ()
   in
   first :: rest
@@ -1031,7 +1175,8 @@ let end_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
     (fun () ->
       let value = p () in
       let _ = sep () in
-      value)
+      value
+    )
     ()
 
 let end_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
@@ -1049,7 +1194,8 @@ let chainl1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
       (fun () ->
         let f = op () in
         let rhs = p () in
-        (f, rhs))
+        (f, rhs)
+      )
       ()
   in
   List.fold_left (fun acc (f, rhs) -> f acc rhs) first rest
@@ -1064,7 +1210,8 @@ let rec chainr1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
     (fun () ->
       let f = op () in
       let rhs = chainr1 p op () in
-      f first rhs)
+      f first rhs
+    )
     (fun () -> first)
     ()
 
@@ -1077,7 +1224,10 @@ let optional (p : unit -> 'a) () : 'a option =
 
 let count n (p : unit -> 'a) () : 'a list =
   let rec loop acc i =
-    if i <= 0 then List.rev acc else loop (p () :: acc) (i - 1)
+    if i <= 0 then
+      List.rev acc
+    else
+      loop (p () :: acc) (i - 1)
   in
   loop [] n
 
@@ -1100,7 +1250,8 @@ let[@inline] skip_whitespace () = skip_while is_whitespace
 let alphanum () =
   satisfy
     (fun c ->
-      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+    )
     ~label:"alphanumeric"
 
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
@@ -1111,9 +1262,12 @@ let expect msg p =
 
 let one_of parsers () =
   let rec try_all = function
-    | [] -> fail "no alternative matched"
-    | [ p ] -> p ()
-    | p :: rest -> or_ p (fun () -> try_all rest) ()
+    | [] ->
+        fail "no alternative matched"
+    | [ p ] ->
+        p ()
+    | p :: rest ->
+        or_ p (fun () -> try_all rest) ()
   in
   try_all parsers
 

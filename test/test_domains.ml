@@ -43,10 +43,12 @@ let bool_parser () =
   Parseff.or_
     (fun () ->
       let _ = Parseff.consume "true" in
-      Bool true)
+      Bool true
+    )
     (fun () ->
       let _ = Parseff.consume "false" in
-      Bool false)
+      Bool false
+    )
     ()
 
 let number_parser () =
@@ -71,7 +73,8 @@ let rec json () =
           number_parser;
           string_parser;
         ]
-        ())
+        ()
+  )
 
 and array_parser () =
   let _ = Parseff.consume "[" in
@@ -85,10 +88,12 @@ and array_parser () =
             (fun () ->
               let _ = ws () in
               let _ = Parseff.consume "," in
-              json ())
+              json ()
+            )
             ()
         in
-        first :: rest)
+        first :: rest
+      )
       (fun () -> [])
       ()
   in
@@ -108,10 +113,12 @@ and object_parser () =
             (fun () ->
               let _ = ws () in
               let _ = Parseff.consume "," in
-              key_value ())
+              key_value ()
+            )
             ()
         in
-        first :: rest)
+        first :: rest
+      )
       (fun () -> [])
       ()
   in
@@ -142,16 +149,19 @@ let test_basic_parallel_parsing () =
   let results =
     parallel num_domains (fun i ->
         let input = inputs.(i mod Array.length inputs) in
-        Parseff.parse input (fun () -> Parseff.consume input))
+        Parseff.parse input (fun () -> Parseff.consume input)
+    )
   in
   List.iteri
     (fun i result ->
       let input = inputs.(i mod Array.length inputs) in
       match result with
-      | Parseff.Ok s -> Alcotest.(check string) "matched" input s
+      | Parseff.Ok s ->
+          Alcotest.(check string) "matched" input s
       | Parseff.Error _ ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: expected success for %S" i input))
+            (Printf.sprintf "Domain %d: expected success for %S" i input)
+    )
     results
 
 let test_same_parser_many_domains () =
@@ -160,7 +170,8 @@ let test_same_parser_many_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = String.init (i + 1) (fun j -> Char.chr (48 + (j mod 10))) in
-        (input, Parseff.parse input digit_list_parser))
+        (input, Parseff.parse input digit_list_parser)
+    )
   in
   List.iteri
     (fun i (input, result) ->
@@ -170,7 +181,8 @@ let test_same_parser_many_domains () =
             (Printf.sprintf "domain %d length" i)
             (String.length input) (List.length lst)
       | Parseff.Error _ ->
-          Alcotest.fail (Printf.sprintf "Domain %d: expected success" i))
+          Alcotest.fail (Printf.sprintf "Domain %d: expected success" i)
+    )
     results
 
 let test_alternation_across_domains () =
@@ -189,15 +201,18 @@ let test_alternation_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = choices.(i mod Array.length choices) in
-        (input, Parseff.parse input parser))
+        (input, Parseff.parse input parser)
+    )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s -> Alcotest.(check string) "matched choice" input s
+      | Parseff.Ok s ->
+          Alcotest.(check string) "matched choice" input s
       | Parseff.Error _ ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: expected success for %S" i input))
+            (Printf.sprintf "Domain %d: expected success for %S" i input)
+    )
     results
 
 let test_json_across_domains () =
@@ -217,16 +232,20 @@ let test_json_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = docs.(i mod Array.length docs) in
-        (i, input, Parseff.parse input json))
+        (i, input, Parseff.parse input json)
+    )
   in
   List.iter
     (fun (i, input, result) ->
       match result with
-      | Parseff.Ok _ -> ()
+      | Parseff.Ok _ ->
+          ()
       | Parseff.Error { pos; _ } ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: JSON parse failed at pos %d for %S" i
-               pos input))
+               pos input
+            )
+    )
     results
 
 let test_streaming_across_domains () =
@@ -235,15 +254,18 @@ let test_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "item%d" i in
         let source = Parseff.Source.of_string input in
-        (input, Parseff.parse_source source (fun () -> Parseff.consume input)))
+        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
+    )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s -> Alcotest.(check string) "streaming result" input s
+      | Parseff.Ok s ->
+          Alcotest.(check string) "streaming result" input s
       | Parseff.Error _ ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: streaming parse failed for %S" i input))
+            (Printf.sprintf "Domain %d: streaming parse failed for %S" i input)
+    )
     results
 
 let test_high_contention () =
@@ -257,14 +279,18 @@ let test_high_contention () =
           let input = Printf.sprintf "%d" ((domain_id * iterations) + iter) in
           let parser () = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
           match Parseff.parse input parser with
-          | Parseff.Ok s -> if s <> input then incr failures
-          | Parseff.Error _ -> incr failures
+          | Parseff.Ok s ->
+              if s <> input then incr failures
+          | Parseff.Error _ ->
+              incr failures
         done;
-        !failures)
+        !failures
+    )
   in
   List.iteri
     (fun i failures ->
-      Alcotest.(check int) (Printf.sprintf "domain %d failures" i) 0 failures)
+      Alcotest.(check int) (Printf.sprintf "domain %d failures" i) 0 failures
+    )
     results
 
 let test_errors_isolated_across_domains () =
@@ -279,7 +305,8 @@ let test_errors_isolated_across_domains () =
         else
           (* Invalid parse — should fail *)
           let input = "xyz" in
-          (i, false, Parseff.parse input (fun () -> Parseff.consume "hello")))
+          (i, false, Parseff.parse input (fun () -> Parseff.consume "hello"))
+    )
   in
   List.iter
     (fun (i, should_succeed, result) ->
@@ -289,10 +316,12 @@ let test_errors_isolated_across_domains () =
       | true, Parseff.Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success, got error" i)
-      | false, Parseff.Error _ -> ()
+      | false, Parseff.Error _ ->
+          ()
       | false, Parseff.Ok _ ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: expected error, got success" i))
+            (Printf.sprintf "Domain %d: expected error, got success" i)
+    )
     results
 
 let test_complex_combinators_across_domains () =
@@ -304,7 +333,8 @@ let test_complex_combinators_across_domains () =
         let parser =
           Parseff.sep_by Parseff.digit (fun () -> Parseff.char ',')
         in
-        (i, Parseff.parse input parser))
+        (i, Parseff.parse input parser)
+    )
   in
   List.iter
     (fun (i, result) ->
@@ -315,7 +345,8 @@ let test_complex_combinators_across_domains () =
             [ i; i + 1; i + 2 ]
             lst
       | Parseff.Error _ ->
-          Alcotest.fail (Printf.sprintf "Domain %d: sep_by parse failed" i))
+          Alcotest.fail (Printf.sprintf "Domain %d: sep_by parse failed" i)
+    )
     results
 
 let test_streaming_json_across_domains () =
@@ -336,7 +367,8 @@ let test_streaming_json_across_domains () =
     parallel num_domains (fun i ->
         let input, expected_name = docs.(i mod Array.length docs) in
         let source = Parseff.Source.of_string input in
-        (i, expected_name, Parseff.parse_source source json))
+        (i, expected_name, Parseff.parse_source source json)
+    )
   in
   List.iter
     (fun (i, expected_name, result) ->
@@ -354,7 +386,8 @@ let test_streaming_json_across_domains () =
           Alcotest.fail (Printf.sprintf "Domain %d: expected Object" i)
       | Parseff.Error { pos; _ } ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i pos))
+            (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i pos)
+    )
     results
 
 let test_chunked_streaming_across_domains () =
@@ -366,21 +399,25 @@ let test_chunked_streaming_across_domains () =
         let n = min (min chunk_size len) available in
         Bytes.blit_string input !pos buf off n;
         pos := !pos + n;
-        n)
+        n
+    )
   in
   let results =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "hello%d" i in
         let source = chunked_source 2 input in
-        (input, Parseff.parse_source source (fun () -> Parseff.consume input)))
+        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
+    )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s -> Alcotest.(check string) "chunked result" input s
+      | Parseff.Ok s ->
+          Alcotest.(check string) "chunked result" input s
       | Parseff.Error _ ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: chunked parse failed for %S" i input))
+            (Printf.sprintf "Domain %d: chunked parse failed for %S" i input)
+    )
     results
 
 (* ---------------------------------------------------------------------- *)
@@ -400,9 +437,11 @@ let () =
             test_alternation_across_domains;
           test_case "complex combinators across domains" `Quick
             test_complex_combinators_across_domains;
-        ] );
+        ]
+      );
       ( "parallel JSON",
-        [ test_case "JSON across domains" `Quick test_json_across_domains ] );
+        [ test_case "JSON across domains" `Quick test_json_across_domains ]
+      );
       ( "parallel streaming",
         [
           test_case "streaming across domains" `Quick
@@ -411,11 +450,13 @@ let () =
             test_streaming_json_across_domains;
           test_case "chunked streaming across domains" `Quick
             test_chunked_streaming_across_domains;
-        ] );
+        ]
+      );
       ( "isolation",
         [
           test_case "errors isolated across domains" `Quick
             test_errors_isolated_across_domains;
           test_case "high contention" `Quick test_high_contention;
-        ] );
+        ]
+      );
     ]

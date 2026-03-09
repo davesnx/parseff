@@ -42,8 +42,10 @@ module MParser_Arith = struct
 
   let bench input =
     match parse_string (expr << eof) input () with
-    | MParser.Success result -> Some result
-    | MParser.Failed _ -> None
+    | MParser.Success result ->
+        Some result
+    | MParser.Failed _ ->
+        None
 end
 
 (** {1 Runner} *)
@@ -65,7 +67,8 @@ let () =
       [
         ( "Parseff",
           (fun () -> ignore (Parseff_bench.parse_arithmetic arith_input)),
-          () );
+          ()
+        );
         ("Angstrom", (fun () -> ignore (Angstrom_Arith.bench arith_input)), ());
         ("MParser", (fun () -> ignore (MParser_Arith.bench arith_input)), ());
       ]

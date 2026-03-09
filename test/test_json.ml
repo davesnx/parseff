@@ -19,10 +19,12 @@ let bool_parser () =
   Parseff.or_
     (fun () ->
       let _ = Parseff.consume "true" in
-      Bool true)
+      Bool true
+    )
     (fun () ->
       let _ = Parseff.consume "false" in
-      Bool false)
+      Bool false
+    )
     ()
 
 let number_parser () =
@@ -47,7 +49,8 @@ let rec json () =
           number_parser;
           string_parser;
         ]
-        ())
+        ()
+  )
 
 and array_parser () =
   let _ = Parseff.consume "[" in
@@ -61,10 +64,12 @@ and array_parser () =
             (fun () ->
               let _ = ws () in
               let _ = Parseff.consume "," in
-              json ())
+              json ()
+            )
             ()
         in
-        first :: rest)
+        first :: rest
+      )
       (fun () -> [])
       ()
   in
@@ -84,10 +89,12 @@ and object_parser () =
             (fun () ->
               let _ = ws () in
               let _ = Parseff.consume "," in
-              key_value ())
+              key_value ()
+            )
             ()
         in
-        first :: rest)
+        first :: rest
+      )
       (fun () -> [])
       ()
   in
@@ -107,68 +114,99 @@ and key_value () =
 
 let test_null () =
   match Parseff.parse "null" json with
-  | Ok Null -> ()
-  | Ok _ -> Alcotest.fail "Expected Null"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok Null ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected Null"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_bool_true () =
   match Parseff.parse "true" json with
-  | Ok (Bool true) -> ()
-  | Ok _ -> Alcotest.fail "Expected Bool true"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok (Bool true) ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected Bool true"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_bool_false () =
   match Parseff.parse "false" json with
-  | Ok (Bool false) -> ()
-  | Ok _ -> Alcotest.fail "Expected Bool false"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok (Bool false) ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected Bool false"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_number () =
   match Parseff.parse "42" json with
-  | Ok (Number n) -> Alcotest.(check (float 0.1)) "number" 42.0 n
-  | Ok _ -> Alcotest.fail "Expected Number"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok (Number n) ->
+      Alcotest.(check (float 0.1)) "number" 42.0 n
+  | Ok _ ->
+      Alcotest.fail "Expected Number"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_number_float () =
   match Parseff.parse "3.14" json with
-  | Ok (Number n) -> Alcotest.(check (float 0.01)) "float" 3.14 n
-  | Ok _ -> Alcotest.fail "Expected Number"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok (Number n) ->
+      Alcotest.(check (float 0.01)) "float" 3.14 n
+  | Ok _ ->
+      Alcotest.fail "Expected Number"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_string () =
   match Parseff.parse "\"hello\"" json with
-  | Ok (String s) -> Alcotest.(check string) "string" "hello" s
-  | Ok _ -> Alcotest.fail "Expected String"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok (String s) ->
+      Alcotest.(check string) "string" "hello" s
+  | Ok _ ->
+      Alcotest.fail "Expected String"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_empty_array () =
   match Parseff.parse "[]" json with
-  | Ok (Array lst) -> Alcotest.(check int) "empty array" 0 (List.length lst)
-  | Ok _ -> Alcotest.fail "Expected Array"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok (Array lst) ->
+      Alcotest.(check int) "empty array" 0 (List.length lst)
+  | Ok _ ->
+      Alcotest.fail "Expected Array"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_simple_array () =
   match Parseff.parse "[1, 2, 3]" json with
-  | Ok (Array lst) -> Alcotest.(check int) "three elements" 3 (List.length lst)
+  | Ok (Array lst) ->
+      Alcotest.(check int) "three elements" 3 (List.length lst)
   | Ok v ->
       let typ =
         match v with
-        | Null -> "Null"
-        | Bool _ -> "Bool"
-        | Number _ -> "Number"
-        | String _ -> "String"
-        | Array _ -> "Array"
-        | Object _ -> "Object"
+        | Null ->
+            "Null"
+        | Bool _ ->
+            "Bool"
+        | Number _ ->
+            "Number"
+        | String _ ->
+            "String"
+        | Array _ ->
+            "Array"
+        | Object _ ->
+            "Object"
       in
       Alcotest.fail (Printf.sprintf "Expected Array, got %s" typ)
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_empty_object () =
   match Parseff.parse "{}" json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "empty object" 0 (List.length pairs)
-  | Ok _ -> Alcotest.fail "Expected Object"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_simple_object () =
   match Parseff.parse "{\"key\": \"value\"}" json with
@@ -176,24 +214,34 @@ let test_simple_object () =
       Alcotest.(check int) "one pair" 1 (List.length pairs);
       let key, _ = List.hd pairs in
       Alcotest.(check string) "key" "key" key
-  | Ok _ -> Alcotest.fail "Expected Object"
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let test_nested () =
   match Parseff.parse "{\"a\": {\"b\": null}}" json with
-  | Ok (Object _) -> ()
+  | Ok (Object _) ->
+      ()
   | Ok v ->
       let typ =
         match v with
-        | Null -> "Null"
-        | Bool _ -> "Bool"
-        | Number _ -> "Number"
-        | String _ -> "String"
-        | Array _ -> "Array"
-        | Object _ -> "Object"
+        | Null ->
+            "Null"
+        | Bool _ ->
+            "Bool"
+        | Number _ ->
+            "Number"
+        | String _ ->
+            "String"
+        | Array _ ->
+            "Array"
+        | Object _ ->
+            "Object"
       in
       Alcotest.fail (Printf.sprintf "Expected Object, got %s" typ)
-  | Error _ -> Alcotest.fail "Parse failed"
+  | Error _ ->
+      Alcotest.fail "Parse failed"
 
 let make_deeply_nested_arrays depth =
   let open Buffer in
@@ -209,20 +257,25 @@ let make_deeply_nested_arrays depth =
 let test_deep_nesting_within_limit () =
   let input = make_deeply_nested_arrays 50 in
   match Parseff.parse input json with
-  | Ok (Array _) -> ()
-  | Ok _ -> Alcotest.fail "Expected nested Array"
+  | Ok (Array _) ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected nested Array"
   | Error { error = `Expected msg; _ } ->
       Alcotest.fail (Printf.sprintf "Unexpected parse error: %s" msg)
-  | Error _ -> Alcotest.fail "Unexpected error"
+  | Error _ ->
+      Alcotest.fail "Unexpected error"
 
 let test_deep_nesting_exceeds_limit () =
   let input = make_deeply_nested_arrays 256 in
   match Parseff.parse ~max_depth:128 input json with
-  | Ok _ -> Alcotest.fail "Expected depth limit error, got success"
+  | Ok _ ->
+      Alcotest.fail "Expected depth limit error, got success"
   | Error { error = `Depth_limit_exceeded msg; _ } ->
       let expected_msg = "maximum nesting depth 128 exceeded" in
       Alcotest.(check string) "depth error message" expected_msg msg
-  | Error _ -> Alcotest.fail "Expected `Depth_limit_exceeded"
+  | Error _ ->
+      Alcotest.fail "Expected `Depth_limit_exceeded"
 
 let () =
   let open Alcotest in
@@ -236,23 +289,27 @@ let () =
           test_case "number" `Quick test_number;
           test_case "float" `Quick test_number_float;
           test_case "string" `Quick test_string;
-        ] );
+        ]
+      );
       ( "arrays",
         [
           test_case "empty array" `Quick test_empty_array;
           test_case "simple array" `Quick test_simple_array;
-        ] );
+        ]
+      );
       ( "objects",
         [
           test_case "empty object" `Quick test_empty_object;
           test_case "simple object" `Quick test_simple_object;
           test_case "nested" `Quick test_nested;
-        ] );
+        ]
+      );
       ( "depth limiting",
         [
           test_case "deep nesting within limit" `Quick
             test_deep_nesting_within_limit;
           test_case "deep nesting exceeds limit" `Quick
             test_deep_nesting_exceeds_limit;
-        ] );
+        ]
+      );
     ]

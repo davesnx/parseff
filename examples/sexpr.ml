@@ -10,7 +10,8 @@ let simple_list () =
     Parseff.sep_by
       (fun () ->
         let _ = ws () in
-        atom ())
+        atom ()
+      )
       (fun () -> ws ())
       ()
   in
@@ -42,18 +43,26 @@ let () =
   List.iter
     (fun (input, expected) ->
       let parser =
-        if String.contains input '(' then parse_list else parse_atom
+        if String.contains input '(' then
+          parse_list
+        else
+          parse_atom
       in
       match Parseff.parse input parser with
       | Ok result ->
           let matches = result = expected in
           Printf.printf "✓ %-15s -> [%s] %s\n" input
             (String.concat "; " result)
-            (if matches then ""
-             else Printf.sprintf "(expected [%s])" (String.concat "; " expected))
+            ( if matches then
+                ""
+              else
+                Printf.sprintf "(expected [%s])" (String.concat "; " expected)
+            )
       | Error { pos; error = `Expected exp } ->
           Printf.printf "✗ %-15s -> Error at %d: %s\n" input pos exp
       | Error { pos; error = `Unexpected_end_of_input } ->
           Printf.printf "✗ %-15s -> Unexpected end of input at %d\n" input pos
-      | Error _ -> Printf.printf "✗ Unknown error\n")
+      | Error _ ->
+          Printf.printf "✗ Unknown error\n"
+    )
     test_cases
