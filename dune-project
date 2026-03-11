@@ -42,7 +42,10 @@
   (ocaml-lsp-server :with-dev-setup)
 
   ;; Documentation dependencies
-  (odoc :with-doc)
+  (odoc
+   (and
+    (>= 3.1.0)
+    :with-doc))
   (odoc-parser :with-doc)
   (mdx :with-test)
 ))
