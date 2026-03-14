@@ -8,6 +8,7 @@
 
 (rule
  (alias doc-markdown)
+ (enabled_if (<> %{env:CI=false} "true"))
  (mode
   (promote (until-clean)))
  (deps %{workspace_root}/_doc/_markdown/parseff/README.md)
