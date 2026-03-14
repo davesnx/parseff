@@ -5,7 +5,7 @@
 ; Source of truth: doc/guides/*.mld files.
 
 (rule
- (alias doc-markdown)
+ (alias generate-markdown)
  (mode
   (promote (until-clean)))
  (deps
@@ -17,7 +17,7 @@
    "printf '%s\\n' '---' 'title: Your First Parser' 'description: Build a config file parser from scratch, learning Parseff along the way' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/first-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
- (alias doc-markdown)
+ (alias generate-markdown)
  (mode
   (promote (until-clean)))
  (deps
@@ -29,7 +29,7 @@
    "printf '%s\\n' '---' 'title: \"Parsing an IP Address\"' 'description: Build a validated IPv4 address parser step by step' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/ip-address.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
- (alias doc-markdown)
+ (alias generate-markdown)
  (mode
   (promote (until-clean)))
  (deps
@@ -41,7 +41,7 @@
    "printf '%s\\n' '---' 'title: \"Expressions with Precedence\"' 'description: Build an arithmetic expression parser with operator precedence and an AST' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/expression-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
- (alias doc-markdown)
+ (alias generate-markdown)
  (mode
   (promote (until-clean)))
  (deps
@@ -53,7 +53,7 @@
    "printf '%s\\n' '---' 'title: \"A JSON Parser\"' 'description: Build a complete recursive-descent JSON parser with depth limiting' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/json-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
- (alias doc-markdown)
+ (alias generate-markdown)
  (mode
   (promote (until-clean)))
  (deps
@@ -65,7 +65,7 @@
    "printf '%s\\n' '---' 'title: Making parsers fast' 'description: Techniques for writing high-performance parsers with Parseff' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/optimization.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
- (alias doc-markdown)
+ (alias generate-markdown)
  (mode
   (promote (until-clean)))
  (deps
