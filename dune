@@ -8,8 +8,10 @@
 
 (alias
  (name doc-markdown)
- (enabled_if (<> %{env:CI=false} "true"))
- (deps (alias_rec generate-markdown)))
+ (enabled_if
+  (<> %{env:CI=false} "true"))
+ (deps
+  (alias_rec generate-markdown)))
 
 (rule
  (alias generate-markdown)
