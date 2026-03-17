@@ -9,12 +9,14 @@
 (alias
  (name doc-markdown)
  (enabled_if
-  (<> %{env:CI=false} "true"))
+  (= %{env:PARSEFF_GENERATE_MARKDOWN=false} "true"))
  (deps
   (alias_rec generate-markdown)))
 
 (rule
  (alias generate-markdown)
+ (enabled_if
+  (= %{env:PARSEFF_GENERATE_MARKDOWN=false} "true"))
  (mode
   (promote (until-clean)))
  (deps %{workspace_root}/_doc/_markdown/parseff/README.md)

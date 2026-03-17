@@ -2,6 +2,7 @@ project_name = parseff
 
 DUNE = opam exec -- dune
 opam_file = $(project_name).opam
+PARSEFF_GENERATE_MARKDOWN ?= true
 
 .PHONY: help
 help: ## Print this help message
@@ -102,7 +103,7 @@ subst: ## Run dune substitute
 
 .PHONY: docs
 docs: ## Generate odoc documentation and markdown
-	$(DUNE) build @doc @doc-markdown
+	PARSEFF_GENERATE_MARKDOWN=$(PARSEFF_GENERATE_MARKDOWN) $(DUNE) build @doc @doc-markdown
 
 .PHONY: website-dev
 website-dev: docs ## Run website dev server (generated from .mld)
