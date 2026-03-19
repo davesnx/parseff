@@ -103,15 +103,15 @@ val parse :
 
     Example:
     {@ocaml[
-      match parse "hello" (fun () -> consume "hello") with
-      | Ok s ->
-          Printf.printf "Matched %S\n" s
-      | Error { pos; error = `Expected msg } ->
-          Printf.printf "Failed at %d: %s\n" pos msg
-      | Error { error = `Unexpected_end_of_input; _ } ->
-          Printf.printf "Input ended too early\n"
-      | Error _ ->
-          Printf.printf "Other error\n"
+    match parse "hello" (fun () -> consume "hello") with
+    | Ok s ->
+        Printf.printf "Matched %S\n" s
+    | Error { pos; error = `Expected msg } ->
+        Printf.printf "Failed at %d: %s\n" pos msg
+    | Error { error = `Unexpected_end_of_input; _ } ->
+        Printf.printf "Input ended too early\n"
+    | Error _ ->
+        Printf.printf "Other error\n"
     ]} *)
 
 val parse_until_end :
@@ -138,10 +138,10 @@ val consume : string -> string
 
     Example:
     {@ocaml[
-      let parser () =
-        consume "hello";
-        consume " ";
-        consume "world"
+    let parser () =
+      consume "hello";
+      consume " ";
+      consume "world"
     ]} *)
 
 val satisfy : (char -> bool) -> label:string -> char
@@ -151,7 +151,7 @@ val satisfy : (char -> bool) -> label:string -> char
 
     Example:
     {@ocaml[
-      let vowel () = satisfy (fun c -> String.contains "aeiou" c) ~label:"vowel"
+    let vowel () = satisfy (fun c -> String.contains "aeiou" c) ~label:"vowel"
     ]} *)
 
 val char : char -> char
@@ -159,7 +159,7 @@ val char : char -> char
 
     Example:
     {@ocaml[
-      let comma () = char ','
+    let comma () = char ','
     ]} *)
 
 val match_regex : Re.re -> string
@@ -168,9 +168,9 @@ val match_regex : Re.re -> string
 
     Example:
     {@ocaml[
-      let identifier () =
-        let re = Re.compile (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*") in
-        match_regex re
+    let identifier () =
+      let re = Re.compile (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*") in
+      match_regex re
     ]} *)
 
 val take_while : (char -> bool) -> string
@@ -181,7 +181,7 @@ val take_while : (char -> bool) -> string
 
     Example:
     {@ocaml[
-      let digits () = take_while (fun c -> c >= '0' && c <= '9')
+    let digits () = take_while (fun c -> c >= '0' && c <= '9')
     ]} *)
 
 val take_while1 : (char -> bool) -> label:string -> string
@@ -191,8 +191,7 @@ val take_while1 : (char -> bool) -> label:string -> string
 
     Example:
     {@ocaml[
-      let digits1 () =
-        take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    let digits1 () = take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
     ]} *)
 
 val skip_while : (char -> bool) -> unit
@@ -203,7 +202,7 @@ val skip_while : (char -> bool) -> unit
 
     Example:
     {@ocaml[
-      let skip_spaces () = skip_while (fun c -> c = ' ')
+    let skip_spaces () = skip_while (fun c -> c = ' ')
     ]} *)
 
 val skip_while_then_char : (char -> bool) -> char -> unit
@@ -240,11 +239,11 @@ val fail : string -> 'a
 
     Example:
     {@ocaml[
-      let validate_range n =
-        if n >= 0 && n <= 255 then
-          n
-        else
-          fail "number out of range"
+    let validate_range n =
+      if n >= 0 && n <= 255 then
+        n
+      else
+        fail "number out of range"
     ]} *)
 
 val error : 'e -> 'a
@@ -293,10 +292,10 @@ val end_of_input : unit -> unit
 
     Example:
     {@ocaml[
-      let complete_parser () =
-        let result = some_parser () in
-        end_of_input ();
-        result
+    let complete_parser () =
+      let result = some_parser () in
+      end_of_input ();
+      result
     ]} *)
 
 val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
@@ -305,17 +304,17 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 
     Example:
     {@ocaml[
-      let bool_parser () =
-        or_
-          (fun () ->
-            consume "true";
-            true
-          )
-          (fun () ->
-            consume "false";
-            false
-          )
-          ()
+    let bool_parser () =
+      or_
+        (fun () ->
+          consume "true";
+          true
+        )
+        (fun () ->
+          consume "false";
+          false
+        )
+        ()
     ]} *)
 
 val look_ahead : (unit -> 'a) -> 'a
@@ -325,8 +324,8 @@ val look_ahead : (unit -> 'a) -> 'a
 
     Example:
     {@ocaml[
-      let check_next_is_digit () = look_ahead digit
-      (* position hasn't moved *)
+    let check_next_is_digit () = look_ahead digit
+    (* position hasn't moved *)
     ]} *)
 
 val rec_ : (unit -> 'a) -> 'a
@@ -356,22 +355,22 @@ val expect : string -> (unit -> 'a) -> 'a
     the structured error:
 
     {@ocaml[
-      let octet () =
-        expect "an octet (0-255)" (fun () ->
-            let n = number () in
-            if n > 255 then
-              error (`Out_of_range n)
-            else
-              n
-        )
-      (* A non-digit input gives: "expected an octet (0-255)" *)
-      (* Input "300" gives: `Out_of_range 300 — not swallowed *)
+    let octet () =
+      expect "an octet (0-255)" (fun () ->
+          let n = number () in
+          if n > 255 then
+            error (`Out_of_range n)
+          else
+            n
+      )
+    (* A non-digit input gives: "expected an octet (0-255)" *)
+    (* Input "300" gives: `Out_of_range 300 — not swallowed *)
     ]}
 
     Example:
     {@ocaml[
-      let dot () = expect "a dot separator" (fun () -> char '.')
-      let digit_val () = expect "a digit (0-9)" digit
+    let dot () = expect "a dot separator" (fun () -> char '.')
+    let digit_val () = expect "a digit (0-9)" digit
     ]} *)
 
 val one_of : (unit -> 'a) list -> unit -> 'a
@@ -379,14 +378,14 @@ val one_of : (unit -> 'a) list -> unit -> 'a
 
     Example:
     {@ocaml[
-      let keyword () =
-        one_of
-          [
-            (fun () -> consume "if");
-            (fun () -> consume "else");
-            (fun () -> consume "while");
-          ]
-          ()
+    let keyword () =
+      one_of
+        [
+          (fun () -> consume "if");
+          (fun () -> consume "else");
+          (fun () -> consume "while");
+        ]
+        ()
     ]} *)
 
 val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
@@ -398,15 +397,15 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Example:
     {@ocaml[
-      let literal () =
-        one_of_labeled
-          [
-            ("number", number_parser);
-            ("string", string_parser);
-            ("boolean", bool_parser);
-          ]
-          ()
-      (* On failure: "expected one of: number, string, boolean" *)
+    let literal () =
+      one_of_labeled
+        [
+          ("number", number_parser);
+          ("string", string_parser);
+          ("boolean", bool_parser);
+        ]
+        ()
+    (* On failure: "expected one of: number, string, boolean" *)
     ]} *)
 
 (** {1 Repetition Combinators} *)
@@ -418,7 +417,7 @@ val many : (unit -> 'a) -> unit -> 'a list
 
     Example:
     {@ocaml[
-      let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
+    let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
     ]} *)
 
 val many1 : (unit -> 'a) -> unit -> 'a list
@@ -427,7 +426,7 @@ val many1 : (unit -> 'a) -> unit -> 'a list
 
     Example:
     {@ocaml[
-      let non_empty_digits () = many1 digit ()
+    let non_empty_digits () = many1 digit ()
     ]} *)
 
 val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
@@ -436,11 +435,11 @@ val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 
     Example:
     {@ocaml[
-      let csv_line () =
-        sep_by
-          (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
-          (fun () -> char ',')
-          ()
+    let csv_line () =
+      sep_by
+        (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
+        (fun () -> char ',')
+        ()
     ]} *)
 
 val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
@@ -483,8 +482,8 @@ val optional : (unit -> 'a) -> unit -> 'a option
 
     Example:
     {@ocaml[
-      let optional_sign () =
-        optional (fun () -> or_ (fun () -> char '-') (fun () -> char '+') ()) ()
+    let optional_sign () =
+      optional (fun () -> or_ (fun () -> char '-') (fun () -> char '+') ()) ()
     ]} *)
 
 val count : int -> (unit -> 'a) -> unit -> 'a list
@@ -493,7 +492,7 @@ val count : int -> (unit -> 'a) -> unit -> 'a list
 
     Example:
     {@ocaml[
-      let three_digits () = count 3 digit ()
+    let three_digits () = count 3 digit ()
     ]} *)
 
 (** {1 Convenience Combinators} *)
@@ -574,11 +573,11 @@ val parse_source :
 
     Example:
     {@ocaml[
-      let ic = open_in "data.json" in
-      let source = Source.of_channel ic in
-      let result = parse_source source json in
-      close_in ic;
-      result
+    let ic = open_in "data.json" in
+    let source = Source.of_channel ic in
+    let result = parse_source source json in
+    close_in ic;
+    result
     ]} *)
 
 val parse_source_until_end :
@@ -598,9 +597,9 @@ val parse_source_until_end :
 
     Example:
     {@ocaml[
-      let ic = open_in "data.json" in
-      let source = Source.of_channel ic in
-      let outcome = parse_source_until_end source json in
-      close_in ic;
-      outcome
+    let ic = open_in "data.json" in
+    let source = Source.of_channel ic in
+    let outcome = parse_source_until_end source json in
+    close_in ic;
+    outcome
     ]} *)

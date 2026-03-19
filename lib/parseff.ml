@@ -570,12 +570,13 @@ let handle_take_while_source src st pred =
   let start = st.pos in
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len then begin
-      if pred (String.unsafe_get src.input st.pos) then
+    if st.pos < src.input_len then
+      begin if pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
       else
         continue := false
-    end else if try_refill src then
+    end
+    else if try_refill src then
       ()
     else
       continue := false
@@ -590,12 +591,13 @@ let handle_take_while_span_source src st pred =
   let start = st.pos in
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len then begin
-      if pred (String.unsafe_get src.input st.pos) then
+    if st.pos < src.input_len then
+      begin if pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
       else
         continue := false
-    end else if try_refill src then
+    end
+    else if try_refill src then
       ()
     else
       continue := false
@@ -606,12 +608,13 @@ let handle_take_while_span_source src st pred =
 let handle_skip_while_source src st pred =
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len then begin
-      if pred (String.unsafe_get src.input st.pos) then
+    if st.pos < src.input_len then
+      begin if pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
       else
         continue := false
-    end else if try_refill src then
+    end
+    else if try_refill src then
       ()
     else
       continue := false
@@ -638,12 +641,13 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
     let start = st.pos in
     let continue = ref true in
     while !continue do
-      if st.pos < src.input_len then begin
-        if take_pred (String.unsafe_get src.input st.pos) then
+      if st.pos < src.input_len then
+        begin if take_pred (String.unsafe_get src.input st.pos) then
           st.pos <- st.pos + 1
         else
           continue := false
-      end else if try_refill src then
+      end
+      else if try_refill src then
         ()
       else
         continue := false
@@ -664,12 +668,13 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
   let start = st.pos in
   let continue_take = ref true in
   while !continue_take do
-    if st.pos < src.input_len then begin
-      if take_pred (String.unsafe_get src.input st.pos) then
+    if st.pos < src.input_len then
+      begin if take_pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
       else
         continue_take := false
-    end else if try_refill src then
+    end
+    else if try_refill src then
       ()
     else
       continue_take := false
@@ -691,12 +696,13 @@ let handle_sep_by_take_source src st ws_pred sep_char take_pred =
         let elem_start = st.pos in
         let ct = ref true in
         while !ct do
-          if st.pos < src.input_len then begin
-            if take_pred (String.unsafe_get src.input st.pos) then
+          if st.pos < src.input_len then
+            begin if take_pred (String.unsafe_get src.input st.pos) then
               st.pos <- st.pos + 1
             else
               ct := false
-          end else if try_refill src then
+          end
+          else if try_refill src then
             ()
           else
             ct := false
@@ -722,12 +728,13 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
   let start = st.pos in
   let continue_take = ref true in
   while !continue_take do
-    if st.pos < src.input_len then begin
-      if take_pred (String.unsafe_get src.input st.pos) then
+    if st.pos < src.input_len then
+      begin if take_pred (String.unsafe_get src.input st.pos) then
         st.pos <- st.pos + 1
       else
         continue_take := false
-    end else if try_refill src then
+    end
+    else if try_refill src then
       ()
     else
       continue_take := false
@@ -749,12 +756,13 @@ let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
         let elem_start = st.pos in
         let ct = ref true in
         while !ct do
-          if st.pos < src.input_len then begin
-            if take_pred (String.unsafe_get src.input st.pos) then
+          if st.pos < src.input_len then
+            begin if take_pred (String.unsafe_get src.input st.pos) then
               st.pos <- st.pos + 1
             else
               ct := false
-          end else if try_refill src then
+          end
+          else if try_refill src then
             ()
           else
             ct := false
