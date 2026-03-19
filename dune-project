@@ -1,4 +1,4 @@
-(lang dune 3.20)
+(lang dune 3.17)
 
 (using mdx 0.2)
 
@@ -20,9 +20,15 @@
 (package
  (name parseff)
  (synopsis "Direct-style parser combinator library for OCaml 5 powered by algebraic effects")
-  (description
-   "Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and algebraic effects handle control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.")
+ (description
+  "Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and algebraic effects handle control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.")
  (depends
+  (dune
+   (or
+    (and
+     (>= 3.22)
+     (= :with-doc true))
+    (= :with-doc false)))
   (ocaml
    (>= 5.3))
   (re
