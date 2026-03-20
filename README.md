@@ -51,13 +51,13 @@ let () =
 
 - Build parsers with **direct-style** and compose with `Parseff` combinators
 - API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
-- **Typed domain errors via polymorphic variants**, raise with [`Parseff.error`](https://davesnx.github.io/parseff/api/primitives/#error). Parseff also adds ``Expected of string`, ``Unexpected_end_of_input`, and ``Depth_limit_exceeded of string` as possible parsing failures
+- [**Typed domain errors via polymorphic variants**](https://davesnx.github.io/parseff/api/errors/)
 - **Automatic backtracking** with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
 - **Minimal dependency footprint** only `re` for regex support
-- **Streaming** support with [`Source.of_string`](https://davesnx.github.io/parseff/api/streaming/#sourceof_string), [`Source.of_channel`](https://davesnx.github.io/parseff/api/streaming/#sourceof_channel), [`Source.of_function`](https://davesnx.github.io/parseff/api/streaming/#sourceof_function)
+- [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)
 - **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/overview/#parse) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
-- **Zero-copy span APIs** for low-allocation parsing ([`Parseff.take_while_span`](https://davesnx.github.io/parseff/api/zero-copy/#take_while_span), [`Parseff.sep_by_take_span`](https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take_span), [`Parseff.fused_sep_take`](https://davesnx.github.io/parseff/api/zero-copy/#fused_sep_take), [`Parseff.skip_while_then_char`](https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char))
-- **Fused operations** for hot paths ([`Parseff.sep_by_take`](https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take), [`Parseff.skip_while_then_char`](https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char))
+- [**Zero-copy span APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing
+- [**Fused operations**](https://davesnx.github.io/parseff/api/zero-copy/) for hot paths
 
 ## Performance
 
