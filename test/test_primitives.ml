@@ -310,56 +310,56 @@ let test_end_by1_success () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainl1_left_assoc () =
+let test_fold_left_left_assoc () =
   let num = Parseff.digit in
   let sub_op () =
     let _ = Parseff.char '-' in
     ( - )
   in
-  match parse_with_pos "9-3-1" (Parseff.chainl num sub_op) with
+  match parse_with_pos "9-3-1" (Parseff.fold_left num sub_op) with
   | Ok (value, pos) ->
       Alcotest.(check int) "left associative" 5 value;
       Alcotest.(check int) "final position" 5 pos
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainr1_right_assoc () =
+let test_fold_right_right_assoc () =
   let num = Parseff.digit in
   let sub_op () =
     let _ = Parseff.char '-' in
     ( - )
   in
-  match parse_with_pos "9-3-1" (Parseff.chainr num sub_op) with
+  match parse_with_pos "9-3-1" (Parseff.fold_right num sub_op) with
   | Ok (value, pos) ->
       Alcotest.(check int) "right associative" 7 value;
       Alcotest.(check int) "final position" 5 pos
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainl_default () =
+let test_fold_left_otherwise () =
   let parser =
-    Parseff.chainl Parseff.digit
+    Parseff.fold_left Parseff.digit
       (fun () ->
         let _ = Parseff.char '+' in
         ( + )
       )
-      ~default:42
+      ~otherwise:42
   in
   match parse_with_pos "" parser with
   | Ok (value, pos) ->
-      Alcotest.(check int) "default value" 42 value;
+      Alcotest.(check int) "otherwise value" 42 value;
       Alcotest.(check int) "final position" 0 pos
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainl_non_default () =
+let test_fold_left_non_otherwise () =
   let parser =
-    Parseff.chainl Parseff.digit
+    Parseff.fold_left Parseff.digit
       (fun () ->
         let _ = Parseff.char '+' in
         ( + )
       )
-      ~default:42
+      ~otherwise:42
   in
   match parse_with_pos "1+2+3" parser with
   | Ok (value, pos) ->
@@ -368,30 +368,30 @@ let test_chainl_non_default () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainr_default () =
+let test_fold_right_otherwise () =
   let parser =
-    Parseff.chainr Parseff.digit
+    Parseff.fold_right Parseff.digit
       (fun () ->
         let _ = Parseff.char '+' in
         ( + )
       )
-      ~default:42
+      ~otherwise:42
   in
   match parse_with_pos "" parser with
   | Ok (value, pos) ->
-      Alcotest.(check int) "default value" 42 value;
+      Alcotest.(check int) "otherwise value" 42 value;
       Alcotest.(check int) "final position" 0 pos
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainr_non_default () =
+let test_fold_right_non_otherwise () =
   let parser =
-    Parseff.chainr Parseff.digit
+    Parseff.fold_right Parseff.digit
       (fun () ->
         let _ = Parseff.char '^' in
         fun l r -> int_of_float (float_of_int l ** float_of_int r)
       )
-      ~default:42
+      ~otherwise:42
   in
   match parse_with_pos "2^3^2" parser with
   | Ok (value, pos) ->
@@ -400,9 +400,9 @@ let test_chainr_non_default () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chainl1_requires_one () =
+let test_fold_left_requires_one () =
   let parser =
-    Parseff.chainl Parseff.digit (fun () ->
+    Parseff.fold_left Parseff.digit (fun () ->
         let _ = Parseff.char '+' in
         ( + )
     )
@@ -415,9 +415,9 @@ let test_chainl1_requires_one () =
   | Error _ ->
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
-let test_chainr1_requires_one () =
+let test_fold_right_requires_one () =
   let parser =
-    Parseff.chainr Parseff.digit (fun () ->
+    Parseff.fold_right Parseff.digit (fun () ->
         let _ = Parseff.char '+' in
         ( + )
     )
@@ -1196,14 +1196,17 @@ let () =
           test_case "end_by empty" `Quick test_end_by_empty;
           test_case "end_by1 failure" `Quick test_end_by1_failure;
           test_case "end_by1 success" `Quick test_end_by1_success;
-          test_case "chainl1 left assoc" `Quick test_chainl1_left_assoc;
-          test_case "chainr1 right assoc" `Quick test_chainr1_right_assoc;
-          test_case "chainl default" `Quick test_chainl_default;
-          test_case "chainl non-default" `Quick test_chainl_non_default;
-          test_case "chainr default" `Quick test_chainr_default;
-          test_case "chainr non-default" `Quick test_chainr_non_default;
-          test_case "chainl1 requires one" `Quick test_chainl1_requires_one;
-          test_case "chainr1 requires one" `Quick test_chainr1_requires_one;
+          test_case "fold_left left assoc" `Quick test_fold_left_left_assoc;
+          test_case "fold_right right assoc" `Quick test_fold_right_right_assoc;
+          test_case "fold_left otherwise" `Quick test_fold_left_otherwise;
+          test_case "fold_left non-otherwise" `Quick
+            test_fold_left_non_otherwise;
+          test_case "fold_right otherwise" `Quick test_fold_right_otherwise;
+          test_case "fold_right non-otherwise" `Quick
+            test_fold_right_non_otherwise;
+          test_case "fold_left requires one" `Quick test_fold_left_requires_one;
+          test_case "fold_right requires one" `Quick
+            test_fold_right_requires_one;
         ]
       );
       ( "special",

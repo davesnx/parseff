@@ -449,22 +449,23 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 
     When [~at_least] is specified, requires at least that many elements. *)
 
-val chainl :
-  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
-(** [chainl element op] parses one or more [element] values separated by [op],
-    combining them left-associatively. Fails if there are zero [element] values.
-
-    When [~default] is specified, returns [default] if there are zero [element]
-    values instead of failing. *)
-
-val chainr :
-  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
-(** [chainr element op] parses one or more [element] values separated by [op],
-    combining them right-associatively. Fails if there are zero [element]
+val fold_left :
+  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+(** [fold_left element op] parses one or more [element] values separated by
+    [op], combining them left-associatively. Fails if there are zero [element]
     values.
 
-    When [~default] is specified, returns [default] if there are zero [element]
-    values instead of failing. *)
+    When [~otherwise] is specified, returns [otherwise] if there are zero
+    [element] values instead of failing. *)
+
+val fold_right :
+  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+(** [fold_right element op] parses one or more [element] values separated by
+    [op], combining them right-associatively. Fails if there are zero [element]
+    values.
+
+    When [~otherwise] is specified, returns [otherwise] if there are zero
+    [element] values instead of failing. *)
 
 val optional : (unit -> 'a) -> unit -> 'a option
 (** [optional parser] tries to apply [parser]. Returns [Some result] if it

@@ -186,19 +186,19 @@ These combinators parse sequences of values joined by operators, handling
 associativity. They're the standard tool for expression parsing with operator
 precedence.
 
-{2 [chainl]}
+{2 [fold_left]}
 
-{!val:Parseff.chainl} parses one or more values separated by an operator,
+{!val:Parseff.fold_left} parses one or more values separated by an operator,
 combining them {b left-associatively}. The operator parser returns a function
-that combines two values. If no elements match, use [~default] to provide a
+that combines two values. If no elements match, use [~otherwise] to provide a
 fallback value.
 
-{@ocaml skip[val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a]}
+{@ocaml skip[val fold_left : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a]}
 
 {@ocaml[
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
 let subtraction () =
-  Parseff.chainl
+  Parseff.fold_left
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '-' in
@@ -207,33 +207,33 @@ let subtraction () =
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ]}
 
-With [~default], returns the default if zero elements match:
+With [~otherwise], returns the fallback if zero elements match:
 
 {@ocaml[
 let maybe_subtract () =
-  Parseff.chainl
+  Parseff.fold_left
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
-    ~default:0
+    ~otherwise:0
     ()
 (* "1-2" -> -1 *)
 (* ""    -> 0  *)
 ]}
 
-{2 [chainr]}
+{2 [fold_right]}
 
-{!val:Parseff.chainr} is like {!val:Parseff.chainl} but combines
-{b right-associatively}. Use [~default] to provide a fallback value when no
+{!val:Parseff.fold_right} is like {!val:Parseff.fold_left} but combines
+{b right-associatively}. Use [~otherwise] to provide a fallback value when no
 elements match.
 
-{@ocaml skip[val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a]}
+{@ocaml skip[val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a]}
 
 {@ocaml skip[
 (* Parse "2^3^2" as 2^(3^2) = 512 *)
 let power () =
-  Parseff.chainr
+  Parseff.fold_right
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '^' in

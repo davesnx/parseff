@@ -106,7 +106,7 @@ let () =
 |---------|------------|
 | [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
 | [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `rec_` |
-| [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `chainl`, `chainr` |
+| [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace` |
 | [Errors](/parseff/api/errors) | `fail`, `error`, `expect` |
 | [Diagnostics](/parseff/api/diagnostics) | `warn`, `warn_at`, `parse_until_end`, `parse_source_until_end` |

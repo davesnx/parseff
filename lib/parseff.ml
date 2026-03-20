@@ -1189,7 +1189,8 @@ let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
     )
     ()
 
-let chainl_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
+let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
+    =
   let first = p () in
   let rest =
     many
@@ -1202,31 +1203,33 @@ let chainl_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
   in
   List.fold_left (fun acc (f, rhs) -> f acc rhs) first rest
 
-let chainl (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?default () : 'a =
-  match default with
+let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
+    =
+  match otherwise with
   | None ->
-      chainl_one_or_more p op ()
+      fold_left_one_or_more p op ()
   | Some d ->
-      or_ (chainl_one_or_more p op) (fun () -> d) ()
+      or_ (fold_left_one_or_more p op) (fun () -> d) ()
 
-let rec chainr_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () :
-    'a =
+let rec fold_right_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ()
+    : 'a =
   let first = p () in
   or_
     (fun () ->
       let f = op () in
-      let rhs = chainr_one_or_more p op () in
+      let rhs = fold_right_one_or_more p op () in
       f first rhs
     )
     (fun () -> first)
     ()
 
-let chainr (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?default () : 'a =
-  match default with
+let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
+    =
+  match otherwise with
   | None ->
-      chainr_one_or_more p op ()
+      fold_right_one_or_more p op ()
   | Some d ->
-      or_ (chainr_one_or_more p op) (fun () -> d) ()
+      or_ (fold_right_one_or_more p op) (fun () -> d) ()
 
 let optional (p : unit -> 'a) () : 'a option =
   or_ (fun () -> Some (p ())) (fun () -> None) ()

@@ -121,7 +121,7 @@ Here's the same expression parser in both libraries:
 
 ```ocaml
 let rec expr () =
-  Parseff.chainl
+  Parseff.fold_left
     term
     (fun () ->
       Parseff.skip_whitespace ();
@@ -131,7 +131,7 @@ let rec expr () =
     ()
 
 and term () =
-  Parseff.chainl
+  Parseff.fold_left
     factor
     (fun () ->
       Parseff.skip_whitespace ();

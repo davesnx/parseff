@@ -178,17 +178,17 @@ Pass `~at_least:1` to `end_by` to require at least one element.
 These combinators parse sequences of values joined by operators, handling associativity. They're the standard tool for expression parsing with operator precedence.
 
 
-### `chainl`
+### `fold_left`
 
-`Parseff.chainl` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. Pass `~default` to return a fallback value when zero elements match.
+`Parseff.fold_left` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. Pass `~otherwise` to return a fallback value when zero elements match.
 
 ```ocaml
-val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
+val fold_left : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
 ```
 ```ocaml
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
 let subtraction () =
-  Parseff.chainl
+  Parseff.fold_left
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '-' in
@@ -197,17 +197,17 @@ let subtraction () =
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ```
 
-### `chainr`
+### `fold_right`
 
-`Parseff.chainr` is like `Parseff.chainl` but combines **right-associatively**. Pass `~default` to return a fallback value when zero elements match.
+`Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Pass `~otherwise` to return a fallback value when zero elements match.
 
 ```ocaml
-val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
+val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
 ```
 ```ocaml
 (* Parse "2^3^2" as 2^(3^2) = 512 *)
 let power () =
-  Parseff.chainr
+  Parseff.fold_right
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '^' in
@@ -216,18 +216,18 @@ let power () =
 (* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
 ```
 
-#### Using `~default`
+#### Using `~otherwise`
 
-Pass `~default` to `chainl` or `chainr` to return a fallback value when zero elements match.
+Pass `~otherwise` to `fold_left` or `fold_right` to return a fallback value when zero elements match.
 
 ```ocaml
 let maybe_subtract () =
-  Parseff.chainl
+  Parseff.fold_left
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
-    ~default:0
+    ~otherwise:0
     ()
 (* "1-2" -> -1 *)
 (* ""    -> 0  *)
