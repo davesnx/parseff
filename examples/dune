@@ -1,6 +1,6 @@
 (executables
- (names routes sexpr better_errors)
+ (names routes sexpr better_errors lambda)
  (libraries parseff re))
 
 (cram
- (deps sexpr.exe routes.exe))
+ (deps sexpr.exe routes.exe lambda.exe))
