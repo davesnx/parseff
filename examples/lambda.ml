@@ -11,12 +11,14 @@ let rec pp ppf =
   | Abs (v, body) ->
       fprintf ppf "(fun %s . %a)" v pp body
 
-let ws =
-  let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*") in
-  fun () -> Parseff.match_regex ws_re
-let atom =
-  let atom_re = Re.compile (Re.Posix.re "[a-zA-Z0-9]+") in
-  fun () -> Parseff.match_regex atom_re
+let ws = Parseff.skip_whitespace
+
+let atom () =
+  Parseff.take_while ~at_least:1
+    (fun c ->
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+    )
+    ~label:"identifier"
 
 let abstr parse_body () =
   let open Parseff in
