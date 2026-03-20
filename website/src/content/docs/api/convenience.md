@@ -106,10 +106,10 @@ let trim_parser () =
 
 ### `whitespace`
 
-`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace). Pass `~at_least` to require a minimum number of whitespace characters.
+`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
 
 ```ocaml
-val whitespace : ?at_least:int -> unit -> string
+val whitespace : unit -> string
 ```
 ```ocaml
 let spaced_values () =
@@ -123,8 +123,13 @@ let spaced_values () =
 (* Matches "12" -> (1, 2) *)
 ```
 
-Pass `~at_least:1` to `whitespace` to require one or more whitespace characters. Fails if no whitespace found.
+### `whitespace ~at_least:1`
 
+`Parseff.whitespace` with `~at_least:1` parses one or more whitespace characters. Fails if no whitespace found.
+
+```ocaml
+val whitespace : ?at_least:int -> unit -> string
+```
 ```ocaml
 let words () =
   Parseff.sep_by ~at_least:1

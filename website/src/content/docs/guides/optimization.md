@@ -87,6 +87,58 @@ let parse_values () =
     (fun () -> Parseff.char ',')
     ()
 
+(* zero-copy: spans point into the original buffer *)
+let parse_values () =
+  let spans = Parseff.sep_by_take_span is_whitespace ',' is_digit in
+  List.map int_of_span spans
+```
+
+See the Zero-copy API reference for more details.
+
+## Advanced techniques
+
+### Minimize `or_` in loops
+
+Each `Parseff.or_` sets up a backtracking checkpoint, which is extra work the runtime has to do. In a `Parseff.many` loop that runs thousands of times, doing less per iteration makes a real difference:
+
+```ocaml
+let keyword () =
+  (* installs a handler per alternation, per iteration *)
+  Parseff.or_
+    (fun () -> Parseff.consume "class")
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.consume "function")
+        (fun () -> Parseff.consume "let")
+        ())
+    ()
+
+let keyword () =
+  (* parse then validate, no backtracking *)
+  let w = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"keyword" in
+  match w with
+  | "class" | "function" | "let" -> w
+  | _ -> Parseff.fail "expected keyword"
+```
+
+**When `or_` is fine:**
+
+- Top-level choices (not inside tight loops)
+- Complex parsers where each branch has distinct structure
+- When the number of alternatives is small
+
+### Push work into handler-level operations
+
+The less your parser has to bounce back and forth with the effect handler, the faster it runs. Handler-level operations do the entire scan in one go instead of making repeated round-trips:
+
+```ocaml
+let parse_list () =
+  (* using combinators *)
+  Parseff.sep_by
+    (fun () -> int_of_string (Parseff.take_while ~at_least:1 is_digit ~label:"digit"))
+    (fun () -> Parseff.char ',')
+    ()
+
 let parse_list () =
   (* runs the entire scan in one operation *)
   Parseff.sep_by_take is_whitespace ',' is_digit

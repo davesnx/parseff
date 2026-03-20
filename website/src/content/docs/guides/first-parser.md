@@ -33,7 +33,7 @@ Lines starting with `#` are comments. Blank lines are skipped. Everything else i
 
 ## Step 1: parsing a key-value pair
 
-Each parser reads input by calling combinators like `Parseff.take_while ~at_least:1` and `Parseff.char`, and returns a value.
+Each parser reads input by calling combinators like `Parseff.take_while` (with `~at_least:1`) and `Parseff.char`, and returns a value.
 
 ```ocaml
 let key () =
@@ -96,7 +96,7 @@ let line () =
 
 `one_of` tries each parser in order until one succeeds. Here: try a comment, then try an entry, then fall through to `None` for blank lines. The last branch always succeeds, so `line` never fails.
 
-`take_while` (without the `1`) can match zero characters. It always succeeds.
+`take_while` (without `~at_least`) can match zero characters. It always succeeds.
 
 ## Step 3: the whole file
 

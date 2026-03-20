@@ -16,10 +16,10 @@ These combinators handle patterns that repeat: lists, separated values, delimite
 
 ### `many`
 
-`Parseff.many` applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately). Pass `~at_least` to require a minimum number of matches.
+`Parseff.many` applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately).
 
 ```ocaml
-val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
+val many : (unit -> 'a) -> unit -> 'a list
 ```
 ```ocaml
 let digits () = Parseff.many Parseff.digit ()
@@ -28,8 +28,13 @@ let digits () = Parseff.many Parseff.digit ()
 (* "abc"  -> []         *)
 ```
 
-Pass `~at_least:1` to require at least one match. Fails if the parser doesn't succeed at least once.
+### `many ~at_least:1`
 
+`Parseff.many` with `~at_least:1` requires at least one match. Fails if the parser doesn't succeed at least once.
+
+```ocaml
+val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
+```
 ```ocaml
 let digits1 () = Parseff.many ~at_least:1 Parseff.digit ()
 (* "123" -> [1; 2; 3]  *)
@@ -75,10 +80,10 @@ let hex_color () =
 
 ### `sep_by`
 
-`Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds. Pass `~at_least` to require a minimum number of elements.
+`Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds.
 
 ```ocaml
-val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
 ```ocaml
 let csv_line () =
@@ -90,8 +95,13 @@ let csv_line () =
 (* ""      -> [""]             *)
 ```
 
-Pass `~at_least:1` to `sep_by` to require at least one element.
+### `sep_by ~at_least:1`
 
+`Parseff.sep_by` with `~at_least:1` requires at least one element.
+
+```ocaml
+val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+```
 ```ocaml
 let csv_line1 () =
   Parseff.sep_by ~at_least:1
@@ -152,10 +162,10 @@ let brackets p =
 
 ### `end_by`
 
-`Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last). Pass `~at_least` to require a minimum number of elements.
+`Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last).
 
 ```ocaml
-val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
 ```ocaml
 (* Parse semicolon-terminated statements *)
@@ -171,7 +181,13 @@ let statements () =
 (* ""       -> []               *)
 ```
 
-Pass `~at_least:1` to `end_by` to require at least one element.
+### `end_by ~at_least:1`
+
+`Parseff.end_by` with `~at_least:1` requires at least one element.
+
+```ocaml
+val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+```
 
 ## Operator chains
 
@@ -180,7 +196,7 @@ These combinators parse sequences of values joined by operators, handling associ
 
 ### `fold_left`
 
-`Parseff.fold_left` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. Pass `~otherwise` to return a fallback value when zero elements match.
+`Parseff.fold_left` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. If no elements match, use `~otherwise` to provide a fallback value.
 
 ```ocaml
 val fold_left : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
@@ -196,10 +212,24 @@ let subtraction () =
     ()
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ```
+With `~otherwise`, returns the fallback if zero elements match:
+
+```ocaml
+let maybe_subtract () =
+  Parseff.fold_left
+    (fun () -> Parseff.digit ())
+    (fun () ->
+      let _ = Parseff.char '-' in
+      fun a b -> a - b)
+    ~otherwise:0
+    ()
+(* "1-2" -> -1 *)
+(* ""    -> 0  *)
+```
 
 ### `fold_right`
 
-`Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Pass `~otherwise` to return a fallback value when zero elements match.
+`Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Use `~otherwise` to provide a fallback value when no elements match.
 
 ```ocaml
 val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
@@ -214,23 +244,6 @@ let power () =
       fun a b -> int_of_float (float_of_int a ** float_of_int b))
     ()
 (* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
-```
-
-#### Using `~otherwise`
-
-Pass `~otherwise` to `fold_left` or `fold_right` to return a fallback value when zero elements match.
-
-```ocaml
-let maybe_subtract () =
-  Parseff.fold_left
-    (fun () -> Parseff.digit ())
-    (fun () ->
-      let _ = Parseff.char '-' in
-      fun a b -> a - b)
-    ~otherwise:0
-    ()
-(* "1-2" -> -1 *)
-(* ""    -> 0  *)
 ```
 
 ## Complete example: JSON array

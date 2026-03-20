@@ -46,20 +46,20 @@ let () =
 
 {1 Features}
 
-- Build parsers with direct-style and compose with [Parseff] combinators
+- Build parsers with {b direct-style} and compose with [Parseff] combinators
 - API is designed to be expressive enough to {b not need monadic operators} ([>>=], [>>|], [*>]), {b nor binding operators} ([let*], [let+], [and+])
-- Typed domain errors via polymorphic variants, raise with {{:https://davesnx.github.io/parseff/api/primitives/#error}[Parseff.error]}. Parseff also adds [`Expected of string], [`Unexpected_end_of_input], and [`Depth_limit_exceeded of string] as possible parsing failures
-- Automatic backtracking with {{:https://davesnx.github.io/parseff/api/combinators/#or_}[Parseff.or_]}
-- Minimal dependency footprint: only [re] for regex support
-- Streaming support with {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_string}[Source.of_string]}, {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_channel}[Source.of_channel]}, {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_function}[Source.of_function]}
-- Domain-safe: each {{:https://davesnx.github.io/parseff/api/overview/#parse}[Parseff.parse]} / {{:https://davesnx.github.io/parseff/api/streaming/#parse_source}[Parseff.parse_source]} call is self-contained with no global mutable state, so independent parses can run in parallel across domains
-- Zero-copy span APIs for low-allocation parsing ({{:https://davesnx.github.io/parseff/api/zero-copy/#take_while_span}[Parseff.take_while_span]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take_span}[Parseff.sep_by_take_span]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#fused_sep_take}[Parseff.fused_sep_take]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char}[Parseff.skip_while_then_char]})
-- Fused operations for hot paths ({{:https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take}[Parseff.sep_by_take]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char}[Parseff.skip_while_then_char]})
+- {b Typed domain errors via polymorphic variants}, raise with {{:https://davesnx.github.io/parseff/api/primitives/#error}[Parseff.error]}. Parseff also adds [`Expected of string], [`Unexpected_end_of_input], and [`Depth_limit_exceeded of string] as possible parsing failures
+- {b Automatic backtracking} with {{:https://davesnx.github.io/parseff/api/combinators/#or_}[Parseff.or_]}
+- {b Minimal dependency footprint} only [re] for regex support
+- {b Streaming} support with {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_string}[Source.of_string]}, {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_channel}[Source.of_channel]}, {{:https://davesnx.github.io/parseff/api/streaming/#sourceof_function}[Source.of_function]}
+- {b Domain-safe} each {{:https://davesnx.github.io/parseff/api/overview/#parse}[Parseff.parse]} / {{:https://davesnx.github.io/parseff/api/streaming/#parse_source}[Parseff.parse_source]} call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- {b Zero-copy span APIs} for low-allocation parsing ({{:https://davesnx.github.io/parseff/api/zero-copy/#take_while_span}[Parseff.take_while_span]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take_span}[Parseff.sep_by_take_span]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#fused_sep_take}[Parseff.fused_sep_take]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char}[Parseff.skip_while_then_char]})
+- {b Fused operations} for hot paths ({{:https://davesnx.github.io/parseff/api/zero-copy/#sep_by_take}[Parseff.sep_by_take]}, {{:https://davesnx.github.io/parseff/api/zero-copy/#skip_while_then_char}[Parseff.skip_while_then_char]})
 
 {1 Performance}
 
-Parseff is faster than Angstrom and MParser by a factor of 2 to 4x.
-In case of equal implementations, Parseff is ~2x faster than Angstrom and MParser. With an optimized version using zero-copy span APIs, that gap widens to ~4x. See the {{:https://davesnx.github.io/parseff/guides/comparison/}full comparison} for details and {{:./bench/bench_vs_angstrom.ml}bench/bench_vs_angstrom.ml} for the benchmark.
+[Parseff] is faster than Angstrom and MParser by a factor of 2 to 4x.
+In case of equal implementations, [Parseff] is ~2x faster than Angstrom and MParser. With an optimized version using zero-copy span APIs, that gap widens to ~4x. See the {{:https://davesnx.github.io/parseff/guides/comparison/}full comparison} for details and {{:./bench/bench_vs_angstrom.ml}bench/bench_vs_angstrom.ml} for the benchmark.
 
 {1 Documentation}
 
