@@ -112,21 +112,21 @@ let identifier () =
 (* "123abc" -> identifier fails (first char must be letter) *)
 ]}
 
-{2 [take_while1]}
+{2 [take_while ~at_least:1]}
 
-{!val:Parseff.take_while1} is like {!val:Parseff.take_while} but requires at
+{!val:Parseff.take_while} with [~at_least:1] requires at
 least one character. Fails if no characters match.
 
-{@ocaml skip[val take_while1 : (char -> bool) -> label:string -> string]}
+{@ocaml skip[val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string]}
 
 {@ocaml[
 (* Parse non-empty digits *)
 let digits1 () =
-  Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
 (* Parse identifier (simpler than take_while approach) *)
 let identifier1 () =
-  Parseff.take_while1
+  Parseff.take_while ~at_least:1
     (fun c -> c = '_' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
     ~label:"identifier character"
 
@@ -185,7 +185,7 @@ let number () = Parseff.match_regex number_re
 
 (* take_while. No regex overhead for simple predicates *)
 let number () =
-  Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ]}
 
 {1 Control flow}
@@ -201,7 +201,7 @@ let number () =
 let byte () =
   let n =
     int_of_string
-      (Parseff.take_while1
+      (Parseff.take_while ~at_least:1
          (fun c -> c >= '0' && c <= '9')
          ~label:"digit")
   in
@@ -222,7 +222,7 @@ errors are caught by {!val:Parseff.parse} and returned in the result.
 {@ocaml[
 let validated_number () =
   let s =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
   if n < 0 then Parseff.error (`Negative n)
@@ -244,7 +244,7 @@ let () =
 {@ocaml[
 let number_checked () =
   let s =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
   if n > 255 then Parseff.error `Too_large

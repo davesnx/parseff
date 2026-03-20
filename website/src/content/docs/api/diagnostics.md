@@ -99,7 +99,7 @@ type validation = [ `Octet_out_of_range of int ]
 
 let number_lenient () =
   let start = Parseff.position () in
-  let digits = Parseff.many1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n > 255 then Parseff.warn_at ~pos:start (`Octet_out_of_range n);
   n

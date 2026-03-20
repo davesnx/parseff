@@ -4,7 +4,7 @@ This walkthrough builds an arithmetic expression parser that handles expressions
 
 Along the way, we'll cover the standard recursive-descent technique for
 precedence, [expect] for clear error messages, and the
-[chainl1] combinator as a shortcut for left-associative operator
+[chainl] combinator as a shortcut for left-associative operator
 chains.
 
 Source:
@@ -149,14 +149,14 @@ The key insight: [*] is consumed inside [term], so by the time [expr] sees the
 result, [2*3] is already a single [Mul] node. That's how precedence works. Each
 level "claims" its operators before the level above sees them.
 
-{1 An alternative: using [chainl1]}
+{1 An alternative: using [chainl]}
 
 The [many] + [fold_left] pattern is so common that Parseff provides
-[chainl1] as a shortcut:
+[chainl] as a shortcut:
 
 {@ocaml skip[
 let rec expr () =
-  Parseff.chainl1
+  Parseff.chainl
     term
     (fun () ->
       Parseff.skip_whitespace ();
@@ -166,7 +166,7 @@ let rec expr () =
     ()
 
 and term () =
-  Parseff.chainl1
+  Parseff.chainl
     factor
     (fun () ->
       Parseff.skip_whitespace ();
@@ -188,11 +188,11 @@ and factor () =
     ()
 ]}
 
-[chainl1 element op] parses one or more [element]s separated by [op], combining
+[chainl element op] parses one or more [element]s separated by [op], combining
 them left-to-right. The [op] parser returns the combining function. This is more
 concise and expresses the intent directly.
 
-For right-associative operators (like exponentiation), use [chainr1]
+For right-associative operators (like exponentiation), use [chainr]
 instead.
 
 {1 Printing the AST}

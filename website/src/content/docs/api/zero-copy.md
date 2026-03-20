@@ -98,7 +98,7 @@ let csv_to_ints () =
 
 ### `fused_sep_take`
 
-`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while1, all in a single effect dispatch. Much more efficient than separate calls.
+`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while ~at\_least:1, all in a single effect dispatch. Much more efficient than separate calls.
 
 ```ocaml
 val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
@@ -109,7 +109,7 @@ let parse_value_slow () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   Parseff.skip_whitespace ();
-  Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
 (* single effect dispatch *)
 let parse_value_fast () =
@@ -168,7 +168,7 @@ let parse_numbers () =
     (fun () ->
       Parseff.skip_whitespace ();
       let s =
-        Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+        Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
       in
       int_of_string s)
     (fun () -> Parseff.char ',')
@@ -190,7 +190,7 @@ let value () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   Parseff.skip_whitespace ();
-  Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
 (* single dispatch *)
 let value () =

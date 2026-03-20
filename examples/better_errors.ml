@@ -1,7 +1,7 @@
 let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
 
 let number_0_255_simple () =
-  let digits = Parseff.many1 digit_val () in
+  let digits = Parseff.many ~at_least:1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then
     n
@@ -20,7 +20,7 @@ let ip_address_simple () =
   (a, b, c, d)
 
 let number_0_255_with_error () =
-  let digits = Parseff.many1 digit_val () in
+  let digits = Parseff.many ~at_least:1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then
     n

@@ -173,25 +173,20 @@ val match_regex : Re.re -> string
       match_regex re
     ]} *)
 
-val take_while : (char -> bool) -> string
+val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
 (** [take_while fun] reads characters one by one as long as [fun] returns [true]
     for each one. Returns the matched string (may be empty if the very first
     character doesn't match). Much faster than regex for simple character
     classes.
 
+    When [~at_least] is specified, requires at least that many characters to
+    match. Fails with [~label] in the error message if fewer characters match.
+
     Example:
     {@ocaml[
     let digits () = take_while (fun c -> c >= '0' && c <= '9')
-    ]} *)
-
-val take_while1 : (char -> bool) -> label:string -> string
-(** [take_while1 fun ~label] like {!take_while} but requires at least one
-    character to match. Fails with [label] in the error message if no characters
-    match.
-
-    Example:
-    {@ocaml[
-    let digits1 () = take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    let digits1 () =
+      take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
     ]} *)
 
 val skip_while : (char -> bool) -> unit
@@ -410,28 +405,25 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
 (** {1 Repetition Combinators} *)
 
-val many : (unit -> 'a) -> unit -> 'a list
+val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
 (** [many parser] applies [parser] repeatedly until it fails. Returns a list of
     all successful results. Always succeeds (returns [[]] if [parser] fails
     immediately).
 
+    When [~at_least] is specified, requires at least that many successful
+    matches. Fails if [parser] doesn't succeed enough times.
+
     Example:
     {@ocaml[
     let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
+    let non_empty_digits () = many ~at_least:1 digit ()
     ]} *)
 
-val many1 : (unit -> 'a) -> unit -> 'a list
-(** [many1 parser] like {!many} but requires at least one successful match.
-    Fails if [parser] doesn't succeed at least once.
-
-    Example:
-    {@ocaml[
-    let non_empty_digits () = many1 digit ()
-    ]} *)
-
-val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 (** [sep_by element separator] parses zero or more occurrences of [element] with
     [separator] between each pair. Returns a list of the parsed elements.
+
+    When [~at_least] is specified, requires at least that many elements.
 
     Example:
     {@ocaml[
@@ -440,41 +432,39 @@ val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
         (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
         (fun () -> char ',')
         ()
+    let csv_line_nonempty () =
+      sep_by ~at_least:1
+        (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
+        (fun () -> char ',')
+        ()
     ]} *)
-
-val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
-(** [sep_by1 element separator] like {!sep_by} but requires at least one
-    [element] to match. *)
 
 val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> unit -> 'c
 (** [between open_ close_ parser] parses [open_], then [parser], then [close_],
     and returns the value produced by [parser]. *)
 
-val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 (** [end_by element separator] parses zero or more [element]s, each followed by
-    [separator]. *)
+    [separator].
 
-val end_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
-(** [end_by1 element separator] like {!end_by} but requires at least one
-    [element]. *)
+    When [~at_least] is specified, requires at least that many elements. *)
 
-val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
-(** [chainl element op default] parses zero or more [element] values separated
-    by [op], combining them left-associatively. Returns [default] if there are
-    zero [element] values. *)
+val chainl :
+  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
+(** [chainl element op] parses one or more [element] values separated by [op],
+    combining them left-associatively. Fails if there are zero [element] values.
 
-val chainl1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
-(** [chainl1 element op] parses one or more [element] values separated by [op],
-    combining them left-associatively. *)
+    When [~default] is specified, returns [default] if there are zero [element]
+    values instead of failing. *)
 
-val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
-(** [chainr element op default] parses zero or more [element] values separated
-    by [op], combining them right-associatively. Returns [default] if there are
-    zero [element] values. *)
+val chainr :
+  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
+(** [chainr element op] parses one or more [element] values separated by [op],
+    combining them right-associatively. Fails if there are zero [element]
+    values.
 
-val chainr1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
-(** [chainr1 element op] parses one or more [element] values separated by [op],
-    combining them right-associatively. *)
+    When [~default] is specified, returns [default] if there are zero [element]
+    values instead of failing. *)
 
 val optional : (unit -> 'a) -> unit -> 'a option
 (** [optional parser] tries to apply [parser]. Returns [Some result] if it
@@ -513,12 +503,12 @@ val is_whitespace : char -> bool
 (** [is_whitespace c] returns true for whitespace characters (space, tab,
     newline, CR). *)
 
-val whitespace : unit -> string
+val whitespace : ?at_least:int -> unit -> string
 (** [whitespace ()] parses zero or more whitespace characters (space, tab,
-    newline, carriage return). Uses fast character scanning (not regex). *)
+    newline, carriage return). Uses fast character scanning (not regex).
 
-val whitespace1 : unit -> string
-(** [whitespace1 ()] parses one or more whitespace characters. *)
+    When [~at_least] is specified, requires at least that many whitespace
+    characters. [whitespace ~at_least:1 ()] fails if no whitespace is found. *)
 
 val skip_whitespace : unit -> unit
 (** [skip_whitespace ()] skips zero or more whitespace characters (returns

@@ -7,7 +7,7 @@ description: Build an arithmetic expression parser with operator precedence and 
 
 This walkthrough builds an arithmetic expression parser that handles expressions like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence.
 
-Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl1` combinator as a shortcut for left-associative operator chains.
+Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `chainl` combinator as a shortcut for left-associative operator chains.
 
 Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
 
@@ -130,13 +130,13 @@ Let's trace `1+2*3` through the parser:
 
 The key insight: `*` is consumed inside `term`, so by the time `expr` sees the result, `2*3` is already a single `Mul` node. That's how precedence works. Each level "claims" its operators before the level above sees them.
 
-## An alternative: using `chainl1`
+## An alternative: using `chainl`
 
-The `many` + `fold_left` pattern is so common that Parseff provides `chainl1` as a shortcut:
+The `many` + `fold_left` pattern is so common that Parseff provides `chainl` as a shortcut:
 
 ```ocaml
 let rec expr () =
-  Parseff.chainl1
+  Parseff.chainl
     term
     (fun () ->
       Parseff.skip_whitespace ();
@@ -146,7 +146,7 @@ let rec expr () =
     ()
 
 and term () =
-  Parseff.chainl1
+  Parseff.chainl
     factor
     (fun () ->
       Parseff.skip_whitespace ();
@@ -168,9 +168,9 @@ and factor () =
     ()
 ```
 
-`chainl1 element op` parses one or more `element`s separated by `op`, combining them left-to-right. The `op` parser returns the combining function. This is more concise and expresses the intent directly.
+`chainl element op` parses one or more `element`s separated by `op`, combining them left-to-right. The `op` parser returns the combining function. This is more concise and expresses the intent directly.
 
-For right-associative operators (like exponentiation), use `chainr1` instead.
+For right-associative operators (like exponentiation), use `chainr` instead.
 
 ## Printing the AST
 

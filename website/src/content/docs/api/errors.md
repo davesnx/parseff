@@ -25,7 +25,7 @@ val fail : string -> 'a
 let byte () =
   let n =
     int_of_string
-      (Parseff.take_while1
+      (Parseff.take_while ~at_least:1
          (fun c -> c >= '0' && c <= '9')
          ~label:"digit")
   in
@@ -53,7 +53,7 @@ val error : 'e -> 'a
 ```ocaml
 let number () =
   let s =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
   if n > 255 then Parseff.error (`Too_large n)
@@ -78,7 +78,7 @@ Polymorphic variants work great with `error` for quick error types:
 ```ocaml
 let number_quick () =
   let s =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
   if n > 255 then Parseff.error `Too_large
@@ -99,7 +99,7 @@ let dot () =
 
 let number () =
   let s =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   int_of_string s
 

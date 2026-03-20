@@ -138,14 +138,14 @@ let test_many_several () =
       Alcotest.fail "Expected success"
 
 let test_many1_success () =
-  match Parseff.parse "456" (Parseff.many1 Parseff.digit) with
+  match Parseff.parse "456" (Parseff.many ~at_least:1 Parseff.digit) with
   | Ok lst ->
       Alcotest.(check (list int)) "digits" [ 4; 5; 6 ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_many1_failure () =
-  match Parseff.parse "abc" (Parseff.many1 Parseff.digit) with
+  match Parseff.parse "abc" (Parseff.many ~at_least:1 Parseff.digit) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -288,7 +288,9 @@ let test_end_by_empty () =
       Alcotest.fail "Expected success"
 
 let test_end_by1_failure () =
-  let parser = Parseff.end_by1 Parseff.digit (fun () -> Parseff.char ',') in
+  let parser =
+    Parseff.end_by ~at_least:1 Parseff.digit (fun () -> Parseff.char ',')
+  in
   match Parseff.parse "" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
@@ -298,7 +300,9 @@ let test_end_by1_failure () =
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_end_by1_success () =
-  let parser = Parseff.end_by1 Parseff.digit (fun () -> Parseff.char ',') in
+  let parser =
+    Parseff.end_by ~at_least:1 Parseff.digit (fun () -> Parseff.char ',')
+  in
   match parse_with_pos "1,2,3," parser with
   | Ok (lst, pos) ->
       Alcotest.(check (list int)) "parsed list" [ 1; 2; 3 ] lst;
@@ -312,7 +316,7 @@ let test_chainl1_left_assoc () =
     let _ = Parseff.char '-' in
     ( - )
   in
-  match parse_with_pos "9-3-1" (Parseff.chainl1 num sub_op) with
+  match parse_with_pos "9-3-1" (Parseff.chainl num sub_op) with
   | Ok (value, pos) ->
       Alcotest.(check int) "left associative" 5 value;
       Alcotest.(check int) "final position" 5 pos
@@ -325,7 +329,7 @@ let test_chainr1_right_assoc () =
     let _ = Parseff.char '-' in
     ( - )
   in
-  match parse_with_pos "9-3-1" (Parseff.chainr1 num sub_op) with
+  match parse_with_pos "9-3-1" (Parseff.chainr num sub_op) with
   | Ok (value, pos) ->
       Alcotest.(check int) "right associative" 7 value;
       Alcotest.(check int) "final position" 5 pos
@@ -339,7 +343,7 @@ let test_chainl_default () =
         let _ = Parseff.char '+' in
         ( + )
       )
-      42
+      ~default:42
   in
   match parse_with_pos "" parser with
   | Ok (value, pos) ->
@@ -355,7 +359,7 @@ let test_chainl_non_default () =
         let _ = Parseff.char '+' in
         ( + )
       )
-      42
+      ~default:42
   in
   match parse_with_pos "1+2+3" parser with
   | Ok (value, pos) ->
@@ -371,7 +375,7 @@ let test_chainr_default () =
         let _ = Parseff.char '+' in
         ( + )
       )
-      42
+      ~default:42
   in
   match parse_with_pos "" parser with
   | Ok (value, pos) ->
@@ -387,7 +391,7 @@ let test_chainr_non_default () =
         let _ = Parseff.char '^' in
         fun l r -> int_of_float (float_of_int l ** float_of_int r)
       )
-      42
+      ~default:42
   in
   match parse_with_pos "2^3^2" parser with
   | Ok (value, pos) ->
@@ -398,7 +402,7 @@ let test_chainr_non_default () =
 
 let test_chainl1_requires_one () =
   let parser =
-    Parseff.chainl1 Parseff.digit (fun () ->
+    Parseff.chainl Parseff.digit (fun () ->
         let _ = Parseff.char '+' in
         ( + )
     )
@@ -413,7 +417,7 @@ let test_chainl1_requires_one () =
 
 let test_chainr1_requires_one () =
   let parser =
-    Parseff.chainr1 Parseff.digit (fun () ->
+    Parseff.chainr Parseff.digit (fun () ->
         let _ = Parseff.char '+' in
         ( + )
     )
@@ -908,14 +912,14 @@ let test_whitespace_empty () =
       Alcotest.fail "Expected success"
 
 let test_whitespace1_success () =
-  match Parseff.parse "  \tX" (fun () -> Parseff.whitespace1 ()) with
+  match Parseff.parse "  \tX" (fun () -> Parseff.whitespace ~at_least:1 ()) with
   | Ok s ->
       Alcotest.(check string) "whitespace" "  \t" s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace1_failure () =
-  match Parseff.parse "abc" (fun () -> Parseff.whitespace1 ()) with
+  match Parseff.parse "abc" (fun () -> Parseff.whitespace ~at_least:1 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->

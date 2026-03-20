@@ -16,10 +16,10 @@ These combinators handle patterns that repeat: lists, separated values, delimite
 
 ### `many`
 
-`Parseff.many` applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately).
+`Parseff.many` applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately). Pass `~at_least` to require a minimum number of matches.
 
 ```ocaml
-val many : (unit -> 'a) -> unit -> 'a list
+val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
 ```
 ```ocaml
 let digits () = Parseff.many Parseff.digit ()
@@ -28,15 +28,10 @@ let digits () = Parseff.many Parseff.digit ()
 (* "abc"  -> []         *)
 ```
 
-### `many1`
-
-`Parseff.many1` is like `Parseff.many` but requires at least one match. Fails if the parser doesn't succeed at least once.
+Pass `~at_least:1` to require at least one match. Fails if the parser doesn't succeed at least once.
 
 ```ocaml
-val many1 : (unit -> 'a) -> unit -> 'a list
-```
-```ocaml
-let digits1 () = Parseff.many1 Parseff.digit ()
+let digits1 () = Parseff.many ~at_least:1 Parseff.digit ()
 (* "123" -> [1; 2; 3]  *)
 (* ""    -> Error      *)
 (* "abc" -> Error      *)
@@ -80,10 +75,10 @@ let hex_color () =
 
 ### `sep_by`
 
-`Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds.
+`Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds. Pass `~at_least` to require a minimum number of elements.
 
 ```ocaml
-val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
 ```ocaml
 let csv_line () =
@@ -95,18 +90,13 @@ let csv_line () =
 (* ""      -> [""]             *)
 ```
 
-### `sep_by1`
+Pass `~at_least:1` to `sep_by` to require at least one element.
 
-`Parseff.sep_by1` is like `Parseff.sep_by` but requires at least one element.
-
-```ocaml
-val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
-```
 ```ocaml
 let csv_line1 () =
-  Parseff.sep_by1
+  Parseff.sep_by ~at_least:1
     (fun () ->
-      Parseff.take_while1
+      Parseff.take_while ~at_least:1
         (fun c -> c <> ',' && c <> '\n')
         ~label:"value")
     (fun () -> Parseff.char ',')
@@ -162,17 +152,17 @@ let brackets p =
 
 ### `end_by`
 
-`Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last).
+`Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last). Pass `~at_least` to require a minimum number of elements.
 
 ```ocaml
-val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 ```
 ```ocaml
 (* Parse semicolon-terminated statements *)
 let statements () =
   Parseff.end_by
     (fun () ->
-      Parseff.take_while1
+      Parseff.take_while ~at_least:1
         (fun c -> c <> ';' && c <> '\n')
         ~label:"statement")
     (fun () -> Parseff.char ';')
@@ -181,30 +171,24 @@ let statements () =
 (* ""       -> []               *)
 ```
 
-### `end_by1`
-
-`Parseff.end_by1` is like `Parseff.end_by` but requires at least one element.
-
-```ocaml
-val end_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
-```
+Pass `~at_least:1` to `end_by` to require at least one element.
 
 ## Operator chains
 
 These combinators parse sequences of values joined by operators, handling associativity. They're the standard tool for expression parsing with operator precedence.
 
 
-### `chainl1`
+### `chainl`
 
-`Parseff.chainl1` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values.
+`Parseff.chainl` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. Pass `~default` to return a fallback value when zero elements match.
 
 ```ocaml
-val chainl1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
 ```
 ```ocaml
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
 let subtraction () =
-  Parseff.chainl1
+  Parseff.chainl
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '-' in
@@ -213,17 +197,17 @@ let subtraction () =
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ```
 
-### `chainr1`
+### `chainr`
 
-`Parseff.chainr1` is like `Parseff.chainl1` but combines **right-associatively**.
+`Parseff.chainr` is like `Parseff.chainl` but combines **right-associatively**. Pass `~default` to return a fallback value when zero elements match.
 
 ```ocaml
-val chainr1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a
 ```
 ```ocaml
 (* Parse "2^3^2" as 2^(3^2) = 512 *)
 let power () =
-  Parseff.chainr1
+  Parseff.chainr
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '^' in
@@ -232,13 +216,10 @@ let power () =
 (* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
 ```
 
-### `chainl`
+#### Using `~default`
 
-`Parseff.chainl` is like `Parseff.chainl1` but takes a default value. Returns the default if zero elements match.
+Pass `~default` to `chainl` or `chainr` to return a fallback value when zero elements match.
 
-```ocaml
-val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
-```
 ```ocaml
 let maybe_subtract () =
   Parseff.chainl
@@ -246,18 +227,10 @@ let maybe_subtract () =
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
-    0
+    ~default:0
     ()
 (* "1-2" -> -1 *)
 (* ""    -> 0  *)
-```
-
-### `chainr`
-
-`Parseff.chainr` is like `Parseff.chainr1` but with a default value for zero matches.
-
-```ocaml
-val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
 ```
 
 ## Complete example: JSON array
@@ -266,7 +239,7 @@ val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a
 let integer () =
   let sign = Parseff.optional (fun () -> Parseff.char '-') () in
   let digits =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string digits in
   match sign with Some _ -> -n | None -> n

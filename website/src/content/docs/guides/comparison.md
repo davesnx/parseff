@@ -47,10 +47,10 @@ The fundamental difference: Parseff uses direct-style imperative code. Angstrom 
 
 ```ocaml
 let key_value () =
-  let key = Parseff.take_while1 (fun c -> c <> ':') ~label:"key" in
+  let key = Parseff.take_while ~at_least:1 (fun c -> c <> ':') ~label:"key" in
   let _ = Parseff.char ':' in
   Parseff.skip_whitespace ();
-  let value = Parseff.take_while1 (fun c -> c <> '\n') ~label:"value" in
+  let value = Parseff.take_while ~at_least:1 (fun c -> c <> '\n') ~label:"value" in
   (key, value)
 ```
 
@@ -96,7 +96,7 @@ let numbers () =
   Parseff.sep_by
     (fun () ->
       Parseff.skip_whitespace ();
-      let s = Parseff.take_while1 is_digit ~label:"digit" in
+      let s = Parseff.take_while ~at_least:1 is_digit ~label:"digit" in
       Parseff.skip_whitespace ();
       int_of_string s)
     (fun () -> Parseff.char ',')
@@ -121,7 +121,7 @@ Here's the same expression parser in both libraries:
 
 ```ocaml
 let rec expr () =
-  Parseff.chainl1
+  Parseff.chainl
     term
     (fun () ->
       Parseff.skip_whitespace ();
@@ -131,7 +131,7 @@ let rec expr () =
     ()
 
 and term () =
-  Parseff.chainl1
+  Parseff.chainl
     factor
     (fun () ->
       Parseff.skip_whitespace ();

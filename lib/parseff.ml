@@ -1099,12 +1099,10 @@ let[@inline] consume s = Effect.perform (Consume s)
 let[@inline] satisfy pred ~label = Effect.perform (Satisfy (pred, label))
 let[@inline] char c = satisfy (Char.equal c) ~label:(String.make 1 c)
 let[@inline] match_regex re = Effect.perform (Match_re re)
-let[@inline] take_while pred = Effect.perform (Take_while pred)
-
-let[@inline] take_while1 pred ~label =
-  let s = take_while pred in
-  if String.length s = 0 then
-    Effect.perform (Fail label)
+let take_while ?(at_least = 0) ?label pred =
+  let s = Effect.perform (Take_while pred) in
+  if at_least > 0 && String.length s < at_least then
+    Effect.perform (Fail (match label with Some l -> l | None -> "take_while"))
   else
     s
 
@@ -1135,41 +1133,45 @@ let[@inline] end_of_input () = Effect.perform End_of_input
 let[@inline] or_ p q () = Effect.perform (Choose (p, q))
 let[@inline] look_ahead p = Effect.perform (Look_ahead p)
 let[@inline] rec_ p = Effect.perform (Rec_ p)
-let[@inline] many (p : unit -> 'a) () : 'a list = Effect.perform (Greedy_many p)
+let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
+  if at_least <= 0 then
+    Effect.perform (Greedy_many p)
+  else
+    let rec collect_required acc n =
+      if n <= 0 then
+        List.rev acc
+      else
+        collect_required (p () :: acc) (n - 1)
+    in
+    let required = collect_required [] at_least in
+    let rest = Effect.perform (Greedy_many p) in
+    required @ rest
 
-let[@inline] many1 (p : unit -> 'a) () : 'a list =
-  let first = p () in
-  let rest = many p () in
-  first :: rest
-
-let sep_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  or_
-    (fun () ->
-      let first = p () in
-      let rest =
-        many
-          (fun () ->
-            let _ = sep () in
-            p ()
-          )
-          ()
-      in
-      first :: rest
-    )
-    (fun () -> [])
-    ()
-
-let sep_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  let first = p () in
-  let rest =
-    many
+let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
+  if at_least <= 0 then
+    or_
       (fun () ->
-        let _ = sep () in
-        p ()
+        let first = p () in
+        let rest =
+          many
+            (fun () ->
+              let _ = sep () in
+              p ()
+            )
+            ()
+        in
+        first :: rest
       )
+      (fun () -> [])
       ()
-  in
-  first :: rest
+  else
+    let first = p () in
+    let sep_then_p () =
+      let _ = sep () in
+      p ()
+    in
+    let rest = many ~at_least:(at_least - 1) sep_then_p () in
+    first :: rest
 
 let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) () : 'c
     =
@@ -1178,8 +1180,8 @@ let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) () : 'c
   let _ = close_ () in
   value
 
-let end_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  many
+let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
+  many ~at_least
     (fun () ->
       let value = p () in
       let _ = sep () in
@@ -1187,15 +1189,7 @@ let end_by (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
     )
     ()
 
-let end_by1 (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  let first =
-    let value = p () in
-    let _ = sep () in
-    value
-  in
-  first :: end_by p sep ()
-
-let chainl1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
+let chainl_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
   let first = p () in
   let rest =
     many
@@ -1208,24 +1202,31 @@ let chainl1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
   in
   List.fold_left (fun acc (f, rhs) -> f acc rhs) first rest
 
-let chainl (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) (default : 'a) () : 'a
-    =
-  or_ (chainl1 p op) (fun () -> default) ()
+let chainl (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?default () : 'a =
+  match default with
+  | None ->
+      chainl_one_or_more p op ()
+  | Some d ->
+      or_ (chainl_one_or_more p op) (fun () -> d) ()
 
-let rec chainr1 (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a =
+let rec chainr_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () :
+    'a =
   let first = p () in
   or_
     (fun () ->
       let f = op () in
-      let rhs = chainr1 p op () in
+      let rhs = chainr_one_or_more p op () in
       f first rhs
     )
     (fun () -> first)
     ()
 
-let chainr (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) (default : 'a) () : 'a
-    =
-  or_ (chainr1 p op) (fun () -> default) ()
+let chainr (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?default () : 'a =
+  match default with
+  | None ->
+      chainr_one_or_more p op ()
+  | Some d ->
+      or_ (chainr_one_or_more p op) (fun () -> d) ()
 
 let optional (p : unit -> 'a) () : 'a option =
   or_ (fun () -> Some (p ())) (fun () -> None) ()
@@ -1251,8 +1252,8 @@ let letter () =
 let[@inline always] is_whitespace c =
   c = ' ' || c = '\t' || c = '\n' || c = '\r'
 
-let[@inline] whitespace () = take_while is_whitespace
-let[@inline] whitespace1 () = take_while1 is_whitespace ~label:"whitespace"
+let whitespace ?(at_least = 0) () =
+  take_while ~at_least ~label:"whitespace" is_whitespace
 let[@inline] skip_whitespace () = skip_while is_whitespace
 
 let alphanum () =

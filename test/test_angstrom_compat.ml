@@ -129,20 +129,28 @@ let basic_constructors =
           (fun () -> Parseff.take_while (fun _ -> false))
           [ "" ] ""
     );
-    ( "take_while1",
+    ( "take_while ~at_least:1",
       `Quick,
       fun () ->
         check_s ~msg:"true, non-empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> true) ~label:"char")
+          (fun () ->
+            Parseff.take_while ~at_least:1 (fun _ -> true) ~label:"char"
+          )
           [ "asdf" ] "asdf";
         check_expected ~msg:"false, non-empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
+          (fun () ->
+            Parseff.take_while ~at_least:1 (fun _ -> false) ~label:"char"
+          )
           [ "asdf" ];
         check_expected ~msg:"true, empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> true) ~label:"char")
+          (fun () ->
+            Parseff.take_while ~at_least:1 (fun _ -> true) ~label:"char"
+          )
           [ "" ];
         check_expected ~msg:"false, empty input"
-          (fun () -> Parseff.take_while1 (fun _ -> false) ~label:"char")
+          (fun () ->
+            Parseff.take_while ~at_least:1 (fun _ -> false) ~label:"char"
+          )
           [ "" ]
     );
   ]
@@ -240,11 +248,11 @@ let combinators =
           (Parseff.many (fun () -> Parseff.char 'a'))
           [ "aa" ] [ 'a'; 'a' ]
     );
-    ( "sep_by1",
+    ( "sep_by ~at_least:1",
       `Quick,
       fun () ->
         let parser =
-          Parseff.sep_by1
+          Parseff.sep_by ~at_least:1
             (fun () -> Parseff.char 'a')
             (fun () -> Parseff.char ',')
         in
@@ -282,9 +290,11 @@ let count_while_regression =
             s
           )
           [ "asdf" ] "asdf";
-        check_s ~msg:"take_while1 then eof"
+        check_s ~msg:"take_while ~at_least:1 then eof"
           (fun () ->
-            let s = Parseff.take_while1 (fun _ -> true) ~label:"char" in
+            let s =
+              Parseff.take_while ~at_least:1 (fun _ -> true) ~label:"char"
+            in
             Parseff.end_of_input ();
             s
           )

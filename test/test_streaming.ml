@@ -17,7 +17,7 @@ let parse_source_with_pos src parser =
 (* {{{ Parsers reused across tests *)
 
 let number () =
-  let digits = Parseff.many1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then
     n

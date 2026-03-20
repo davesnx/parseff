@@ -74,7 +74,7 @@ Here's a small parser that validates IPv4 addresses `192.168.1.1` or `0.0.0.0`. 
 
 ```ocaml
 let number () =
-  let digits = Parseff.many1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.error (`Out_of_range n)
@@ -104,10 +104,10 @@ let () =
 
 | Section | Combinators |
 |---------|------------|
-| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `take_while1`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
+| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
 | [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `rec_` |
-| [Repetition and separation](/parseff/api/repetition) | `many`, `many1`, `count`, `sep_by`, `sep_by1`, `between`, `end_by`, `end_by1`, `chainl`, `chainl1`, `chainr`, `chainr1` |
-| [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `whitespace1`, `skip_whitespace` |
+| [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `chainl`, `chainr` |
+| [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace` |
 | [Errors](/parseff/api/errors) | `fail`, `error`, `expect` |
 | [Diagnostics](/parseff/api/diagnostics) | `warn`, `warn_at`, `parse_until_end`, `parse_source_until_end` |
 | [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char` |

@@ -33,16 +33,16 @@ Lines starting with `#` are comments. Blank lines are skipped. Everything else i
 
 ## Step 1: parsing a key-value pair
 
-Each parser reads input by calling combinators like `Parseff.take_while1` and `Parseff.char`, and returns a value.
+Each parser reads input by calling combinators like `Parseff.take_while ~at_least:1` and `Parseff.char`, and returns a value.
 
 ```ocaml
 let key () =
-  Parseff.take_while1
+  Parseff.take_while ~at_least:1
     (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_')
     ~label:"key"
 
 let raw_value () =
-  Parseff.take_while1 (fun c -> c <> '\n') ~label:"value"
+  Parseff.take_while ~at_least:1 (fun c -> c <> '\n') ~label:"value"
 
 let entry () =
   let k = key () in
@@ -53,7 +53,7 @@ let entry () =
   (k, v)
 ```
 
-`take_while1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
+`take_while ~at_least:1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
 
 Sequencing is just `let` bindings. Each line advances the cursor through the input.
 
@@ -160,13 +160,13 @@ let bool_value () =
     ()
 
 let int_value () =
-  let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"integer" in
+  let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"integer" in
   Int (int_of_string s)
 
 let tag_list () =
   let tags =
     Parseff.sep_by
-      (fun () -> Parseff.take_while1 (fun c -> c <> ',' && c <> '\n') ~label:"tag")
+      (fun () -> Parseff.take_while ~at_least:1 (fun c -> c <> ',' && c <> '\n') ~label:"tag")
       (fun () -> Parseff.char ',')
       ()
   in
@@ -202,7 +202,7 @@ Suppose ports must be 0-65535. Use `Parseff.error` with a polymorphic variant to
 
 ```ocaml
 let port_value () =
-  let s = Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
+  let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
   let n = int_of_string s in
   if n >= 0 && n <= 65535 then Int n
   else Parseff.error (`Port_out_of_range n)

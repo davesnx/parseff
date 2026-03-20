@@ -126,7 +126,7 @@ The parser doesn't know which one it's running under. The code is identical:
   (* This parser works with both runners *)
   let number () =
     let s =
-      Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+      Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
     in
     int_of_string s
 

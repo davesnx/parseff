@@ -94,7 +94,7 @@ val is_whitespace : char -> bool
 let trim_parser () =
   Parseff.skip_while Parseff.is_whitespace;
   let value =
-    Parseff.take_while1
+    Parseff.take_while ~at_least:1
       (fun c -> not (Parseff.is_whitespace c))
       ~label:"value"
   in
@@ -106,10 +106,10 @@ let trim_parser () =
 
 ### `whitespace`
 
-`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
+`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace). Pass `~at_least` to require a minimum number of whitespace characters.
 
 ```ocaml
-val whitespace : unit -> string
+val whitespace : ?at_least:int -> unit -> string
 ```
 ```ocaml
 let spaced_values () =
@@ -123,21 +123,16 @@ let spaced_values () =
 (* Matches "12" -> (1, 2) *)
 ```
 
-### `whitespace1`
+Pass `~at_least:1` to `whitespace` to require one or more whitespace characters. Fails if no whitespace found.
 
-`Parseff.whitespace1` parses one or more whitespace characters. Fails if no whitespace found.
-
-```ocaml
-val whitespace1 : unit -> string
-```
 ```ocaml
 let words () =
-  Parseff.sep_by1
+  Parseff.sep_by ~at_least:1
     (fun () ->
-      Parseff.take_while1
+      Parseff.take_while ~at_least:1
         (fun c -> not (Parseff.is_whitespace c))
         ~label:"word")
-    (fun () -> Parseff.whitespace1 ())
+    (fun () -> Parseff.whitespace ~at_least:1 ())
     ()
 
 (* Matches "hello world" -> ["hello"; "world"] *)

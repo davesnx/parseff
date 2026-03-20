@@ -19,15 +19,15 @@ let digits () = Parseff.many Parseff.digit ()
 (* "abc"  -> []         *)
 ]}
 
-{2 [many1]}
+{2 [many ~at_least:1]}
 
-{!val:Parseff.many1} is like {!val:Parseff.many} but requires at least one
+{!val:Parseff.many} with [~at_least:1] requires at least one
 match. Fails if the parser doesn't succeed at least once.
 
-{@ocaml skip[val many1 : (unit -> 'a) -> unit -> 'a list]}
+{@ocaml skip[val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list]}
 
 {@ocaml[
-let digits1 () = Parseff.many1 Parseff.digit ()
+let digits1 () = Parseff.many ~at_least:1 Parseff.digit ()
 (* "123" -> [1; 2; 3]  *)
 (* ""    -> Error      *)
 (* "abc" -> Error      *)
@@ -86,18 +86,18 @@ let csv_line () =
 (* ""      -> [""]             *)
 ]}
 
-{2 [sep_by1]}
+{2 [sep_by ~at_least:1]}
 
-{!val:Parseff.sep_by1} is like {!val:Parseff.sep_by} but requires at least one
+{!val:Parseff.sep_by} with [~at_least:1] requires at least one
 element.
 
-{@ocaml skip[val sep_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list]}
+{@ocaml skip[val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list]}
 
 {@ocaml[
 let csv_line1 () =
-  Parseff.sep_by1
+  Parseff.sep_by ~at_least:1
     (fun () ->
-      Parseff.take_while1
+      Parseff.take_while ~at_least:1
         (fun c -> c <> ',' && c <> '\n')
         ~label:"value")
     (fun () -> Parseff.char ',')
@@ -164,7 +164,7 @@ element (including the last).
 let statements () =
   Parseff.end_by
     (fun () ->
-      Parseff.take_while1
+      Parseff.take_while ~at_least:1
         (fun c -> c <> ';' && c <> '\n')
         ~label:"statement")
     (fun () -> Parseff.char ';')
@@ -173,12 +173,12 @@ let statements () =
 (* ""       -> []               *)
 ]}
 
-{2 [end_by1]}
+{2 [end_by ~at_least:1]}
 
-{!val:Parseff.end_by1} is like {!val:Parseff.end_by} but requires at least one
+{!val:Parseff.end_by} with [~at_least:1] requires at least one
 element.
 
-{@ocaml skip[val end_by1 : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list]}
+{@ocaml skip[val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list]}
 
 {1 Operator chains}
 
@@ -186,18 +186,19 @@ These combinators parse sequences of values joined by operators, handling
 associativity. They're the standard tool for expression parsing with operator
 precedence.
 
-{2 [chainl1]}
+{2 [chainl]}
 
-{!val:Parseff.chainl1} parses one or more values separated by an operator,
+{!val:Parseff.chainl} parses one or more values separated by an operator,
 combining them {b left-associatively}. The operator parser returns a function
-that combines two values.
+that combines two values. If no elements match, use [~default] to provide a
+fallback value.
 
-{@ocaml skip[val chainl1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a]}
+{@ocaml skip[val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a]}
 
 {@ocaml[
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
 let subtraction () =
-  Parseff.chainl1
+  Parseff.chainl
     (fun () -> Parseff.digit ())
     (fun () ->
       let _ = Parseff.char '-' in
@@ -206,31 +207,7 @@ let subtraction () =
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ]}
 
-{2 [chainr1]}
-
-{!val:Parseff.chainr1} is like {!val:Parseff.chainl1} but combines
-{b right-associatively}.
-
-{@ocaml skip[val chainr1 : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a]}
-
-{@ocaml skip[
-(* Parse "2^3^2" as 2^(3^2) = 512 *)
-let power () =
-  Parseff.chainr1
-    (fun () -> Parseff.digit ())
-    (fun () ->
-      let _ = Parseff.char '^' in
-      fun a b -> int_of_float (float_of_int a ** float_of_int b))
-    ()
-(* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
-]}
-
-{2 [chainl]}
-
-{!val:Parseff.chainl} is like {!val:Parseff.chainl1} but takes a default value.
-Returns the default if zero elements match.
-
-{@ocaml skip[val chainl : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a]}
+With [~default], returns the default if zero elements match:
 
 {@ocaml[
 let maybe_subtract () =
@@ -239,7 +216,7 @@ let maybe_subtract () =
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
-    0
+    ~default:0
     ()
 (* "1-2" -> -1 *)
 (* ""    -> 0  *)
@@ -247,10 +224,23 @@ let maybe_subtract () =
 
 {2 [chainr]}
 
-{!val:Parseff.chainr} is like {!val:Parseff.chainr1} but with a default value
-for zero matches.
+{!val:Parseff.chainr} is like {!val:Parseff.chainl} but combines
+{b right-associatively}. Use [~default] to provide a fallback value when no
+elements match.
 
-{@ocaml skip[val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a -> unit -> 'a]}
+{@ocaml skip[val chainr : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?default:'a -> unit -> 'a]}
+
+{@ocaml skip[
+(* Parse "2^3^2" as 2^(3^2) = 512 *)
+let power () =
+  Parseff.chainr
+    (fun () -> Parseff.digit ())
+    (fun () ->
+      let _ = Parseff.char '^' in
+      fun a b -> int_of_float (float_of_int a ** float_of_int b))
+    ()
+(* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
+]}
 
 {1 Complete example: JSON array}
 
@@ -258,7 +248,7 @@ for zero matches.
 let integer () =
   let sign = Parseff.optional (fun () -> Parseff.char '-') () in
   let digits =
-    Parseff.take_while1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string digits in
   match sign with Some _ -> -n | None -> n

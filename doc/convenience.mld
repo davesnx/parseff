@@ -80,7 +80,7 @@ newline, carriage return). This is a predicate, not a parser.
 let trim_parser () =
   Parseff.skip_while Parseff.is_whitespace;
   let value =
-    Parseff.take_while1
+    Parseff.take_while ~at_least:1
       (fun c -> not (Parseff.is_whitespace c))
       ~label:"value"
   in
@@ -109,21 +109,21 @@ let spaced_values () =
 (* Matches "12" -> (1, 2) *)
 ]}
 
-{2 [whitespace1]}
+{2 [whitespace ~at_least:1]}
 
-{!val:Parseff.whitespace1} parses one or more whitespace characters. Fails if no
-whitespace found.
+{!val:Parseff.whitespace} with [~at_least:1] parses one or more whitespace
+characters. Fails if no whitespace found.
 
-{@ocaml skip[val whitespace1 : unit -> string]}
+{@ocaml skip[val whitespace : ?at_least:int -> unit -> string]}
 
 {@ocaml[
 let words () =
-  Parseff.sep_by1
+  Parseff.sep_by ~at_least:1
     (fun () ->
-      Parseff.take_while1
+      Parseff.take_while ~at_least:1
         (fun c -> not (Parseff.is_whitespace c))
         ~label:"word")
-    (fun () -> Parseff.whitespace1 ())
+    (fun () -> Parseff.whitespace ~at_least:1 ())
     ()
 
 (* Matches "hello world" -> ["hello"; "world"] *)
