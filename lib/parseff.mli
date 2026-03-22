@@ -522,6 +522,21 @@ val alphanum : unit -> char
 val any_char : unit -> char
 (** [any_char ()] parses any character. *)
 
+val take : int -> string
+(** [take n] reads exactly [n] bytes and returns them as a string. Fails if
+    fewer than [n] bytes remain.
+
+    Useful for length-prefixed binary fields and fixed-width text fields alike.
+
+    @raise Invalid_argument if [n] is negative.
+
+    Example:
+    {@ocaml[
+    let payload () =
+      let len = BE.any_uint16 () in
+      take len
+    ]} *)
+
 (** {1 Streaming} *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
@@ -594,3 +609,105 @@ val parse_source_until_end :
     close_in ic;
     outcome
     ]} *)
+
+(** {1 Binary Parsing}
+
+    Big-endian and little-endian parsers for multi-byte integers, floats, and
+    doubles. Pick the module matching your wire format's byte order.
+
+    Single-byte readers ({!BE.any_uint8}, {!LE.any_uint8}, etc.) are present in
+    both modules for convenience — their results are identical since endianness
+    does not affect single bytes.
+
+    Example:
+    {@ocaml[
+    let parse_png_chunk () =
+      let length = BE.any_int32 () in
+      let chunk_type = take 4 in
+      let data = take (Int32.to_int length) in
+      (chunk_type, data)
+
+    let parse_wav_size () =
+      let _ = consume "RIFF" in
+      let size = LE.any_int32 () in
+      let _ = consume "WAVE" in
+      size
+    ]} *)
+
+(** Big-endian binary parsers. *)
+module BE : sig
+  val any_uint8 : unit -> int
+  (** Read one byte as an unsigned integer (0–255). *)
+
+  val any_int8 : unit -> int
+  (** Read one byte as a signed integer (−128–127). *)
+
+  val any_int16 : unit -> int
+  (** Read 2 bytes as a big-endian signed 16-bit integer. *)
+
+  val any_uint16 : unit -> int
+  (** Read 2 bytes as a big-endian unsigned 16-bit integer. *)
+
+  val any_int32 : unit -> int32
+  (** Read 4 bytes as a big-endian signed 32-bit integer. *)
+
+  val any_int64 : unit -> int64
+  (** Read 8 bytes as a big-endian signed 64-bit integer. *)
+
+  val any_float : unit -> float
+  (** Read 4 bytes as a big-endian IEEE 754 single-precision float. *)
+
+  val any_double : unit -> float
+  (** Read 8 bytes as a big-endian IEEE 754 double-precision float. *)
+
+  val int16 : int -> unit
+  (** [int16 i] matches exactly the 2 bytes that encode [i] in big-endian order.
+      Fails if the bytes don't match. *)
+
+  val int32 : int32 -> unit
+  (** [int32 i] matches exactly the 4 bytes that encode [i] in big-endian order.
+      Fails if the bytes don't match. *)
+
+  val int64 : int64 -> unit
+  (** [int64 i] matches exactly the 8 bytes that encode [i] in big-endian order.
+      Fails if the bytes don't match. *)
+end
+
+(** Little-endian binary parsers. *)
+module LE : sig
+  val any_uint8 : unit -> int
+  (** Read one byte as an unsigned integer (0–255). *)
+
+  val any_int8 : unit -> int
+  (** Read one byte as a signed integer (−128–127). *)
+
+  val any_int16 : unit -> int
+  (** Read 2 bytes as a little-endian signed 16-bit integer. *)
+
+  val any_uint16 : unit -> int
+  (** Read 2 bytes as a little-endian unsigned 16-bit integer. *)
+
+  val any_int32 : unit -> int32
+  (** Read 4 bytes as a little-endian signed 32-bit integer. *)
+
+  val any_int64 : unit -> int64
+  (** Read 8 bytes as a little-endian signed 64-bit integer. *)
+
+  val any_float : unit -> float
+  (** Read 4 bytes as a little-endian IEEE 754 single-precision float. *)
+
+  val any_double : unit -> float
+  (** Read 8 bytes as a little-endian IEEE 754 double-precision float. *)
+
+  val int16 : int -> unit
+  (** [int16 i] matches exactly the 2 bytes that encode [i] in little-endian
+      order. Fails if the bytes don't match. *)
+
+  val int32 : int32 -> unit
+  (** [int32 i] matches exactly the 4 bytes that encode [i] in little-endian
+      order. Fails if the bytes don't match. *)
+
+  val int64 : int64 -> unit
+  (** [int64 i] matches exactly the 8 bytes that encode [i] in little-endian
+      order. Fails if the bytes don't match. *)
+end

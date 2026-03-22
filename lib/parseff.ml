@@ -6,6 +6,8 @@ let[@inline always] span_to_string s =
   else
     String.sub s.buf s.off s.len
 
+type endian = Big | Little
+
 type _ Effect.t +=
   | Consume : string -> string Effect.t
   | Satisfy : (char -> bool) * string -> char Effect.t
@@ -29,6 +31,12 @@ type _ Effect.t +=
       (char -> bool) * char * (char -> bool)
       -> span list Effect.t
   | Rec_ : (unit -> 'a) -> 'a Effect.t
+  | Any_uint8 : int Effect.t
+  | Any_int8 : int Effect.t
+  | Any_int16 : endian -> int Effect.t
+  | Any_int32 : endian -> int32 Effect.t
+  | Any_int64 : endian -> int64 Effect.t
+  | Take : int -> string Effect.t
 
 type ('a, 'e) result = Ok of 'a | Error of { pos : int; error : 'e }
 type 'd diagnostic = { pos : int; diagnostic : 'd }
@@ -283,6 +291,72 @@ let[@inline] handle_end_of_input st input_len =
   if st.pos <> input_len then
     raise (Parse_error (st.pos, "expected end of input"))
 
+let[@inline] handle_any_uint8 st input_len =
+  if st.pos < input_len then begin
+    let v = String.get_uint8 st.input st.pos in
+    st.pos <- st.pos + 1;
+    v
+  end else
+    raise (Unexpected_eof st.pos)
+
+let[@inline] handle_any_int8 st input_len =
+  if st.pos < input_len then begin
+    let v = String.get_int8 st.input st.pos in
+    st.pos <- st.pos + 1;
+    v
+  end else
+    raise (Unexpected_eof st.pos)
+
+let[@inline] handle_any_int16 st input_len endian =
+  if st.pos + 2 <= input_len then begin
+    let v =
+      match endian with
+      | Big ->
+          String.get_int16_be st.input st.pos
+      | Little ->
+          String.get_int16_le st.input st.pos
+    in
+    st.pos <- st.pos + 2;
+    v
+  end else
+    raise (Unexpected_eof st.pos)
+
+let[@inline] handle_any_int32 st input_len endian =
+  if st.pos + 4 <= input_len then begin
+    let v =
+      match endian with
+      | Big ->
+          String.get_int32_be st.input st.pos
+      | Little ->
+          String.get_int32_le st.input st.pos
+    in
+    st.pos <- st.pos + 4;
+    v
+  end else
+    raise (Unexpected_eof st.pos)
+
+let[@inline] handle_any_int64 st input_len endian =
+  if st.pos + 8 <= input_len then begin
+    let v =
+      match endian with
+      | Big ->
+          String.get_int64_be st.input st.pos
+      | Little ->
+          String.get_int64_le st.input st.pos
+    in
+    st.pos <- st.pos + 8;
+    v
+  end else
+    raise (Unexpected_eof st.pos)
+
+let[@inline] handle_take st input_len n =
+  if st.pos + n <= input_len then begin
+    let s = String.sub st.input st.pos n in
+    st.pos <- st.pos + n;
+    s
+  end else
+    raise (Unexpected_eof st.pos)
+
 (* }}} *)
 
 (* {{{ Deep handler *)
@@ -430,6 +504,48 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         match handle_end_of_input st input_len with
         | () ->
             Effect.Deep.continue k ()
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Any_uint8, k -> (
+        match handle_any_uint8 st input_len with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Any_int8, k -> (
+        match handle_any_int8 st input_len with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Any_int16 endian, k -> (
+        match handle_any_int16 st input_len endian with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Any_int32 endian, k -> (
+        match handle_any_int32 st input_len endian with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Any_int64 endian, k -> (
+        match handle_any_int64 st input_len endian with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Take n, k -> (
+        match handle_take st input_len n with
+        | v ->
+            Effect.Deep.continue k v
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
@@ -982,6 +1098,72 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
+    | effect Any_uint8, k -> (
+        try
+          ignore (ensure_bytes src st.pos 1);
+          sync_to_source ();
+          match handle_any_uint8 st src.input_len with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
+    | effect Any_int8, k -> (
+        try
+          ignore (ensure_bytes src st.pos 1);
+          sync_to_source ();
+          match handle_any_int8 st src.input_len with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
+    | effect Any_int16 endian, k -> (
+        try
+          ignore (ensure_bytes src st.pos 2);
+          sync_to_source ();
+          match handle_any_int16 st src.input_len endian with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
+    | effect Any_int32 endian, k -> (
+        try
+          ignore (ensure_bytes src st.pos 4);
+          sync_to_source ();
+          match handle_any_int32 st src.input_len endian with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
+    | effect Any_int64 endian, k -> (
+        try
+          ignore (ensure_bytes src st.pos 8);
+          sync_to_source ();
+          match handle_any_int64 st src.input_len endian with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
+    | effect Take n, k -> (
+        try
+          ignore (ensure_bytes src st.pos n);
+          sync_to_source ();
+          match handle_take st src.input_len n with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with exn -> Effect.Deep.discontinue k exn
+      )
   in
   Fun.protect
     ~finally:(fun () ->
@@ -1268,6 +1450,13 @@ let alphanum () =
 
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
 
+let take n =
+  if n < 0 then invalid_arg "Parseff.take: negative count";
+  if n = 0 then
+    ""
+  else
+    Effect.perform (Take n)
+
 let expect msg p =
   try p ()
   with Parse_error _ | Unexpected_eof _ | Propagated_error _ -> fail msg
@@ -1290,5 +1479,67 @@ let one_of_labeled labeled_parsers () =
   with Parse_error _ | Unexpected_eof _ | Propagated_error _ ->
     let expected = String.concat ", " labels in
     fail (Printf.sprintf "expected one of: %s" expected)
+
+module BE = struct
+  let[@inline] any_uint8 () = Effect.perform Any_uint8
+  let[@inline] any_int8 () = Effect.perform Any_int8
+  let[@inline] any_int16 () = Effect.perform (Any_int16 Big)
+
+  let[@inline] any_uint16 () =
+    let v = Effect.perform (Any_int16 Big) in
+    v land 0xFFFF
+
+  let[@inline] any_int32 () = Effect.perform (Any_int32 Big)
+  let[@inline] any_int64 () = Effect.perform (Any_int64 Big)
+  let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
+  let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
+
+  let int16 expected =
+    let actual = any_int16 () in
+    if actual <> expected then
+      fail (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
+
+  let int32 expected =
+    let actual = any_int32 () in
+    if actual <> expected then
+      fail (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual)
+
+  let int64 expected =
+    let actual = any_int64 () in
+    if actual <> expected then
+      fail
+        (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected actual)
+end
+
+module LE = struct
+  let[@inline] any_uint8 () = Effect.perform Any_uint8
+  let[@inline] any_int8 () = Effect.perform Any_int8
+  let[@inline] any_int16 () = Effect.perform (Any_int16 Little)
+
+  let[@inline] any_uint16 () =
+    let v = Effect.perform (Any_int16 Little) in
+    v land 0xFFFF
+
+  let[@inline] any_int32 () = Effect.perform (Any_int32 Little)
+  let[@inline] any_int64 () = Effect.perform (Any_int64 Little)
+  let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
+  let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
+
+  let int16 expected =
+    let actual = any_int16 () in
+    if actual <> expected then
+      fail (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
+
+  let int32 expected =
+    let actual = any_int32 () in
+    if actual <> expected then
+      fail (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual)
+
+  let int64 expected =
+    let actual = any_int64 () in
+    if actual <> expected then
+      fail
+        (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected actual)
+end
 
 (* }}} *)
