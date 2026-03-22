@@ -40,6 +40,8 @@ let () =
       Printf.printf "Error at %d: unexpected end of input\n" pos
   | Error { pos; error = `Expected msg } ->
       Printf.printf "Error at %d: %s\n" pos msg
+  | Error { pos; error = `Failure msg } ->
+      Printf.printf "Error at %d: %s\n" pos msg
   | Error { pos; error = `Depth_limit_exceeded msg } ->
       Printf.printf "Error at %d: %s\n" pos msg
 ]}

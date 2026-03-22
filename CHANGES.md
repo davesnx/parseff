@@ -1,3 +1,17 @@
+## Unreleased
+
+- **`fail` now produces `` `Failure of string `` instead of `` `Expected ``.**
+  Distinguishes user validation errors from parser expectation mismatches.
+  `` `Failure `` propagates through backtracking (`or_`, `many`, `optional`,
+  `look_ahead`) and relabeling (`expect`, `one_of_labeled`).
+
+- **Add `catch` combinator.** `catch parser handler` intercepts `` `Failure ``
+  errors, allowing recovery within backtracking contexts.
+
+- **BE/LE exact-match validators produce `` `Expected `` instead of `` `Failure ``.**
+  `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser
+  expectations, not user validation failures.
+
 ## 0.2.0
 
 - **Unified `*1` variants into base combinators with `~at_least` parameter.**

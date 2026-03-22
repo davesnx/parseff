@@ -606,8 +606,6 @@ let test_parse_until_end_preserves_end_of_input_semantics () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* {{{ Phase 2: Missing test dimensions *)
-
 let test_satisfy_failure () =
   match
     Parseff.parse "a" (fun () ->
@@ -728,10 +726,6 @@ let test_skip_while () =
       Alcotest.(check int) "final position" 8 pos
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* }}} *)
-
-(* {{{ Phase 3: Tests for previously untested combinators *)
 
 (* --- expect --- *)
 
@@ -884,16 +878,371 @@ let test_error_distinct_from_fail () =
     Parseff.parse "" (fun () -> Parseff.error (`Boom "boom"))
   in
   ( match fail_result with
-  | Error { error = `Expected msg; _ } ->
+  | Error { error = `Failure msg; _ } ->
       Alcotest.(check string) "fail message" "boom" msg
   | _ ->
-      Alcotest.fail "Expected `Expected from fail"
+      Alcotest.fail "Expected `Failure from fail"
   );
   match error_result with
   | Error { error = `Boom msg; _ } ->
       Alcotest.(check string) "error message" "boom" msg
   | _ ->
       Alcotest.fail "Expected `Boom from error"
+
+(* --- fail / Failure semantics --- *)
+
+(* fail produces `Failure, not `Expected *)
+let test_fail_produces_failure () =
+  match Parseff.parse "abc" (fun () -> Parseff.fail "bad value") with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "bad value" msg
+  | Error { error = `Expected _; _ } ->
+      Alcotest.fail "fail should not produce `Expected"
+  | _ ->
+      Alcotest.fail "Expected `Failure error"
+
+(* Failure punches through or_ *)
+let test_failure_punches_through_or () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.or_
+          (fun () ->
+            let _ = Parseff.consume "abc" in
+            Parseff.fail "validation failed"
+          )
+          (fun () -> "fallback")
+          ()
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "validation failed" msg
+  | Ok v ->
+      Alcotest.fail
+        (Printf.sprintf
+           "Expected Failure but got Ok %S — or_ should not catch Failure" v
+        )
+  | Error _ ->
+      Alcotest.fail "Expected `Failure error"
+
+(* Expected IS caught by or_ (backtracking still works for Expected) *)
+let test_expected_caught_by_or () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.or_
+          (fun () -> Parseff.consume "xyz")
+          (fun () -> Parseff.consume "abc")
+          ()
+    )
+  with
+  | Ok s ->
+      Alcotest.(check string) "or_ backtracks on Expected" "abc" s
+  | Error _ ->
+      Alcotest.fail "Expected success from or_ backtracking"
+
+(* Failure punches through many *)
+let test_failure_punches_through_many () =
+  let counter = ref 0 in
+  match
+    Parseff.parse "aaab" (fun () ->
+        Parseff.many
+          (fun () ->
+            incr counter;
+            if !counter > 2 then
+              Parseff.fail "too many"
+            else
+              Parseff.consume "a"
+          )
+          ()
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "too many" msg
+  | Ok _ ->
+      Alcotest.fail
+        "Expected Failure but got Ok — many should not catch Failure"
+  | Error _ ->
+      Alcotest.fail "Expected `Failure error"
+
+(* Failure punches through optional *)
+let test_failure_punches_through_optional () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.optional
+          (fun () ->
+            let _ = Parseff.consume "abc" in
+            Parseff.fail "nope"
+          )
+          ()
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "nope" msg
+  | Ok _ ->
+      Alcotest.fail
+        "Expected Failure but got Ok — optional should not catch Failure"
+  | Error _ ->
+      Alcotest.fail "Expected `Failure error"
+
+(* Failure punches through look_ahead *)
+let test_failure_punches_through_look_ahead () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.look_ahead (fun () ->
+            let _ = Parseff.consume "abc" in
+            Parseff.fail "look_ahead fail"
+        )
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "look_ahead fail" msg
+  | Ok _ ->
+      Alcotest.fail
+        "Expected Failure but got Ok — look_ahead should not catch Failure"
+  | Error _ ->
+      Alcotest.fail "Expected `Failure error"
+
+(* Failure punches through expect *)
+let test_failure_punches_through_expect () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.expect "a number" (fun () ->
+            let _ = Parseff.consume "abc" in
+            Parseff.fail "not a valid number"
+        )
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "not a valid number" msg
+  | Error { error = `Expected _; _ } ->
+      Alcotest.fail "expect should not catch Failure"
+  | Ok _ ->
+      Alcotest.fail "Expected Failure error"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+(* Failure punches through one_of_labeled *)
+let test_failure_punches_through_one_of_labeled () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.one_of_labeled
+          [
+            ( "first",
+              fun () ->
+                let _ = Parseff.consume "abc" in
+                Parseff.fail "bad value"
+            );
+            ("second", fun () -> Parseff.consume "xyz");
+          ]
+          ()
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "bad value" msg
+  | Error { error = `Expected _; _ } ->
+      Alcotest.fail "one_of_labeled should not catch Failure"
+  | Ok _ ->
+      Alcotest.fail "Expected Failure error"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+(* Internal combinators still produce Expected *)
+let test_consume_produces_expected () =
+  match Parseff.parse "abc" (fun () -> Parseff.consume "xyz") with
+  | Error { error = `Expected _; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "consume mismatch should produce `Expected"
+
+let test_satisfy_produces_expected () =
+  match
+    Parseff.parse "a" (fun () ->
+        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+    )
+  with
+  | Error { error = `Expected msg; _ } ->
+      Alcotest.(check string) "expected message" "expected digit" msg
+  | _ ->
+      Alcotest.fail "satisfy mismatch should produce `Expected"
+
+let test_one_of_produces_expected () =
+  match
+    Parseff.parse "c" (fun () ->
+        Parseff.one_of
+          [ (fun () -> Parseff.consume "a"); (fun () -> Parseff.consume "b") ]
+          ()
+    )
+  with
+  | Error { error = `Expected _; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "one_of failure should produce `Expected"
+
+let test_take_while_at_least_produces_expected () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.take_while ~at_least:1
+          (fun c -> c >= '0' && c <= '9')
+          ~label:"digit"
+    )
+  with
+  | Error { error = `Expected msg; _ } ->
+      Alcotest.(check string) "expected message" "digit" msg
+  | _ ->
+      Alcotest.fail "take_while ~at_least failure should produce `Expected"
+
+(* Failure works with parse_source (streaming) *)
+let test_failure_with_streaming () =
+  let src = Parseff.Source.of_string "abc" in
+  match
+    Parseff.parse_source src (fun () ->
+        let _ = Parseff.consume "abc" in
+        Parseff.fail "stream fail"
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "stream fail" msg
+  | Ok _ ->
+      Alcotest.fail "Expected Failure error"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+(* Failure punches through or_ in streaming mode *)
+let test_failure_punches_through_or_streaming () =
+  let src = Parseff.Source.of_string "abc" in
+  match
+    Parseff.parse_source src (fun () ->
+        Parseff.or_
+          (fun () ->
+            let _ = Parseff.consume "abc" in
+            Parseff.fail "stream validation failed"
+          )
+          (fun () -> "fallback")
+          ()
+    )
+  with
+  | Error { error = `Failure msg; _ } ->
+      Alcotest.(check string) "failure message" "stream validation failed" msg
+  | Ok _ ->
+      Alcotest.fail
+        "Expected Failure — or_ should not catch Failure in streaming mode"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+(* --- catch --- *)
+
+(* catch recovers from Failure *)
+let test_catch_recovers_failure () =
+  match
+    Parseff.parse "300" (fun () ->
+        Parseff.catch
+          (fun () ->
+            let s =
+              Parseff.take_while ~at_least:1
+                (fun c -> c >= '0' && c <= '9')
+                ~label:"digit"
+            in
+            let n = int_of_string s in
+            if n > 255 then
+              Parseff.fail "out of range"
+            else
+              n
+          )
+          (fun _msg -> -1)
+    )
+  with
+  | Ok n ->
+      Alcotest.(check int) "catch returns handler value" (-1) n
+  | Error _ ->
+      Alcotest.fail "Expected Ok from catch recovery"
+
+(* catch passes through on success *)
+let test_catch_passthrough_on_success () =
+  match
+    Parseff.parse "42" (fun () ->
+        Parseff.catch
+          (fun () ->
+            let s =
+              Parseff.take_while ~at_least:1
+                (fun c -> c >= '0' && c <= '9')
+                ~label:"digit"
+            in
+            int_of_string s
+          )
+          (fun _msg -> -1)
+    )
+  with
+  | Ok n ->
+      Alcotest.(check int) "catch passthrough" 42 n
+  | Error _ ->
+      Alcotest.fail "Expected Ok"
+
+(* catch does NOT catch Expected errors *)
+let test_catch_does_not_catch_expected () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.catch (fun () -> Parseff.consume "xyz") (fun _msg -> "recovered")
+    )
+  with
+  | Error { error = `Expected _; _ } ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "catch should not intercept Expected errors"
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+(* catch makes Failure recoverable inside or_ *)
+let test_catch_enables_backtracking () =
+  match
+    Parseff.parse "abc" (fun () ->
+        Parseff.or_
+          (fun () ->
+            Parseff.catch
+              (fun () ->
+                let _ = Parseff.consume "abc" in
+                Parseff.fail "bad value"
+              )
+              (fun _msg -> "caught")
+          )
+          (fun () -> "fallback")
+          ()
+    )
+  with
+  | Ok s ->
+      Alcotest.(check string) "catch inside or_" "caught" s
+  | Error _ ->
+      Alcotest.fail "Expected Ok from catch inside or_"
+
+(* catch handler receives the message *)
+let test_catch_receives_message () =
+  match
+    Parseff.parse "" (fun () ->
+        Parseff.catch
+          (fun () -> Parseff.fail "specific message")
+          (fun msg -> msg)
+    )
+  with
+  | Ok s ->
+      Alcotest.(check string) "handler receives message" "specific message" s
+  | Error _ ->
+      Alcotest.fail "Expected Ok"
+
+(* catch works with streaming *)
+let test_catch_streaming () =
+  let src = Parseff.Source.of_string "abc" in
+  match
+    Parseff.parse_source src (fun () ->
+        Parseff.catch
+          (fun () ->
+            let _ = Parseff.consume "abc" in
+            Parseff.fail "stream fail"
+          )
+          (fun msg -> msg)
+    )
+  with
+  | Ok s ->
+      Alcotest.(check string) "catch in streaming" "stream fail" s
+  | Error _ ->
+      Alcotest.fail "Expected Ok from catch in streaming"
 
 (* --- whitespace / whitespace1 --- *)
 
@@ -1132,8 +1481,6 @@ let test_take_while_span_empty () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* }}} *)
-
 let () =
   let open Alcotest in
   run "Parseff Primitives"
@@ -1241,6 +1588,49 @@ let () =
         [
           test_case "custom error type" `Quick test_error_custom_type;
           test_case "distinct from fail" `Quick test_error_distinct_from_fail;
+        ]
+      );
+      ( "fail / Failure semantics",
+        [
+          test_case "fail produces Failure" `Quick test_fail_produces_failure;
+          test_case "Failure punches through or_" `Quick
+            test_failure_punches_through_or;
+          test_case "Expected caught by or_" `Quick test_expected_caught_by_or;
+          test_case "Failure punches through many" `Quick
+            test_failure_punches_through_many;
+          test_case "Failure punches through optional" `Quick
+            test_failure_punches_through_optional;
+          test_case "Failure punches through look_ahead" `Quick
+            test_failure_punches_through_look_ahead;
+          test_case "Failure punches through expect" `Quick
+            test_failure_punches_through_expect;
+          test_case "Failure punches through one_of_labeled" `Quick
+            test_failure_punches_through_one_of_labeled;
+          test_case "consume produces Expected" `Quick
+            test_consume_produces_expected;
+          test_case "satisfy produces Expected" `Quick
+            test_satisfy_produces_expected;
+          test_case "one_of produces Expected" `Quick
+            test_one_of_produces_expected;
+          test_case "take_while at_least produces Expected" `Quick
+            test_take_while_at_least_produces_expected;
+          test_case "Failure with streaming" `Quick test_failure_with_streaming;
+          test_case "Failure punches through or_ streaming" `Quick
+            test_failure_punches_through_or_streaming;
+        ]
+      );
+      ( "catch",
+        [
+          test_case "recovers from Failure" `Quick test_catch_recovers_failure;
+          test_case "passthrough on success" `Quick
+            test_catch_passthrough_on_success;
+          test_case "does not catch Expected" `Quick
+            test_catch_does_not_catch_expected;
+          test_case "enables backtracking" `Quick
+            test_catch_enables_backtracking;
+          test_case "handler receives message" `Quick
+            test_catch_receives_message;
+          test_case "works with streaming" `Quick test_catch_streaming;
         ]
       );
       ( "whitespace",

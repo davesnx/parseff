@@ -51,10 +51,9 @@ let test_invalid_out_of_range () =
   match Parseff.parse "1.2.3.256" ip_address with
   | Ok _ ->
       Alcotest.fail "Expected failure for out of range"
-  | Error { pos; error = `Expected expected } ->
+  | Error { pos; error = `Failure msg } ->
       Alcotest.(check int) "error position" 9 pos;
-      Alcotest.(check string)
-        "error message" "number out of range: 256" expected
+      Alcotest.(check string) "error message" "number out of range: 256" msg
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
