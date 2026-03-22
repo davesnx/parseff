@@ -59,7 +59,7 @@ let () =
 {1 Performance}
 
 [Parseff] is faster than Angstrom and MParser by a factor of 2 to 4x.
-In case of equal implementations, [Parseff] is ~2x faster than Angstrom and MParser. With an optimized version using zero-copy span APIs, that gap widens to ~4x. See the {{:https://davesnx.github.io/parseff/guides/comparison/}full comparison} for details and {{:./bench/bench_vs_angstrom.ml}bench/bench_vs_angstrom.ml} for the benchmark.
+In case of equal implementations, [Parseff] is ~2x faster than Angstrom and MParser. With an optimized version using zero-copy span APIs, that gap widens to ~4x. See the {{:https://davesnx.github.io/parseff/guides/comparison/}full comparison} for details and {{:https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml}bench/bench_vs_angstrom.ml} for the benchmark.
 
 {1 Documentation}
 
