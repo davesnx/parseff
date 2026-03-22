@@ -32,7 +32,8 @@ let parse_list () =
   Parseff.end_of_input ();
   lst
 
-let run input =
+let () =
+  let input = Sys.argv.(1) in
   let parser =
     if String.contains input '(' then
       parse_list
@@ -48,5 +49,3 @@ let run input =
       Printf.printf "%-15s -> Unexpected end of input at %d\n" input pos
   | Error _ ->
       Printf.printf "%-15s -> Unknown error\n" input
-
-let () = run Sys.argv.(1)

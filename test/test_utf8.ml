@@ -3,15 +3,11 @@ let uchar_testable =
     (fun fmt u -> Format.fprintf fmt "U+%04X" (Uchar.to_int u))
     Uchar.equal
 
-let u_of_int = Uchar.of_int
-
 let parse_with_pos input parser =
   Parseff.parse input (fun () ->
       let value = parser () in
       (value, Parseff.position ())
   )
-
-(* {{{ satisfy *)
 
 let test_satisfy_ascii () =
   match
@@ -20,7 +16,7 @@ let test_satisfy_ascii () =
     )
   with
   | Ok u ->
-      Alcotest.(check uchar_testable) "matched 'a'" (u_of_int 0x61) u
+      Alcotest.(check uchar_testable) "matched 'a'" (Uchar.of_int 0x61) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -32,7 +28,7 @@ let test_satisfy_multibyte () =
     )
   with
   | Ok (u, pos) ->
-      Alcotest.(check uchar_testable) "matched lambda" (u_of_int 0x03BB) u;
+      Alcotest.(check uchar_testable) "matched lambda" (Uchar.of_int 0x03BB) u;
       Alcotest.(check int) "advanced 2 bytes" 2 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -45,7 +41,7 @@ let test_satisfy_3byte () =
     )
   with
   | Ok (u, pos) ->
-      Alcotest.(check uchar_testable) "matched CJK" (u_of_int 0x4E2D) u;
+      Alcotest.(check uchar_testable) "matched CJK" (Uchar.of_int 0x4E2D) u;
       Alcotest.(check int) "advanced 3 bytes" 3 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -58,7 +54,7 @@ let test_satisfy_4byte () =
     )
   with
   | Ok (u, pos) ->
-      Alcotest.(check uchar_testable) "matched emoji" (u_of_int 0x1F600) u;
+      Alcotest.(check uchar_testable) "matched emoji" (Uchar.of_int 0x1F600) u;
       Alcotest.(check int) "advanced 4 bytes" 4 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -105,14 +101,12 @@ let test_satisfy_invalid_utf8 () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* }}} *)
-
-(* {{{ char *)
-
 let test_char_ascii () =
-  match parse_with_pos "a" (fun () -> Parseff.Utf8.char (u_of_int 0x61)) with
+  match
+    parse_with_pos "a" (fun () -> Parseff.Utf8.char (Uchar.of_int 0x61))
+  with
   | Ok (u, pos) ->
-      Alcotest.(check uchar_testable) "matched" (u_of_int 0x61) u;
+      Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0x61) u;
       Alcotest.(check int) "position" 1 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -120,16 +114,16 @@ let test_char_ascii () =
 let test_char_multibyte () =
   (* é = U+00E9 *)
   match
-    parse_with_pos "\xC3\xA9" (fun () -> Parseff.Utf8.char (u_of_int 0xE9))
+    parse_with_pos "\xC3\xA9" (fun () -> Parseff.Utf8.char (Uchar.of_int 0xE9))
   with
   | Ok (u, pos) ->
-      Alcotest.(check uchar_testable) "matched" (u_of_int 0xE9) u;
+      Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0xE9) u;
       Alcotest.(check int) "position" 2 pos
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_char_failure () =
-  match Parseff.parse "a" (fun () -> Parseff.Utf8.char (u_of_int 0x62)) with
+  match Parseff.parse "a" (fun () -> Parseff.Utf8.char (Uchar.of_int 0x62)) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected _ } ->
@@ -137,14 +131,10 @@ let test_char_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* }}} *)
-
-(* {{{ any_char *)
-
 let test_any_char_ascii () =
   match Parseff.parse "x" Parseff.Utf8.any_char with
   | Ok u ->
-      Alcotest.(check uchar_testable) "matched" (u_of_int 0x78) u
+      Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0x78) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -152,7 +142,7 @@ let test_any_char_multibyte () =
   (* ñ = U+00F1 *)
   match Parseff.parse "\xC3\xB1" Parseff.Utf8.any_char with
   | Ok u ->
-      Alcotest.(check uchar_testable) "matched" (u_of_int 0xF1) u
+      Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0xF1) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -164,10 +154,6 @@ let test_any_char_eof () =
       ()
   | Error _ ->
       Alcotest.fail "Expected `Unexpected_end_of_input"
-
-(* }}} *)
-
-(* {{{ take_while *)
 
 let test_take_while_ascii () =
   match
@@ -278,10 +264,6 @@ let test_take_while_invalid_utf8 () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* }}} *)
-
-(* {{{ skip_while *)
-
 let test_skip_while () =
   match
     parse_with_pos "  \t\nhello" (fun () ->
@@ -309,10 +291,6 @@ let test_skip_while_unicode_whitespace () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* }}} *)
-
-(* {{{ take_while_span *)
-
 let test_take_while_span () =
   match
     parse_with_pos "héllo world" (fun () ->
@@ -333,15 +311,11 @@ let test_take_while_span () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* }}} *)
-
-(* {{{ skip_while_then_char *)
-
 let test_skip_while_then_char () =
   match
     parse_with_pos "  :value" (fun () ->
         Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (u_of_int 0x3A);
+          (Uchar.of_int 0x3A);
         Parseff.consume "value"
     )
   with
@@ -356,7 +330,7 @@ let test_skip_while_then_char_unicode_term () =
   match
     parse_with_pos "  \xE2\x86\x92ok" (fun () ->
         Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (u_of_int 0x2192);
+          (Uchar.of_int 0x2192);
         Parseff.consume "ok"
     )
   with
@@ -370,7 +344,7 @@ let test_skip_while_then_char_failure () =
   match
     Parseff.parse "  x" (fun () ->
         Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (u_of_int 0x3A)
+          (Uchar.of_int 0x3A)
     )
   with
   | Ok _ ->
@@ -384,7 +358,7 @@ let test_skip_while_then_char_eof () =
   match
     Parseff.parse "  " (fun () ->
         Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (u_of_int 0x3A)
+          (Uchar.of_int 0x3A)
     )
   with
   | Ok _ ->
@@ -394,14 +368,10 @@ let test_skip_while_then_char_eof () =
   | Error _ ->
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
-(* }}} *)
-
-(* {{{ letter *)
-
 let test_letter_ascii () =
   match Parseff.parse "a" Parseff.Utf8.letter with
   | Ok u ->
-      Alcotest.(check uchar_testable) "ASCII letter" (u_of_int 0x61) u
+      Alcotest.(check uchar_testable) "ASCII letter" (Uchar.of_int 0x61) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -409,7 +379,7 @@ let test_letter_accented () =
   (* é = U+00E9 *)
   match Parseff.parse "\xC3\xA9" Parseff.Utf8.letter with
   | Ok u ->
-      Alcotest.(check uchar_testable) "accented letter" (u_of_int 0xE9) u
+      Alcotest.(check uchar_testable) "accented letter" (Uchar.of_int 0xE9) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -417,7 +387,7 @@ let test_letter_cjk () =
   (* 中 = U+4E2D *)
   match Parseff.parse "\xE4\xB8\xAD" Parseff.Utf8.letter with
   | Ok u ->
-      Alcotest.(check uchar_testable) "CJK letter" (u_of_int 0x4E2D) u
+      Alcotest.(check uchar_testable) "CJK letter" (Uchar.of_int 0x4E2D) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -425,7 +395,7 @@ let test_letter_cyrillic () =
   (* д = U+0434 *)
   match Parseff.parse "\xD0\xB4" Parseff.Utf8.letter with
   | Ok u ->
-      Alcotest.(check uchar_testable) "Cyrillic letter" (u_of_int 0x434) u
+      Alcotest.(check uchar_testable) "Cyrillic letter" (Uchar.of_int 0x434) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -438,10 +408,6 @@ let test_letter_failure () =
       Alcotest.(check string) "error message" "expected letter" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
-
-(* }}} *)
-
-(* {{{ digit *)
 
 let test_digit_success () =
   match Parseff.parse "7" Parseff.Utf8.digit with
@@ -460,21 +426,17 @@ let test_digit_failure_letter () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* }}} *)
-
-(* {{{ alphanum *)
-
 let test_alphanum_letter () =
   match Parseff.parse "\xC3\xA9" Parseff.Utf8.alphanum with
   | Ok u ->
-      Alcotest.(check uchar_testable) "accented letter" (u_of_int 0xE9) u
+      Alcotest.(check uchar_testable) "accented letter" (Uchar.of_int 0xE9) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_alphanum_digit () =
   match Parseff.parse "5" Parseff.Utf8.alphanum with
   | Ok u ->
-      Alcotest.(check uchar_testable) "digit" (u_of_int 0x35) u
+      Alcotest.(check uchar_testable) "digit" (Uchar.of_int 0x35) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -487,10 +449,6 @@ let test_alphanum_failure () =
       Alcotest.(check string) "error message" "expected alphanumeric" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
-
-(* }}} *)
-
-(* {{{ whitespace *)
 
 let test_whitespace_ascii () =
   match Parseff.parse "  \t\nX" (fun () -> Parseff.Utf8.whitespace ()) with
@@ -541,10 +499,6 @@ let test_skip_whitespace () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* }}} *)
-
-(* {{{ mixing byte-level and Utf8 *)
-
 let test_mix_byte_and_utf8 () =
   (* Parse: key=value where key is ASCII, value is Unicode *)
   let input = "name=こんにちは" in
@@ -568,10 +522,6 @@ let test_mix_byte_and_utf8 () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* }}} *)
-
-(* {{{ streaming *)
-
 let test_streaming_satisfy () =
   let chunks = ref [ "\xCE"; "\xBB" ] in
   let source =
@@ -592,7 +542,7 @@ let test_streaming_satisfy () =
     )
   with
   | Ok u ->
-      Alcotest.(check uchar_testable) "matched lambda" (u_of_int 0x03BB) u
+      Alcotest.(check uchar_testable) "matched lambda" (Uchar.of_int 0x03BB) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -621,8 +571,6 @@ let test_streaming_take_while () =
       Alcotest.(check string) "matched" "\xC3\xA9\xC3\xA0\xC3\xBC" s
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* }}} *)
 
 let () =
   let open Alcotest in

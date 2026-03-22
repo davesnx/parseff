@@ -14,8 +14,6 @@ let parse_source_with_pos src parser =
       (value, Parseff.position ())
   )
 
-(* {{{ Parsers reused across tests *)
-
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
@@ -150,10 +148,6 @@ and key_value () =
   let value = json () in
   (key, value)
 
-(* }}} *)
-
-(* {{{ Phase 1: Source.of_string correctness *)
-
 let test_of_string_consume () =
   let src = Parseff.Source.of_string "hello" in
   match parse_source_with_pos src (fun () -> Parseff.consume "hello") with
@@ -287,10 +281,6 @@ let test_of_string_sep_by () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* }}} *)
-
-(* {{{ Phase 2: Chunked feeding *)
-
 let test_chunked_consume () =
   let src = chunked_source ~chunk_size:1 "hello" in
   match parse_source_with_pos src (fun () -> Parseff.consume "hello") with
@@ -415,10 +405,6 @@ let test_chunked_skip_while_then_char () =
       Alcotest.(check int) "pos" 4 pos
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* }}} *)
-
-(* {{{ Phase 3: Edge cases *)
 
 let test_empty_source () =
   let src = Parseff.Source.of_function (fun _ _ _ -> 0) in
@@ -619,8 +605,6 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
       Alcotest.(check int) "fails at explicit eof position" 1 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
-
-(* }}} *)
 
 let () =
   let open Alcotest in
