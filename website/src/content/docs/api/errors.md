@@ -8,15 +8,16 @@ description: Building better error messages in Parseff
 
 # Error handling
 
-Parseff exposes three main APIs for error handling:
+Parseff exposes four main APIs for error handling:
 
 - `Parseff.fail`: fail with a string message
 - `Parseff.error`: fail with a typed custom value
+- `Parseff.catch`: intercept a failure and recover
 - `Parseff.expect`: relabel failures from another parser
 
 ## `fail`
 
-Abort parsing with a message. The message is returned as `Error { error = `Expected msg; ... }`.
+Abort parsing with a message. The message is returned as `Error { error = `Failure msg; ... }`.
 
 ```ocaml
 val fail : string -> 'a
@@ -34,8 +35,8 @@ let byte () =
 
 let () =
   match Parseff.parse "300" byte with
-  | Error { pos; error = `Expected msg } ->
-      (* pos = 0, msg = "number must be between 0 and 255" *)
+  | Error { pos; error = `Failure msg } ->
+      (* pos = 3, msg = "number must be between 0 and 255" *)
       Printf.printf "Error at %d: %s\n" pos msg
   | Ok n -> Printf.printf "Got: %d\n" n
   | Error _ -> ()
@@ -86,6 +87,32 @@ let number_quick () =
   else n
 ```
 
+## `catch`
+
+Intercept a `{!val:Parseff.fail}` failure and recover from it.
+
+```ocaml
+val catch : (unit -> 'a) -> (string -> 'a) -> 'a
+```
+Since `fail` produces ``Failure` errors that punch through backtracking, they cannot be recovered with `Parseff.or_` or `Parseff.optional`. Use `catch` when you want a failure to be recoverable:
+
+```ocaml
+(* Without catch: the fail punches through or_, second branch never runs *)
+(* With catch: the failure is intercepted and converted to a fallback value *)
+let lenient_number () =
+  Parseff.catch
+    (fun () ->
+      let s =
+        Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+      in
+      let n = int_of_string s in
+      if n > 255 then Parseff.fail "out of range"
+      else n)
+    (fun _msg -> 0)
+```
+The handler receives the failure message and can return a value, raise a different error with `Parseff.error`, or call `Parseff.fail` again.
+
+
 ## `expect`
 
 Run a parser and replace its failure message with a clearer description.
@@ -119,9 +146,10 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 
 ## Built-in error variants
 
-Parseff adds three built-in error variants to every parse result:
+Parseff adds four built-in error variants to every parse result:
 
-- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by `Parseff.fail`, primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
+- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
+- ``Failure of string`: A user-initiated validation failure raised via `Parseff.fail`. Unlike ``Expected`, failures are not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
 - ``Unexpected_end_of_input`: The input ended before the parser could finish. Produced when primitives like `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input but have reached the end.
 - ``Depth_limit_exceeded of string`: A `Parseff.rec_` call exceeded the `~max_depth` limit. The message contains the depth that was exceeded.
 Your own error types from `Parseff.error` are merged with these via polymorphic variant row extension.

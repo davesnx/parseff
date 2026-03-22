@@ -6,3 +6,5 @@ _build/
 *~
 .vscode/
 .idea/
+
+tasks/
