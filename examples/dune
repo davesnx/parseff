@@ -3,5 +3,11 @@
  (libraries parseff re uucp))
 
 (cram
- (deps sexpr.exe routes.exe lambda.exe multilingual.exe png_header.exe
-  better_errors.exe test.png))
+ (deps
+  sexpr.exe
+  routes.exe
+  lambda.exe
+  multilingual.exe
+  png_header.exe
+  better_errors.exe
+  test.png))
