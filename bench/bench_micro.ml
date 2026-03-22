@@ -76,6 +76,19 @@ let bench_many_10x_satisfy () =
   | Error _ ->
       ()
 
+let hundred_a_chars = String.make 100 'a'
+
+let bench_many_100x_satisfy () =
+  match
+    Parseff.parse hundred_a_chars (fun () ->
+        Parseff.many (fun () -> Parseff.satisfy is_a ~label:"a") ()
+    )
+  with
+  | Ok _ ->
+      ()
+  | Error _ ->
+      ()
+
 let bench_parse_and_return () =
   match Parseff.parse "" (fun () -> ()) with Ok _ -> () | Error _ -> ()
 
@@ -86,6 +99,7 @@ let () =
     bench_single_skip_while ();
     bench_choose_first_branch_succeeds ();
     bench_many_10x_satisfy ();
+    bench_many_100x_satisfy ();
     bench_parse_and_return ()
   done;
 
@@ -101,6 +115,7 @@ let () =
         ("1x skip_while(10)", bench_single_skip_while, ());
         ("1x choose (success)", bench_choose_first_branch_succeeds, ());
         ("many(10x satisfy)", bench_many_10x_satisfy, ());
+        ("many(100x satisfy)", bench_many_100x_satisfy, ());
       ]
   in
 

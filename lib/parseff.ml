@@ -91,7 +91,7 @@ let[@inline] handle_consume st input_len s =
       st.pos <- pos + len;
       s
     end else
-      raise (Parse_error (pos, Printf.sprintf "expected %S" s))
+      raise (Parse_error (pos, "expected \"" ^ String.escaped s ^ "\""))
   end else
     raise (Unexpected_eof st.pos)
 
@@ -102,7 +102,7 @@ let[@inline] handle_satisfy st input_len pred label =
       st.pos <- st.pos + 1;
       c
     end else
-      raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
+      raise (Parse_error (st.pos, "expected " ^ label))
   else
     raise (Unexpected_eof st.pos)
 
@@ -151,7 +151,7 @@ let[@inline] handle_skip_while_then_char st input_len pred c =
     if !pos >= input_len then
       raise (Unexpected_eof !pos)
     else
-      raise (Parse_error (!pos, Printf.sprintf "expected %C" c))
+      raise (Parse_error (!pos, "expected '" ^ String.make 1 c ^ "'"))
   end
 
 let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
@@ -184,7 +184,7 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
     if !pos >= input_len then
       raise (Unexpected_eof !pos)
     else
-      raise (Parse_error (!pos, Printf.sprintf "expected %C" sep_char))
+      raise (Parse_error (!pos, "expected '" ^ String.make 1 sep_char ^ "'"))
   end
 
 let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
@@ -389,7 +389,7 @@ let[@inline] handle_satisfy_uchar st input_len pred label =
     st.pos <- st.pos + Uchar.utf_decode_length d;
     u
   end else
-    raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
+    raise (Parse_error (st.pos, "expected " ^ label))
 
 let[@inline] handle_take_while_uchar st input_len pred =
   let start = st.pos in
@@ -468,7 +468,7 @@ let[@inline] handle_skip_while_then_uchar st input_len pred term =
     st.pos <- !pos + Uchar.utf_decode_length d
   else begin
     st.pos <- !pos;
-    raise (Parse_error (!pos, Printf.sprintf "expected %s" (uchar_label term)))
+    raise (Parse_error (!pos, "expected " ^ uchar_label term))
   end
 
 (* }}} *)
@@ -898,7 +898,7 @@ let handle_skip_while_then_char_source src st pred c =
   else if st.pos >= src.input_len then
     raise (Unexpected_eof st.pos)
   else
-    raise (Parse_error (st.pos, Printf.sprintf "expected %C" c))
+    raise (Parse_error (st.pos, "expected '" ^ String.make 1 c ^ "'"))
 
 let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
   handle_skip_while_source src st ws_pred;
@@ -931,7 +931,7 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
   end else if st.pos >= src.input_len then
     raise (Unexpected_eof st.pos)
   else
-    raise (Parse_error (st.pos, Printf.sprintf "expected %C" sep_char))
+    raise (Parse_error (st.pos, "expected '" ^ String.make 1 sep_char ^ "'"))
 
 let handle_sep_by_take_source src st ws_pred sep_char take_pred =
   let start = st.pos in
@@ -1132,7 +1132,7 @@ let handle_satisfy_uchar_source src st pred label =
     st.input <- src.input;
     u
   end else
-    raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
+    raise (Parse_error (st.pos, "expected " ^ label))
 
 let handle_take_while_uchar_source src st pred =
   let start = st.pos in
@@ -1199,7 +1199,7 @@ let handle_skip_while_then_uchar_source src st pred term =
     st.pos <- st.pos + Uchar.utf_decode_length d;
     st.input <- src.input
   end else
-    raise (Parse_error (st.pos, Printf.sprintf "expected %s" (uchar_label term)))
+    raise (Parse_error (st.pos, "expected " ^ uchar_label term))
 
 (* }}} *)
 

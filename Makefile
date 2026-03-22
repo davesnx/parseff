@@ -96,6 +96,14 @@ bench-csv: ## Run CSV benchmark (all parsers)
 bench-arithmetic: ## Run arithmetic benchmark (all parsers)
 	@$(DUNE) exec bench/bench_arithmetic.exe --profile=release --display-separate-messages --no-print-directory
 
+.PHONY: bench-binary
+bench-binary: ## Run binary parsing benchmarks
+	@$(DUNE) exec bench/bench_binary.exe --profile=release --display-separate-messages --no-print-directory
+
+.PHONY: bench-utf8
+bench-utf8: ## Run UTF-8 parsing benchmarks
+	@$(DUNE) exec bench/bench_utf8.exe --profile=release --display-separate-messages --no-print-directory
+
 .PHONY: subst
 subst: ## Run dune substitute
 	$(DUNE) subst
