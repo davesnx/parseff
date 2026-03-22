@@ -3,8 +3,6 @@ let int32_testable =
 let int64_testable =
   Alcotest.testable (fun fmt v -> Format.fprintf fmt "0x%016LX" v) Int64.equal
 
-(* --- byte reads --- *)
-
 let test_be_any_uint8 () =
   match
     Parseff.parse "\x00\x7F\xFF" (fun () ->
@@ -55,8 +53,6 @@ let test_uint8_eof () =
   | Error _ ->
       Alcotest.fail "Expected unexpected end of input"
 
-(* --- 16-bit reads --- *)
-
 let test_be_any_int16 () =
   match Parseff.parse "\x01\x02" (fun () -> Parseff.BE.any_int16 ()) with
   | Ok v ->
@@ -94,8 +90,6 @@ let test_int16_eof () =
   | Error _ ->
       Alcotest.fail "Expected unexpected end of input"
 
-(* --- 32-bit reads --- *)
-
 let test_be_any_int32 () =
   match
     Parseff.parse "\x01\x02\x03\x04" (fun () -> Parseff.BE.any_int32 ())
@@ -122,8 +116,6 @@ let test_int32_eof () =
       ()
   | Error _ ->
       Alcotest.fail "Expected unexpected end of input"
-
-(* --- 64-bit reads --- *)
 
 let test_be_any_int64 () =
   match
@@ -159,8 +151,6 @@ let test_int64_eof () =
       ()
   | Error _ ->
       Alcotest.fail "Expected unexpected end of input"
-
-(* --- float / double --- *)
 
 let test_be_any_float () =
   (* IEEE 754: 1.0f = 0x3F800000 *)
@@ -225,8 +215,6 @@ let test_be_any_float_neg () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- exact match --- *)
-
 let test_be_int16_match () =
   match Parseff.parse "\x01\x02" (fun () -> Parseff.BE.int16 0x0102) with
   | Ok () ->
@@ -272,8 +260,6 @@ let test_le_int32_match () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- take --- *)
-
 let test_take_exact () =
   match
     Parseff.parse "abcdef" (fun () ->
@@ -312,13 +298,11 @@ let test_take_eof () =
       Alcotest.fail "Expected unexpected end of input"
 
 let test_take_negative () =
-  match Parseff.take (-1) with
-  | exception Invalid_argument _ ->
+  match Parseff.parse "abc" (fun () -> Parseff.take (-1)) with
+  | Error { error = `Failure _; _ } ->
       ()
   | _ ->
-      Alcotest.fail "Expected Invalid_argument"
-
-(* --- composition --- *)
+      Alcotest.fail "Expected failure for negative take"
 
 let test_tlv_header () =
   (* TLV: magic "TL", version u8, count u16-be, one field: tag u8, len u16-be, payload *)
@@ -350,8 +334,6 @@ let test_tlv_header () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- backtracking --- *)
-
 let test_backtracking () =
   let input = "\x01\x02\x03\x04" in
   let parser () =
@@ -373,8 +355,6 @@ let test_backtracking () =
       Alcotest.(check string) "backtracked" "got_0102" s
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* --- streaming --- *)
 
 let byte_at_a_time s =
   let pos = ref 0 in
@@ -452,8 +432,6 @@ let test_streaming_composition () =
       Alcotest.(check string) "value" "foo" value
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* --- runner --- *)
 
 let () =
   Alcotest.run "binary"
