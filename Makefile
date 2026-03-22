@@ -10,6 +10,10 @@ help: ## Print this help message
 	@echo "List of available make commands";
 	@echo "";
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}';
+	@for f in $(BENCH_FILES); do \
+		name=$$(basename $$f .ml | sed 's/bench_//'); \
+		printf "  \033[36m%-15s\033[0m Run bench-$$name benchmark\n" "bench-$$name"; \
+	done;
 	@echo "";
 
 .PHONY: build
@@ -68,41 +72,15 @@ setup-githooks: ## Setup githooks
 .PHONY: init
 init: setup-githooks create-switch pin install ## Create a local dev enviroment
 
+BENCH_FILES := $(wildcard bench/bench_*.ml)
+BENCH_NAMES := $(patsubst bench/bench_%.ml,bench-%,$(BENCH_FILES))
+
 .PHONY: bench
-bench: ## Run all benchmarks
-	@$(DUNE) exec bench/bench_micro.exe --profile=release --display-separate-messages --no-print-directory
-	@$(DUNE) exec bench/bench_vs_angstrom.exe --profile=release --display-separate-messages --no-print-directory
-	@$(DUNE) exec bench/bench_json.exe --profile=release --display-separate-messages --no-print-directory
-	@$(DUNE) exec bench/bench_csv.exe --profile=release --display-separate-messages --no-print-directory
-	@$(DUNE) exec bench/bench_arithmetic.exe --profile=release --display-separate-messages --no-print-directory
+bench: $(BENCH_NAMES) ## Run all benchmarks
 
-.PHONY: bench-micro
-bench-micro: ## Run micro benchmarks
-	@$(DUNE) exec bench/bench_micro.exe --profile=release --display-separate-messages --no-print-directory
-
-.PHONY: bench-vs-angstrom
-bench-vs-angstrom: ## Run benchmarks vs Angstrom
-	@$(DUNE) exec bench/bench_vs_angstrom.exe --profile=release --display-separate-messages --no-print-directory
-
-.PHONY: bench-json
-bench-json: ## Run JSON benchmark (all parsers)
-	@$(DUNE) exec bench/bench_json.exe --profile=release --display-separate-messages --no-print-directory
-
-.PHONY: bench-csv
-bench-csv: ## Run CSV benchmark (all parsers)
-	@$(DUNE) exec bench/bench_csv.exe --profile=release --display-separate-messages --no-print-directory
-
-.PHONY: bench-arithmetic
-bench-arithmetic: ## Run arithmetic benchmark (all parsers)
-	@$(DUNE) exec bench/bench_arithmetic.exe --profile=release --display-separate-messages --no-print-directory
-
-.PHONY: bench-binary
-bench-binary: ## Run binary parsing benchmarks
-	@$(DUNE) exec bench/bench_binary.exe --profile=release --display-separate-messages --no-print-directory
-
-.PHONY: bench-utf8
-bench-utf8: ## Run UTF-8 parsing benchmarks
-	@$(DUNE) exec bench/bench_utf8.exe --profile=release --display-separate-messages --no-print-directory
+.PHONY: $(BENCH_NAMES)
+$(BENCH_NAMES): bench-%: ## Run bench-% benchmark
+	@$(DUNE) exec bench/bench_$*.exe --profile=release --display-separate-messages --no-print-directory
 
 .PHONY: subst
 subst: ## Run dune substitute
