@@ -1,0 +1,186 @@
+{0 UTF-8 Parsing}
+
+The {!module:Parseff.Utf8} module provides primitives that operate on Unicode
+code points ([Uchar.t]) instead of byte sequences ([string]). The input is still an
+OCaml [string], but characters are decoded as UTF-8 sequences.
+
+Primitives operate at the code point level. A base character followed by a
+combining accent is two separate code points. {!val:Parseff.Utf8.satisfy} returns
+them individually. For grapheme-level parsing, compose the code-point primitives
+with a grapheme segmentation library like
+{{:https://erratique.ch/software/uuseg}uuseg}.
+
+{1 Mixing with byte-level primitives}
+
+UTF-8 and byte-level primitives can be freely mixed in the same parser. Use
+byte-level {!val:Parseff.consume} or {!val:Parseff.satisfy} for ASCII structural
+tokens, and {!module:Parseff.Utf8} for multilingual text content:
+
+{@ocaml skip[
+let field () =
+  let key = Parseff.take_while ~at_least:1
+    (fun c -> c >= 'a' && c <= 'z')
+    ~label:"key"
+  in
+  let _ = Parseff.consume ":" in
+  Parseff.Utf8.skip_whitespace ();
+  let value = Parseff.Utf8.take_while ~at_least:1
+    ~label:"value"
+    (fun u -> Uchar.to_int u <> 0x0A)
+  in
+  (key, value)
+]}
+
+{2 [satisfy]}
+
+{!val:Parseff.Utf8.satisfy} decodes the next UTF-8 code point and tests it
+against a predicate. Advances by 1--4 bytes depending on the encoding.
+
+{@ocaml skip[val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t]}
+
+{@ocaml skip[
+(* Match any CJK Unified Ideograph *)
+let cjk_char () =
+  Parseff.Utf8.satisfy
+    (fun u ->
+      let i = Uchar.to_int u in
+      i >= 0x4E00 && i <= 0x9FFF)
+    ~label:"CJK character"
+]}
+
+{2 [char]}
+
+{!val:Parseff.Utf8.char} matches an exact Unicode code point.
+
+{@ocaml skip[val char : Uchar.t -> Uchar.t]}
+
+{@ocaml skip[
+let lambda () = Parseff.Utf8.char (Uchar.of_int 0x03BB)  (* λ *)
+let arrow () = Parseff.Utf8.char (Uchar.of_int 0x2192)   (* → *)
+]}
+
+{2 [take_while]}
+
+{!val:Parseff.Utf8.take_while} consumes code points while the predicate holds.
+Returns the matched UTF-8 bytes as a string. The optional [~at_least] parameter
+counts {e code points}, not bytes — users think in characters when using Unicode
+primitives, so the count matches that mental model.
+
+{@ocaml skip[val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string]}
+
+{@ocaml skip[
+(* Parse a Unicode word *)
+let word () =
+  Parseff.Utf8.take_while
+    Uucp.Alpha.is_alphabetic
+    ~at_least:1
+    ~label:"letter"
+
+(* Parses "hello", "café", "東京", "Москва", etc. *)
+]}
+
+{2 [skip_while]}
+
+{!val:Parseff.Utf8.skip_while} advances past code points without building a
+string. More efficient than {!val:Parseff.Utf8.take_while} when you don't need
+the result.
+
+{@ocaml skip[val skip_while : (Uchar.t -> bool) -> unit]}
+
+{2 [take_while_span]}
+
+{!val:Parseff.Utf8.take_while_span} returns a zero-copy {!Parseff.span} instead
+of allocating a new string. Use {!val:Parseff.span_to_string} to materialize
+when needed.
+
+{@ocaml skip[val take_while_span : (Uchar.t -> bool) -> span]}
+
+{2 [skip_while_then_char]}
+
+{!val:Parseff.Utf8.skip_while_then_char} skips code points matching a predicate,
+then matches a specific terminating code point. More efficient than calling
+{!val:Parseff.Utf8.skip_while} followed by {!val:Parseff.Utf8.char} separately.
+
+{@ocaml skip[val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit]}
+
+{1 Convenience combinators}
+
+These are built on top of the structural primitives using Unicode character
+properties from the {{:https://erratique.ch/software/uucp}uucp} library.
+
+{2 [letter]}
+
+{!val:Parseff.Utf8.letter} matches any Unicode alphabetic character using
+[Uucp.Alpha.is_alphabetic]. This covers Latin, Greek, Cyrillic, CJK, Arabic,
+Devanagari, and all other Unicode scripts.
+
+{@ocaml skip[
+let l = Parseff.Utf8.letter ()
+(* Matches: 'a', 'é', 'λ', '中', 'д', 'ع', 'अ', ... *)
+]}
+
+{2 [digit]}
+
+{!val:Parseff.Utf8.digit} matches ASCII digits 0--9 only and returns an [int].
+Unicode digit categories (Nd) include Arabic-Indic, Devanagari, and other
+numeral systems where mapping to [int] is non-trivial. Keeping it ASCII-only
+makes the return value unambiguous. For Unicode digit handling, use
+{!val:Parseff.Utf8.satisfy} with a custom predicate.
+
+{2 [alphanum]}
+
+{!val:Parseff.Utf8.alphanum} matches a Unicode alphabetic character or an ASCII
+digit. Combines [Uucp.Alpha.is_alphabetic] with the ASCII digit range.
+
+{2 [whitespace] and [skip_whitespace]}
+
+{!val:Parseff.Utf8.whitespace} and {!val:Parseff.Utf8.skip_whitespace} use the
+full Unicode White_Space property ([Uucp.White.is_white_space]). This includes
+ASCII whitespace plus:
+- NO-BREAK SPACE (U+00A0)
+- EN SPACE (U+2002), EM SPACE (U+2003)
+- IDEOGRAPHIC SPACE (U+3000)
+- and others
+
+The [~at_least] parameter on {!val:Parseff.Utf8.whitespace} counts code points,
+not bytes.
+
+{@ocaml skip[
+(* Skip any Unicode whitespace before a value *)
+Parseff.Utf8.skip_whitespace ();
+let value = Parseff.Utf8.take_while ~at_least:1
+  Uucp.Alpha.is_alphabetic
+  ~label:"word"
+]}
+
+{2 [is_whitespace]}
+
+{!val:Parseff.Utf8.is_whitespace} exposes the Unicode whitespace predicate for
+use with {!val:Parseff.Utf8.take_while} or {!val:Parseff.Utf8.skip_while}
+directly.
+
+{1 Invalid UTF-8}
+
+All UTF-8 primitives raise a parse error when they encounter an invalid byte
+sequence. This includes:
+- Bare continuation bytes (0x80--0xBF)
+- Invalid lead bytes (0xFE, 0xFF)
+- Overlong encodings
+- Truncated multi-byte sequences
+
+The error message is ["invalid UTF-8"] and the position points to the first
+invalid byte.
+
+{1 Position tracking}
+
+Positions remain byte offsets, consistent with the rest of parseff. A single
+{!val:Parseff.Utf8.satisfy} call advances the position by 1--4 bytes depending
+on the UTF-8 encoding of the matched code point. {!val:Parseff.position} always
+returns a byte offset.
+
+{1 Streaming support}
+
+All UTF-8 primitives work with streaming input ({!val:Parseff.parse_source} and
+{!val:Parseff.parse_source_until_end}). Multi-byte UTF-8 sequences that span
+chunk boundaries are handled correctly, the streaming handlers ensure enough
+bytes are available before decoding each code point.

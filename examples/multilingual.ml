@@ -11,17 +11,20 @@ let key () =
     (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_')
     ~label:"key"
 
+let is_newline u = Uchar.to_int u = 0x0A
+
 let value () =
-  Parseff.Utf8.take_while ~at_least:1 ~label:"value" (fun c ->
-      let i = Uchar.to_int c in
-      i <> 0x0A && i <> 0x0D
+  Parseff.Utf8.take_while ~at_least:1 ~label:"value" (fun u ->
+      not (is_newline u)
   )
 
 let field () =
   let k = key () in
-  let _ = Parseff.expect "':' after key" (fun () -> Parseff.consume ":") in
+  let _ =
+    Parseff.expect ("':' after '" ^ k ^ "'") (fun () -> Parseff.consume ":")
+  in
   Parseff.Utf8.skip_whitespace ();
-  let v = Parseff.expect "a value after ':'" (fun () -> value ()) in
+  let v = Parseff.expect ("a value after '" ^ k ^ ":'") (fun () -> value ()) in
   (k, v)
 
 let record () =

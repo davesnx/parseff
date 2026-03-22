@@ -41,12 +41,12 @@ Empty input:
 Missing value:
 
   $ ./multilingual.exe "key:"
-  Error at byte 4: a value after ':'
+  Error at byte 4: a value after 'key:'
 
 Missing colon:
 
   $ ./multilingual.exe "no_colon"
-  Error at byte 8: ':' after key
+  Error at byte 8: ':' after 'no_colon'
 
 Non-ASCII key (keys must be ASCII letters):
 
@@ -86,4 +86,9 @@ Mixed ASCII and multibyte value:
 Non-ASCII in key (café — parser matches 'caf' then expects ':' but finds 'é'):
 
   $ ./multilingual.exe "café: latte"
-  Error at byte 3: ':' after key
+  Error at byte 3: ':' after 'caf'
+
+Invalid UTF-8 (0xC3 where whitespace is expected, hits skip_whitespace directly):
+
+  $ ./multilingual.exe "$(printf 'key:\303 hello')"
+  Error at byte 4: invalid UTF-8

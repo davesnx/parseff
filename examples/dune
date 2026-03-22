@@ -1,6 +1,6 @@
 (executables
  (names routes sexpr better_errors lambda multilingual)
- (libraries parseff re))
+ (libraries parseff re uucp))
 
 (cram
  (deps sexpr.exe routes.exe lambda.exe multilingual.exe))
