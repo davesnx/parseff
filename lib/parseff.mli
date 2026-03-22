@@ -594,3 +594,110 @@ val parse_source_until_end :
     close_in ic;
     outcome
     ]} *)
+
+(** {1 UTF-8 Parsing}
+
+    The [Utf8] module provides primitives that operate on Unicode code points
+    ([Uchar.t]) instead of raw bytes ([char]). Input is still an OCaml [string],
+    but characters are decoded as UTF-8 sequences. Invalid UTF-8 raises a parse
+    error.
+
+    Unicode character properties (letter, whitespace, etc.) use the
+    {{:https://erratique.ch/software/uucp}uucp} library for full Unicode
+    support.
+
+    These primitives can be freely mixed with the byte-level primitives in the
+    same parser. Position tracking remains in bytes. *)
+
+module Utf8 : sig
+  val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t
+  (** [satisfy pred ~label] decodes the next UTF-8 code point and checks it
+      against [pred]. Advances by the number of bytes in the UTF-8 encoding
+      (1--4). Fails with [label] if the predicate returns [false], the input
+      ends, or the bytes are not valid UTF-8.
+
+      Example:
+      {@ocaml skip[
+      let cjk () =
+        Parseff.Utf8.satisfy
+          (fun u -> Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF)
+          ~label:"CJK character"
+      ]} *)
+
+  val char : Uchar.t -> Uchar.t
+  (** [char u] matches the exact Unicode code point [u].
+
+      Example:
+      {@ocaml skip[
+      let lambda () = Parseff.Utf8.char (Uchar.of_int 0x03BB) (* λ *)
+      ]} *)
+
+  val any_char : unit -> Uchar.t
+  (** [any_char ()] decodes and returns the next UTF-8 code point, whatever it
+      is. Fails on end of input or invalid UTF-8. *)
+
+  val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string
+  (** [take_while pred] decodes code points and consumes them while [pred]
+      returns [true]. Returns the matched UTF-8 bytes as a string (may be
+      empty). Fails on invalid UTF-8 encountered during scanning.
+
+      When [~at_least] is specified, requires at least that many {e code points}
+      (not bytes) to match. Fails with [~label] if fewer match.
+
+      Example:
+      {@ocaml skip[
+      let unicode_word () =
+        Parseff.Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic
+          ~label:"letter"
+      ]} *)
+
+  val skip_while : (Uchar.t -> bool) -> unit
+  (** [skip_while pred] advances past code points while [pred] returns [true].
+      Like {!take_while} but returns [unit] — no string allocation. *)
+
+  val take_while_span : (Uchar.t -> bool) -> span
+  (** [take_while_span pred] like {!take_while} but returns a zero-copy {!span}.
+  *)
+
+  val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit
+  (** [skip_while_then_char pred u] skips code points where [pred] returns
+      [true], then matches the exact code point [u]. More efficient than calling
+      {!skip_while} followed by {!char} separately. *)
+
+  val is_whitespace : Uchar.t -> bool
+  (** [is_whitespace u] returns [true] for Unicode whitespace characters, using
+      the full Unicode White_Space property. This includes ASCII whitespace plus
+      characters like NO-BREAK SPACE (U+00A0), EM SPACE (U+2003), IDEOGRAPHIC
+      SPACE (U+3000), and others. *)
+
+  val letter : unit -> Uchar.t
+  (** [letter ()] parses a Unicode alphabetic character. Uses the Unicode
+      Alphabetic property via [Uucp.Alpha.is_alphabetic], which covers Latin,
+      Greek, Cyrillic, CJK, Arabic, Devanagari, and all other Unicode scripts.
+
+      Example:
+      {@ocaml skip[
+      (* Matches 'a', 'é', 'λ', '中', 'д', etc. *)
+      let l = Parseff.Utf8.letter ()
+      ]} *)
+
+  val digit : unit -> int
+  (** [digit ()] parses an ASCII digit (0--9) and returns its integer value.
+      Only matches ASCII digits; does not match Unicode digit characters from
+      other scripts. *)
+
+  val alphanum : unit -> Uchar.t
+  (** [alphanum ()] parses a Unicode alphabetic character or an ASCII digit. *)
+
+  val whitespace : ?at_least:int -> unit -> string
+  (** [whitespace ()] parses zero or more Unicode whitespace characters. Returns
+      the matched UTF-8 string. Uses the full Unicode White_Space property.
+
+      When [~at_least] is specified, requires at least that many whitespace code
+      points. *)
+
+  val skip_whitespace : unit -> unit
+  (** [skip_whitespace ()] skips zero or more Unicode whitespace characters.
+      More efficient than {!whitespace} when you don't need the matched string.
+  *)
+end

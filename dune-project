@@ -33,6 +33,8 @@
    (>= 5.3))
   (re
    (>= 1.9.0))
+  (uucp
+   (>= 16.0.0))
 
   ;; Test dependencies
   (alcotest :with-test)

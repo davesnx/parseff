@@ -6,5 +6,6 @@
   test_json
   test_angstrom_compat
   test_streaming
-  test_domains)
- (libraries parseff alcotest re))
+  test_domains
+  test_utf8)
+ (libraries parseff alcotest re uucp))

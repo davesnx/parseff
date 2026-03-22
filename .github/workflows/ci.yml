@@ -79,6 +79,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use OCaml 5.3.0
         uses: ocaml/setup-ocaml@v3.4.5

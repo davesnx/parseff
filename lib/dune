@@ -1,6 +1,6 @@
 (library
  (name parseff)
  (public_name parseff)
- (libraries re)
+ (libraries re uucp)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures)))
