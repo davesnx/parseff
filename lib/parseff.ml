@@ -14,8 +14,6 @@ type _ Effect.t +=
   | Position : int Effect.t
   | Match_re : Re.re -> string Effect.t
   | Choose : (unit -> 'a) * (unit -> 'a) -> 'a Effect.t
-  | Fail : string -> 'a Effect.t
-  | Error_val : 'e -> 'a Effect.t
   | Warn : 'd -> unit Effect.t
   | Warn_at : int * 'd -> unit Effect.t
   | Look_ahead : (unit -> 'a) -> 'a Effect.t
@@ -37,6 +35,11 @@ type _ Effect.t +=
   | Any_int32 : endian -> int32 Effect.t
   | Any_int64 : endian -> int64 Effect.t
   | Take : int -> string Effect.t
+  | Satisfy_uchar : (Uchar.t -> bool) * string -> Uchar.t Effect.t
+  | Take_while_uchar : (Uchar.t -> bool) -> string Effect.t
+  | Skip_while_uchar : (Uchar.t -> bool) -> unit Effect.t
+  | Take_while_span_uchar : (Uchar.t -> bool) -> span Effect.t
+  | Skip_while_then_uchar : (Uchar.t -> bool) * Uchar.t -> unit Effect.t
 
 type ('a, 'e) result = Ok of 'a | Error of { pos : int; error : 'e }
 type 'd diagnostic = { pos : int; diagnostic : 'd }
@@ -53,6 +56,7 @@ type ('a, 'e, 'd) result_with_diagnostics =
 exception Parse_error of int * string
 exception Unexpected_eof of int
 exception User_error of int * Obj.t
+exception User_failure of int * string
 exception Propagated_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
@@ -357,6 +361,116 @@ let[@inline] handle_take st input_len n =
   end else
     raise (Unexpected_eof st.pos)
 
+(* {{{ UTF-8 helpers *)
+
+exception Invalid_utf8 of int
+
+let[@inline] uchar_label u =
+  let i = Uchar.to_int u in
+  if i < 0x80 then
+    Printf.sprintf "%C" (Char.chr i)
+  else
+    Printf.sprintf "U+%04X" i
+
+let[@inline] decode_uchar inp pos input_len =
+  if pos >= input_len then raise (Unexpected_eof pos);
+  let d = String.get_utf_8_uchar inp pos in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 pos);
+  d
+
+(* }}} *)
+
+(* {{{ UTF-8 in-memory handlers *)
+
+let[@inline] handle_satisfy_uchar st input_len pred label =
+  let d = decode_uchar st.input st.pos input_len in
+  let u = Uchar.utf_decode_uchar d in
+  if pred u then begin
+    st.pos <- st.pos + Uchar.utf_decode_length d;
+    u
+  end else
+    raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
+
+let[@inline] handle_take_while_uchar st input_len pred =
+  let start = st.pos in
+  let inp = st.input in
+  let pos = ref start in
+  let continue_loop = ref true in
+  while !pos < input_len && !continue_loop do
+    let d = String.get_utf_8_uchar inp !pos in
+    if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+    let u = Uchar.utf_decode_uchar d in
+    if pred u then
+      pos := !pos + Uchar.utf_decode_length d
+    else
+      continue_loop := false
+  done;
+  let end_pos = !pos in
+  st.pos <- end_pos;
+  if end_pos > start then
+    String.sub inp start (end_pos - start)
+  else
+    ""
+
+let[@inline] handle_take_while_span_uchar st input_len pred =
+  let start = st.pos in
+  let inp = st.input in
+  let pos = ref start in
+  let continue_loop = ref true in
+  while !pos < input_len && !continue_loop do
+    let d = String.get_utf_8_uchar inp !pos in
+    if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+    let u = Uchar.utf_decode_uchar d in
+    if pred u then
+      pos := !pos + Uchar.utf_decode_length d
+    else
+      continue_loop := false
+  done;
+  st.pos <- !pos;
+  { buf = inp; off = start; len = !pos - start }
+
+let[@inline] handle_skip_while_uchar st input_len pred =
+  let inp = st.input in
+  let pos = ref st.pos in
+  let continue_loop = ref true in
+  while !pos < input_len && !continue_loop do
+    let d = String.get_utf_8_uchar inp !pos in
+    if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+    let u = Uchar.utf_decode_uchar d in
+    if pred u then
+      pos := !pos + Uchar.utf_decode_length d
+    else
+      continue_loop := false
+  done;
+  st.pos <- !pos
+
+let[@inline] handle_skip_while_then_uchar st input_len pred term =
+  let inp = st.input in
+  let pos = ref st.pos in
+  let continue_loop = ref true in
+  while !pos < input_len && !continue_loop do
+    let d = String.get_utf_8_uchar inp !pos in
+    if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+    let u = Uchar.utf_decode_uchar d in
+    if pred u then
+      pos := !pos + Uchar.utf_decode_length d
+    else
+      continue_loop := false
+  done;
+  if !pos >= input_len then begin
+    st.pos <- !pos;
+    raise (Unexpected_eof !pos)
+  end;
+  let d = String.get_utf_8_uchar inp !pos in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+  let u = Uchar.utf_decode_uchar d in
+  if Uchar.equal u term then
+    st.pos <- !pos + Uchar.utf_decode_length d
+  else begin
+    st.pos <- !pos;
+    raise (Parse_error (!pos, Printf.sprintf "expected %s" (uchar_label term)))
+  end
+
 (* }}} *)
 
 (* {{{ Deep handler *)
@@ -457,10 +571,6 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
                   (Propagated_error (e.pos, Obj.repr e.error))
           )
       )
-    | effect Fail msg, k ->
-        Effect.Deep.discontinue k (Parse_error (st.pos, msg))
-    | effect Error_val e, k ->
-        Effect.Deep.discontinue k (User_error (st.pos, Obj.repr e))
     | effect Warn d, k ->
         st.diagnostics_rev <- (st.pos, Obj.repr d) :: st.diagnostics_rev;
         Effect.Deep.continue k ()
@@ -549,6 +659,45 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
+    | effect Satisfy_uchar (pred, label), k -> (
+        match handle_satisfy_uchar st input_len pred label with
+        | v ->
+            Effect.Deep.continue k v
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Take_while_uchar pred, k -> (
+        match handle_take_while_uchar st input_len pred with
+        | v ->
+            Effect.Deep.continue k v
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+      )
+    | effect Take_while_span_uchar pred, k -> (
+        match handle_take_while_span_uchar st input_len pred with
+        | v ->
+            Effect.Deep.continue k v
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+      )
+    | effect Skip_while_uchar pred, k -> (
+        match handle_skip_while_uchar st input_len pred with
+        | () ->
+            Effect.Deep.continue k ()
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+      )
+    | effect Skip_while_then_uchar (pred, term), k -> (
+        match handle_skip_while_then_uchar st input_len pred term with
+        | () ->
+            Effect.Deep.continue k ()
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
   in
   Fun.protect
     ~finally:(fun () ->
@@ -582,6 +731,8 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
   with
   | result ->
       result
+  | exception User_failure (pos, msg) ->
+      Error { pos; error = `Failure msg }
   | exception Depth_limit_exceeded (pos, msg) ->
       Error { pos; error = `Depth_limit_exceeded msg }
 
@@ -599,7 +750,7 @@ let attach_diagnostics result diagnostics =
 
 let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
     ( 'a,
-      [> `Expected of string | `Unexpected_end_of_input ],
+      [> `Expected of string | `Failure of string | `Unexpected_end_of_input ],
       'd
     )
     result_with_diagnostics =
@@ -631,6 +782,8 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
     with
     | result ->
         result
+    | exception User_failure (pos, msg) ->
+        Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
   in
@@ -937,6 +1090,119 @@ let handle_end_of_input_source src st =
   if st.pos <> src.input_len then
     raise (Parse_error (st.pos, "expected end of input"))
 
+(* {{{ UTF-8 streaming helpers *)
+
+let ensure_utf8_char src pos =
+  if not (ensure_bytes src pos 1) then
+    false
+  else
+    let lead = Char.code (String.unsafe_get src.input pos) in
+    let needed =
+      if lead < 0x80 then
+        1
+      else if lead < 0xC2 then
+        1
+      (* continuation or overlong: let decode catch it *)
+      else if lead < 0xE0 then
+        2
+      else if lead < 0xF0 then
+        3
+      else if lead < 0xF5 then
+        4
+      else
+        1
+      (* invalid lead byte: let decode catch it *)
+    in
+    if needed <= 1 then
+      true
+    else
+      ensure_bytes src pos needed
+
+(* }}} *)
+
+(* {{{ UTF-8 streaming handlers *)
+
+let handle_satisfy_uchar_source src st pred label =
+  if not (ensure_utf8_char src st.pos) then raise (Unexpected_eof st.pos);
+  let d = String.get_utf_8_uchar src.input st.pos in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
+  let u = Uchar.utf_decode_uchar d in
+  if pred u then begin
+    st.pos <- st.pos + Uchar.utf_decode_length d;
+    st.input <- src.input;
+    u
+  end else
+    raise (Parse_error (st.pos, Printf.sprintf "expected %s" label))
+
+let handle_take_while_uchar_source src st pred =
+  let start = st.pos in
+  let continue_loop = ref true in
+  while !continue_loop do
+    if ensure_utf8_char src st.pos then begin
+      let d = String.get_utf_8_uchar src.input st.pos in
+      if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
+      let u = Uchar.utf_decode_uchar d in
+      if pred u then
+        st.pos <- st.pos + Uchar.utf_decode_length d
+      else
+        continue_loop := false
+    end else
+      continue_loop := false
+  done;
+  st.input <- src.input;
+  if st.pos > start then
+    String.sub src.input start (st.pos - start)
+  else
+    ""
+
+let handle_take_while_span_uchar_source src st pred =
+  let start = st.pos in
+  let continue_loop = ref true in
+  while !continue_loop do
+    if ensure_utf8_char src st.pos then begin
+      let d = String.get_utf_8_uchar src.input st.pos in
+      if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
+      let u = Uchar.utf_decode_uchar d in
+      if pred u then
+        st.pos <- st.pos + Uchar.utf_decode_length d
+      else
+        continue_loop := false
+    end else
+      continue_loop := false
+  done;
+  st.input <- src.input;
+  { buf = src.input; off = start; len = st.pos - start }
+
+let handle_skip_while_uchar_source src st pred =
+  let continue_loop = ref true in
+  while !continue_loop do
+    if ensure_utf8_char src st.pos then begin
+      let d = String.get_utf_8_uchar src.input st.pos in
+      if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
+      let u = Uchar.utf_decode_uchar d in
+      if pred u then
+        st.pos <- st.pos + Uchar.utf_decode_length d
+      else
+        continue_loop := false
+    end else
+      continue_loop := false
+  done;
+  st.input <- src.input
+
+let handle_skip_while_then_uchar_source src st pred term =
+  handle_skip_while_uchar_source src st pred;
+  if not (ensure_utf8_char src st.pos) then raise (Unexpected_eof st.pos);
+  let d = String.get_utf_8_uchar src.input st.pos in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
+  let u = Uchar.utf_decode_uchar d in
+  if Uchar.equal u term then begin
+    st.pos <- st.pos + Uchar.utf_decode_length d;
+    st.input <- src.input
+  end else
+    raise (Parse_error (st.pos, Printf.sprintf "expected %s" (uchar_label term)))
+
+(* }}} *)
+
 let run_deep_source (type e) ?diagnostics_out ~max_depth
     (handler : e exn_handler) (src : source) (parser : unit -> 'a) :
     ('a, e) result =
@@ -961,7 +1227,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Satisfy (pred, label), k -> (
         try
@@ -972,7 +1242,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Take_while pred, k ->
         Effect.Deep.continue k (handle_take_while_source src st pred)
@@ -1046,10 +1320,6 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
                   (Propagated_error (e.pos, Obj.repr e.error))
           )
       )
-    | effect Fail msg, k ->
-        Effect.Deep.discontinue k (Parse_error (st.pos, msg))
-    | effect Error_val e, k ->
-        Effect.Deep.discontinue k (User_error (st.pos, Obj.repr e))
     | effect Warn d, k ->
         st.diagnostics_rev <- (st.pos, Obj.repr d) :: st.diagnostics_rev;
         Effect.Deep.continue k ()
@@ -1107,7 +1377,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Any_int8, k -> (
         try
@@ -1118,7 +1392,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Any_int16 endian, k -> (
         try
@@ -1129,7 +1407,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Any_int32 endian, k -> (
         try
@@ -1140,7 +1422,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Any_int64 endian, k -> (
         try
@@ -1151,7 +1437,11 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
       )
     | effect Take n, k -> (
         try
@@ -1162,7 +1452,50 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
               Effect.Deep.continue k v
           | exception exn ->
               Effect.Deep.discontinue k exn
-        with exn -> Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Satisfy_uchar (pred, label), k -> (
+        match handle_satisfy_uchar_source src st pred label with
+        | v ->
+            Effect.Deep.continue k v
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Take_while_uchar pred, k -> (
+        match handle_take_while_uchar_source src st pred with
+        | v ->
+            Effect.Deep.continue k v
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+      )
+    | effect Take_while_span_uchar pred, k -> (
+        match handle_take_while_span_uchar_source src st pred with
+        | v ->
+            Effect.Deep.continue k v
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+      )
+    | effect Skip_while_uchar pred, k -> (
+        match handle_skip_while_uchar_source src st pred with
+        | () ->
+            Effect.Deep.continue k ()
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+      )
+    | effect Skip_while_then_uchar (pred, term), k -> (
+        match handle_skip_while_then_uchar_source src st pred term with
+        | () ->
+            Effect.Deep.continue k ()
+        | exception Invalid_utf8 pos ->
+            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+        | exception exn ->
+            Effect.Deep.discontinue k exn
       )
   in
   Fun.protect
@@ -1229,13 +1562,15 @@ let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
   with
   | result ->
       result
+  | exception User_failure (pos, msg) ->
+      Error { pos; error = `Failure msg }
   | exception Depth_limit_exceeded (pos, msg) ->
       Error { pos; error = `Depth_limit_exceeded msg }
 
 let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     (parser : unit -> 'a) :
     ( 'a,
-      [> `Expected of string | `Unexpected_end_of_input ],
+      [> `Expected of string | `Failure of string | `Unexpected_end_of_input ],
       'd
     )
     result_with_diagnostics =
@@ -1267,6 +1602,8 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     with
     | result ->
         result
+    | exception User_failure (pos, msg) ->
+        Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
   in
@@ -1281,11 +1618,22 @@ let[@inline] consume s = Effect.perform (Consume s)
 let[@inline] satisfy pred ~label = Effect.perform (Satisfy (pred, label))
 let[@inline] char c = satisfy (Char.equal c) ~label:(String.make 1 c)
 let[@inline] match_regex re = Effect.perform (Match_re re)
+
+let[@inline] fail msg =
+  let pos = Effect.perform Position in
+  raise (User_failure (pos, msg))
+
+let[@inline] error e =
+  let pos = Effect.perform Position in
+  raise (User_error (pos, Obj.repr e))
+
 let take_while ?(at_least = 0) ?label pred =
   let s = Effect.perform (Take_while pred) in
-  if at_least > 0 && String.length s < at_least then
-    Effect.perform (Fail (match label with Some l -> l | None -> "take_while"))
-  else
+  if at_least > 0 && String.length s < at_least then begin
+    let pos = Effect.perform Position in
+    raise
+      (Parse_error (pos, match label with Some l -> l | None -> "take_while"))
+  end else
     s
 
 let[@inline] skip_while pred = Effect.perform (Skip_while pred)
@@ -1304,8 +1652,6 @@ let[@inline] sep_by_take_span ws_pred sep_char take_pred =
 let[@inline] fused_sep_take ws_pred sep_char take_pred =
   Effect.perform (Fused_sep_take (ws_pred, sep_char, take_pred))
 
-let[@inline] fail msg = Effect.perform (Fail msg)
-let[@inline] error e = Effect.perform (Error_val e)
 let[@inline] warn diagnostic = Effect.perform (Warn diagnostic)
 
 let[@inline] warn_at ~pos diagnostic = Effect.perform (Warn_at (pos, diagnostic))
@@ -1451,7 +1797,7 @@ let alphanum () =
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
 
 let take n =
-  if n < 0 then invalid_arg "Parseff.take: negative count";
+  if n < 0 then fail "take: count must be non-negative";
   if n = 0 then
     ""
   else
@@ -1459,12 +1805,17 @@ let take n =
 
 let expect msg p =
   try p ()
-  with Parse_error _ | Unexpected_eof _ | Propagated_error _ -> fail msg
+  with Parse_error _ | Unexpected_eof _ | Propagated_error _ ->
+    let pos = Effect.perform Position in
+    raise (Parse_error (pos, msg))
+
+let catch p handler = try p () with User_failure (_pos, msg) -> handler msg
 
 let one_of parsers () =
   let rec try_all = function
     | [] ->
-        fail "no alternative matched"
+        let pos = Effect.perform Position in
+        raise (Parse_error (pos, "no alternative matched"))
     | [ p ] ->
         p ()
     | p :: rest ->
@@ -1478,7 +1829,8 @@ let one_of_labeled labeled_parsers () =
   try one_of parsers ()
   with Parse_error _ | Unexpected_eof _ | Propagated_error _ ->
     let expected = String.concat ", " labels in
-    fail (Printf.sprintf "expected one of: %s" expected)
+    let pos = Effect.perform Position in
+    raise (Parse_error (pos, Printf.sprintf "expected one of: %s" expected))
 
 module BE = struct
   let[@inline] any_uint8 () = Effect.perform Any_uint8
@@ -1497,18 +1849,37 @@ module BE = struct
   let int16 expected =
     let actual = any_int16 () in
     if actual <> expected then
-      fail (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
+      let pos = Effect.perform Position in
+      raise
+        (Parse_error
+           ( pos,
+             Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual
+           )
+        )
 
   let int32 expected =
     let actual = any_int32 () in
     if actual <> expected then
-      fail (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual)
+      let pos = Effect.perform Position in
+      raise
+        (Parse_error
+           ( pos,
+             Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected
+               actual
+           )
+        )
 
   let int64 expected =
     let actual = any_int64 () in
     if actual <> expected then
-      fail
-        (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected actual)
+      let pos = Effect.perform Position in
+      raise
+        (Parse_error
+           ( pos,
+             Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected
+               actual
+           )
+        )
 end
 
 module LE = struct
@@ -1528,18 +1899,109 @@ module LE = struct
   let int16 expected =
     let actual = any_int16 () in
     if actual <> expected then
-      fail (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
+      let pos = Effect.perform Position in
+      raise
+        (Parse_error
+           ( pos,
+             Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual
+           )
+        )
 
   let int32 expected =
     let actual = any_int32 () in
     if actual <> expected then
-      fail (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual)
+      let pos = Effect.perform Position in
+      raise
+        (Parse_error
+           ( pos,
+             Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected
+               actual
+           )
+        )
 
   let int64 expected =
     let actual = any_int64 () in
     if actual <> expected then
-      fail
-        (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected actual)
+      let pos = Effect.perform Position in
+      raise
+        (Parse_error
+           ( pos,
+             Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected
+               actual
+           )
+        )
+end
+
+(* }}} *)
+
+(* {{{ Utf8 module *)
+
+module Utf8 = struct
+  let[@inline] satisfy pred ~label = Effect.perform (Satisfy_uchar (pred, label))
+
+  let[@inline] char u = satisfy (Uchar.equal u) ~label:(uchar_label u)
+
+  let[@inline] any_char () = satisfy (fun _ -> true) ~label:"any character"
+
+  let take_while ?(at_least = 0) ?label pred =
+    let s = Effect.perform (Take_while_uchar pred) in
+    if at_least > 0 then begin
+      (* Count code points in the matched string *)
+        let count = ref 0 in
+        let i = ref 0 in
+        let len = String.length s in
+        while !i < len do
+          let d = String.get_utf_8_uchar s !i in
+          i := !i + Uchar.utf_decode_length d;
+          incr count
+        done;
+        if !count < at_least then begin
+          let pos = Effect.perform Position in
+          raise
+            (Parse_error
+               (pos, match label with Some l -> l | None -> "take_while")
+            )
+        end else
+          s
+    end else
+      s
+
+  let[@inline] skip_while pred = Effect.perform (Skip_while_uchar pred)
+
+  let[@inline] take_while_span pred = Effect.perform (Take_while_span_uchar pred)
+
+  let[@inline] skip_while_then_char pred u =
+    Effect.perform (Skip_while_then_uchar (pred, u))
+
+  let[@inline] is_whitespace u = Uucp.White.is_white_space u
+
+  let letter () = satisfy Uucp.Alpha.is_alphabetic ~label:"letter"
+
+  let digit () =
+    let u =
+      satisfy
+        (fun u ->
+          let i = Uchar.to_int u in
+          i >= 0x30 && i <= 0x39
+        )
+        ~label:"digit"
+    in
+    Uchar.to_int u - 0x30
+
+  let alphanum () =
+    satisfy
+      (fun u ->
+        Uucp.Alpha.is_alphabetic u
+        ||
+        let i = Uchar.to_int u in
+        i >= 0x30 && i <= 0x39
+      )
+      ~label:"alphanumeric"
+
+  let whitespace ?(at_least = 0) () =
+    take_while ~at_least ~label:"whitespace" Uucp.White.is_white_space
+
+  let skip_whitespace () = skip_while Uucp.White.is_white_space
 end
 
 (* }}} *)

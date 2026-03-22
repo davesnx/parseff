@@ -48,6 +48,7 @@ val span_to_string : span -> string
     Built-in errors are polymorphic variants:
     - [`Expected of string] — a specific token or pattern was expected but the
       input contained something else
+    - [`Failure of string] — a user-initiated failure raised via {!val:fail}
     - [`Unexpected_end_of_input] — input ended before the parser could match
     - [`Depth_limit_exceeded of string] — recursive nesting exceeded [max_depth]
       (see {!rec_})
@@ -81,6 +82,7 @@ val parse :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ]
   )
@@ -97,6 +99,7 @@ val parse :
     Returns [Ok result] on success, or [Error { pos; error }] on failure. Errors
     are:
     - [`Expected msg] — the input contained something unexpected
+    - [`Failure msg] — a user-initiated failure raised via {!val:fail}
     - [`Unexpected_end_of_input] — the input ended before the parser could match
     - [`Depth_limit_exceeded msg] — recursive nesting exceeded [max_depth]
     - Any user error raised via {!val-error}
@@ -107,6 +110,8 @@ val parse :
     | Ok s ->
         Printf.printf "Matched %S\n" s
     | Error { pos; error = `Expected msg } ->
+        Printf.printf "Expected at %d: %s\n" pos msg
+    | Error { pos; error = `Failure msg } ->
         Printf.printf "Failed at %d: %s\n" pos msg
     | Error { error = `Unexpected_end_of_input; _ } ->
         Printf.printf "Input ended too early\n"
@@ -120,6 +125,7 @@ val parse_until_end :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ],
     'd
@@ -230,7 +236,17 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     step separately when parsing separated values. *)
 
 val fail : string -> 'a
-(** [fail msg] aborts parsing with an error message.
+(** [fail msg] aborts parsing with a [`Failure msg] error. This is intended for
+    user-initiated validation failures (e.g. a parsed value is out of range).
+
+    [`Failure] errors are not caught by backtracking combinators ({!val:or_},
+    {!val:many}, {!val:one_of}, {!val:optional}, {!val:look_ahead}) or
+    relabeling combinators ({!val:expect}, {!val:one_of_labeled}). Once raised,
+    a failure propagates all the way to the runner.
+
+    For typed errors, see {!val-error}. For errors that should participate in
+    backtracking, the parser should signal failure through the parsing
+    combinators themselves (e.g. {!consume}, {!satisfy}).
 
     Example:
     {@ocaml[
@@ -242,7 +258,7 @@ val fail : string -> 'a
     ]} *)
 
 val error : 'e -> 'a
-(** [error e] aborts parsing with a user-defined error value.
+(** [error e] aborts parsing with a user-defined typed error value.
 
     The error is returned as [Error { pos; error = e }]. Use polymorphic
     variants for rich error reporting:
@@ -266,8 +282,10 @@ val error : 'e -> 'a
     {!val:one_of_labeled} without being caught or relabeled. However,
     backtracking combinators ({!val:or_}, {!val:many}, {!val:one_of},
     {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
-    like any other parse failure. If you need an error to escape backtracking,
-    raise an OCaml exception instead. *)
+    like any other parse failure.
+
+    For a simpler string-based alternative that also escapes backtracking, see
+    {!val:fail}. *)
 
 val warn : 'd -> unit
 (** [warn diagnostic] records a non-fatal diagnostic at the current position and
@@ -344,10 +362,11 @@ val expect : string -> (unit -> 'a) -> 'a
     error, replaces the error message with [description]. Reads naturally:
     "expect a dot separator".
 
-    Only parse errors (from {!fail}, {!consume}, {!satisfy}, etc.) are
-    relabeled. User errors raised via {!val-error} propagate unchanged — this
-    lets you use [expect] around parsers that perform validation without losing
-    the structured error:
+    Only parse errors (from {!consume}, {!satisfy}, etc.) are relabeled.
+    Failures from {!val:fail} propagate unchanged (use {!val:catch} to intercept
+    those). User errors raised via {!val-error} propagate unchanged — this lets
+    you use [expect] around parsers that perform validation without losing the
+    structured error:
 
     {@ocaml[
     let octet () =
@@ -366,6 +385,34 @@ val expect : string -> (unit -> 'a) -> 'a
     {@ocaml[
     let dot () = expect "a dot separator" (fun () -> char '.')
     let digit_val () = expect "a digit (0-9)" digit
+    ]} *)
+
+val catch : (unit -> 'a) -> (string -> 'a) -> 'a
+(** [catch parser handler] runs [parser]. If [parser] raises a [`Failure] (via
+    {!val:fail}), calls [handler msg] instead of propagating the failure.
+
+    This is the escape hatch for when you want a {!val:fail} to participate in
+    backtracking or be recovered from. Without [catch], failures always
+    propagate through combinators like {!val:or_} and {!val:many}.
+
+    Example:
+    {@ocaml[
+    (* Make a failure recoverable inside or_ *)
+    let lenient_byte () =
+      Parseff.or_
+        (fun () ->
+          Parseff.catch
+            (fun () ->
+              let n = number () in
+              if n > 255 then
+                Parseff.fail "out of range"
+              else
+                n
+            )
+            (fun _msg -> -1)
+        )
+        (fun () -> 0)
+        ()
     ]} *)
 
 val one_of : (unit -> 'a) list -> unit -> 'a
@@ -524,11 +571,9 @@ val any_char : unit -> char
 
 val take : int -> string
 (** [take n] reads exactly [n] bytes and returns them as a string. Fails if
-    fewer than [n] bytes remain.
+    fewer than [n] bytes remain or if [n] is negative.
 
     Useful for length-prefixed binary fields and fixed-width text fields alike.
-
-    @raise Invalid_argument if [n] is negative.
 
     Example:
     {@ocaml[
@@ -566,6 +611,7 @@ val parse_source :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ]
   )
@@ -592,6 +638,7 @@ val parse_source_until_end :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ],
     'd
@@ -710,4 +757,111 @@ module LE : sig
   val int64 : int64 -> unit
   (** [int64 i] matches exactly the 8 bytes that encode [i] in little-endian
       order. Fails if the bytes don't match. *)
+end
+
+(** {1 UTF-8 Parsing}
+
+    The [Utf8] module provides primitives that operate on Unicode code points
+    ([Uchar.t]) instead of raw bytes ([char]). Input is still an OCaml [string],
+    but characters are decoded as UTF-8 sequences. Invalid UTF-8 raises a parse
+    error.
+
+    Unicode character properties (letter, whitespace, etc.) use the
+    {{:https://erratique.ch/software/uucp}uucp} library for full Unicode
+    support.
+
+    These primitives can be freely mixed with the byte-level primitives in the
+    same parser. Position tracking remains in bytes. *)
+
+module Utf8 : sig
+  val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t
+  (** [satisfy pred ~label] decodes the next UTF-8 code point and checks it
+      against [pred]. Advances by the number of bytes in the UTF-8 encoding
+      (1--4). Fails with [label] if the predicate returns [false], the input
+      ends, or the bytes are not valid UTF-8.
+
+      Example:
+      {@ocaml skip[
+      let cjk () =
+        Parseff.Utf8.satisfy
+          (fun u -> Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF)
+          ~label:"CJK character"
+      ]} *)
+
+  val char : Uchar.t -> Uchar.t
+  (** [char u] matches the exact Unicode code point [u].
+
+      Example:
+      {@ocaml skip[
+      let lambda () = Parseff.Utf8.char (Uchar.of_int 0x03BB) (* λ *)
+      ]} *)
+
+  val any_char : unit -> Uchar.t
+  (** [any_char ()] decodes and returns the next UTF-8 code point, whatever it
+      is. Fails on end of input or invalid UTF-8. *)
+
+  val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string
+  (** [take_while pred] decodes code points and consumes them while [pred]
+      returns [true]. Returns the matched UTF-8 bytes as a string (may be
+      empty). Fails on invalid UTF-8 encountered during scanning.
+
+      When [~at_least] is specified, requires at least that many {e code points}
+      (not bytes) to match. Fails with [~label] if fewer match.
+
+      Example:
+      {@ocaml skip[
+      let unicode_word () =
+        Parseff.Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic
+          ~label:"letter"
+      ]} *)
+
+  val skip_while : (Uchar.t -> bool) -> unit
+  (** [skip_while pred] advances past code points while [pred] returns [true].
+      Like {!take_while} but returns [unit] — no string allocation. *)
+
+  val take_while_span : (Uchar.t -> bool) -> span
+  (** [take_while_span pred] like {!take_while} but returns a zero-copy {!span}.
+  *)
+
+  val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit
+  (** [skip_while_then_char pred u] skips code points where [pred] returns
+      [true], then matches the exact code point [u]. More efficient than calling
+      {!skip_while} followed by {!char} separately. *)
+
+  val is_whitespace : Uchar.t -> bool
+  (** [is_whitespace u] returns [true] for Unicode whitespace characters, using
+      the full Unicode White_Space property. This includes ASCII whitespace plus
+      characters like NO-BREAK SPACE (U+00A0), EM SPACE (U+2003), IDEOGRAPHIC
+      SPACE (U+3000), and others. *)
+
+  val letter : unit -> Uchar.t
+  (** [letter ()] parses a Unicode alphabetic character. Uses the Unicode
+      Alphabetic property via [Uucp.Alpha.is_alphabetic], which covers Latin,
+      Greek, Cyrillic, CJK, Arabic, Devanagari, and all other Unicode scripts.
+
+      Example:
+      {@ocaml skip[
+      (* Matches 'a', 'é', 'λ', '中', 'д', etc. *)
+      let l = Parseff.Utf8.letter ()
+      ]} *)
+
+  val digit : unit -> int
+  (** [digit ()] parses an ASCII digit (0--9) and returns its integer value.
+      Only matches ASCII digits; does not match Unicode digit characters from
+      other scripts. *)
+
+  val alphanum : unit -> Uchar.t
+  (** [alphanum ()] parses a Unicode alphabetic character or an ASCII digit. *)
+
+  val whitespace : ?at_least:int -> unit -> string
+  (** [whitespace ()] parses zero or more Unicode whitespace characters. Returns
+      the matched UTF-8 string. Uses the full Unicode White_Space property.
+
+      When [~at_least] is specified, requires at least that many whitespace code
+      points. *)
+
+  val skip_whitespace : unit -> unit
+  (** [skip_whitespace ()] skips zero or more Unicode whitespace characters.
+      More efficient than {!whitespace} when you don't need the matched string.
+  *)
 end
