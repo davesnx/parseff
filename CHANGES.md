@@ -8,6 +8,17 @@
 - **Add `catch` combinator.** `catch parser handler` intercepts `` `Failure ``
   errors, allowing recovery within backtracking contexts.
 
+- **Add `Parseff.Utf8` module for Unicode-aware parsing.**
+  `satisfy`, `char`, `any_char`, `take_while`, `skip_while`, `letter`,
+  `digit`, `alphanum`, `whitespace`, and zero-copy `take_while_span`.
+  Full Unicode property support via `Uucp` (alphabetic, whitespace).
+  Works with both string and streaming sources.
+
+- **Add `Parseff.BE` and `Parseff.LE` binary parsing primitives.**
+  Big-endian and little-endian readers for `any_uint8`, `any_int8`,
+  `any_int16`, `any_uint16`, `any_int32`, `any_int64`, `any_float`,
+  `any_double`, plus exact-match validators `int16`, `int32`, `int64`.
+
 - **BE/LE exact-match validators produce `` `Expected `` instead of `` `Failure ``.**
   `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser
   expectations, not user validation failures.
