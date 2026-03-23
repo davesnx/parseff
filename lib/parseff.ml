@@ -612,27 +612,27 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         while not !failed do
           saved := st.pos;
           saved_diagnostics := st.diagnostics_rev;
-          match go (Obj.magic p) with
+          match go p with
           | Ok v ->
-              acc := Obj.magic v :: !acc
+              acc := v :: !acc
           | Error _ ->
               st.pos <- !saved;
               st.diagnostics_rev <- !saved_diagnostics;
               failed := true
         done;
-        Effect.Deep.continue k (Obj.magic (List.rev !acc))
+        Effect.Deep.continue k (List.rev !acc)
     | effect Choose (left, right), k -> (
         let saved = st.pos in
         let saved_diagnostics = st.diagnostics_rev in
-        match go (Obj.magic left) with
+        match go left with
         | Ok v ->
-            Effect.Deep.continue k (Obj.magic v)
+            Effect.Deep.continue k v
         | Error _ -> (
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
-            match go (Obj.magic right) with
+            match go right with
             | Ok v ->
-                Effect.Deep.continue k (Obj.magic v)
+                Effect.Deep.continue k v
             | Error e ->
                 Effect.Deep.discontinue k
                   (Propagated_error (e.pos, Obj.repr e.error))
@@ -647,11 +647,11 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
     | effect Look_ahead p, k -> (
         let saved = st.pos in
         let saved_diagnostics = st.diagnostics_rev in
-        match go (Obj.magic p) with
+        match go p with
         | Ok v ->
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
-            Effect.Deep.continue k (Obj.magic v)
+            Effect.Deep.continue k v
         | Error e ->
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
@@ -668,10 +668,10 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
             )
         else begin
           incr nest_depth;
-          match go (Obj.magic p) with
+          match go p with
           | Ok v ->
               decr nest_depth;
-              Effect.Deep.continue k (Obj.magic v)
+              Effect.Deep.continue k v
           | Error e ->
               decr nest_depth;
               Effect.Deep.discontinue k
@@ -1364,29 +1364,29 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         while not !failed do
           saved := st.pos;
           saved_diagnostics := st.diagnostics_rev;
-          match go (Obj.magic p) with
+          match go p with
           | Ok v ->
-              acc := Obj.magic v :: !acc
+              acc := v :: !acc
           | Error _ ->
               st.pos <- !saved;
               st.diagnostics_rev <- !saved_diagnostics;
               sync_to_source ();
               failed := true
         done;
-        Effect.Deep.continue k (Obj.magic (List.rev !acc))
+        Effect.Deep.continue k (List.rev !acc)
     | effect Choose (left, right), k -> (
         let saved = st.pos in
         let saved_diagnostics = st.diagnostics_rev in
-        match go (Obj.magic left) with
+        match go left with
         | Ok v ->
-            Effect.Deep.continue k (Obj.magic v)
+            Effect.Deep.continue k v
         | Error _ -> (
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
-            match go (Obj.magic right) with
+            match go right with
             | Ok v ->
-                Effect.Deep.continue k (Obj.magic v)
+                Effect.Deep.continue k v
             | Error e ->
                 Effect.Deep.discontinue k
                   (Propagated_error (e.pos, Obj.repr e.error))
@@ -1401,12 +1401,12 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
     | effect Look_ahead p, k -> (
         let saved = st.pos in
         let saved_diagnostics = st.diagnostics_rev in
-        match go (Obj.magic p) with
+        match go p with
         | Ok v ->
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
-            Effect.Deep.continue k (Obj.magic v)
+            Effect.Deep.continue k v
         | Error e ->
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
@@ -1424,10 +1424,10 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
             )
         else begin
           incr nest_depth;
-          match go (Obj.magic p) with
+          match go p with
           | Ok v ->
               decr nest_depth;
-              Effect.Deep.continue k (Obj.magic v)
+              Effect.Deep.continue k v
           | Error e ->
               decr nest_depth;
               Effect.Deep.discontinue k
