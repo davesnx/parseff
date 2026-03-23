@@ -36,11 +36,12 @@
   (uucp
    (>= 16.0.0))
 
-  ;; Test dependencies
-  (alcotest :with-test)
-  (benchmark :with-test)
-  (angstrom :with-test)
-  (mparser :with-test)
+   ;; Test dependencies
+   (alcotest :with-test)
+   (eio_main :with-test)
+   (benchmark :with-test)
+   (angstrom :with-test)
+   (mparser :with-test)
 
   ;; Dev dependencies
   (ocamlformat

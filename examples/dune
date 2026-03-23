@@ -2,6 +2,12 @@
  (names routes sexpr better_errors lambda multilingual png_header)
  (libraries parseff re uucp))
 
+(executable
+ (name eio_source)
+ (libraries parseff eio eio_main)
+ (enabled_if
+  (= %{arch_sixtyfour} true)))
+
 (cram
  (deps
   (glob_files *.exe)
