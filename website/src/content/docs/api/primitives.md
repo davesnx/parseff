@@ -286,3 +286,40 @@ let complete_number () =
 ```ocaml
 val position : unit -> int
 ```
+
+### `location`
+
+`Parseff.location` returns the current position as a `Parseff.location` record with byte offset, line number, and column. Lines and columns are 1-based. Columns count bytes, not characters (relevant for multibyte UTF-8 input).
+
+```ocaml
+type location = { offset : int; line : int; col : int }
+val location : unit -> location
+```
+**Performance:** The line index is built lazily on the first call and extended incrementally on subsequent calls. If you never call `location`, no scanning overhead is incurred.
+
+`Parseff.location_of_position` does the same conversion outside a parser. Pass the original input string and a byte offset (e.g. from an error result) to get line and column information.
+
+```ocaml
+val location_of_position : string -> int -> location
+```
+```ocaml
+(* Annotate AST nodes with source spans *)
+type expr =
+  | Num of int * Parseff.location
+  | Add of expr * expr
+
+let number () =
+  let loc = Parseff.location () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  Num (n, loc)
+
+(* Convert error positions after parsing *)
+let report_error input result =
+  match result with
+  | Parseff.Error { pos; error = `Expected msg } ->
+      let loc = Parseff.location_of_position input pos in
+      Printf.printf "line %d, col %d: expected %s\n" loc.line loc.col msg
+  | _ -> ()
+```
+**Tip:** Use `location` during parsing to attach source positions to AST nodes or other parsed structures. Use `location_of_position` after parsing to convert byte offsets from error results into line and column numbers for diagnostics.

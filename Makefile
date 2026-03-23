@@ -92,10 +92,12 @@ docs: ## Generate odoc documentation and markdown
 
 .PHONY: website-dev
 website-dev: docs ## Run website dev server (generated from .mld)
+	./website/generate-changelog.sh
 	cd website && npm run dev
 
 .PHONY: website-build
 website-build: docs ## Build website (generates markdown from .mld then builds Astro)
+	./website/generate-changelog.sh
 	@if [ ! -d website/node_modules ]; then \
 		echo "Installing website dependencies..."; \
 		cd website && npm ci; \

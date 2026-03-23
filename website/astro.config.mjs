@@ -93,8 +93,9 @@ export default defineConfig({
 						{ label: 'Expressions with precedence', slug: 'guides/expression-parser' },
 					],
 				},
-				{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
-				{ label: 'Credits', slug: 'credits' },
+			{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
+			{ label: 'Changelog', slug: 'changelog' },
+			{ label: 'Credits', slug: 'credits' },
 			],
 		}),
 		staticOnly(opengraphImage({

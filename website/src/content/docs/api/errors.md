@@ -67,8 +67,6 @@ let () =
       Printf.printf "Number %d too large at position %d\n" n pos
   | Error { error = `Negative n; pos } ->
       Printf.printf "Negative number %d at position %d\n" n pos
-  | Error { error = `Expected msg; _ } ->
-      Printf.printf "Parse error: %s\n" msg
   | Error _ -> Printf.printf "Other error\n"
   | Ok n -> Printf.printf "Got %d\n" n
 ```
