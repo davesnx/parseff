@@ -1,4 +1,4 @@
-## 0.2.0
+## 0.3.0
 
 - **`fail` now produces `` `Failure of string `` instead of `` `Expected ``.**
 
@@ -22,6 +22,8 @@
 - **BE/LE exact-match validators produce `` `Expected `` instead of `` `Failure ``.**
   `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser
   expectations, not user validation failures.
+
+## 0.2.0
 
 - **Unified `*1` variants into base combinators with `~at_least` parameter.**
   `many1` → `many ~at_least:1`, `take_while1` → `take_while ~at_least:1`,
