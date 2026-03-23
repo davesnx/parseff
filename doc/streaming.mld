@@ -51,7 +51,8 @@ diagnostics in both cases. See {!page:diagnostics}.
 {1 The Source module}
 
 {!module:Parseff.Source} wraps a readable byte stream behind a uniform interface.
-Three constructors cover the common cases.
+Five constructors cover the common cases, ordered here from simplest to most
+low-level.
 
 {2 [Source.of_string]}
 
@@ -84,34 +85,120 @@ for testing streaming code paths with known input:
 A larger buffer means fewer system calls but more memory. For most files, the
 default 4096 is fine. For multi-megabyte files, 64KB or larger reduces overhead.
 
-{2 [Source.of_function]}
+{2 [Source.of_chunks]}
 
-{!val:Parseff.Source.of_function} creates a source from a custom read function.
-The function signature is [read buf off len]. Fill [buf] starting at [off] with
-up to [len] bytes, and return the number of bytes written. Return [0] to signal
-EOF.
+{!val:Parseff.Source.of_chunks} creates a source from a function that returns
+string chunks. Return [Some s] with a non-empty string for data, or [None] to
+signal EOF. Empty strings ([Some ""]) are silently skipped.
 
-{@ocaml skip[val of_function : (bytes -> int -> int -> int) -> Source.t]}
+{@ocaml skip[val of_chunks : (unit -> string option) -> Source.t]}
+
+This is the recommended way to wrap effectful or callback-based data sources.
+The library handles buffer management internally — no manual [Bytes.blit_string],
+position tracking, or [min] calculations needed.
 
 {@ocaml skip[
-  (* Unix file descriptor *)
-  let source = Parseff.Source.of_function (fun buf off len ->
-    Unix.read fd buf off len
-  ) in
+  (* Eio promise — await once, then signal EOF *)
+  let fetched = ref false in
+  let source = Parseff.Source.of_chunks (fun () ->
+      if !fetched then None
+      else begin
+        fetched := true;
+        Some (Promise.await_exn promise)
+      end) in
+  Parseff.parse_source source json
+]}
+
+{@ocaml skip[
+  (* HTTP body arriving in pieces *)
+  let source = Parseff.Source.of_chunks (fun () ->
+      match Http.Body.read body with
+      | `Data chunk -> Some chunk
+      | `Eof -> None) in
   Parseff.parse_source source my_parser
 ]}
 
-This is the escape hatch for any byte source not covered by the other
-constructors: network sockets, memory-mapped files, decompression streams, etc.
+Compare with the equivalent {!val:Parseff.Source.of_function} version, which
+requires the caller to manage a position cursor, calculate byte counts, and blit
+into a pre-allocated buffer:
 
 {@ocaml skip[
-  (* Decompression stream *)
+  (* Same Eio example with of_function — more boilerplate *)
+  let data = ref None in
+  let pos = ref 0 in
   let source = Parseff.Source.of_function (fun buf off len ->
+      let s = match !data with
+        | Some s -> s
+        | None ->
+            let s = Promise.await_exn promise in
+            data := Some s; s
+      in
+      let remaining = String.length s - !pos in
+      let n = min len remaining in
+      Bytes.blit_string s !pos buf off n;
+      pos := !pos + n;
+      n) in
+  Parseff.parse_source source json
+]}
+
+{2 [Source.of_seq]}
+
+{!val:Parseff.Source.of_seq} creates a source from a lazy sequence of string
+chunks. Each element is a chunk of input; the sequence ending ([Seq.Nil]) signals
+EOF.
+
+{@ocaml skip[val of_seq : string Seq.t -> Source.t]}
+
+{@ocaml skip[
+  (* From a list of chunks *)
+  let source = Parseff.Source.of_seq
+    (List.to_seq ["{ \"key\""; ": "; "\"value\" }"]) in
+  Parseff.parse_source source json
+]}
+
+[of_seq] is useful when the data is already structured as a sequence — for
+example, reading lines from a file or splitting a large string into fixed-size
+pieces:
+
+{@ocaml skip[
+  (* Fixed-size chunks from a string, useful for testing *)
+  let chunk_seq ?(chunk_size = 4096) input =
+    let len = String.length input in
+    let rec go pos () =
+      if pos >= len then Seq.Nil
+      else
+        let n = min chunk_size (len - pos) in
+        Seq.Cons (String.sub input pos n, go (pos + n))
+    in
+    go 0
+
+  let source = Parseff.Source.of_seq (chunk_seq ~chunk_size:2 "hello world")
+]}
+
+{2 [Source.of_function]}
+
+{!val:Parseff.Source.of_function} creates a source from a low-level read
+function. The function signature matches POSIX [read(2)]: [read buf off len]
+fills [buf] starting at [off] with up to [len] bytes and returns the count
+actually written. Return [0] to signal EOF.
+
+{@ocaml skip[val of_function : (bytes -> int -> int -> int) -> Source.t]}
+
+This is the low-level escape hatch for byte sources that natively fill a
+pre-allocated buffer. For most use cases, prefer {!val:Parseff.Source.of_chunks}
+or {!val:Parseff.Source.of_seq} which handle buffer management automatically.
+
+{@ocaml skip[
+  let unix_file_descriptor = Parseff.Source.of_function (fun buf off len ->
+    Unix.read fd buf off len
+  ) in
+  Parseff.parse_source source my_parser
+
+  let decompression_stream = Parseff.Source.of_function (fun buf off len ->
     Zlib.inflate zstream buf off len
   )
 
-  (* Network socket *)
-  let source = Parseff.Source.of_function (fun buf off len ->
+  let network_socket = Parseff.Source.of_function (fun buf off len ->
     Unix.recv socket buf off len []
   )
 ]}
@@ -195,7 +282,8 @@ to be revisited.
 
 {2 Blocking reads}
 
-{!val:Parseff.Source.of_channel} and {!val:Parseff.Source.of_function} block the
+{!val:Parseff.Source.of_channel}, {!val:Parseff.Source.of_chunks},
+{!val:Parseff.Source.of_function}, and {!val:Parseff.Source.of_seq} all block the
 calling thread when waiting for data. For async/event-driven architectures, wrap
 the parse call in a thread:
 

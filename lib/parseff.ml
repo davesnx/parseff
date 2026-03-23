@@ -1690,6 +1690,45 @@ module Source = struct
       eof = false;
       tmp = Bytes.create default_buf_size;
     }
+
+  let of_chunks read_chunk =
+    let pending = ref "" in
+    let pending_pos = ref 0 in
+    of_function (fun buf off len ->
+        if !pending_pos < String.length !pending then begin
+          let available = String.length !pending - !pending_pos in
+          let n = min len available in
+          Bytes.blit_string !pending !pending_pos buf off n;
+          pending_pos := !pending_pos + n;
+          n
+        end else
+          let rec next () =
+            match read_chunk () with
+            | None ->
+                0
+            | Some s when String.length s = 0 ->
+                next ()
+            | Some chunk ->
+                pending := chunk;
+                pending_pos := 0;
+                let n = min len (String.length chunk) in
+                Bytes.blit_string chunk 0 buf off n;
+                pending_pos := n;
+                n
+          in
+          next ()
+    )
+
+  let of_seq seq =
+    let r = ref seq in
+    of_chunks (fun () ->
+        match !r () with
+        | Seq.Nil ->
+            None
+        | Seq.Cons (s, rest) ->
+            r := rest;
+            Some s
+    )
 end
 
 let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :

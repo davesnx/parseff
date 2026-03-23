@@ -629,7 +629,38 @@ module Source : sig
   val of_function : (bytes -> int -> int -> int) -> t
   (** [of_function read] creates a source that calls [read buf off len] to
       obtain up to [len] bytes starting at offset [off] in [buf]. Must return
-      the number of bytes actually read; return [0] to signal EOF. *)
+      the number of bytes actually read; return [0] to signal EOF.
+
+      This is the low-level escape hatch for byte sources that fill a
+      pre-allocated buffer, such as [Unix.read] or [Unix.recv]. For most use
+      cases, prefer {!of_chunks} or {!of_seq}. *)
+
+  val of_chunks : (unit -> string option) -> t
+  (** [of_chunks read] creates a source that calls [read ()] to obtain the next
+      chunk of input. Return [Some s] with a non-empty string for data, or
+      [None] to signal EOF. Empty strings ([Some ""]) are silently skipped.
+
+      This is the recommended way to wrap effectful or callback-based data
+      sources:
+
+      {@ocaml skip[
+      (* Eio promise *)
+      let fetched = ref false in
+      let source = Source.of_chunks (fun () ->
+          if !fetched then None
+          else begin
+            fetched := true;
+            Some (Promise.await_exn promise)
+          end)
+      ]} *)
+
+  val of_seq : string Seq.t -> t
+  (** [of_seq seq] creates a source from a lazy sequence of string chunks. Each
+      element is a chunk of input; the sequence ending ([Seq.Nil]) signals EOF.
+
+      {@ocaml skip[
+      let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])
+      ]} *)
 end
 
 val parse_source :

@@ -1,6 +1,6 @@
-(* Eio + parseff: Source.of_function that awaits an Eio promise.
+(* Eio + parseff: Source.of_chunks that awaits an Eio promise.
 
-   The read function inside Source.of_function performs an Eio effect
+   The callback inside Source.of_chunks performs an Eio effect
    (Promise.await) which suspends the fiber until data arrives.
    This works because parseff's deep effect handlers forward
    unrecognised effects to the outer Eio scheduler. *)
@@ -29,25 +29,16 @@ let () =
             )
           in
 
-          (* Source.of_function that awaits the Eio promise on first read. *)
-          let data = ref None in
-          let pos = ref 0 in
+          (* Source.of_chunks that awaits the Eio promise on first read. *)
+          let fetched = ref false in
           let source =
-            Parseff.Source.of_function (fun buf off len ->
-                let s =
-                  match !data with
-                  | Some s ->
-                      s
-                  | None ->
-                      let s = Promise.await_exn promise in
-                      data := Some s;
-                      s
-                in
-                let remaining = String.length s - !pos in
-                let n = min len remaining in
-                Bytes.blit_string s !pos buf off n;
-                pos := !pos + n;
-                n
+            Parseff.Source.of_chunks (fun () ->
+                if !fetched then
+                  None
+                else begin
+                  fetched := true;
+                  Some (Promise.await_exn promise)
+                end
             )
           in
 

@@ -656,6 +656,157 @@ let test_streaming_location_multiple_calls () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+(* Helper: chunked source using of_chunks instead of of_function *)
+let chunked_source_chunks ?(chunk_size = 1) input =
+  let pos = ref 0 in
+  Parseff.Source.of_chunks (fun () ->
+      let available = String.length input - !pos in
+      if available = 0 then
+        None
+      else
+        let n = min chunk_size available in
+        let s = String.sub input !pos n in
+        pos := !pos + n;
+        Some s
+  )
+
+let test_of_chunks_ip () =
+  let src = chunked_source_chunks ~chunk_size:2 "192.168.1.100" in
+  match Parseff.parse_source src ip_address with
+  | Ok (a, b, c, d) ->
+      Alcotest.(check int) "a" 192 a;
+      Alcotest.(check int) "b" 168 b;
+      Alcotest.(check int) "c" 1 c;
+      Alcotest.(check int) "d" 100 d
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_chunks_json () =
+  let input = "{\"a\": [1, 2, null]}" in
+  let src = chunked_source_chunks ~chunk_size:3 input in
+  match Parseff.parse_source src json with
+  | Ok (Object pairs) ->
+      Alcotest.(check int) "pairs" 1 (List.length pairs)
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_chunks_single_shot () =
+  (* Deliver entire input in one chunk, like an Eio promise *)
+  let delivered = ref false in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        if !delivered then
+          None
+        else begin
+          delivered := true;
+          Some "hello"
+        end
+    )
+  in
+  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_chunks_empty_skipped () =
+  (* Empty Some "" chunks should be silently skipped, not treated as EOF *)
+  let calls = ref 0 in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        incr calls;
+        match !calls with
+        | 1 ->
+            Some ""
+        | 2 ->
+            Some ""
+        | 3 ->
+            Some "hello"
+        | _ ->
+            None
+    )
+  in
+  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_chunks_backtrack () =
+  let src = chunked_source_chunks ~chunk_size:2 "foobaz" in
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.consume "foobar")
+      (fun () -> Parseff.consume "foobaz")
+      ()
+  in
+  match Parseff.parse_source src parser with
+  | Ok s ->
+      Alcotest.(check string) "matched" "foobaz" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_seq_basic () =
+  let seq = List.to_seq [ "192."; "168."; "1.1"; "00" ] in
+  let src = Parseff.Source.of_seq seq in
+  match Parseff.parse_source src ip_address with
+  | Ok (a, b, c, d) ->
+      Alcotest.(check int) "a" 192 a;
+      Alcotest.(check int) "b" 168 b;
+      Alcotest.(check int) "c" 1 c;
+      Alcotest.(check int) "d" 100 d
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_seq_json () =
+  let input = "{\"key\": \"value\"}" in
+  (* Split into 2-char chunks via Seq *)
+  let len = String.length input in
+  let rec chunks pos () =
+    if pos >= len then
+      Seq.Nil
+    else
+      let n = min 2 (len - pos) in
+      Seq.Cons (String.sub input pos n, chunks (pos + n))
+  in
+  let src = Parseff.Source.of_seq (chunks 0) in
+  match Parseff.parse_source src json with
+  | Ok (Object pairs) ->
+      Alcotest.(check int) "pairs" 1 (List.length pairs);
+      let key, _ = List.hd pairs in
+      Alcotest.(check string) "key" "key" key
+  | Ok _ ->
+      Alcotest.fail "Expected Object"
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_of_seq_empty () =
+  let src = Parseff.Source.of_seq Seq.empty in
+  match Parseff.parse_source src Parseff.end_of_input with
+  | Ok () ->
+      ()
+  | Error _ ->
+      Alcotest.fail "Expected success on empty seq"
+
+let test_of_seq_take_while () =
+  let seq = List.to_seq [ "aa"; "ab"; "bb" ] in
+  let src = Parseff.Source.of_seq seq in
+  match
+    parse_source_with_pos src (fun () ->
+        let a = Parseff.take_while (fun c -> c = 'a') in
+        let b = Parseff.take_while (fun c -> c = 'b') in
+        (a, b)
+    )
+  with
+  | Ok ((a, b), pos) ->
+      Alcotest.(check string) "a" "aaa" a;
+      Alcotest.(check string) "b" "bbb" b;
+      Alcotest.(check int) "pos" 6 pos
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -720,6 +871,23 @@ let () =
             test_streaming_location_across_chunks;
           test_case "multiple calls" `Quick
             test_streaming_location_multiple_calls;
+        ]
+      );
+      ( "Source.of_chunks",
+        [
+          test_case "ip 2-byte" `Quick test_of_chunks_ip;
+          test_case "json 3-byte" `Quick test_of_chunks_json;
+          test_case "single shot" `Quick test_of_chunks_single_shot;
+          test_case "empty chunks skipped" `Quick test_of_chunks_empty_skipped;
+          test_case "backtrack 2-byte" `Quick test_of_chunks_backtrack;
+        ]
+      );
+      ( "Source.of_seq",
+        [
+          test_case "ip from list" `Quick test_of_seq_basic;
+          test_case "json 2-byte chunks" `Quick test_of_seq_json;
+          test_case "empty seq" `Quick test_of_seq_empty;
+          test_case "take_while" `Quick test_of_seq_take_while;
         ]
       );
     ]
