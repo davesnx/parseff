@@ -39,6 +39,7 @@
    ;; Test dependencies
    (alcotest :with-test)
    (eio_main :with-test)
+   (miou :with-test)
    (benchmark :with-test)
    (angstrom :with-test)
    (mparser :with-test)

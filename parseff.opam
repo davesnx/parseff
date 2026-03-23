@@ -16,6 +16,7 @@ depends: [
   "uucp" {>= "16.0.0"}
   "alcotest" {with-test}
   "eio_main" {with-test}
+  "miou" {with-test}
   "benchmark" {with-test}
   "angstrom" {with-test}
   "mparser" {with-test}
