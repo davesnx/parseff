@@ -2,6 +2,8 @@
 
 ## 0.3.0
 
+- **Add `Source.of_seq`.** Creates a source from a `string Seq.t`.
+- **Add `Source.of_chunks`.** Creates a source from a `(unit -> string option)` pull function.
 - **`fail` now produces `` `Failure of string `` instead of `` `Expected ``.**
 - **Add `catch` combinator.** `catch parser handler` intercepts `` `Failure `` errors, allowing recovery within backtracking contexts.
 - **Add `Parseff.Utf8` module for Unicode-aware parsing.** `satisfy`, `char`, `any_char`, `take_while`, `skip_while`, `letter`, `digit`, `alphanum`, `whitespace` and `take_while_span`.
