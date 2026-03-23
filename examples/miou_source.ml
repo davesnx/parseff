@@ -1,12 +1,7 @@
 (* Miou + parseff: parallel log parsing across domains.
 
    Three batches of structured log entries are parsed simultaneously on
-   separate Miou domains using Miou.parallel — true OS-level parallelism.
-   This demonstrates that parseff is domain-safe and integrates naturally
-   with Miou's fork-join model.
-
-   The parser uses only parseff combinators and is completely unaware
-   of concurrency or parallelism. *)
+   separate Miou domains using Miou.parallel *)
 
 type level = Info | Warn | Error
 

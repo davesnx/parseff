@@ -17,4 +17,6 @@
 (cram
  (deps
   (glob_files *.exe)
-  test.png))
+  test.png
+  bad.bin
+  truncated.bin))

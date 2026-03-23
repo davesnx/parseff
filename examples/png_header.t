@@ -8,12 +8,10 @@ Parse a valid PNG file:
 
 Error on non-PNG input:
 
-  $ echo "not a png" > bad.bin
   $ ./png_header.exe bad.bin
   bad.bin: error at byte 8: PNG signature
 
 Error on truncated file (only the 8-byte signature, no chunks):
 
-  $ printf '\x89PNG\r\n\x1a\n' > truncated.bin
   $ ./png_header.exe truncated.bin
-  truncated.bin: error at byte 8: PNG signature
+  truncated.bin: unexpected end of input at byte 8
