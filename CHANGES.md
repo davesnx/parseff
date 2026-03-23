@@ -1,4 +1,4 @@
-## Unreleased
+## 0.2.0
 
 - **`fail` now produces `` `Failure of string `` instead of `` `Expected ``.**
 
@@ -14,11 +14,14 @@
   `any_int16`, `any_uint16`, `any_int32`, `any_int64`, `any_float`,
   `any_double`, and validators `int16`, `int32`, `int64`.
 
+- **Add `location` and `location_of_position` for line/column tracking.**
+  `location ()` returns `{ offset; line; col }` during parsing (lazy, incremental,
+  zero cost if unused). `location_of_position input pos` converts a byte offset
+  after parsing — useful for error reporting.
+
 - **BE/LE exact-match validators produce `` `Expected `` instead of `` `Failure ``.**
   `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser
   expectations, not user validation failures.
-
-## 0.2.0
 
 - **Unified `*1` variants into base combinators with `~at_least` parameter.**
   `many1` → `many ~at_least:1`, `take_while1` → `take_while ~at_least:1`,
