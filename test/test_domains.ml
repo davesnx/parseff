@@ -1,13 +1,9 @@
 (* Tests for multi-domain (OCaml 5) safety.
 
    Parseff uses algebraic effects internally and all mutable parser state is
-   local to each [parse] / [parse_source] call.  These tests verify that
+   local to each [parse] / [parse_source] call. These tests verify that
    independent parses can run concurrently in separate domains without
    interference. *)
-
-(* ---------------------------------------------------------------------- *)
-(* Helpers                                                                 *)
-(* ---------------------------------------------------------------------- *)
 
 let num_domains = Domain.recommended_domain_count () |> min 8 |> max 2
 
@@ -16,11 +12,6 @@ let num_domains = Domain.recommended_domain_count () |> min 8 |> max 2
 let parallel n f =
   let domains = List.init n (fun i -> Domain.spawn (fun () -> f i)) in
   List.map Domain.join domains
-
-(* ---------------------------------------------------------------------- *)
-(* A small JSON parser (duplicated from test_json.ml so this file is       *)
-(* self-contained).                                                        *)
-(* ---------------------------------------------------------------------- *)
 
 type json =
   | Null
@@ -136,10 +127,6 @@ and key_value () =
   let _ = ws () in
   let value = json () in
   (key, value)
-
-(* ---------------------------------------------------------------------- *)
-(* Tests                                                                   *)
-(* ---------------------------------------------------------------------- *)
 
 let test_basic_parallel_parsing () =
   (* Each domain parses a distinct simple input. *)
@@ -419,10 +406,6 @@ let test_chunked_streaming_across_domains () =
             (Printf.sprintf "Domain %d: chunked parse failed for %S" i input)
     )
     results
-
-(* ---------------------------------------------------------------------- *)
-(* Runner                                                                  *)
-(* ---------------------------------------------------------------------- *)
 
 let () =
   let open Alcotest in

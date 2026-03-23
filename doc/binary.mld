@@ -1,0 +1,222 @@
+{0 Binary Parsing}
+
+The {!module:Parseff.BE} and {!module:Parseff.LE} modules provide parsers for
+multi-byte integers, floats, and doubles in big-endian and little-endian byte
+order respectively. Pick the module matching your wire format's byte order.
+
+Single-byte readers ({!val:Parseff.BE.any_uint8}, {!val:Parseff.LE.any_uint8},
+etc.) are present in both modules for convenience: their results are identical
+since endianness does not affect single bytes.
+
+{1 Integer parsers}
+
+{2 [any_uint8] and [any_int8]}
+
+{!val:Parseff.BE.any_uint8} reads one byte as an unsigned integer (0--255).
+{!val:Parseff.BE.any_int8} reads one byte as a signed integer (-128--127).
+
+{@ocaml skip[val any_uint8 : unit -> int]}
+{@ocaml skip[val any_int8 : unit -> int]}
+
+{@ocaml skip[
+let color_type () = Parseff.BE.any_uint8 ()    (* PNG color type: 0–6 *)
+let temperature () = Parseff.LE.any_int8 ()    (* signed sensor reading *)
+]}
+
+{2 [any_int16] and [any_uint16]}
+
+{!val:Parseff.BE.any_int16} reads 2 bytes as a signed 16-bit integer.
+{!val:Parseff.BE.any_uint16} reads 2 bytes as an unsigned 16-bit integer.
+
+{@ocaml skip[val any_int16 : unit -> int]}
+{@ocaml skip[val any_uint16 : unit -> int]}
+
+{@ocaml skip[
+let dns_query_count () = Parseff.BE.any_uint16 ()   (* QDCOUNT field *)
+let wav_channels () = Parseff.LE.any_uint16 ()      (* number of channels *)
+]}
+
+{2 [any_int32]}
+
+{!val:Parseff.BE.any_int32} reads 4 bytes as a signed 32-bit integer, returned
+as [int32].
+
+{@ocaml skip[val any_int32 : unit -> int32]}
+
+{@ocaml skip[
+let png_chunk_length () = Parseff.BE.any_int32 ()
+let elf_entry_point () = Parseff.LE.any_int32 ()
+]}
+
+{2 [any_int64]}
+
+{!val:Parseff.BE.any_int64} reads 8 bytes as a signed 64-bit integer, returned
+as [int64].
+
+{@ocaml skip[val any_int64 : unit -> int64]}
+
+{@ocaml skip[
+let timestamp () = Parseff.LE.any_int64 ()   (* 64-bit Unix timestamp *)
+]}
+
+{1 Floating-point parsers}
+
+{2 [any_float]}
+
+{!val:Parseff.BE.any_float} reads 4 bytes as an IEEE 754 single-precision float.
+Internally reads an [int32] and converts via [Int32.float_of_bits].
+
+{@ocaml skip[val any_float : unit -> float]}
+
+{2 [any_double]}
+
+{!val:Parseff.BE.any_double} reads 8 bytes as an IEEE 754 double-precision
+float. Internally reads an [int64] and converts via [Int64.float_of_bits].
+
+{@ocaml skip[val any_double : unit -> float]}
+
+{@ocaml skip[
+let coordinates () =
+  let lat = Parseff.BE.any_double () in
+  let lon = Parseff.BE.any_double () in
+  (lat, lon)
+]}
+
+{1 Exact-match parsers}
+
+{!val:Parseff.BE.int16}, {!val:Parseff.BE.int32}, and {!val:Parseff.BE.int64}
+read the corresponding number of bytes and assert that the decoded value matches
+an expected constant. They fail with an error message showing both the expected
+and actual values in hexadecimal.
+
+{@ocaml skip[val int16 : int -> unit]}
+{@ocaml skip[val int32 : int32 -> unit]}
+{@ocaml skip[val int64 : int64 -> unit]}
+
+Use these for magic numbers, version fields, and fixed protocol headers:
+
+{@ocaml skip[
+let png_magic () =
+  (* PNG files start with this 4-byte sequence *)
+  Parseff.BE.int32 0x89504E47l
+
+let wav_header () =
+  let _ = Parseff.consume "RIFF" in
+  let size = Parseff.LE.any_int32 () in
+  let _ = Parseff.consume "WAVE" in
+  size
+]}
+
+{1 [take]}
+
+{!val:Parseff.take} reads exactly [n] bytes and returns them as a string. While
+not inside {!module:Parseff.BE} or {!module:Parseff.LE} (byte blobs have no
+endianness), it is essential for binary parsing — reading magic bytes, fixed-width
+fields, and length-prefixed payloads.
+
+{@ocaml skip[val take : int -> string]}
+
+Returns [""] for [n <= 0] without consuming input. Fails with an
+unexpected-end-of-input error if fewer than [n] bytes remain.
+
+{@ocaml skip[
+(* Length-prefixed payload *)
+let payload () =
+  let len = Parseff.BE.any_uint16 () in
+  Parseff.take len
+
+(* Fixed-width chunk type *)
+let chunk_type () = Parseff.take 4
+]}
+
+{1 Mixing with text primitives}
+
+Binary and text primitives can be freely mixed. Use {!val:Parseff.consume} for
+ASCII magic strings and {!module:Parseff.BE}/{!module:Parseff.LE} for numeric
+fields:
+
+{@ocaml skip[
+let parse_png_ihdr () =
+  let length = Parseff.BE.any_int32 () in
+  let chunk_type = Parseff.take 4 in
+  let width = Parseff.BE.any_int32 () in
+  let height = Parseff.BE.any_int32 () in
+  let bit_depth = Parseff.BE.any_uint8 () in
+  let color_type = Parseff.BE.any_uint8 () in
+  (chunk_type, width, height, bit_depth, color_type)
+]}
+
+{1 Composition patterns}
+
+{2 TLV (Type-Length-Value)}
+
+Many binary formats use tag-length-value structures. The binary primitives
+compose naturally for this pattern:
+
+{@ocaml skip[
+let tlv_field () =
+  let tag = Parseff.BE.any_uint8 () in
+  let len = Parseff.BE.any_uint16 () in
+  let value = Parseff.take len in
+  (tag, value)
+
+let tlv_message () =
+  let _ = Parseff.consume "TL" in
+  let version = Parseff.BE.any_uint8 () in
+  let count = Parseff.BE.any_uint16 () in
+  let fields = Parseff.count count tlv_field in
+  Parseff.end_of_input ();
+  (version, fields)
+]}
+
+{2 Backtracking}
+
+Binary parsers support backtracking with {!val:Parseff.or_} just like text
+parsers. On failure the position resets, so the alternative branch re-reads
+from the same offset:
+
+{@ocaml skip[
+let version_field () =
+  Parseff.or_
+    (fun () ->
+      Parseff.BE.int16 0xFFFF;
+      `Legacy)
+    (fun () ->
+      let v = Parseff.BE.any_uint16 () in
+      `Version v)
+]}
+
+{1 Error handling}
+
+All binary parsers fail with an unexpected-end-of-input error when there are not
+enough bytes remaining. The position in the error points to the byte where the
+read was attempted, not the end of input.
+
+Exact-match parsers ({!val:Parseff.BE.int16}, {!val:Parseff.BE.int32},
+{!val:Parseff.BE.int64}) fail with an error showing the expected and actual
+values in hexadecimal, e.g. ["expected int32 0x01020304, got 0xDEADBEEF"].
+
+{1 Position tracking}
+
+Positions are byte offsets, consistent with the rest of parseff. Each parser
+advances the position by the number of bytes it reads:
+- {!val:Parseff.BE.any_uint8}, {!val:Parseff.BE.any_int8}: 1 byte
+- {!val:Parseff.BE.any_int16}, {!val:Parseff.BE.any_uint16}: 2 bytes
+- {!val:Parseff.BE.any_int32}, {!val:Parseff.BE.any_float}: 4 bytes
+- {!val:Parseff.BE.any_int64}, {!val:Parseff.BE.any_double}: 8 bytes
+- {!val:Parseff.take}: [n] bytes
+
+{1 Performance}
+
+Integer parsers use the OCaml stdlib's [String.get_int16_be],
+[String.get_int32_le], etc. directly on the input buffer with no intermediate
+allocations. Float and double parsers are derived from the integer parsers using
+[Int32.float_of_bits] and [Int64.float_of_bits] respectively — this avoids
+dedicated effects while remaining allocation-free.
+
+{1 Streaming support}
+
+All binary parsers work with streaming input ({!val:Parseff.parse_source} and
+{!val:Parseff.parse_source_until_end}). Multi-byte reads that span chunk
+boundaries are handled correctly — the streaming handler ensures enough bytes are
+buffered before each read.

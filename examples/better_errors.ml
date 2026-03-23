@@ -126,149 +126,83 @@ let literal () =
     ]
     ()
 
-let () =
-  Printf.printf "Better Error Messages Example\n";
-  Printf.printf "==============================\n\n";
+let format_error pos error = Printf.sprintf "Error at pos %d: %s" pos error
 
-  Printf.printf "Example 1: Using 'expect' for clear error messages\n";
-  Printf.printf "---------------------------------------------------\n";
-  let test_cases_simple =
-    [
-      ("192.168.1.1", true);
-      ("192.168.1.256", false);
-      ("192.168.1", false);
-      ("192.168.1.", false);
-    ]
-  in
-  List.iter
-    (fun (input, should_succeed) ->
-      match Parseff.parse input ip_address_simple with
-      | Ok (a, b, c, d) ->
-          Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
-      | Error { pos; error = `Expected expected } ->
-          Printf.printf "%s %-20s -> Error at pos %d: %s\n"
-            ( if should_succeed then
-                "✗"
-              else
-                "✓"
-            )
-            input pos expected
-      | Error { pos; error = `Unexpected_end_of_input } ->
-          Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
-            ( if should_succeed then
-                "✗"
-              else
-                "✓"
-            )
-            input pos
-      | Error _ ->
-          Printf.printf "✗ Unknown error\n"
-    )
-    test_cases_simple;
+let run_ip input =
+  match Parseff.parse input ip_address_simple with
+  | Ok (a, b, c, d) ->
+      Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Failure msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
+  | Error _ ->
+      Printf.printf "%-20s -> Unknown error\n" input
 
-  Printf.printf "\nExample 2: Custom error types with polymorphic variants\n";
-  Printf.printf "--------------------------------------------------------\n";
-  let test_cases_custom = [ ("192.168.1.300", false); ("192.168.1.1", true) ] in
-  List.iter
-    (fun (input, should_succeed) ->
-      match Parseff.parse input ip_address_with_custom_errors with
-      | Ok (a, b, c, d) ->
-          Printf.printf "✓ %-20s -> %d.%d.%d.%d\n" input a b c d
-      | Error { pos; error = `Expected expected } ->
-          Printf.printf "%s %-20s -> Parse error at pos %d: %s\n"
-            ( if should_succeed then
-                "✗"
-              else
-                "✓"
-            )
-            input pos expected
-      | Error { pos; error = `Unexpected_end_of_input } ->
-          Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
-            ( if should_succeed then
-                "✗"
-              else
-                "✓"
-            )
-            input pos
-      | Error { pos; error = `Out_of_range n } ->
-          Printf.printf
-            "✓ %-20s -> Custom error at pos %d: octet %d out of range (0-255)\n"
-            input pos n
-      | Error _ ->
-          Printf.printf "✗ Unknown error\n"
-    )
-    test_cases_custom;
+let run_ip_custom input =
+  match Parseff.parse input ip_address_with_custom_errors with
+  | Ok (a, b, c, d) ->
+      Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
+  | Error { pos; error = `Out_of_range n } ->
+      Printf.printf
+        "%-20s -> Custom error at pos %d: octet %d out of range (0-255)\n" input
+        pos n
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
+  | Error _ ->
+      Printf.printf "%-20s -> Unknown error\n" input
 
-  Printf.printf "\nExample 3: Expression parser with precedence\n";
-  Printf.printf "--------------------------------------------\n";
-  let expr_tests =
-    [ ("1+2*3", true); ("(1+2)*3", true); ("1+", false); ("1*)", false) ]
-  in
-  List.iter
-    (fun (input, should_succeed) ->
-      match Parseff.parse input expr with
-      | Ok result ->
-          Printf.printf "✓ %-20s -> %s\n" input (expr_to_string result)
-      | Error { pos; error = `Expected expected } ->
-          Printf.printf "%s %-20s -> Error at pos %d: %s\n"
-            ( if should_succeed then
-                "✗"
-              else
-                "✓"
-            )
-            input pos expected
-      | Error { pos; error = `Unexpected_end_of_input } ->
-          Printf.printf "%s %-20s -> Unexpected end of input at pos %d\n"
-            ( if should_succeed then
-                "✗"
-              else
-                "✓"
-            )
-            input pos
-      | Error _ ->
-          Printf.printf "✗ Unknown error\n"
-    )
-    expr_tests;
+let run_expr input =
+  match Parseff.parse input expr with
+  | Ok result ->
+      Printf.printf "%-20s -> %s\n" input (expr_to_string result)
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
+  | Error _ ->
+      Printf.printf "%-20s -> Unknown error\n" input
 
-  Printf.printf "\nExample 4: Using one_of and one_of_labeled\n";
-  Printf.printf "-------------------------------------------\n";
-  ( match Parseff.parse "if" keyword with
+let run_keyword input =
+  match Parseff.parse input keyword with
   | Ok s ->
-      Printf.printf "✓ Parsed keyword: %s\n" s
+      Printf.printf "%-20s -> %s\n" input s
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
   | Error _ ->
-      Printf.printf "✗ Error\n"
-  );
+      Printf.printf "%-20s -> Unknown error\n" input
 
-  ( match Parseff.parse "xyz" keyword with
-  | Ok _ ->
-      Printf.printf "✗ Should have failed\n"
-  | Error { error = `Expected expected; _ } ->
-      Printf.printf "✓ Failed as expected: %s\n" expected
-  | Error _ ->
-      Printf.printf "✓ Failed\n"
-  );
-
-  ( match Parseff.parse "99" literal with
+let run_literal input =
+  match Parseff.parse input literal with
   | Ok e ->
-      Printf.printf "✓ Parsed literal: %s\n" (expr_to_string e)
+      Printf.printf "%-20s -> %s\n" input (expr_to_string e)
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
   | Error _ ->
-      Printf.printf "✗ Error\n"
-  );
+      Printf.printf "%-20s -> Unknown error\n" input
 
-  ( match Parseff.parse "xyz" literal with
-  | Ok _ ->
-      Printf.printf "✗ Should have failed\n"
-  | Error { error = `Expected expected; _ } ->
-      Printf.printf "✓ Failed with labels: %s\n" expected
-  | Error _ ->
-      Printf.printf "✓ Failed\n"
-  );
-
-  Printf.printf "\nConclusion:\n";
-  Printf.printf "-----------\n";
-  Printf.printf
-    "The new API provides:\n\
-    \  1. 'expect' combinator for cleaner error messages\n\
-    \  2. 'error' for custom polymorphic variant error types\n\
-    \  3. 'one_of' and 'one_of_labeled' for cleaner alternations\n\
-    \  4. 'or_' as a named alternative to the <|> operator\n"
+let () =
+  let cmd = Sys.argv.(1) in
+  let input = Sys.argv.(2) in
+  match cmd with
+  | "ip" ->
+      run_ip input
+  | "ip-custom" ->
+      run_ip_custom input
+  | "expr" ->
+      run_expr input
+  | "keyword" ->
+      run_keyword input
+  | "literal" ->
+      run_literal input
+  | _ ->
+      Printf.eprintf "Unknown command: %s\n" cmd;
+      exit 1

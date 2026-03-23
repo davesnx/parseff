@@ -42,7 +42,8 @@ let route_to_string = function
   | Blog_article slug ->
       Printf.sprintf "Blog_article(%s)" slug
 
-let run input =
+let () =
+  let input = Sys.argv.(1) in
   match Parseff.parse input route with
   | Ok result ->
       Printf.printf "%-25s -> %s\n" input (route_to_string result)
@@ -52,5 +53,3 @@ let run input =
       Printf.printf "%-25s -> Unexpected end of input at %d\n" input pos
   | Error _ ->
       Printf.printf "%-25s -> Unknown error\n" input
-
-let () = run Sys.argv.(1)

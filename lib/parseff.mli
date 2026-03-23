@@ -37,6 +37,12 @@ val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
     actually need the string value. *)
 
+(** {1 Location Type} *)
+
+type location = { offset : int; line : int; col : int }
+(** A source location. [line] and [col] are 1-based. [col] counts bytes from the
+    start of the line (not characters — relevant for UTF-8). *)
+
 (** {1 Result Types} *)
 
 (** Parse result with support for custom error types.
@@ -48,6 +54,7 @@ val span_to_string : span -> string
     Built-in errors are polymorphic variants:
     - [`Expected of string] — a specific token or pattern was expected but the
       input contained something else
+    - [`Failure of string] — a user-initiated failure raised via {!val:fail}
     - [`Unexpected_end_of_input] — input ended before the parser could match
     - [`Depth_limit_exceeded of string] — recursive nesting exceeded [max_depth]
       (see {!rec_})
@@ -81,6 +88,7 @@ val parse :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ]
   )
@@ -97,6 +105,7 @@ val parse :
     Returns [Ok result] on success, or [Error { pos; error }] on failure. Errors
     are:
     - [`Expected msg] — the input contained something unexpected
+    - [`Failure msg] — a user-initiated failure raised via {!val:fail}
     - [`Unexpected_end_of_input] — the input ended before the parser could match
     - [`Depth_limit_exceeded msg] — recursive nesting exceeded [max_depth]
     - Any user error raised via {!val-error}
@@ -107,6 +116,8 @@ val parse :
     | Ok s ->
         Printf.printf "Matched %S\n" s
     | Error { pos; error = `Expected msg } ->
+        Printf.printf "Expected at %d: %s\n" pos msg
+    | Error { pos; error = `Failure msg } ->
         Printf.printf "Failed at %d: %s\n" pos msg
     | Error { error = `Unexpected_end_of_input; _ } ->
         Printf.printf "Input ended too early\n"
@@ -120,6 +131,7 @@ val parse_until_end :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ],
     'd
@@ -230,7 +242,17 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     step separately when parsing separated values. *)
 
 val fail : string -> 'a
-(** [fail msg] aborts parsing with an error message.
+(** [fail msg] aborts parsing with a [`Failure msg] error. This is intended for
+    user-initiated validation failures (e.g. a parsed value is out of range).
+
+    [`Failure] errors are not caught by backtracking combinators ({!val:or_},
+    {!val:many}, {!val:one_of}, {!val:optional}, {!val:look_ahead}) or
+    relabeling combinators ({!val:expect}, {!val:one_of_labeled}). Once raised,
+    a failure propagates all the way to the runner.
+
+    For typed errors, see {!val-error}. For errors that should participate in
+    backtracking, the parser should signal failure through the parsing
+    combinators themselves (e.g. {!consume}, {!satisfy}).
 
     Example:
     {@ocaml[
@@ -242,7 +264,7 @@ val fail : string -> 'a
     ]} *)
 
 val error : 'e -> 'a
-(** [error e] aborts parsing with a user-defined error value.
+(** [error e] aborts parsing with a user-defined typed error value.
 
     The error is returned as [Error { pos; error = e }]. Use polymorphic
     variants for rich error reporting:
@@ -266,8 +288,10 @@ val error : 'e -> 'a
     {!val:one_of_labeled} without being caught or relabeled. However,
     backtracking combinators ({!val:or_}, {!val:many}, {!val:one_of},
     {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
-    like any other parse failure. If you need an error to escape backtracking,
-    raise an OCaml exception instead. *)
+    like any other parse failure.
+
+    For a simpler string-based alternative that also escapes backtracking, see
+    {!val:fail}. *)
 
 val warn : 'd -> unit
 (** [warn diagnostic] records a non-fatal diagnostic at the current position and
@@ -280,6 +304,15 @@ val warn_at : pos:int -> 'd -> unit
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
     the input. *)
+
+val location : unit -> location
+(** [location ()] returns the current parser location with line and column. Zero
+    cost if never called — the line index is built lazily on first use and
+    extended incrementally on subsequent calls. *)
+
+val location_of_position : string -> int -> location
+(** [location_of_position input pos] computes line and column for a byte
+    position in [input]. Useful for converting error positions after parsing. *)
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only if no input remains. Use this to ensure the
@@ -344,10 +377,11 @@ val expect : string -> (unit -> 'a) -> 'a
     error, replaces the error message with [description]. Reads naturally:
     "expect a dot separator".
 
-    Only parse errors (from {!fail}, {!consume}, {!satisfy}, etc.) are
-    relabeled. User errors raised via {!val-error} propagate unchanged — this
-    lets you use [expect] around parsers that perform validation without losing
-    the structured error:
+    Only parse errors (from {!consume}, {!satisfy}, etc.) are relabeled.
+    Failures from {!val:fail} propagate unchanged (use {!val:catch} to intercept
+    those). User errors raised via {!val-error} propagate unchanged — this lets
+    you use [expect] around parsers that perform validation without losing the
+    structured error:
 
     {@ocaml[
     let octet () =
@@ -366,6 +400,34 @@ val expect : string -> (unit -> 'a) -> 'a
     {@ocaml[
     let dot () = expect "a dot separator" (fun () -> char '.')
     let digit_val () = expect "a digit (0-9)" digit
+    ]} *)
+
+val catch : (unit -> 'a) -> (string -> 'a) -> 'a
+(** [catch parser handler] runs [parser]. If [parser] raises a [`Failure] (via
+    {!val:fail}), calls [handler msg] instead of propagating the failure.
+
+    This is the escape hatch for when you want a {!val:fail} to participate in
+    backtracking or be recovered from. Without [catch], failures always
+    propagate through combinators like {!val:or_} and {!val:many}.
+
+    Example:
+    {@ocaml[
+    (* Make a failure recoverable inside or_ *)
+    let lenient_byte () =
+      Parseff.or_
+        (fun () ->
+          Parseff.catch
+            (fun () ->
+              let n = number () in
+              if n > 255 then
+                Parseff.fail "out of range"
+              else
+                n
+            )
+            (fun _msg -> -1)
+        )
+        (fun () -> 0)
+        ()
     ]} *)
 
 val one_of : (unit -> 'a) list -> unit -> 'a
@@ -522,6 +584,19 @@ val alphanum : unit -> char
 val any_char : unit -> char
 (** [any_char ()] parses any character. *)
 
+val take : int -> string
+(** [take n] reads exactly [n] bytes and returns them as a string. Fails if
+    fewer than [n] bytes remain or if [n] is negative.
+
+    Useful for length-prefixed binary fields and fixed-width text fields alike.
+
+    Example:
+    {@ocaml[
+    let payload () =
+      let len = BE.any_uint16 () in
+      take len
+    ]} *)
+
 (** {1 Streaming} *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
@@ -551,6 +626,7 @@ val parse_source :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ]
   )
@@ -577,6 +653,7 @@ val parse_source_until_end :
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
+    | `Failure of string
     | `Unexpected_end_of_input
     | `Depth_limit_exceeded of string ],
     'd
@@ -594,6 +671,108 @@ val parse_source_until_end :
     close_in ic;
     outcome
     ]} *)
+
+(** {1 Binary Parsing}
+
+    Big-endian and little-endian parsers for multi-byte integers, floats, and
+    doubles. Pick the module matching your wire format's byte order.
+
+    Single-byte readers ({!BE.any_uint8}, {!LE.any_uint8}, etc.) are present in
+    both modules for convenience — their results are identical since endianness
+    does not affect single bytes.
+
+    Example:
+    {@ocaml[
+    let parse_png_chunk () =
+      let length = BE.any_int32 () in
+      let chunk_type = take 4 in
+      let data = take (Int32.to_int length) in
+      (chunk_type, data)
+
+    let parse_wav_size () =
+      let _ = consume "RIFF" in
+      let size = LE.any_int32 () in
+      let _ = consume "WAVE" in
+      size
+    ]} *)
+
+(** Big-endian binary parsers. *)
+module BE : sig
+  val any_uint8 : unit -> int
+  (** Read one byte as an unsigned integer (0–255). *)
+
+  val any_int8 : unit -> int
+  (** Read one byte as a signed integer (−128–127). *)
+
+  val any_int16 : unit -> int
+  (** Read 2 bytes as a big-endian signed 16-bit integer. *)
+
+  val any_uint16 : unit -> int
+  (** Read 2 bytes as a big-endian unsigned 16-bit integer. *)
+
+  val any_int32 : unit -> int32
+  (** Read 4 bytes as a big-endian signed 32-bit integer. *)
+
+  val any_int64 : unit -> int64
+  (** Read 8 bytes as a big-endian signed 64-bit integer. *)
+
+  val any_float : unit -> float
+  (** Read 4 bytes as a big-endian IEEE 754 single-precision float. *)
+
+  val any_double : unit -> float
+  (** Read 8 bytes as a big-endian IEEE 754 double-precision float. *)
+
+  val int16 : int -> unit
+  (** [int16 i] matches exactly the 2 bytes that encode [i] in big-endian order.
+      Fails if the bytes don't match. *)
+
+  val int32 : int32 -> unit
+  (** [int32 i] matches exactly the 4 bytes that encode [i] in big-endian order.
+      Fails if the bytes don't match. *)
+
+  val int64 : int64 -> unit
+  (** [int64 i] matches exactly the 8 bytes that encode [i] in big-endian order.
+      Fails if the bytes don't match. *)
+end
+
+(** Little-endian binary parsers. *)
+module LE : sig
+  val any_uint8 : unit -> int
+  (** Read one byte as an unsigned integer (0–255). *)
+
+  val any_int8 : unit -> int
+  (** Read one byte as a signed integer (−128–127). *)
+
+  val any_int16 : unit -> int
+  (** Read 2 bytes as a little-endian signed 16-bit integer. *)
+
+  val any_uint16 : unit -> int
+  (** Read 2 bytes as a little-endian unsigned 16-bit integer. *)
+
+  val any_int32 : unit -> int32
+  (** Read 4 bytes as a little-endian signed 32-bit integer. *)
+
+  val any_int64 : unit -> int64
+  (** Read 8 bytes as a little-endian signed 64-bit integer. *)
+
+  val any_float : unit -> float
+  (** Read 4 bytes as a little-endian IEEE 754 single-precision float. *)
+
+  val any_double : unit -> float
+  (** Read 8 bytes as a little-endian IEEE 754 double-precision float. *)
+
+  val int16 : int -> unit
+  (** [int16 i] matches exactly the 2 bytes that encode [i] in little-endian
+      order. Fails if the bytes don't match. *)
+
+  val int32 : int32 -> unit
+  (** [int32 i] matches exactly the 4 bytes that encode [i] in little-endian
+      order. Fails if the bytes don't match. *)
+
+  val int64 : int64 -> unit
+  (** [int64 i] matches exactly the 8 bytes that encode [i] in little-endian
+      order. Fails if the bytes don't match. *)
+end
 
 (** {1 UTF-8 Parsing}
 

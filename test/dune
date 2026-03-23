@@ -4,8 +4,8 @@
   test_ip
   test_css
   test_json
-  test_angstrom_compat
   test_streaming
   test_domains
+  test_binary
   test_utf8)
  (libraries parseff alcotest re uucp))
