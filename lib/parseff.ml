@@ -44,6 +44,43 @@ type _ Effect.t +=
   | Take_while_span_uchar : (Uchar.t -> bool) -> span Effect.t
   | Skip_while_then_uchar : (Uchar.t -> bool) * Uchar.t -> unit Effect.t
 
+(* When adding a new effect constructor above, also add it here.
+   Used by the unhandled-effect printer at the bottom of this file. *)
+let is_parseff_effect : type a. a Effect.t -> bool = function
+  | Consume _
+  | Satisfy _
+  | Position
+  | Location
+  | Match_re _
+  | Choose _
+  | Warn _
+  | Warn_at _
+  | Look_ahead _
+  | End_of_input
+  | Take_while _
+  | Skip_while _
+  | Greedy_many _
+  | Skip_while_then_char _
+  | Fused_sep_take _
+  | Sep_by_take _
+  | Take_while_span _
+  | Sep_by_take_span _
+  | Rec_ _
+  | Any_uint8
+  | Any_int8
+  | Any_int16 _
+  | Any_int32 _
+  | Any_int64 _
+  | Take _
+  | Satisfy_uchar _
+  | Take_while_uchar _
+  | Skip_while_uchar _
+  | Take_while_span_uchar _
+  | Skip_while_then_uchar _ ->
+      true
+  | _ ->
+      false
+
 type ('a, 'e) result = Ok of 'a | Error of { pos : int; error : 'e }
 type 'd diagnostic = { pos : int; diagnostic : 'd }
 
@@ -2128,3 +2165,15 @@ module Utf8 = struct
 end
 
 (* }}} *)
+
+let () =
+  Printexc.register_printer (function
+    | Effect.Unhandled e when is_parseff_effect e ->
+        Some
+          "Parseff: parser called outside of a parse context. Parser \
+           combinators can only be used inside a function passed to \
+           Parseff.parse, Parseff.parse_until_end, Parseff.parse_source, or \
+           Parseff.parse_source_until_end."
+    | _ ->
+        None
+    )
