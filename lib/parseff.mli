@@ -37,6 +37,12 @@ val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
     actually need the string value. *)
 
+(** {1 Location Type} *)
+
+type location = { offset : int; line : int; col : int }
+(** A source location. [line] and [col] are 1-based. [col] counts bytes from the
+    start of the line (not characters — relevant for UTF-8). *)
+
 (** {1 Result Types} *)
 
 (** Parse result with support for custom error types.
@@ -298,6 +304,15 @@ val warn_at : pos:int -> 'd -> unit
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
     the input. *)
+
+val location : unit -> location
+(** [location ()] returns the current parser location with line and column. Zero
+    cost if never called — the line index is built lazily on first use and
+    extended incrementally on subsequent calls. *)
+
+val location_of_position : string -> int -> location
+(** [location_of_position input pos] computes line and column for a byte
+    position in [input]. Useful for converting error positions after parsing. *)
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only if no input remains. Use this to ensure the

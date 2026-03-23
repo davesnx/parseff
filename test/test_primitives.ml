@@ -1481,6 +1481,151 @@ let test_take_while_span_empty () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let check_location msg expected actual =
+  Alcotest.(check int)
+    (msg ^ " offset") expected.Parseff.offset actual.Parseff.offset;
+  Alcotest.(check int) (msg ^ " line") expected.Parseff.line actual.Parseff.line;
+  Alcotest.(check int) (msg ^ " col") expected.Parseff.col actual.Parseff.col
+
+let test_location_at_start () =
+  match Parseff.parse "hello" (fun () -> Parseff.location ()) with
+  | Ok loc ->
+      check_location "start" { offset = 0; line = 1; col = 1 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_after_consume () =
+  let parser () =
+    let _ = Parseff.consume "hello" in
+    Parseff.location ()
+  in
+  match Parseff.parse "hello world" parser with
+  | Ok loc ->
+      check_location "after consume" { offset = 5; line = 1; col = 6 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_multiline () =
+  let input = "aaa\nbbb\nccc" in
+  let parser () =
+    let _ = Parseff.consume "aaa\nbbb\nc" in
+    Parseff.location ()
+  in
+  match Parseff.parse input parser with
+  | Ok loc ->
+      check_location "multiline" { offset = 9; line = 3; col = 2 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_column_resets () =
+  let input = "abc\nde" in
+  let parser () =
+    let _ = Parseff.consume "abc\nd" in
+    Parseff.location ()
+  in
+  match Parseff.parse input parser with
+  | Ok loc ->
+      check_location "col reset" { offset = 5; line = 2; col = 2 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_multiple_calls () =
+  let input = "aa\nbb\ncc" in
+  let parser () =
+    let _ = Parseff.consume "aa" in
+    let loc1 = Parseff.location () in
+    let _ = Parseff.consume "\nbb\nc" in
+    let loc2 = Parseff.location () in
+    (loc1, loc2)
+  in
+  match Parseff.parse input parser with
+  | Ok (loc1, loc2) ->
+      check_location "first" { offset = 2; line = 1; col = 3 } loc1;
+      check_location "second" { offset = 7; line = 3; col = 2 } loc2
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_at_newline () =
+  let input = "ab\ncd" in
+  let parser () =
+    let _ = Parseff.consume "ab" in
+    let loc1 = Parseff.location () in
+    let _ = Parseff.consume "\n" in
+    let loc2 = Parseff.location () in
+    (loc1, loc2)
+  in
+  match Parseff.parse input parser with
+  | Ok (loc1, loc2) ->
+      check_location "before newline" { offset = 2; line = 1; col = 3 } loc1;
+      check_location "after newline" { offset = 3; line = 2; col = 1 } loc2
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_backtracking () =
+  let input = "aaa\nbbb" in
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        let _ = Parseff.consume "aaa\nbbb\nccc" in
+        ()
+      )
+      (fun () ->
+        let _ = Parseff.consume "aaa\nb" in
+        ()
+      )
+      ();
+    Parseff.location ()
+  in
+  match Parseff.parse input parser with
+  | Ok loc ->
+      check_location "after backtrack" { offset = 5; line = 2; col = 2 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_empty_input () =
+  match Parseff.parse "" (fun () -> Parseff.location ()) with
+  | Ok loc ->
+      check_location "empty" { offset = 0; line = 1; col = 1 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_location_of_position_basic () =
+  let input = "aaa\nbbb\nccc" in
+  let loc = Parseff.location_of_position input 0 in
+  check_location "start" { offset = 0; line = 1; col = 1 } loc;
+  let loc = Parseff.location_of_position input 3 in
+  check_location "end of line 1" { offset = 3; line = 1; col = 4 } loc;
+  let loc = Parseff.location_of_position input 4 in
+  check_location "start of line 2" { offset = 4; line = 2; col = 1 } loc;
+  let loc = Parseff.location_of_position input 8 in
+  check_location "start of line 3" { offset = 8; line = 3; col = 1 } loc;
+  let loc = Parseff.location_of_position input 10 in
+  check_location "end of input" { offset = 10; line = 3; col = 3 } loc
+
+let test_location_of_position_empty () =
+  let loc = Parseff.location_of_position "" 0 in
+  check_location "empty" { offset = 0; line = 1; col = 1 } loc
+
+let test_location_of_position_single_line () =
+  let input = "hello" in
+  let loc = Parseff.location_of_position input 3 in
+  check_location "mid" { offset = 3; line = 1; col = 4 } loc
+
+let test_location_with_position () =
+  let input = "aa\nbb" in
+  let parser () =
+    let _ = Parseff.consume "aa\nb" in
+    let pos = Parseff.position () in
+    let loc = Parseff.location () in
+    (pos, loc)
+  in
+  match Parseff.parse input parser with
+  | Ok (pos, loc) ->
+      Alcotest.(check int) "position matches" pos loc.offset;
+      check_location "loc" { offset = 4; line = 2; col = 2 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let () =
   let open Alcotest in
   run "Parseff Primitives"
@@ -1682,6 +1827,27 @@ let () =
           test_case "preserves end_of_input semantics" `Quick
             test_parse_until_end_preserves_end_of_input_semantics;
           test_case "warn_at nonzero pos" `Quick test_warn_at_nonzero_pos;
+        ]
+      );
+      ( "location",
+        [
+          test_case "at start" `Quick test_location_at_start;
+          test_case "after consume" `Quick test_location_after_consume;
+          test_case "multiline" `Quick test_location_multiline;
+          test_case "column resets after newline" `Quick
+            test_location_column_resets;
+          test_case "multiple calls" `Quick test_location_multiple_calls;
+          test_case "at newline boundary" `Quick test_location_at_newline;
+          test_case "after backtracking" `Quick test_location_backtracking;
+          test_case "empty input" `Quick test_location_empty_input;
+          test_case "with position" `Quick test_location_with_position;
+        ]
+      );
+      ( "location_of_position",
+        [
+          test_case "basic" `Quick test_location_of_position_basic;
+          test_case "empty input" `Quick test_location_of_position_empty;
+          test_case "single line" `Quick test_location_of_position_single_line;
         ]
       );
     ]

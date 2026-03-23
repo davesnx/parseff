@@ -6,12 +6,15 @@ let[@inline always] span_to_string s =
   else
     String.sub s.buf s.off s.len
 
+type location = { offset : int; line : int; col : int }
+
 type endian = Big | Little
 
 type _ Effect.t +=
   | Consume : string -> string Effect.t
   | Satisfy : (char -> bool) * string -> char Effect.t
   | Position : int Effect.t
+  | Location : location Effect.t
   | Match_re : Re.re -> string Effect.t
   | Choose : (unit -> 'a) * (unit -> 'a) -> 'a Effect.t
   | Warn : 'd -> unit Effect.t
@@ -60,10 +63,17 @@ exception User_failure of int * string
 exception Propagated_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
+type line_index = {
+  mutable starts : int array;
+  mutable count : int;
+  mutable scanned_up_to : int;
+}
+
 type state = {
   mutable input : string;
   mutable pos : int;
   mutable diagnostics_rev : (int * Obj.t) list;
+  mutable line_index : line_index option;
 }
 
 (* Polymorphic record so handle_exn can be called at different types inside the
@@ -473,11 +483,66 @@ let[@inline] handle_skip_while_then_uchar st input_len pred term =
 
 (* }}} *)
 
+(* {{{ Line index helpers *)
+
+let create_line_index () =
+  let starts = Array.make 64 0 in
+  starts.(0) <- 0;
+  { starts; count = 1; scanned_up_to = 0 }
+
+let extend_line_index idx input up_to =
+  let i = ref idx.scanned_up_to in
+  while !i < up_to do
+    if String.unsafe_get input !i = '\n' then begin
+      if idx.count >= Array.length idx.starts then begin
+        let new_arr = Array.make (idx.count * 2) 0 in
+        Array.blit idx.starts 0 new_arr 0 idx.count;
+        idx.starts <- new_arr
+      end;
+      idx.starts.(idx.count) <- !i + 1;
+      idx.count <- idx.count + 1
+    end;
+    incr i
+  done;
+  idx.scanned_up_to <- up_to
+
+let find_line idx offset =
+  let lo = ref 0 and hi = ref (idx.count - 1) in
+  while !lo < !hi do
+    let mid = !lo + ((!hi - !lo + 1) / 2) in
+    if idx.starts.(mid) <= offset then
+      lo := mid
+    else
+      hi := mid - 1
+  done;
+  !lo
+
+let handle_location st input_len =
+  let idx =
+    match st.line_index with
+    | Some idx ->
+        idx
+    | None ->
+        let idx = create_line_index () in
+        st.line_index <- Some idx;
+        idx
+  in
+  let up_to = min st.pos input_len in
+  extend_line_index idx st.input up_to;
+  let line_idx = find_line idx st.pos in
+  {
+    offset = st.pos;
+    line = line_idx + 1;
+    col = st.pos - idx.starts.(line_idx) + 1;
+  }
+
+(* }}} *)
+
 (* {{{ Deep handler *)
 
 let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
     input (parser : unit -> 'a) : ('a, e) result =
-  let st = { input; pos = 0; diagnostics_rev = [] } in
+  let st = { input; pos = 0; diagnostics_rev = []; line_index = None } in
   let input_len = String.length input in
   let nest_depth = ref 0 in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
@@ -489,6 +554,8 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         handler.handle exn
     | effect Position, k ->
         Effect.Deep.continue k st.pos
+    | effect Location, k ->
+        Effect.Deep.continue k (handle_location st input_len)
     | effect Consume s, k -> (
         match handle_consume st input_len s with
         | v ->
@@ -1206,7 +1273,9 @@ let handle_skip_while_then_uchar_source src st pred term =
 let run_deep_source (type e) ?diagnostics_out ~max_depth
     (handler : e exn_handler) (src : source) (parser : unit -> 'a) :
     ('a, e) result =
-  let st = { input = src.input; pos = 0; diagnostics_rev = [] } in
+  let st =
+    { input = src.input; pos = 0; diagnostics_rev = []; line_index = None }
+  in
   let nest_depth = ref 0 in
   let sync_to_source () = st.input <- src.input in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
@@ -1218,6 +1287,9 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         handler.handle exn
     | effect Position, k ->
         Effect.Deep.continue k st.pos
+    | effect Location, k ->
+        sync_to_source ();
+        Effect.Deep.continue k (handle_location st src.input_len)
     | effect Consume s, k -> (
         try
           ignore (ensure_bytes src st.pos (String.length s));
@@ -1610,6 +1682,12 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
   let diagnostics = to_diagnostics !diagnostics_out in
   attach_diagnostics result diagnostics
 
+let location_of_position input pos =
+  let idx = create_line_index () in
+  extend_line_index idx input (min pos (String.length input));
+  let line_idx = find_line idx pos in
+  { offset = pos; line = line_idx + 1; col = pos - idx.starts.(line_idx) + 1 }
+
 (* }}} *)
 
 (* {{{ Combinators *)
@@ -1657,6 +1735,7 @@ let[@inline] warn diagnostic = Effect.perform (Warn diagnostic)
 let[@inline] warn_at ~pos diagnostic = Effect.perform (Warn_at (pos, diagnostic))
 
 let[@inline] position () = Effect.perform Position
+let[@inline] location () = Effect.perform Location
 let[@inline] end_of_input () = Effect.perform End_of_input
 let[@inline] or_ p q () = Effect.perform (Choose (p, q))
 let[@inline] look_ahead p = Effect.perform (Look_ahead p)

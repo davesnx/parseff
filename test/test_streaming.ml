@@ -606,6 +606,56 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
+let check_location msg expected actual =
+  Alcotest.(check int)
+    (msg ^ " offset") expected.Parseff.offset actual.Parseff.offset;
+  Alcotest.(check int) (msg ^ " line") expected.Parseff.line actual.Parseff.line;
+  Alcotest.(check int) (msg ^ " col") expected.Parseff.col actual.Parseff.col
+
+let test_streaming_location_basic () =
+  let input = "aaa\nbbb\nccc" in
+  let src = chunked_source ~chunk_size:1 input in
+  let parser () =
+    let _ = Parseff.consume "aaa\nbbb\nc" in
+    Parseff.location ()
+  in
+  match Parseff.parse_source src parser with
+  | Ok loc ->
+      check_location "streamed" { offset = 9; line = 3; col = 2 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_streaming_location_across_chunks () =
+  (* Chunk boundary falls in the middle of a line *)
+  let input = "ab\ncd\nef" in
+  let src = chunked_source ~chunk_size:2 input in
+  let parser () =
+    let _ = Parseff.consume "ab\ncd\ne" in
+    Parseff.location ()
+  in
+  match Parseff.parse_source src parser with
+  | Ok loc ->
+      check_location "across chunks" { offset = 7; line = 3; col = 2 } loc
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_streaming_location_multiple_calls () =
+  let input = "aa\nbb\ncc" in
+  let src = chunked_source ~chunk_size:1 input in
+  let parser () =
+    let _ = Parseff.consume "aa" in
+    let loc1 = Parseff.location () in
+    let _ = Parseff.consume "\nbb\nc" in
+    let loc2 = Parseff.location () in
+    (loc1, loc2)
+  in
+  match Parseff.parse_source src parser with
+  | Ok (loc1, loc2) ->
+      check_location "first" { offset = 2; line = 1; col = 3 } loc1;
+      check_location "second" { offset = 7; line = 3; col = 2 } loc2
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -661,6 +711,15 @@ let () =
             test_parse_source_until_end_error_has_diagnostics;
           test_case "parse_source_until_end preserves end_of_input" `Quick
             test_parse_source_until_end_preserves_end_of_input_semantics;
+        ]
+      );
+      ( "location",
+        [
+          test_case "basic byte-at-a-time" `Quick test_streaming_location_basic;
+          test_case "across chunk boundaries" `Quick
+            test_streaming_location_across_chunks;
+          test_case "multiple calls" `Quick
+            test_streaming_location_multiple_calls;
         ]
       );
     ]
