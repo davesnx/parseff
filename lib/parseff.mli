@@ -330,6 +330,18 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 (** [or_] is the alternation combinator. Tries the left parser; if it fails,
     backtracks and tries the right parser.
 
+    When both branches fail, error composition depends on position:
+    - {b Same position}: if both produce [Expected] errors, the messages are
+      joined with [" or "]. If one is [Expected] and the other is
+      [Unexpected_end_of_input], the [Expected] error is preferred (it carries
+      more information). Two [Unexpected_end_of_input] stay as-is.
+    - {b Different positions}: the error from the branch that consumed more
+      input (furthest position) is kept, since it likely reflects the more
+      relevant failure.
+
+    This means [one_of] (which chains [or_]) naturally produces composed
+    messages like ["expected \"if\" or expected \"else\""].
+
     Example:
     {@ocaml[
     let bool_parser () =

@@ -40,7 +40,7 @@ Using one_of and one_of_labeled
   if                   -> if
 
   $ ./better_errors.exe keyword "xyz"
-  xyz                  -> Unexpected end of input at pos 0
+  xyz                  -> Error at pos 0: expected "if"
 
   $ ./better_errors.exe literal "99"
   99                   -> 9

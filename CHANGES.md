@@ -1,3 +1,5 @@
+## Unreleased
+
 ## 0.3.0
 
 - **`fail` now produces `` `Failure of string `` instead of `` `Expected ``.**
@@ -6,6 +8,7 @@
 - **Add `Parseff.BE` and `Parseff.LE` binary parsing primitives.** Big-endian and little-endian readers for `any_uint8`, `any_int8`, `any_int16`, `any_uint16`, `any_int32`, `any_int64`, `any_float`, `any_double`, and validators `int16`, `int32`, `int64`.
 - **Add `location` and `location_of_position` for line/column tracking.** `location ()` returns `{ offset; line; col }` during parsing (lazy, incremental, zero cost if unused). `location_of_position input pos` converts a byte offset after parsing — useful for error reporting.
 - **BE/LE exact-match validators produce `` `Expected `` instead of `` `Failure ``.** `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser expectations, not user validation failures.
+- **`or_` now composes errors from both branches.** When both branches fail at the same position, `Expected` messages are joined with `" or "` (e.g., `expected "foo" or expected "bar"`). When branches fail at different positions, the error from the branch that consumed more input is kept. This also improves `one_of`, which chains `or_` and now naturally produces composed messages across all alternatives.
 
 ## 0.2.0
 

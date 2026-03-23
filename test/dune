@@ -7,5 +7,6 @@
   test_streaming
   test_domains
   test_binary
-  test_utf8)
+   test_utf8
+   test_errors)
  (libraries parseff alcotest re uucp))

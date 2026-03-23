@@ -100,7 +100,8 @@ let test_alternation_failure () =
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected \"bar\"" expected
+      Alcotest.(check string)
+        "error message" "expected \"foo\" or expected \"bar\"" expected
   | Error _ ->
       Alcotest.fail "Expected `Expected error variant"
 
@@ -116,11 +117,14 @@ let test_one_of_failure () =
   match Parseff.parse "xyz" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      (* "xyz" is shorter than "while", so last branch fails at EOF *)
-      Alcotest.(check int) "error position" 0 pos
+  | Error { pos; error = `Expected expected } ->
+      (* Parse_error from "if" branch (which could check but mismatched) is
+         preferred over Unexpected_eof from "else"/"while" branches (which were
+         too short to even check) at the same position. *)
+      Alcotest.(check int) "error position" 0 pos;
+      Alcotest.(check string) "error message" "expected \"if\"" expected
   | Error _ ->
-      Alcotest.fail "Expected `Unexpected_end_of_input"
+      Alcotest.fail "Expected `Expected"
 
 let test_many_empty () =
   match Parseff.parse "" (Parseff.many Parseff.digit) with
