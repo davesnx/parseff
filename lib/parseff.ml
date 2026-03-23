@@ -540,17 +540,55 @@ let handle_location st input_len =
 
 (* {{{ Deep handler *)
 
+let wrap_user_error = function
+  | User_error (pos, obj) ->
+      Propagated_error (pos, obj)
+  | exn ->
+      exn
+
+let pos_of_exn = function
+  | Parse_error (p, _)
+  | Unexpected_eof p
+  | User_error (p, _)
+  | Propagated_error (p, _) ->
+      p
+  | _ ->
+      -1
+
+let compose_branch_errors left_exn right_exn =
+  let lpos = pos_of_exn left_exn in
+  let rpos = pos_of_exn right_exn in
+  if lpos <> rpos then
+    if lpos > rpos then
+      wrap_user_error left_exn
+    else
+      wrap_user_error right_exn
+  else
+    match (left_exn, right_exn) with
+    | Parse_error (_, lmsg), Parse_error (pos, rmsg) ->
+        Parse_error (pos, lmsg ^ " or " ^ rmsg)
+    | Parse_error _, Unexpected_eof _ ->
+        left_exn
+    | Unexpected_eof _, Parse_error _ ->
+        right_exn
+    | Unexpected_eof pos, Unexpected_eof _ ->
+        Unexpected_eof pos
+    | _, right ->
+        wrap_user_error right
+
 let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
     input (parser : unit -> 'a) : ('a, e) result =
   let st = { input; pos = 0; diagnostics_rev = []; line_index = None } in
   let input_len = String.length input in
   let nest_depth = ref 0 in
+  let last_exn = ref (Failure "unreachable") in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
     match p () with
     | v ->
         Ok v
     | exception exn ->
+        last_exn := exn;
         handler.handle exn
     | effect Position, k ->
         Effect.Deep.continue k st.pos
@@ -628,14 +666,16 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | Ok v ->
             Effect.Deep.continue k v
         | Error _ -> (
+            let left_exn = !last_exn in
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             match go right with
             | Ok v ->
                 Effect.Deep.continue k v
-            | Error e ->
+            | Error _ ->
+                let right_exn = !last_exn in
                 Effect.Deep.discontinue k
-                  (Propagated_error (e.pos, Obj.repr e.error))
+                  (compose_branch_errors left_exn right_exn)
           )
       )
     | effect Warn d, k ->
@@ -1277,6 +1317,7 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
     { input = src.input; pos = 0; diagnostics_rev = []; line_index = None }
   in
   let nest_depth = ref 0 in
+  let last_exn = ref (Failure "unreachable") in
   let sync_to_source () = st.input <- src.input in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
@@ -1284,6 +1325,7 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
     | v ->
         Ok v
     | exception exn ->
+        last_exn := exn;
         handler.handle exn
     | effect Position, k ->
         Effect.Deep.continue k st.pos
@@ -1381,15 +1423,17 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         | Ok v ->
             Effect.Deep.continue k v
         | Error _ -> (
+            let left_exn = !last_exn in
             st.pos <- saved;
             st.diagnostics_rev <- saved_diagnostics;
             sync_to_source ();
             match go right with
             | Ok v ->
                 Effect.Deep.continue k v
-            | Error e ->
+            | Error _ ->
+                let right_exn = !last_exn in
                 Effect.Deep.discontinue k
-                  (Propagated_error (e.pos, Obj.repr e.error))
+                  (compose_branch_errors left_exn right_exn)
           )
       )
     | effect Warn d, k ->
