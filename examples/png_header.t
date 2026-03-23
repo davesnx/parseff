@@ -14,6 +14,6 @@ Error on non-PNG input:
 
 Error on truncated file (only the 8-byte signature, no chunks):
 
-  $ python3 -c "import sys; sys.stdout.buffer.write(b'\x89PNG\r\n\x1a\n')" > truncated.bin
+  $ printf '\x89PNG\r\n\x1a\n' > truncated.bin
   $ ./png_header.exe truncated.bin
-  truncated.bin: unexpected end of input at byte 8
+  truncated.bin: error at byte 8: PNG signature
