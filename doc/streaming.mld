@@ -144,10 +144,7 @@ The parser doesn't know which one it's running under. The code is identical:
     Parseff.parse_source (Parseff.Source.of_string "42") number
 ]}
 
-Traditional parser combinator libraries (like Angstrom) implement streaming
-through CPS. Every parser carries [fail] and [succ] callbacks, and suspension is
-encoded as closures returned in a [Partial] state. This forces the entire API
-into monadic style. In Parseff, effects make streaming transparent.
+In Parseff, effects make streaming transparent. Other parser combinator libraries implement streaming through CPS. Every parser carries [fail] and [succ] callbacks, and suspension is encoded as closures returned in a [Partial] state.
 
 {1 How backtracking works across chunks}
 
@@ -169,9 +166,7 @@ the data is still there in the buffer.
 {1 Thread safety}
 
 {!val:Parseff.parse_source} (and {!val:Parseff.parse}) are safe to call from
-multiple OCaml 5 domains concurrently. All mutable state (the parser position,
-internal buffer, recursion depth counter) is created locally inside each call and
-never shared across calls. There is no global mutable state in the library.
+multiple OCaml 5 domains concurrently. All mutable state (the parser position, internal buffer, recursion depth counter) is created locally inside each call and never shared across calls. There is no global mutable state in the library.
 
 {@ocaml skip[
   (* Parse different files in parallel *)
