@@ -268,8 +268,7 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
       raise (Parse_error (pos, Expected_char sep_char))
   end
 
-let[@inline always] handle_sep_by_take_core st input_len ws_pred sep_char
-    take_pred fn =
+let[@inline always] handle_sep_by_take st input_len ws_pred sep_char take_pred =
   let inp = st.input in
   let start = st.pos in
   let first_end = scan_while inp start input_len take_pred in
@@ -277,7 +276,7 @@ let[@inline always] handle_sep_by_take_core st input_len ws_pred sep_char
     st.pos <- first_end;
     []
   end else begin
-    let acc = ref [ fn inp start (first_end - start) ] in
+    let acc = ref [ String.sub inp start (first_end - start) ] in
     let pos = ref first_end in
     let continue_loop = ref true in
     while !continue_loop do
@@ -286,7 +285,7 @@ let[@inline always] handle_sep_by_take_core st input_len ws_pred sep_char
         let after_ws = scan_while inp (ws_end + 1) input_len ws_pred in
         let elem_end = scan_while inp after_ws input_len take_pred in
         if elem_end > after_ws then begin
-          acc := fn inp after_ws (elem_end - after_ws) :: !acc;
+          acc := String.sub inp after_ws (elem_end - after_ws) :: !acc;
           pos := elem_end
         end else
           continue_loop := false
@@ -296,11 +295,6 @@ let[@inline always] handle_sep_by_take_core st input_len ws_pred sep_char
     st.pos <- !pos;
     List.rev !acc
   end
-
-let[@inline always] handle_sep_by_take st input_len ws_pred sep_char take_pred =
-  handle_sep_by_take_core st input_len ws_pred sep_char take_pred
-    (fun inp off len -> String.sub inp off len
-  )
 
 let[@inline always] handle_sep_by_take_span st input_len ws_pred sep_char
     take_pred =
