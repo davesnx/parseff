@@ -14,7 +14,14 @@
   bench_arithmetic
   bench_binary
   bench_utf8)
- (libraries parseff parseff_bench angstrom mparser re benchmark)
- (modules :standard \ parseff_bench)
+ (libraries parseff parseff_bench angstrom bigstringaf mparser re benchmark)
+ (modules :standard \ parseff_bench bench_quick)
+ (ocamlopt_flags
+  (:standard -O3 -unbox-closures)))
+
+(executable
+ (name bench_quick)
+ (libraries parseff parseff_bench)
+ (modules bench_quick)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures)))

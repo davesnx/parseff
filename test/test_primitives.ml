@@ -643,7 +643,7 @@ let test_char_failure () =
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected a" expected
+      Alcotest.(check string) "error message" "expected 'a'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 

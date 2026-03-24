@@ -17,8 +17,7 @@ let[@inline always] float_of_span (s : Parseff.span) =
 (** {1 JSON array} *)
 
 let json_array () =
-  Parseff.skip_while_then_char is_ws '[';
-  Parseff.skip_while is_ws;
+  ignore (Parseff.char '[');
   let spans = Parseff.sep_by_take_span is_ws ',' is_digit_or_sign in
   let elements = List.map float_of_span spans in
   Parseff.skip_while_then_char is_ws ']';
