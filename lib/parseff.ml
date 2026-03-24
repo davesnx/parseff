@@ -676,19 +676,17 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
       )
     | effect Greedy_many p, k ->
         let acc = ref [] in
-        let saved = ref st.pos in
-        let saved_diagnostics = ref st.diagnostics_rev in
-        let failed = ref false in
-        while not !failed do
-          saved := st.pos;
-          saved_diagnostics := st.diagnostics_rev;
+        let continue_loop = ref true in
+        while !continue_loop do
+          let saved_pos = st.pos in
+          let saved_diagnostics = st.diagnostics_rev in
           match go p with
           | Ok v ->
               acc := v :: !acc
           | Error _ ->
-              st.pos <- !saved;
-              st.diagnostics_rev <- !saved_diagnostics;
-              failed := true
+              st.pos <- saved_pos;
+              st.diagnostics_rev <- saved_diagnostics;
+              continue_loop := false
         done;
         Effect.Deep.continue k (List.rev !acc)
     | effect Choose (left, right), k -> (
@@ -1301,20 +1299,18 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
       )
     | effect Greedy_many p, k ->
         let acc = ref [] in
-        let saved = ref st.pos in
-        let saved_diagnostics = ref st.diagnostics_rev in
-        let failed = ref false in
-        while not !failed do
-          saved := st.pos;
-          saved_diagnostics := st.diagnostics_rev;
+        let continue_loop = ref true in
+        while !continue_loop do
+          let saved_pos = st.pos in
+          let saved_diagnostics = st.diagnostics_rev in
           match go p with
           | Ok v ->
               acc := v :: !acc
           | Error _ ->
-              st.pos <- !saved;
-              st.diagnostics_rev <- !saved_diagnostics;
+              st.pos <- saved_pos;
+              st.diagnostics_rev <- saved_diagnostics;
               sync_to_source ();
-              failed := true
+              continue_loop := false
         done;
         Effect.Deep.continue k (List.rev !acc)
     | effect Choose (left, right), k -> (
