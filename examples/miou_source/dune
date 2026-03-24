@@ -1,0 +1,10 @@
+(executable
+ (name miou_source)
+ (libraries parseff miou)
+ (enabled_if
+  (= %{arch_sixtyfour} true)))
+
+(cram
+ (deps miou_source.exe)
+ (enabled_if
+  (= %{arch_sixtyfour} true)))

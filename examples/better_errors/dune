@@ -1,0 +1,6 @@
+(executable
+ (name better_errors)
+ (libraries parseff))
+
+(cram
+ (deps better_errors.exe))

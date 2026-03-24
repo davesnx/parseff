@@ -1,0 +1,10 @@
+(executable
+ (name png_header)
+ (libraries parseff))
+
+(cram
+ (deps
+  png_header.exe
+  test.png
+  bad.bin
+  truncated.bin))
