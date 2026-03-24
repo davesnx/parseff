@@ -817,15 +817,20 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
             Effect.Deep.discontinue k exn
       )
   in
-  Fun.protect
-    ~finally:(fun () ->
-      match diagnostics_out with
-      | Some out ->
-          out := st.diagnostics_rev
-      | None ->
-          ()
-    )
-    (fun () -> go parser)
+  let write_diagnostics () =
+    match diagnostics_out with
+    | Some out ->
+        out := st.diagnostics_rev
+    | None ->
+        ()
+  in
+  match go parser with
+  | result ->
+      write_diagnostics ();
+      result
+  | exception exn ->
+      write_diagnostics ();
+      raise exn
 
 let default_handler : _ exn_handler =
   {
@@ -1489,15 +1494,20 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
             Effect.Deep.discontinue k exn
       )
   in
-  Fun.protect
-    ~finally:(fun () ->
-      match diagnostics_out with
-      | Some out ->
-          out := st.diagnostics_rev
-      | None ->
-          ()
-    )
-    (fun () -> go parser)
+  let write_diagnostics () =
+    match diagnostics_out with
+    | Some out ->
+        out := st.diagnostics_rev
+    | None ->
+        ()
+  in
+  match go parser with
+  | result ->
+      write_diagnostics ();
+      result
+  | exception exn ->
+      write_diagnostics ();
+      raise exn
 
 module Source = struct
   type t = source
