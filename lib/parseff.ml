@@ -536,6 +536,8 @@ let handle_location st input_len =
 
 (* {{{ Deep handler *)
 
+let unreachable_exn = Failure "unreachable"
+
 let pos_of_exn = function
   | Parse_error (p, _)
   | Unexpected_eof p
@@ -581,7 +583,7 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
   let st = { input; pos = 0; diagnostics_rev = []; line_index = None } in
   let input_len = String.length input in
   let nest_depth = ref 0 in
-  let last_exn = ref (Failure "unreachable") in
+  let last_exn = ref unreachable_exn in
   let rec go : 'b. (unit -> 'b) -> ('b, e) result =
    fun p ->
     match p () with
@@ -592,8 +594,32 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         handler.handle exn
     | effect Position, k ->
         Effect.Deep.continue k st.pos
-    | effect Location, k ->
-        Effect.Deep.continue k (handle_location st input_len)
+    | effect Match_char c, k -> (
+        match handle_match_char st input_len c with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Skip_while pred, k ->
+        handle_skip_while st input_len pred;
+        Effect.Deep.continue k ()
+    | effect Take_while pred, k ->
+        Effect.Deep.continue k (handle_take_while st input_len pred)
+    | effect Take_while_span pred, k ->
+        Effect.Deep.continue k (handle_take_while_span st input_len pred)
+    | effect Skip_while_then_char (pred, c), k -> (
+        match handle_skip_while_then_char st input_len pred c with
+        | () ->
+            Effect.Deep.continue k ()
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Peek_char, k ->
+        if st.pos < input_len then
+          Effect.Deep.continue k (Some (String.unsafe_get st.input st.pos))
+        else
+          Effect.Deep.continue k None
     | effect Consume s, k -> (
         match handle_consume st input_len s with
         | v ->
@@ -608,32 +634,8 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
-    | effect Match_char c, k -> (
-        match handle_match_char st input_len c with
-        | v ->
-            Effect.Deep.continue k v
-        | exception exn ->
-            Effect.Deep.discontinue k exn
-      )
-    | effect Peek_char, k ->
-        if st.pos < input_len then
-          Effect.Deep.continue k (Some (String.unsafe_get st.input st.pos))
-        else
-          Effect.Deep.continue k None
-    | effect Take_while pred, k ->
-        Effect.Deep.continue k (handle_take_while st input_len pred)
-    | effect Take_while_span pred, k ->
-        Effect.Deep.continue k (handle_take_while_span st input_len pred)
-    | effect Skip_while pred, k ->
-        handle_skip_while st input_len pred;
-        Effect.Deep.continue k ()
-    | effect Skip_while_then_char (pred, c), k -> (
-        match handle_skip_while_then_char st input_len pred c with
-        | () ->
-            Effect.Deep.continue k ()
-        | exception exn ->
-            Effect.Deep.discontinue k exn
-      )
+    | effect Location, k ->
+        Effect.Deep.continue k (handle_location st input_len)
     | effect Fused_sep_take (ws_pred, sep_char, take_pred), k -> (
         match handle_fused_sep_take st input_len ws_pred sep_char take_pred with
         | v ->
