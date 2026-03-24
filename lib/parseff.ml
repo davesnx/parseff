@@ -851,7 +851,29 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
       write_diagnostics ();
       raise exn
 
-let default_handler : _ exn_handler =
+(* O8: Deferred error formatting — during internal backtracking (or_, many),
+   errors are created and immediately discarded. We avoid format_error_msg
+   allocation by storing raw error_msg via Obj.magic, formatting only at
+   the parse boundary. *)
+let deferred_handler : _ exn_handler =
+  {
+    handle =
+      (function
+      | Parse_error (pos, msg) ->
+          (* Store error_msg directly as if it were a string — will be formatted at boundary *)
+          Error { pos; error = `Expected (Obj.magic msg : string) }
+      | Unexpected_eof pos ->
+          Error { pos; error = `Unexpected_end_of_input }
+      | User_error (pos, obj) ->
+          Error { pos; error = Obj.obj obj }
+      | Propagated_error (pos, obj) ->
+          Error { pos; error = Obj.obj obj }
+      | e ->
+          raise e
+      );
+  }
+
+let _default_handler : _ exn_handler =
   {
     handle =
       (function
@@ -868,10 +890,21 @@ let default_handler : _ exn_handler =
       );
   }
 
-let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
-  match run_deep ~max_depth default_handler input parser with
-  | result ->
+(* Format deferred error_msg at the boundary *)
+let[@inline] force_deferred_error result =
+  match result with
+  | Ok _ ->
       result
+  | Error { pos; error = `Expected raw } ->
+      (* raw was stored via Obj.magic — it's actually an error_msg *)
+      Error { pos; error = `Expected (format_error_msg (Obj.magic raw)) }
+  | Error _ ->
+      result
+
+let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
+  match run_deep ~max_depth deferred_handler input parser with
+  | result ->
+      force_deferred_error result
   | exception User_failure (pos, msg) ->
       Error { pos; error = `Failure msg }
   | exception Depth_limit_exceeded (pos, msg) ->
@@ -898,14 +931,14 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
   let diagnostics_out = ref [] in
   let result =
     match
-      run_deep ~max_depth ~diagnostics_out default_handler input (fun () ->
+      run_deep ~max_depth ~diagnostics_out deferred_handler input (fun () ->
           let v = parser () in
           Effect.perform End_of_input;
           v
       )
     with
     | result ->
-        result
+        force_deferred_error result
     | exception User_failure (pos, msg) ->
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
@@ -1598,9 +1631,9 @@ end
 
 let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
     ('a, 'e) result =
-  match run_deep_source ~max_depth default_handler src parser with
+  match run_deep_source ~max_depth deferred_handler src parser with
   | result ->
-      result
+      force_deferred_error result
   | exception User_failure (pos, msg) ->
       Error { pos; error = `Failure msg }
   | exception Depth_limit_exceeded (pos, msg) ->
@@ -1616,14 +1649,15 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
   let diagnostics_out = ref [] in
   let result =
     match
-      run_deep_source ~max_depth ~diagnostics_out default_handler src (fun () ->
+      run_deep_source ~max_depth ~diagnostics_out deferred_handler src
+        (fun () ->
           let v = parser () in
           Effect.perform End_of_input;
           v
       )
     with
     | result ->
-        result
+        force_deferred_error result
     | exception User_failure (pos, msg) ->
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
