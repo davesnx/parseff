@@ -151,7 +151,7 @@ type 'e exn_handler = { handle : 'a. exn -> ('a, 'e) result }
    either returning a value or raising [Parse_error]. Shared by deep and shallow
    handlers. *)
 
-let[@inline] handle_consume st input_len s =
+let[@inline always] handle_consume st input_len s =
   let len = String.length s in
   if len = 1 then begin
     (* O5: Special-case single-char strings — skip loop overhead *)
@@ -183,7 +183,7 @@ let[@inline] handle_consume st input_len s =
   end else
     raise (Unexpected_eof st.pos)
 
-let[@inline] handle_satisfy st input_len pred label =
+let[@inline always] handle_satisfy st input_len pred label =
   if st.pos < input_len then
     let c = String.unsafe_get st.input st.pos in
     if pred c then begin
@@ -195,7 +195,7 @@ let[@inline] handle_satisfy st input_len pred label =
     raise (Unexpected_eof st.pos)
 
 (* O2: Dedicated char handler — avoids closure + String.make allocation *)
-let[@inline] handle_match_char st input_len c =
+let[@inline always] handle_match_char st input_len c =
   if st.pos < input_len then
     let ch = String.unsafe_get st.input st.pos in
     if ch = c then begin
@@ -206,14 +206,14 @@ let[@inline] handle_match_char st input_len c =
   else
     raise (Unexpected_eof st.pos)
 
-let[@inline] scan_while inp start input_len pred =
+let[@inline always] scan_while inp start input_len pred =
   let pos = ref start in
   while !pos < input_len && pred (String.unsafe_get inp !pos) do
     pos := !pos + 1
   done;
   !pos
 
-let[@inline] handle_take_while st input_len pred =
+let[@inline always] handle_take_while st input_len pred =
   let start = st.pos in
   let end_pos = scan_while st.input start input_len pred in
   st.pos <- end_pos;
@@ -222,16 +222,16 @@ let[@inline] handle_take_while st input_len pred =
   else
     ""
 
-let[@inline] handle_take_while_span st input_len pred =
+let[@inline always] handle_take_while_span st input_len pred =
   let start = st.pos in
   let end_pos = scan_while st.input start input_len pred in
   st.pos <- end_pos;
   { buf = st.input; off = start; len = end_pos - start }
 
-let[@inline] handle_skip_while st input_len pred =
+let[@inline always] handle_skip_while st input_len pred =
   st.pos <- scan_while st.input st.pos input_len pred
 
-let[@inline] handle_skip_while_then_char st input_len pred c =
+let[@inline always] handle_skip_while_then_char st input_len pred c =
   let inp = st.input in
   let pos = scan_while inp st.pos input_len pred in
   if pos < input_len && String.unsafe_get inp pos = c then
@@ -268,8 +268,8 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
       raise (Parse_error (pos, Expected_char sep_char))
   end
 
-let[@inline] handle_sep_by_take_core st input_len ws_pred sep_char take_pred fn
-    =
+let[@inline always] handle_sep_by_take_core st input_len ws_pred sep_char
+    take_pred fn =
   let inp = st.input in
   let start = st.pos in
   let first_end = scan_while inp start input_len take_pred in
@@ -297,12 +297,13 @@ let[@inline] handle_sep_by_take_core st input_len ws_pred sep_char take_pred fn
     List.rev !acc
   end
 
-let[@inline] handle_sep_by_take st input_len ws_pred sep_char take_pred =
+let[@inline always] handle_sep_by_take st input_len ws_pred sep_char take_pred =
   handle_sep_by_take_core st input_len ws_pred sep_char take_pred
     (fun inp off len -> String.sub inp off len
   )
 
-let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
+let[@inline always] handle_sep_by_take_span st input_len ws_pred sep_char
+    take_pred =
   handle_sep_by_take_core st input_len ws_pred sep_char take_pred
     (fun inp off len -> { buf = inp; off; len }
   )
