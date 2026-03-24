@@ -43,6 +43,8 @@ type _ Effect.t +=
   | Skip_while_uchar : (Uchar.t -> bool) -> unit Effect.t
   | Take_while_span_uchar : (Uchar.t -> bool) -> span Effect.t
   | Skip_while_then_uchar : (Uchar.t -> bool) * Uchar.t -> unit Effect.t
+  | Match_char : char -> char Effect.t
+  | Peek_char : char option Effect.t
 
 (* When adding a new effect constructor above, also add it here.
    Used by the unhandled-effect printer at the bottom of this file. *)
@@ -76,7 +78,9 @@ let is_parseff_effect : type a. a Effect.t -> bool = function
   | Take_while_uchar _
   | Skip_while_uchar _
   | Take_while_span_uchar _
-  | Skip_while_then_uchar _ ->
+  | Skip_while_then_uchar _
+  | Match_char _
+  | Peek_char ->
       true
   | _ ->
       false
@@ -93,7 +97,33 @@ type ('e, 'd) error_with_diagnostics = {
 type ('a, 'e, 'd) result_with_diagnostics =
   ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 
-exception Parse_error of int * string
+(* Structured error messages: defer string formatting to the boundary *)
+type error_msg =
+  | Msg of string
+  | Expected_string of string
+  | Expected_char of char
+  | Expected_label of string
+  | Expected_value
+  | Composed of error_msg * error_msg
+  | No_alternative
+
+let rec format_error_msg = function
+  | Msg s ->
+      s
+  | Expected_string s ->
+      "expected \"" ^ String.escaped s ^ "\""
+  | Expected_char c ->
+      "expected '" ^ String.make 1 c ^ "'"
+  | Expected_label l ->
+      "expected " ^ l
+  | Expected_value ->
+      "expected value"
+  | Composed (l, r) ->
+      format_error_msg l ^ " or " ^ format_error_msg r
+  | No_alternative ->
+      "no alternative matched"
+
+exception Parse_error of int * error_msg
 exception Unexpected_eof of int
 exception User_error of int * Obj.t
 exception User_failure of int * string
@@ -123,7 +153,18 @@ type 'e exn_handler = { handle : 'a. exn -> ('a, 'e) result }
 
 let[@inline] handle_consume st input_len s =
   let len = String.length s in
-  if st.pos + len <= input_len then begin
+  if len = 1 then begin
+    (* O5: Special-case single-char strings — skip loop overhead *)
+      let c = String.unsafe_get s 0 in
+      if st.pos < input_len then
+        if String.unsafe_get st.input st.pos = c then begin
+          st.pos <- st.pos + 1;
+          s
+        end else
+          raise (Parse_error (st.pos, Expected_string s))
+      else
+        raise (Unexpected_eof st.pos)
+  end else if st.pos + len <= input_len then begin
     let inp = st.input in
     let pos = st.pos in
     let rec check i =
@@ -138,7 +179,7 @@ let[@inline] handle_consume st input_len s =
       st.pos <- pos + len;
       s
     end else
-      raise (Parse_error (pos, "expected \"" ^ String.escaped s ^ "\""))
+      raise (Parse_error (pos, Expected_string s))
   end else
     raise (Unexpected_eof st.pos)
 
@@ -149,7 +190,19 @@ let[@inline] handle_satisfy st input_len pred label =
       st.pos <- st.pos + 1;
       c
     end else
-      raise (Parse_error (st.pos, "expected " ^ label))
+      raise (Parse_error (st.pos, Expected_label label))
+  else
+    raise (Unexpected_eof st.pos)
+
+(* O2: Dedicated char handler — avoids closure + String.make allocation *)
+let[@inline] handle_match_char st input_len c =
+  if st.pos < input_len then
+    let ch = String.unsafe_get st.input st.pos in
+    if ch = c then begin
+      st.pos <- st.pos + 1;
+      c
+    end else
+      raise (Parse_error (st.pos, Expected_char c))
   else
     raise (Unexpected_eof st.pos)
 
@@ -188,7 +241,7 @@ let[@inline] handle_skip_while_then_char st input_len pred c =
     if pos >= input_len then
       raise (Unexpected_eof pos)
     else
-      raise (Parse_error (pos, "expected '" ^ String.make 1 c ^ "'"))
+      raise (Parse_error (pos, Expected_char c))
   end
 
 let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
@@ -205,14 +258,14 @@ let[@inline] handle_fused_sep_take st input_len ws_pred sep_char take_pred =
       if end_pos >= input_len then
         raise (Unexpected_eof end_pos)
       else
-        raise (Parse_error (end_pos, "expected value"))
+        raise (Parse_error (end_pos, Expected_value))
     end
   end else begin
     st.pos <- pos;
     if pos >= input_len then
       raise (Unexpected_eof pos)
     else
-      raise (Parse_error (pos, "expected '" ^ String.make 1 sep_char ^ "'"))
+      raise (Parse_error (pos, Expected_char sep_char))
   end
 
 let[@inline] handle_sep_by_take_core st input_len ws_pred sep_char take_pred fn
@@ -254,12 +307,15 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
     (fun inp off len -> { buf = inp; off; len }
   )
 
+let regex_failed = Msg "regex match failed"
+let invalid_utf8_msg = Msg "invalid UTF-8"
+
 let[@inline] handle_match_regex st input_len re =
   try
     let groups = Re.exec ~pos:st.pos re st.input in
     let match_start = Re.Group.start groups 0 in
     if match_start <> st.pos then
-      raise (Parse_error (st.pos, "regex match failed"))
+      raise (Parse_error (st.pos, regex_failed))
     else
       let matched = Re.Group.get groups 0 in
       let match_end = Re.Group.stop groups 0 in
@@ -269,11 +325,12 @@ let[@inline] handle_match_regex st input_len re =
     if st.pos >= input_len then
       raise (Unexpected_eof st.pos)
     else
-      raise (Parse_error (st.pos, "regex match failed"))
+      raise (Parse_error (st.pos, regex_failed))
+
+let expected_end_of_input = Msg "expected end of input"
 
 let[@inline] handle_end_of_input st input_len =
-  if st.pos <> input_len then
-    raise (Parse_error (st.pos, "expected end of input"))
+  if st.pos <> input_len then raise (Parse_error (st.pos, expected_end_of_input))
 
 let[@inline] handle_any_uint8 st input_len =
   if st.pos < input_len then begin
@@ -369,7 +426,7 @@ let[@inline] handle_satisfy_uchar st input_len pred label =
     st.pos <- st.pos + Uchar.utf_decode_length d;
     u
   end else
-    raise (Parse_error (st.pos, "expected " ^ label))
+    raise (Parse_error (st.pos, Expected_label label))
 
 let[@inline] scan_while_uchar inp start input_len pred =
   let pos = ref start in
@@ -416,7 +473,7 @@ let[@inline] handle_skip_while_then_uchar st input_len pred term =
     st.pos <- pos + Uchar.utf_decode_length d
   else begin
     st.pos <- pos;
-    raise (Parse_error (pos, "expected " ^ uchar_label term))
+    raise (Parse_error (pos, Msg ("expected " ^ uchar_label term)))
   end
 
 (* }}} *)
@@ -505,7 +562,7 @@ let compose_branch_errors left_exn right_exn =
   else
     match (left_exn, right_exn) with
     | Parse_error (_, lmsg), Parse_error (pos, rmsg) ->
-        Parse_error (pos, lmsg ^ " or " ^ rmsg)
+        Parse_error (pos, Composed (lmsg, rmsg))
     | Parse_error _, Unexpected_eof _ ->
         left_exn
     | Unexpected_eof _, Parse_error _ ->
@@ -550,6 +607,18 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
+    | effect Match_char c, k -> (
+        match handle_match_char st input_len c with
+        | v ->
+            Effect.Deep.continue k v
+        | exception exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Peek_char, k ->
+        if st.pos < input_len then
+          Effect.Deep.continue k (Some (String.unsafe_get st.input st.pos))
+        else
+          Effect.Deep.continue k None
     | effect Take_while pred, k ->
         Effect.Deep.continue k (handle_take_while st input_len pred)
     | effect Take_while_span pred, k ->
@@ -713,7 +782,7 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | v ->
             Effect.Deep.continue k v
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
@@ -722,28 +791,28 @@ let run_deep (type e) ?diagnostics_out ~max_depth (handler : e exn_handler)
         | v ->
             Effect.Deep.continue k v
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
       )
     | effect Take_while_span_uchar pred, k -> (
         match handle_take_while_span_uchar st input_len pred with
         | v ->
             Effect.Deep.continue k v
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
       )
     | effect Skip_while_uchar pred, k -> (
         match handle_skip_while_uchar st input_len pred with
         | () ->
             Effect.Deep.continue k ()
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
       )
     | effect Skip_while_then_uchar (pred, term), k -> (
         match handle_skip_while_then_uchar st input_len pred term with
         | () ->
             Effect.Deep.continue k ()
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
@@ -763,7 +832,7 @@ let default_handler : _ exn_handler =
     handle =
       (function
       | Parse_error (pos, msg) ->
-          Error { pos; error = `Expected msg }
+          Error { pos; error = `Expected (format_error_msg msg) }
       | Unexpected_eof pos ->
           Error { pos; error = `Unexpected_end_of_input }
       | User_error (pos, obj) ->
@@ -904,7 +973,7 @@ let handle_skip_while_then_char_source src st pred c =
   else if st.pos >= src.input_len then
     raise (Unexpected_eof st.pos)
   else
-    raise (Parse_error (st.pos, "expected '" ^ String.make 1 c ^ "'"))
+    raise (Parse_error (st.pos, Expected_char c))
 
 let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
   handle_skip_while_source src st ws_pred;
@@ -920,11 +989,11 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
     else if st.pos >= src.input_len then
       raise (Unexpected_eof st.pos)
     else
-      raise (Parse_error (st.pos, "expected value"))
+      raise (Parse_error (st.pos, Expected_value))
   end else if st.pos >= src.input_len then
     raise (Unexpected_eof st.pos)
   else
-    raise (Parse_error (st.pos, "expected '" ^ String.make 1 sep_char ^ "'"))
+    raise (Parse_error (st.pos, Expected_char sep_char))
 
 let handle_sep_by_take_source_core src st ws_pred sep_char take_pred fn =
   let start = st.pos in
@@ -977,7 +1046,7 @@ let handle_match_regex_source src st re =
       let match_start = Re.Group.start groups 0 in
       let match_end = Re.Group.stop groups 0 in
       if match_start <> st.pos then
-        raise (Parse_error (st.pos, "regex match failed"))
+        raise (Parse_error (st.pos, regex_failed))
       else if match_end = src.input_len && not src.eof then begin
         ignore (try_refill src);
         st.input <- src.input;
@@ -996,14 +1065,14 @@ let handle_match_regex_source src st re =
       end else if st.pos >= src.input_len then
         raise (Unexpected_eof st.pos)
       else
-        raise (Parse_error (st.pos, "regex match failed"))
+        raise (Parse_error (st.pos, regex_failed))
   in
   loop ()
 
 let handle_end_of_input_source src st =
   if st.pos = src.input_len && not src.eof then ignore (try_refill src);
   if st.pos <> src.input_len then
-    raise (Parse_error (st.pos, "expected end of input"))
+    raise (Parse_error (st.pos, expected_end_of_input))
 
 (* {{{ UTF-8 streaming helpers *)
 
@@ -1047,7 +1116,7 @@ let handle_satisfy_uchar_source src st pred label =
     st.input <- src.input;
     u
   end else
-    raise (Parse_error (st.pos, "expected " ^ label))
+    raise (Parse_error (st.pos, Expected_label label))
 
 let scan_while_uchar_source src st pred =
   let continue_loop = ref true in
@@ -1090,7 +1159,7 @@ let handle_skip_while_then_uchar_source src st pred term =
     st.pos <- st.pos + Uchar.utf_decode_length d;
     st.input <- src.input
   end else
-    raise (Parse_error (st.pos, "expected " ^ uchar_label term))
+    raise (Parse_error (st.pos, Msg ("expected " ^ uchar_label term)))
 
 (* }}} *)
 
@@ -1146,6 +1215,28 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         | exn ->
             Effect.Deep.discontinue k exn
       )
+    | effect Match_char c, k -> (
+        try
+          ignore (ensure_bytes src st.pos 1);
+          sync_to_source ();
+          match handle_match_char st src.input_len c with
+          | v ->
+              Effect.Deep.continue k v
+          | exception exn ->
+              Effect.Deep.discontinue k exn
+        with
+        | User_failure _ as exn ->
+            raise exn
+        | exn ->
+            Effect.Deep.discontinue k exn
+      )
+    | effect Peek_char, k ->
+        ignore (ensure_bytes src st.pos 1);
+        sync_to_source ();
+        if st.pos < src.input_len then
+          Effect.Deep.continue k (Some (String.unsafe_get src.input st.pos))
+        else
+          Effect.Deep.continue k None
     | effect Take_while pred, k ->
         Effect.Deep.continue k (handle_take_while_source src st pred)
     | effect Take_while_span pred, k ->
@@ -1363,7 +1454,7 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         | v ->
             Effect.Deep.continue k v
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
@@ -1372,28 +1463,28 @@ let run_deep_source (type e) ?diagnostics_out ~max_depth
         | v ->
             Effect.Deep.continue k v
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
       )
     | effect Take_while_span_uchar pred, k -> (
         match handle_take_while_span_uchar_source src st pred with
         | v ->
             Effect.Deep.continue k v
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
       )
     | effect Skip_while_uchar pred, k -> (
         match handle_skip_while_uchar_source src st pred with
         | () ->
             Effect.Deep.continue k ()
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
       )
     | effect Skip_while_then_uchar (pred, term), k -> (
         match handle_skip_while_then_uchar_source src st pred term with
         | () ->
             Effect.Deep.continue k ()
         | exception Invalid_utf8 pos ->
-            Effect.Deep.discontinue k (Parse_error (pos, "invalid UTF-8"))
+            Effect.Deep.discontinue k (Parse_error (pos, invalid_utf8_msg))
         | exception exn ->
             Effect.Deep.discontinue k exn
       )
@@ -1526,7 +1617,9 @@ let location_of_position input pos =
 
 let[@inline] consume s = Effect.perform (Consume s)
 let[@inline] satisfy pred ~label = Effect.perform (Satisfy (pred, label))
-let[@inline] char c = satisfy (Char.equal c) ~label:(String.make 1 c)
+
+(* O2: Use dedicated Match_char effect — avoids closure + String.make *)
+let[@inline] char c = Effect.perform (Match_char c)
 let[@inline] match_regex re = Effect.perform (Match_re re)
 
 let[@inline] fail msg =
@@ -1542,7 +1635,9 @@ let take_while ?(at_least = 0) ?label pred =
   if at_least > 0 && String.length s < at_least then begin
     let pos = Effect.perform Position in
     raise
-      (Parse_error (pos, match label with Some l -> l | None -> "take_while"))
+      (Parse_error
+         (pos, Msg (match label with Some l -> l | None -> "take_while"))
+      )
   end else
     s
 
@@ -1569,6 +1664,9 @@ let[@inline] warn_at ~pos diagnostic = Effect.perform (Warn_at (pos, diagnostic)
 let[@inline] position () = Effect.perform Position
 let[@inline] location () = Effect.perform Location
 let[@inline] end_of_input () = Effect.perform End_of_input
+
+(* O3: Zero-backtracking lookahead — avoids Choose effect for dispatch *)
+let[@inline] peek_char () = Effect.perform Peek_char
 let[@inline] or_ p q () = Effect.perform (Choose (p, q))
 let[@inline] look_ahead p = Effect.perform (Look_ahead p)
 let[@inline] rec_ p = Effect.perform (Rec_ p)
@@ -1714,11 +1812,16 @@ let take n =
   else
     Effect.perform (Take n)
 
+(* O4: Extract position from caught exception instead of extra Position effect *)
 let expect msg p =
-  try p ()
-  with Parse_error _ | Unexpected_eof _ | Propagated_error _ ->
-    let pos = Effect.perform Position in
-    raise (Parse_error (pos, msg))
+  let err_msg = Msg msg in
+  try p () with
+  | Parse_error (pos, _) ->
+      raise (Parse_error (pos, err_msg))
+  | Unexpected_eof pos ->
+      raise (Parse_error (pos, err_msg))
+  | Propagated_error (pos, _) ->
+      raise (Parse_error (pos, err_msg))
 
 let catch p handler = try p () with User_failure (_pos, msg) -> handler msg
 
@@ -1726,7 +1829,7 @@ let one_of parsers () =
   let rec try_all = function
     | [] ->
         let pos = Effect.perform Position in
-        raise (Parse_error (pos, "no alternative matched"))
+        raise (Parse_error (pos, No_alternative))
     | [ p ] ->
         p ()
     | p :: rest ->
@@ -1737,10 +1840,11 @@ let one_of parsers () =
 let one_of_labeled labeled_parsers () =
   let parsers = List.map snd labeled_parsers in
   try one_of parsers ()
-  with Parse_error _ | Unexpected_eof _ | Propagated_error _ ->
+  with
+  | Parse_error (pos, _) | Unexpected_eof pos | Propagated_error (pos, _) ->
     let expected = String.concat ", " (List.map fst labeled_parsers) in
-    let pos = Effect.perform Position in
-    raise (Parse_error (pos, Printf.sprintf "expected one of: %s" expected))
+    raise
+      (Parse_error (pos, Msg (Printf.sprintf "expected one of: %s" expected)))
 
 let expect_int16 any_fn expected =
   let actual = any_fn () in
@@ -1749,7 +1853,8 @@ let expect_int16 any_fn expected =
     raise
       (Parse_error
          ( pos,
-           Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual
+           Msg
+             (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
          )
       )
 
@@ -1760,7 +1865,10 @@ let expect_int32 any_fn expected =
     raise
       (Parse_error
          ( pos,
-           Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual
+           Msg
+             (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected
+                actual
+             )
          )
       )
 
@@ -1771,8 +1879,10 @@ let expect_int64 any_fn expected =
     raise
       (Parse_error
          ( pos,
-           Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected
-             actual
+           Msg
+             (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected
+                actual
+             )
          )
       )
 
@@ -1838,7 +1948,7 @@ module Utf8 = struct
         let pos = Effect.perform Position in
         raise
           (Parse_error
-             (pos, match label with Some l -> l | None -> "take_while")
+             (pos, Msg (match label with Some l -> l | None -> "take_while"))
           )
       end else
         s

@@ -326,6 +326,26 @@ val end_of_input : unit -> unit
       result
     ]} *)
 
+val peek_char : unit -> char option
+(** [peek_char ()] returns [Some c] where [c] is the next input character
+    without consuming it, or [None] if at end of input. This is more efficient
+    than using {!or_} or {!look_ahead} for single-character lookahead since it
+    avoids backtracking overhead entirely.
+
+    Example:
+    {@ocaml[
+    let value () =
+      match peek_char () with
+      | Some '[' ->
+          parse_array ()
+      | Some '"' ->
+          parse_string ()
+      | Some c when c >= '0' && c <= '9' ->
+          parse_number ()
+      | _ ->
+          fail "expected value"
+    ]} *)
+
 val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 (** [or_] is the alternation combinator. Tries the left parser; if it fails,
     backtracks and tries the right parser.

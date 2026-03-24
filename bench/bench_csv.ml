@@ -12,6 +12,28 @@ module Angstrom_CSV = struct
   let bench input = parse_string ~consume:All csv input |> Result.to_option
 end
 
+(** {1 Angstrom (optimized)} *)
+
+module Angstrom_CSV_Optimized = struct
+  open Angstrom
+
+  let field = take_while (function ',' -> false | _ -> true)
+
+  (* Manual loop with peek_char — no sep_by backtracking *)
+  let csv =
+    field >>= fun first ->
+    let rec loop acc =
+      peek_char >>= function
+      | Some ',' ->
+          advance 1 *> field >>= fun f -> loop (f :: acc)
+      | _ ->
+          return (List.rev acc)
+    in
+    loop [ first ]
+
+  let bench input = parse_string ~consume:All csv input |> Result.to_option
+end
+
 (** {1 MParser} *)
 
 module MParser_CSV = struct
@@ -28,13 +50,30 @@ module MParser_CSV = struct
         None
 end
 
+(** {1 Parseff (generic)} *)
+
+module Parseff_CSV_Generic = struct
+  let field () = Parseff.take_while (fun c -> c <> ',')
+
+  let csv () = Parseff.sep_by field (fun () -> ignore (Parseff.char ',')) ()
+
+  let bench input =
+    match Parseff.parse input csv with
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
+end
+
 (** {1 Runner} *)
 
 let () =
   (* warmup *)
   for _ = 1 to 1000 do
     ignore (Parseff_bench.parse_csv csv_input);
+    ignore (Parseff_CSV_Generic.bench csv_input);
     ignore (Angstrom_CSV.bench csv_input);
+    ignore (Angstrom_CSV_Optimized.bench csv_input);
     ignore (MParser_CSV.bench csv_input)
   done;
 
@@ -45,8 +84,19 @@ let () =
   let results =
     latencyN ~repeat:3 100000L
       [
-        ("Parseff", (fun () -> ignore (Parseff_bench.parse_csv csv_input)), ());
+        ( "Parseff (fused)",
+          (fun () -> ignore (Parseff_bench.parse_csv csv_input)),
+          ()
+        );
+        ( "Parseff (generic)",
+          (fun () -> ignore (Parseff_CSV_Generic.bench csv_input)),
+          ()
+        );
         ("Angstrom", (fun () -> ignore (Angstrom_CSV.bench csv_input)), ());
+        ( "Angstrom (opt)",
+          (fun () -> ignore (Angstrom_CSV_Optimized.bench csv_input)),
+          ()
+        );
         ("MParser", (fun () -> ignore (MParser_CSV.bench csv_input)), ());
       ]
   in
