@@ -304,9 +304,33 @@ let[@inline always] handle_sep_by_take st input_len ws_pred sep_char take_pred =
 
 let[@inline always] handle_sep_by_take_span st input_len ws_pred sep_char
     take_pred =
-  handle_sep_by_take_core st input_len ws_pred sep_char take_pred
-    (fun inp off len -> { buf = inp; off; len }
-  )
+  let inp = st.input in
+  let start = st.pos in
+  let first_end = scan_while inp start input_len take_pred in
+  if first_end <= start then begin
+    st.pos <- first_end;
+    []
+  end else begin
+    let acc = ref [ { buf = inp; off = start; len = first_end - start } ] in
+    let pos = ref first_end in
+    let continue_loop = ref true in
+    while !continue_loop do
+      let ws_end = scan_while inp !pos input_len ws_pred in
+      if ws_end < input_len && String.unsafe_get inp ws_end = sep_char then begin
+        let after_ws = scan_while inp (ws_end + 1) input_len ws_pred in
+        let elem_end = scan_while inp after_ws input_len take_pred in
+        if elem_end > after_ws then begin
+          acc :=
+            { buf = inp; off = after_ws; len = elem_end - after_ws } :: !acc;
+          pos := elem_end
+        end else
+          continue_loop := false
+      end else
+        continue_loop := false
+    done;
+    st.pos <- !pos;
+    List.rev !acc
+  end
 
 let regex_failed = Msg "regex match failed"
 let invalid_utf8_msg = Msg "invalid UTF-8"
