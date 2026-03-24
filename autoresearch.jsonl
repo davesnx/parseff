@@ -1,0 +1,2 @@
+{"type":"config","name":"parseff-oxcaml","metricName":"json_fused","metricUnit":"parses/sec","bestDirection":"higher"}
+{"run":1,"commit":"b9da14f","metric":4735745,"metrics":{"json_generic":862467,"csv_fused":3586093,"csv_generic":1522893,"arith_fused":6588917,"arith_generic":685836},"status":"keep","description":"baseline: -O3 -unbox-closures","timestamp":1774371701,"segment":0}

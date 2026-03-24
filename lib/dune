@@ -3,4 +3,4 @@
  (public_name parseff)
  (libraries re uucp)
  (ocamlopt_flags
-  (:standard -O3 -unbox-closures)))
+  (:standard -O3 -unbox-closures -unbox-closures-factor 20)))

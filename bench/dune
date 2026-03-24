@@ -3,7 +3,7 @@
  (libraries parseff)
  (modules parseff_bench)
  (ocamlopt_flags
-  (:standard -O3 -unbox-closures)))
+  (:standard -O3 -unbox-closures -unbox-closures-factor 20)))
 
 (executables
  (names
@@ -17,11 +17,11 @@
  (libraries parseff parseff_bench angstrom bigstringaf mparser re benchmark)
  (modules :standard \ parseff_bench bench_quick)
  (ocamlopt_flags
-  (:standard -O3 -unbox-closures)))
+  (:standard -O3 -unbox-closures -unbox-closures-factor 20)))
 
 (executable
  (name bench_quick)
  (libraries parseff parseff_bench)
  (modules bench_quick)
  (ocamlopt_flags
-  (:standard -O3 -unbox-closures)))
+  (:standard -O3 -unbox-closures -unbox-closures-factor 20)))
