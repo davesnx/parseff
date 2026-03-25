@@ -8,16 +8,16 @@ Angstrom side by side: performance, API style, and when to use each.
 
 {1 Performance}
 
-Benchmarked on a JSON array parser ([{[1, 2, 3, ..., 10]}]) over 100,000
+Benchmarked on a JSON array parser ([{[1, 2, 3, ..., 10]}]) over 1,000,000
 iterations (3 runs). Source:
 {{:https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml} bench/bench_angstrom.ml}.
 
 {v
                         Parses/sec     vs. Angstrom (generic)   Minor allocs
-Parseff (optimized)     ~2,120,000     1.9x faster              133 MB
-Parseff (generic)       ~1,520,000     1.4x faster               82 MB
-Angstrom (optimized)    ~1,570,000     1.4x faster             1108 MB
-Angstrom (generic)      ~1,120,000     baseline                 590 MB
+Parseff (optimized)     ~2,360,000     2.1x faster              1.3 GB
+Parseff (generic)       ~1,540,000     1.4x faster              800 MB
+Angstrom (optimized)    ~1,450,000     1.3x faster             11.1 GB
+Angstrom (generic)      ~1,110,000     baseline                 5.9 GB
 v}
 
 {b Optimized} uses [sep_by_take_span] plus [List.map] over zero-copy spans.
@@ -28,7 +28,11 @@ conversion still uses the stdlib [float_of_string] via [Parseff.span_to_string].
 combinators with the same [float_of_string] conversion as [Angstrom (generic)],
 so it reflects the baseline direct-style API.
 
-All parsers produce the same output ([float list]) from the same input.
+All parsers produce the same output ([float list]) from the same input and
+require full input consumption.
+
+Minor allocation totals are the cumulative values reported by
+[Benchmark.latencyN] for the full 1,000,000-parse run.
 
 {2 Why Parseff is faster}
 

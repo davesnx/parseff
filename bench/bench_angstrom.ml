@@ -18,6 +18,7 @@ let[@inline always] is_ws = function
 
 module Parseff_JSON = struct
   let json_array_generic () =
+    Parseff.skip_while is_ws;
     let _ = Parseff.char '[' in
     Parseff.skip_while is_ws;
     let number () =
@@ -32,6 +33,7 @@ module Parseff_JSON = struct
     let elements = Parseff.sep_by number comma () in
     Parseff.skip_while is_ws;
     let _ = Parseff.char ']' in
+    Parseff.end_of_input ();
     elements
 
   let bench_optimized = Parseff_bench.parse_json_array
@@ -103,10 +105,14 @@ end
 
 module Parseff_CSV = struct
   let csv_generic () =
-    Parseff.sep_by
-      (fun () -> Parseff.take_while (fun c -> c <> ','))
-      (fun () -> ignore (Parseff.char ','))
-      ()
+    let fields =
+      Parseff.sep_by
+        (fun () -> Parseff.take_while (fun c -> c <> ','))
+        (fun () -> ignore (Parseff.char ','))
+        ()
+    in
+    Parseff.end_of_input ();
+    fields
 
   let bench_fused input = Parseff_bench.parse_csv input
 
@@ -179,7 +185,11 @@ module Parseff_Arith = struct
       ()
 
   let term () = Parseff.fold_left number mul_op ()
-  let expr () = Parseff.fold_left term add_op ()
+
+  let expr () =
+    let result = Parseff.fold_left term add_op () in
+    Parseff.end_of_input ();
+    result
 
   let bench_fused input = Parseff_bench.parse_arithmetic input
 
@@ -257,11 +267,11 @@ module Angstrom_Arith_Optimized = struct
   let bench input = parse_string ~consume:All expr input |> Result.to_option
 end
 
-let run_section title input benches =
+let run_section title input iterations benches =
   Printf.printf "%s\n" title;
   Printf.printf "%s\n\n" (String.make (String.length title) '=');
   Printf.printf "Input: %s\n\n" input;
-  let results = latencyN ~repeat:3 100000L benches in
+  let results = latencyN ~repeat:3 iterations benches in
   print_newline ();
   tabulate results;
   Printf.printf "\n"
@@ -282,7 +292,7 @@ let () =
     ignore (Angstrom_Arith_Optimized.bench arith_input)
   done;
 
-  run_section "JSON Benchmark: Parseff vs Angstrom" json_input
+  run_section "JSON Benchmark: Parseff vs Angstrom" json_input 1000000L
     [
       ( "Parseff (optimized)",
         (fun () -> ignore (Parseff_JSON.bench_optimized json_input)),
@@ -302,7 +312,7 @@ let () =
       );
     ];
 
-  run_section "CSV Benchmark: Parseff vs Angstrom" csv_input
+  run_section "CSV Benchmark: Parseff vs Angstrom" csv_input 2000000L
     [
       ( "Parseff (fused)",
         (fun () -> ignore (Parseff_CSV.bench_fused csv_input)),
@@ -322,7 +332,7 @@ let () =
       );
     ];
 
-  run_section "Arithmetic Benchmark: Parseff vs Angstrom" arith_input
+  run_section "Arithmetic Benchmark: Parseff vs Angstrom" arith_input 5000000L
     [
       ( "Parseff (fused)",
         (fun () -> ignore (Parseff_Arith.bench_fused arith_input)),

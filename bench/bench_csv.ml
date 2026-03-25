@@ -40,7 +40,7 @@ module MParser_CSV = struct
   open MParser
 
   let field : (string, unit) t = many1_satisfy (fun c -> c <> ',') <|> return ""
-  let csv : (string list, unit) t = sep_by1 field (char ',')
+  let csv : (string list, unit) t = sep_by1 field (char ',') << eof
 
   let bench input =
     match parse_string csv input () with
@@ -55,7 +55,12 @@ end
 module Parseff_CSV_Generic = struct
   let field () = Parseff.take_while (fun c -> c <> ',')
 
-  let csv () = Parseff.sep_by field (fun () -> ignore (Parseff.char ',')) ()
+  let csv () =
+    let fields =
+      Parseff.sep_by field (fun () -> ignore (Parseff.char ',')) ()
+    in
+    Parseff.end_of_input ();
+    fields
 
   let bench input =
     match Parseff.parse input csv with
@@ -80,7 +85,7 @@ let () =
   Printf.printf "Input: %s\n\n" csv_input;
 
   let results =
-    latencyN ~repeat:3 100000L
+    latencyN ~repeat:3 2000000L
       [
         ( "Parseff (fused)",
           (fun () -> ignore (Parseff_bench.parse_csv csv_input)),

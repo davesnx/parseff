@@ -134,7 +134,11 @@ module Parseff_Arith_Generic = struct
       ()
 
   let term () = Parseff.fold_left number mul_op ()
-  let expr () = Parseff.fold_left term add_op ()
+
+  let expr () =
+    let result = Parseff.fold_left term add_op () in
+    Parseff.end_of_input ();
+    result
 
   let bench input =
     match Parseff.parse input expr with
@@ -159,7 +163,7 @@ let () =
   Printf.printf "Input: %s\n\n" arith_input;
 
   let results =
-    latencyN ~repeat:3 100000L
+    latencyN ~repeat:3 5000000L
       [
         ( "Parseff (fused)",
           (fun () -> ignore (Parseff_bench.parse_arithmetic arith_input)),

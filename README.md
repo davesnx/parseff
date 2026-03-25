@@ -63,7 +63,7 @@ let () =
 
 ## Performance
 
-In the JSON benchmark, `Parseff`'s baseline generic parser is ~1.2x faster than `Angstrom (generic)`, and its optimized path is ~5.0x faster. The optimized path is still ~3.8x faster than Angstrom's optimized parser while reducing minor allocations from ~590 MB (`Angstrom (generic)`) to ~107 MB. See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for details and [bench/bench\_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml) for the benchmark.
+In the JSON benchmark, `Parseff`'s baseline generic parser is ~1.4x faster than `Angstrom (generic)`, and its optimized path is ~2.1x faster. The optimized path is still ~1.6x faster than Angstrom's optimized parser while reducing minor allocations from ~5.9 GB (`Angstrom (generic)`) to ~1.3 GB over the full 1,000,000-parse run. See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for details and [bench/bench\_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml) for the benchmark.
 
 
 ## Documentation

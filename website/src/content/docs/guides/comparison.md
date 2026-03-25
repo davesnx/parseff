@@ -11,21 +11,23 @@ How Parseff compares to Angstrom in performance, API style, and trade-offs.
 
 ## Performance
 
-Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 100,000 iterations (3 runs). Source: [bench/bench_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml).
+Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 1,000,000 iterations (3 runs). Source: [bench/bench_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml).
 
 ```
                         Parses/sec     vs. Angstrom (generic)   Minor allocs
-Parseff (optimized)     ~5,980,000     5.0x faster              107 MB
-Parseff (generic)       ~1,500,000     1.2x faster               82 MB
-Angstrom (optimized)    ~1,590,000     1.3x faster             1108 MB
-Angstrom (generic)      ~1,210,000     baseline                 590 MB
+Parseff (optimized)     ~2,360,000     2.1x faster              1.3 GB
+Parseff (generic)       ~1,540,000     1.4x faster              800 MB
+Angstrom (optimized)    ~1,450,000     1.3x faster             11.1 GB
+Angstrom (generic)      ~1,110,000     baseline                 5.9 GB
 ```
 
-**Optimized** uses `sep_by_take_span_map` with a custom `float_of_span` so span scanning and number conversion happen in one fused pass, avoiding both `float_of_string` on common cases and the intermediate `span list`.
+**Optimized** uses `sep_by_take_span` plus `List.map` over zero-copy spans. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.span_to_string`.
 
 **Generic** uses the ordinary `char`, `skip_while`, `take_while`, and `sep_by` combinators with the same `float_of_string` conversion as `Angstrom (generic)`, so it reflects the baseline direct-style API.
 
-All parsers produce the same output (`float list`) from the same input.
+All parsers produce the same output (`float list`) from the same input and require full input consumption.
+
+Minor allocation totals are the cumulative values reported by `Benchmark.latencyN` for the full 1,000,000-parse run.
 
 ### Why Parseff is faster
 

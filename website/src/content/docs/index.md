@@ -21,7 +21,7 @@ Parseff is a direct-style parser combinator library for OCaml 5 where parsers ar
 
 ## Performance
 
-In the JSON benchmark, `Parseff` is ~1.1x faster than Angstrom in fair/generic mode and ~3.7x faster in optimized mode. It also reduces minor allocations from ~590 MB (Angstrom baseline) to ~139 MB in the optimized path. See the [full comparison](/parseff/guides/comparison/) for details and [bench/bench\_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml) for the benchmark.
+In the JSON benchmark, `Parseff`'s baseline generic parser is ~1.4x faster than `Angstrom (generic)`, and its optimized path is ~2.1x faster. The optimized path is still ~1.6x faster than `Angstrom (optimized)` while reducing minor allocations from ~5.9 GB (`Angstrom (generic)`) to ~1.3 GB over the full 1,000,000-parse run. See the [full comparison](/parseff/guides/comparison/) for the full table and methodology, and [bench/bench\_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml) for the benchmark source.
 
 ## Installation
 

@@ -15,6 +15,7 @@ let json_array () =
   let spans = Parseff.sep_by_take_span is_ws ',' is_num in
   let elements = List.map float_of_span spans in
   Parseff.skip_while_then_char is_ws ']';
+  Parseff.end_of_input ();
   elements
 
 let parse_json_array input =
@@ -28,7 +29,9 @@ let parse_json_array input =
 
 let csv () =
   let spans = Parseff.sep_by_take_span (fun _ -> false) ',' is_not_comma in
-  List.map Parseff.span_to_string spans
+  let fields = List.map Parseff.span_to_string spans in
+  Parseff.end_of_input ();
+  fields
 
 let parse_csv input =
   match Parseff.parse input csv with
@@ -98,7 +101,9 @@ let expr () =
         result
   in
   let first_term, rest_nums, rest_ops = pass1 first nums ops in
-  pass2 first_term rest_nums rest_ops
+  let result = pass2 first_term rest_nums rest_ops in
+  Parseff.end_of_input ();
+  result
 
 let parse_arithmetic input =
   match Parseff.parse input expr with
