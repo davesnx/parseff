@@ -33,9 +33,11 @@ let bool_parser () =
     ()
 (* "true"  -> Ok true  *)
 (* "false" -> Ok false *)
-(* "maybe" -> Error { pos = 0; error = `Expected "false" } *)
+(* "maybe" -> Error { pos = 0; error = `Expected "\"true\" or \"false\"" } *)
 ```
-On `"maybe"`, the left branch fails at position 0 (expected `"true"`, got `"m"`), backtracks, and the right branch also fails (expected `"false"`, got `"m"`). The error from the last branch attempted is reported.
+On `"maybe"`, both branches fail at the same position (position 0\), the left branch fails at position 0 (expected `"true"`, got `"m"`), their `Expected` messages are composed with `"or"`: **expected "true" or "false"**
+
+If the branches fail at *different* positions, the error from whichever branch made the most progress (reached the furthest position) is reported.
 
 `or_` is ideal for two alternatives. When you have more, use `Parseff.one_of`, which takes a list and avoids nested `or_` calls:
 
@@ -80,7 +82,7 @@ let json_value () =
     ]
     ()
 ```
-If all parsers fail, `one_of` fails with the error from the last parser attempted.
+Error composition follows the same rules as `or_`: if all parsers fail at the same position, their `Expected` messages are joined with `"or"`. If they fail at different positions, the error from the parser that progressed furthest wins.
 
 
 ### `one_of_labeled`

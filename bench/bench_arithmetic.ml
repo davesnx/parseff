@@ -144,8 +144,6 @@ module Parseff_Arith_Generic = struct
         None
 end
 
-(** {1 Runner} *)
-
 let () =
   (* warmup *)
   for _ = 1 to 1000 do

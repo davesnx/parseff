@@ -1,24 +1,18 @@
-let is_digit c = c >= '0' && c <= '9'
-let is_digit_or_sign c = is_digit c || c = '-' || c = '.'
-let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
-let is_not_comma c = c <> ','
+let[@inline always] is_digit c = c >= '0' && c <= '9'
+let[@inline always] is_digit_or_sign c = is_digit c || c = '-' || c = '.'
+let[@inline always] is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
+let[@inline always] is_not_comma c = c <> ','
 
 let[@inline always] float_of_span (s : Parseff.span) =
-  if s.len = 1 then
-    Float.of_int (Char.code (String.unsafe_get s.buf s.off) - Char.code '0')
-  else if s.len = 2 && String.unsafe_get s.buf s.off >= '1' then
-    Float.of_int
-      (((Char.code (String.unsafe_get s.buf s.off) - Char.code '0') * 10)
-      + (Char.code (String.unsafe_get s.buf (s.off + 1)) - Char.code '0')
-      )
-  else
-    float_of_string (Parseff.span_to_string s)
+  float_of_string (Parseff.span_to_string s)
 
 (** {1 JSON array} *)
 
 let json_array () =
-  ignore (Parseff.char '[');
-  let spans = Parseff.sep_by_take_span is_ws ',' is_digit_or_sign in
+  let[@inline always] is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r' in
+  let[@inline always] is_num c = (c >= '0' && c <= '9') || c = '-' || c = '.' in
+  Parseff.skip_while_then_char is_ws '[';
+  let spans = Parseff.sep_by_take_span is_ws ',' is_num in
   let elements = List.map float_of_span spans in
   Parseff.skip_while_then_char is_ws ']';
   elements

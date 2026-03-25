@@ -11,19 +11,19 @@ How Parseff compares to Angstrom in performance, API style, and trade-offs.
 
 ## Performance
 
-Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 100,000 iterations. Sources: [bench/bench_json.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), [bench/bench_vs_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml).
+Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 100,000 iterations (3 runs). Source: [bench/bench_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml).
 
 ```
-                        Parses/sec     vs. Angstrom   Minor allocs
-Parseff (zero-copy)     ~5,270,000     4.8x faster    168 MB
-Parseff (fair)          ~1,930,000     1.8x faster    184 MB
-MParser                 ~1,330,000     1.2x faster    466 MB
-Angstrom                ~1,090,000     baseline       584 MB
+                        Parses/sec     vs. Angstrom (generic)   Minor allocs
+Parseff (optimized)     ~5,980,000     5.0x faster              107 MB
+Parseff (generic)       ~1,500,000     1.2x faster               82 MB
+Angstrom (optimized)    ~1,590,000     1.3x faster             1108 MB
+Angstrom (generic)      ~1,210,000     baseline                 590 MB
 ```
 
-**Zero-copy** uses `sep_by_take_span` with a custom `float_of_span` that avoids `float_of_string`. This represents the fastest path when you control the conversion logic.
+**Optimized** uses `sep_by_take_span_map` with a custom `float_of_span` so span scanning and number conversion happen in one fused pass, avoiding both `float_of_string` on common cases and the intermediate `span list`.
 
-**Fair** uses the same `float_of_string` call as MParser and Angstrom, isolating parsing overhead from number conversion.
+**Generic** uses the ordinary `char`, `skip_while`, `take_while`, and `sep_by` combinators with the same `float_of_string` conversion as `Angstrom (generic)`, so it reflects the baseline direct-style API.
 
 All parsers produce the same output (`float list`) from the same input.
 
@@ -177,7 +177,7 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | API style | Imperative (direct effects) | Monadic (CPS-based) |
 | Streaming | `parse_source` with `Source.t` | Buffered / Unbuffered modules |
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
-| Zero-copy | `span` type + fused ops | Not built-in |
+| Zero-copy | `span` type + fused ops | Limited via `Unsafe` / bigstring slices |
 | Recursion safety | `rec_` with `~max_depth` | Manual (no built-in depth limit) |
 | Custom errors | `error` with polymorphic variants | Limited (string-based) |
 | Error labels | `expect`, `one_of_labeled` | `<?>` operator |

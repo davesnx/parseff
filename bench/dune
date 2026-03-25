@@ -9,7 +9,6 @@
  (names
   bench_angstrom
   bench_micro
-  bench_json
   bench_csv
   bench_arithmetic
   bench_binary

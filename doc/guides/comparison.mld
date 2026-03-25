@@ -9,24 +9,24 @@ Angstrom side by side: performance, API style, and when to use each.
 {1 Performance}
 
 Benchmarked on a JSON array parser ([{[1, 2, 3, ..., 10]}]) over 100,000
-iterations. Sources:
-{{:https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml} bench/bench_json.ml},
-{{:https://github.com/davesnx/parseff/blob/main/bench/bench_vs_angstrom.ml} bench/bench_vs_angstrom.ml}.
+iterations (3 runs). Source:
+{{:https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml} bench/bench_angstrom.ml}.
 
 {v
-                        Parses/sec     vs. Angstrom   Minor allocs
-Parseff (zero-copy)     ~5,270,000     4.8x faster    168 MB
-Parseff (fair)          ~1,930,000     1.8x faster    184 MB
-MParser                 ~1,330,000     1.2x faster    466 MB
-Angstrom                ~1,090,000     baseline       584 MB
+                        Parses/sec     vs. Angstrom (generic)   Minor allocs
+Parseff (optimized)     ~2,120,000     1.9x faster              133 MB
+Parseff (generic)       ~1,520,000     1.4x faster               82 MB
+Angstrom (optimized)    ~1,570,000     1.4x faster             1108 MB
+Angstrom (generic)      ~1,120,000     baseline                 590 MB
 v}
 
-{b Zero-copy} uses [sep_by_take_span] with a custom [float_of_span] that avoids
-[float_of_string]. This represents the fastest path when you control the
-conversion logic.
+{b Optimized} uses [sep_by_take_span] plus [List.map] over zero-copy spans.
+Scanning avoids per-element [String.sub] allocation during parsing, while value
+conversion still uses the stdlib [float_of_string] via [Parseff.span_to_string].
 
-{b Fair} uses the same [float_of_string] call as MParser and Angstrom, isolating
-parsing overhead from number conversion.
+{b Generic} uses the ordinary [char], [skip_while], [take_while], and [sep_by]
+combinators with the same [float_of_string] conversion as [Angstrom (generic)],
+so it reflects the baseline direct-style API.
 
 All parsers produce the same output ([float list]) from the same input.
 
@@ -210,7 +210,7 @@ monadic/applicative operators.
   {tr
     {td Zero-copy}
     {td [span] type + fused ops}
-    {td Not built-in}}
+    {td Limited via [Unsafe] / bigstring slices}}
   {tr
     {td Recursion safety}
     {td [rec_] with [~max_depth]}

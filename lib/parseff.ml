@@ -1,10 +1,19 @@
 type span = { buf : string; off : int; len : int }
 
-let[@inline always] span_to_string s =
-  if s.len = 0 then
+let one_char_strings = Array.init 256 (fun i -> String.make 1 (Char.chr i))
+
+let[@inline always] string_slice inp off len total_len =
+  if len = 0 then
     ""
+  else if len = 1 then
+    Array.unsafe_get one_char_strings (Char.code (String.unsafe_get inp off))
+  else if off = 0 && len = total_len then
+    inp
   else
-    String.sub s.buf s.off s.len
+    String.sub inp off len
+
+let[@inline always] span_to_string s =
+  string_slice s.buf s.off s.len (String.length s.buf)
 
 type location = { offset : int; line : int; col : int }
 
@@ -92,7 +101,8 @@ module Source = struct
   let[@inline always] get_input_len (t : t) = t.input_len
   let[@inline always] is_eof (t : t) = t.eof
   let[@inline always] char_at (t : t) pos = String.unsafe_get t.input pos
-  let[@inline always] sub (t : t) off len = String.sub t.input off len
+  let[@inline always] sub (t : t) off len =
+    string_slice t.input off len t.input_len
   let[@inline always] span (t : t) off len = { buf = t.input; off; len }
 
   let[@inline always] sync_state_input st (t : t) = st.input <- t.input
@@ -243,6 +253,7 @@ module State = struct
       active = false;
     }
 
+  let key : t Domain.DLS.key = Domain.DLS.new_key make
   let[@inline always] is_active (t : t) = t.active
   let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
 
@@ -303,11 +314,8 @@ let () =
         None
     )
 
-(* each domain gets its own parser state *)
-let state_key : State.t Domain.DLS.key = Domain.DLS.new_key State.make
-
 let[@inline always] get_state () =
-  let st = Domain.DLS.get state_key in
+  let st = Domain.DLS.get State.key in
   if not (State.is_active st) then raise Not_in_parse_context;
   st
 
@@ -380,10 +388,7 @@ let[@inline always] handle_take_while st input_len pred =
   let start = st.pos in
   let end_pos = scan_while st.input start input_len pred in
   st.pos <- end_pos;
-  if end_pos > start then
-    String.sub st.input start (end_pos - start)
-  else
-    ""
+  string_slice st.input start (end_pos - start) input_len
 
 let[@inline always] handle_take_while_span st input_len pred =
   let start = st.pos in
@@ -416,7 +421,7 @@ let[@inline never] handle_fused_sep_take st input_len ws_pred sep_char take_pred
     let end_pos = scan_while inp pos2 input_len take_pred in
     if end_pos > pos2 then begin
       st.pos <- end_pos;
-      String.sub inp pos2 (end_pos - pos2)
+      string_slice inp pos2 (end_pos - pos2) input_len
     end else begin
       st.pos <- end_pos;
       if end_pos >= input_len then
@@ -440,23 +445,25 @@ let[@inline never] handle_sep_by_take st input_len ws_pred sep_char take_pred =
     st.pos <- first_end;
     []
   end else begin
-    let rec loop acc pos =
-      let ws_end = scan_while inp pos input_len ws_pred in
+    let acc = ref [ string_slice inp start (first_end - start) input_len ] in
+    let pos = ref first_end in
+    let continue_loop = ref true in
+    while !continue_loop do
+      let ws_end = scan_while inp !pos input_len ws_pred in
       if ws_end < input_len && String.unsafe_get inp ws_end = sep_char then begin
         let after_ws = scan_while inp (ws_end + 1) input_len ws_pred in
         let elem_end = scan_while inp after_ws input_len take_pred in
-        if elem_end > after_ws then
-          loop (String.sub inp after_ws (elem_end - after_ws) :: acc) elem_end
-        else begin
-          st.pos <- pos;
-          List.rev acc
-        end
-      end else begin
-        st.pos <- pos;
-        List.rev acc
-      end
-    in
-    loop [ String.sub inp start (first_end - start) ] first_end
+        if elem_end > after_ws then begin
+          acc :=
+            string_slice inp after_ws (elem_end - after_ws) input_len :: !acc;
+          pos := elem_end
+        end else
+          continue_loop := false
+      end else
+        continue_loop := false
+    done;
+    st.pos <- !pos;
+    List.rev !acc
   end
 
 let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
@@ -467,25 +474,25 @@ let[@inline] handle_sep_by_take_span st input_len ws_pred sep_char take_pred =
     st.pos <- first_end;
     []
   end else begin
-    let rec loop acc pos =
-      let ws_end = scan_while inp pos input_len ws_pred in
+    let acc = ref [ { buf = inp; off = start; len = first_end - start } ] in
+    let pos = ref first_end in
+    let continue_loop = ref true in
+    while !continue_loop do
+      let ws_end = scan_while inp !pos input_len ws_pred in
       if ws_end < input_len && String.unsafe_get inp ws_end = sep_char then begin
         let after_ws = scan_while inp (ws_end + 1) input_len ws_pred in
         let elem_end = scan_while inp after_ws input_len take_pred in
-        if elem_end > after_ws then
-          loop
-            ({ buf = inp; off = after_ws; len = elem_end - after_ws } :: acc)
-            elem_end
-        else begin
-          st.pos <- pos;
-          List.rev acc
-        end
-      end else begin
-        st.pos <- pos;
-        List.rev acc
-      end
-    in
-    loop [ { buf = inp; off = start; len = first_end - start } ] first_end
+        if elem_end > after_ws then begin
+          acc :=
+            { buf = inp; off = after_ws; len = elem_end - after_ws } :: !acc;
+          pos := elem_end
+        end else
+          continue_loop := false
+      end else
+        continue_loop := false
+    done;
+    st.pos <- !pos;
+    List.rev !acc
   end
 
 let regex_failed = Msg "regex match failed"
@@ -570,7 +577,7 @@ let[@inline never] handle_any_int64 st input_len endian =
 
 let[@inline never] handle_take st input_len n =
   if st.pos + n <= input_len then begin
-    let s = String.sub st.input st.pos n in
+    let s = string_slice st.input st.pos n input_len in
     st.pos <- st.pos + n;
     s
   end else
@@ -619,10 +626,7 @@ let[@inline never] handle_take_while_uchar st input_len pred =
   let start = st.pos in
   let end_pos = scan_while_uchar st.input start input_len pred in
   st.pos <- end_pos;
-  if end_pos > start then
-    String.sub st.input start (end_pos - start)
-  else
-    ""
+  string_slice st.input start (end_pos - start) input_len
 
 let[@inline never] handle_take_while_span_uchar st input_len pred =
   let start = st.pos in
@@ -761,28 +765,28 @@ let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
   else
     raise (Parse_error (st.pos, Expected_char sep_char))
 
-let handle_sep_by_take_source_core src st ws_pred sep_char take_pred fn =
+let handle_sep_by_take_source src st ws_pred sep_char take_pred =
   let start = st.pos in
   scan_while_source src st take_pred;
   if st.pos <= start then
     []
   else begin
-    let acc = ref [ fn src start (st.pos - start) ] in
+    let acc = ref [ Source.sub src start (st.pos - start) ] in
     let continue_loop = ref true in
     while !continue_loop do
       let saved_pos = st.pos in
-      handle_skip_while_source src st ws_pred;
+      scan_while_source src st ws_pred;
       ignore (Source.ensure_bytes src st.pos 1);
       if
         st.pos < Source.get_input_len src
         && Source.char_at src st.pos = sep_char
       then begin
         st.pos <- st.pos + 1;
-        handle_skip_while_source src st ws_pred;
+        scan_while_source src st ws_pred;
         let elem_start = st.pos in
         scan_while_source src st take_pred;
         if st.pos > elem_start then
-          acc := fn src elem_start (st.pos - elem_start) :: !acc
+          acc := Source.sub src elem_start (st.pos - elem_start) :: !acc
         else begin
           st.pos <- saved_pos;
           Source.sync_state_input st src;
@@ -797,15 +801,41 @@ let handle_sep_by_take_source_core src st ws_pred sep_char take_pred fn =
     List.rev !acc
   end
 
-let handle_sep_by_take_source src st ws_pred sep_char take_pred =
-  handle_sep_by_take_source_core src st ws_pred sep_char take_pred
-    (fun src off len -> Source.sub src off len
-  )
-
 let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
-  handle_sep_by_take_source_core src st ws_pred sep_char take_pred
-    (fun src off len -> Source.span src off len
-  )
+  let start = st.pos in
+  scan_while_source src st take_pred;
+  if st.pos <= start then
+    []
+  else begin
+    let acc = ref [ Source.span src start (st.pos - start) ] in
+    let continue_loop = ref true in
+    while !continue_loop do
+      let saved_pos = st.pos in
+      scan_while_source src st ws_pred;
+      ignore (Source.ensure_bytes src st.pos 1);
+      if
+        st.pos < Source.get_input_len src
+        && Source.char_at src st.pos = sep_char
+      then begin
+        st.pos <- st.pos + 1;
+        scan_while_source src st ws_pred;
+        let elem_start = st.pos in
+        scan_while_source src st take_pred;
+        if st.pos > elem_start then
+          acc := Source.span src elem_start (st.pos - elem_start) :: !acc
+        else begin
+          st.pos <- saved_pos;
+          Source.sync_state_input st src;
+          continue_loop := false
+        end
+      end else begin
+        st.pos <- saved_pos;
+        Source.sync_state_input st src;
+        continue_loop := false
+      end
+    done;
+    List.rev !acc
+  end
 
 let handle_match_regex_source (src : source) st re =
   let rec loop () =
@@ -943,6 +973,11 @@ let[@inline] compose_branch_errors left_exn right_exn =
 
 let[@inline] turn_invalid_utf8_to_parse_error f =
   try f () with Invalid_utf8 pos -> raise (Parse_error (pos, invalid_utf8_msg))
+
+let[@inline always] restore_backtrack st saved_pos saved_diag =
+  st.pos <- saved_pos;
+  st.diagnostics_rev <- saved_diag;
+  match st.source with Some src -> Source.sync_state_input st src | None -> ()
 
 let[@inline] consume s =
   let st = get_state () in
@@ -1143,14 +1178,7 @@ let or_ left right () =
       raise exn
   | exception left_exn -> (
       if pos_of_exn left_exn < 0 then raise left_exn;
-      st.pos <- saved_pos;
-      st.diagnostics_rev <- saved_diag;
-      ( match st.source with
-      | Some src ->
-          Source.sync_state_input st src
-      | None ->
-          ()
-      );
+      restore_backtrack st saved_pos saved_diag;
       match right () with
       | v ->
           v
@@ -1167,24 +1195,10 @@ let look_ahead p =
   let saved_diag = st.diagnostics_rev in
   match p () with
   | v ->
-      st.pos <- saved_pos;
-      st.diagnostics_rev <- saved_diag;
-      ( match st.source with
-      | Some src ->
-          Source.sync_state_input st src
-      | None ->
-          ()
-      );
+      restore_backtrack st saved_pos saved_diag;
       v
   | exception exn ->
-      st.pos <- saved_pos;
-      st.diagnostics_rev <- saved_diag;
-      ( match st.source with
-      | Some src ->
-          Source.sync_state_input st src
-      | None ->
-          ()
-      );
+      restore_backtrack st saved_pos saved_diag;
       raise exn
 
 let rec_ p =
@@ -1220,14 +1234,7 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
           raise exn
       | exception exn ->
           if pos_of_exn exn < 0 then raise exn;
-          st.pos <- saved_pos;
-          st.diagnostics_rev <- saved_diag;
-          ( match st.source with
-          | Some src ->
-              Source.sync_state_input st src
-          | None ->
-              ()
-          );
+          restore_backtrack st saved_pos saved_diag;
           continue_ref := false
     done;
     List.rev !acc
@@ -1252,37 +1259,44 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
           raise exn
       | exception exn ->
           if pos_of_exn exn < 0 then raise exn;
-          st.pos <- saved_pos;
-          st.diagnostics_rev <- saved_diag;
-          ( match st.source with
-          | Some src ->
-              Source.sync_state_input st src
-          | None ->
-              ()
-          );
+          restore_backtrack st saved_pos saved_diag;
           continue_ref := false
     done;
     List.rev_append required_rev (List.rev !acc)
   end
 
 let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  if at_least <= 0 then
-    or_
-      (fun () ->
-        let first = p () in
-        let rest =
-          many
-            (fun () ->
-              let _ = sep () in
-              p ()
-            )
-            ()
-        in
-        first :: rest
-      )
-      (fun () -> [])
-      ()
-  else
+  let st = get_state () in
+  if at_least <= 0 then (
+    let start_pos = st.pos in
+    let start_diag = st.diagnostics_rev in
+    match p () with
+    | first ->
+        let acc = ref [ first ] in
+        let continue_ref = ref true in
+        while !continue_ref do
+          let saved_pos = st.pos in
+          let saved_diag = st.diagnostics_rev in
+          try
+            let _ = sep () in
+            let v = p () in
+            acc := v :: !acc
+          with
+          | User_failure _ as exn ->
+              raise exn
+          | exn ->
+              if pos_of_exn exn < 0 then raise exn;
+              restore_backtrack st saved_pos saved_diag;
+              continue_ref := false
+        done;
+        List.rev !acc
+    | exception (User_failure _ as exn) ->
+        raise exn
+    | exception exn ->
+        if pos_of_exn exn < 0 then raise exn;
+        restore_backtrack st start_pos start_diag;
+        []
+  ) else
     let first = p () in
     let sep_then_p () =
       let _ = sep () in
@@ -1309,17 +1323,25 @@ let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
 
 let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     =
-  let first = p () in
-  let rest =
-    many
-      (fun () ->
-        let f = op () in
-        let rhs = p () in
-        (f, rhs)
-      )
-      ()
-  in
-  List.fold_left (fun acc (f, rhs) -> f acc rhs) first rest
+  let st = get_state () in
+  let acc = ref (p ()) in
+  let continue_ref = ref true in
+  while !continue_ref do
+    let saved_pos = st.pos in
+    let saved_diag = st.diagnostics_rev in
+    try
+      let f = op () in
+      let rhs = p () in
+      acc := f !acc rhs
+    with
+    | User_failure _ as exn ->
+        raise exn
+    | exn ->
+        if pos_of_exn exn < 0 then raise exn;
+        restore_backtrack st saved_pos saved_diag;
+        continue_ref := false
+  done;
+  !acc
 
 let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
@@ -1691,7 +1713,7 @@ let attach_diagnostics result diagnostics =
       Stdlib.Error { pos; error; diagnostics }
 
 let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
-  let st = Domain.DLS.get state_key in
+  let st = Domain.DLS.get State.key in
   let saved = State.save st in
   State.reset_for_input st ~input ~max_depth;
   let result =
@@ -1714,7 +1736,7 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
       'd
     )
     result_with_diagnostics =
-  let st = Domain.DLS.get state_key in
+  let st = Domain.DLS.get State.key in
   let saved = State.save st in
   State.reset_for_input st ~input ~max_depth;
   let result =
@@ -1738,7 +1760,7 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
 
 let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
     ('a, 'e) result =
-  let st = Domain.DLS.get state_key in
+  let st = Domain.DLS.get State.key in
   let saved = State.save st in
   State.reset_for_source st ~src ~max_depth;
   let result =
@@ -1762,7 +1784,7 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
       'd
     )
     result_with_diagnostics =
-  let st = Domain.DLS.get state_key in
+  let st = Domain.DLS.get State.key in
   let saved = State.save st in
   State.reset_for_source st ~src ~max_depth;
   let result =
