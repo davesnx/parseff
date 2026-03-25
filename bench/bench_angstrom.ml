@@ -63,7 +63,7 @@ module Angstrom_JSON = struct
     >>| float_of_string
 
   let json_array =
-    char '[' *> ws *> sep_by (ws *> char ',' *> ws) number <* ws <* char ']'
+    ws *> char '[' *> ws *> sep_by (ws *> char ',' *> ws) number <* ws <* char ']'
 
   let bench input =
     parse_string ~consume:All json_array input |> Result.to_option
