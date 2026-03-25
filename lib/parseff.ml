@@ -22,7 +22,6 @@ type ('e, 'd) error_with_diagnostics = {
 type ('a, 'e, 'd) result_with_diagnostics =
   ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 
-(* Structured error messages: defer string formatting to the boundary *)
 type error_msg =
   | Msg of string
   | Expected_string of string
@@ -61,7 +60,6 @@ type line_index = {
   mutable scanned_up_to : int;
 }
 
-(* Source-based streaming *)
 type source = {
   mutable input : string;
   mutable input_len : int;
@@ -305,7 +303,7 @@ let () =
         None
     )
 
-(* Domain-local state -- each domain gets its own parser state *)
+(* each domain gets its own parser state *)
 let state_key : State.t Domain.DLS.key = Domain.DLS.new_key State.make
 
 let[@inline always] get_state () =
@@ -359,7 +357,7 @@ let[@inline] handle_satisfy st input_len pred label =
   else
     raise (Unexpected_eof st.pos)
 
-(* O2: Dedicated char handler -- avoids closure + String.make allocation *)
+(* dedicated char handler it avoids closure + String.make allocation *)
 let[@inline] handle_match_char st input_len c =
   if st.pos < input_len then
     let ch = String.unsafe_get st.input st.pos in
@@ -943,8 +941,7 @@ let[@inline] compose_branch_errors left_exn right_exn =
     | _, right ->
         right
 
-(* Helper: convert Invalid_utf8 to Parse_error *)
-let[@inline] wrap_invalid_utf8 f =
+let[@inline] turn_invalid_utf8_to_parse_error f =
   try f () with Invalid_utf8 pos -> raise (Parse_error (pos, invalid_utf8_msg))
 
 let[@inline] consume s =
@@ -1121,7 +1118,7 @@ let[@inline] warn_at ~pos diagnostic =
   st.diagnostics_rev <- (pos, Obj.repr diagnostic) :: st.diagnostics_rev
 
 let take n =
-  if n < 0 then fail "take: count must be non-negative";
+  if n < 0 then fail "Parseff.take: count must be non-negative";
   if n = 0 then
     ""
   else begin
@@ -1135,7 +1132,6 @@ let take n =
         handle_take st (Source.get_input_len src) n
   end
 
-(* or_ -- backtracking via exception catch *)
 let or_ left right () =
   let st = get_state () in
   let saved_pos = st.pos in
@@ -1165,7 +1161,6 @@ let or_ left right () =
           raise (compose_branch_errors left_exn right_exn)
     )
 
-(* look_ahead -- save/restore position *)
 let look_ahead p =
   let st = get_state () in
   let saved_pos = st.pos in
@@ -1192,7 +1187,6 @@ let look_ahead p =
       );
       raise exn
 
-(* rec_ -- depth tracking *)
 let rec_ p =
   let st = get_state () in
   if st.current_depth >= st.max_depth then
@@ -1211,7 +1205,6 @@ let rec_ p =
       st.current_depth <- st.current_depth - 1;
       raise exn
 
-(* many -- loop with exception for termination *)
 let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
   let st = get_state () in
   if at_least <= 0 then begin
@@ -1368,7 +1361,6 @@ let count n (p : unit -> 'a) () : 'a list =
   in
   loop [] n
 
-(* O4: Extract position from caught exception instead of extra Position effect *)
 let expect msg p =
   let err_msg = Msg msg in
   try p () with
@@ -1556,7 +1548,7 @@ end
 module Utf8 = struct
   let[@inline] satisfy pred ~label =
     let st = get_state () in
-    wrap_invalid_utf8 (fun () ->
+    turn_invalid_utf8_to_parse_error (fun () ->
         match st.source with
         | None ->
             handle_satisfy_uchar st st.input_len pred label
@@ -1573,7 +1565,7 @@ module Utf8 = struct
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
     let s =
-      wrap_invalid_utf8 (fun () ->
+      turn_invalid_utf8_to_parse_error (fun () ->
           match st.source with
           | None ->
               handle_take_while_uchar st st.input_len pred
@@ -1606,7 +1598,7 @@ module Utf8 = struct
 
   let[@inline] skip_while pred =
     let st = get_state () in
-    wrap_invalid_utf8 (fun () ->
+    turn_invalid_utf8_to_parse_error (fun () ->
         match st.source with
         | None ->
             handle_skip_while_uchar st st.input_len pred
@@ -1617,7 +1609,7 @@ module Utf8 = struct
 
   let[@inline] take_while_span pred =
     let st = get_state () in
-    wrap_invalid_utf8 (fun () ->
+    turn_invalid_utf8_to_parse_error (fun () ->
         match st.source with
         | None ->
             handle_take_while_span_uchar st st.input_len pred
@@ -1629,7 +1621,7 @@ module Utf8 = struct
 
   let[@inline] skip_while_then_char pred u =
     let st = get_state () in
-    wrap_invalid_utf8 (fun () ->
+    turn_invalid_utf8_to_parse_error (fun () ->
         match st.source with
         | None ->
             handle_skip_while_then_uchar st st.input_len pred u
