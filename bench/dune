@@ -1,18 +1,5 @@
-(library
- (name parseff_bench)
- (libraries parseff)
- (modules parseff_bench)
+(executables
+ (names bench_json bench_csv bench_arithmetic bench_binary bench_utf8)
+ (libraries parseff angstrom bigstringaf mparser re benchmark)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures)))
-
-(executables
- (names
-  bench_angstrom
-  bench_csv
-  bench_arithmetic
-  bench_binary
-  bench_utf8)
- (libraries parseff parseff_bench angstrom bigstringaf mparser re benchmark)
-  (modules :standard \ parseff_bench)
-  (ocamlopt_flags
-   (:standard -O3 -unbox-closures)))

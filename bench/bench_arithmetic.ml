@@ -20,7 +20,7 @@ module Angstrom_Arith = struct
   let add_op = char '+' *> return ( + ) <|> char '-' *> return ( - )
   let term = chainl1 number mul_op
   let expr = chainl1 term add_op
-  let bench input = parse_string ~consume:All expr input |> Result.to_option
+  let parse input = parse_string ~consume:All expr input |> Result.to_option
 end
 
 (** {1 Angstrom (optimized)} *)
@@ -70,7 +70,7 @@ module Angstrom_Arith_Optimized = struct
     in
     loop init
 
-  let bench input = parse_string ~consume:All expr input |> Result.to_option
+  let parse input = parse_string ~consume:All expr input |> Result.to_option
 end
 
 (** {1 MParser} *)
@@ -90,7 +90,7 @@ module MParser_Arith = struct
   let term : (int, unit) t = chain_left1 decimal mul_op
   let expr : (int, unit) t = chain_left1 term add_op
 
-  let bench input =
+  let parse input =
     match parse_string (expr << eof) input () with
     | MParser.Success result ->
         Some result
@@ -140,7 +140,81 @@ module Parseff_Arith_Generic = struct
     Parseff.end_of_input ();
     result
 
-  let bench input =
+  let parse input =
+    match Parseff.parse input expr with
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
+end
+
+module Parseff_Arith_Fused = struct
+  let[@inline always] is_digit c = c >= '0' && c <= '9'
+
+  let[@inline] int_of_span (s : Parseff.span) =
+    let rec go acc i =
+      if i >= s.off + s.len then
+        acc
+      else
+        let d = Char.code (String.unsafe_get s.buf i) - Char.code '0' in
+        go ((acc * 10) + d) (i + 1)
+    in
+    go 0 s.off
+
+  let is_arith_op c = c = '+' || c = '-' || c = '*' || c = '/'
+
+  let expr () =
+    (* Parse the full expression as: number (op number)* using bulk reads *)
+    let first_span = Parseff.take_while_span is_digit in
+    let first = int_of_span first_span in
+    (* Collect all (op, number) pairs *)
+    let rec collect_ops nums ops =
+      let op_span = Parseff.take_while_span is_arith_op in
+      if op_span.len = 0 then
+        (nums, ops)
+      else
+        let op_char = String.unsafe_get op_span.buf op_span.off in
+        let num_span = Parseff.take_while_span is_digit in
+        let num = int_of_span num_span in
+        collect_ops (num :: nums) (op_char :: ops)
+    in
+    let nums_rev, ops_rev = collect_ops [] [] in
+    let nums = List.rev nums_rev in
+    let ops = List.rev ops_rev in
+    (* Two-pass evaluation respecting precedence *)
+    (* Pass 1: evaluate * and / left-to-right, collecting + and - *)
+    let rec pass1 acc nums ops =
+      match (nums, ops) with
+      | n :: rest_nums, '*' :: rest_ops ->
+          pass1 (acc * n) rest_nums rest_ops
+      | n :: rest_nums, '/' :: rest_ops ->
+          pass1 (acc / n) rest_nums rest_ops
+      | _, ('+' | '-') :: _ ->
+          (acc, nums, ops)
+      | [], [] ->
+          (acc, [], [])
+      | _ ->
+          (acc, nums, ops)
+    in
+    let rec pass2 result nums ops =
+      match (nums, ops) with
+      | [], [] ->
+          result
+      | n :: rest_nums, '+' :: rest_ops ->
+          let term, rest_nums', rest_ops' = pass1 n rest_nums rest_ops in
+          pass2 (result + term) rest_nums' rest_ops'
+      | n :: rest_nums, '-' :: rest_ops ->
+          let term, rest_nums', rest_ops' = pass1 n rest_nums rest_ops in
+          pass2 (result - term) rest_nums' rest_ops'
+      | _ ->
+          result
+    in
+    let first_term, rest_nums, rest_ops = pass1 first nums ops in
+    let result = pass2 first_term rest_nums rest_ops in
+    Parseff.end_of_input ();
+    result
+
+  let parse input =
     match Parseff.parse input expr with
     | Ok result ->
         Some result
@@ -151,11 +225,11 @@ end
 let () =
   (* warmup *)
   for _ = 1 to 1000 do
-    ignore (Parseff_bench.parse_arithmetic arith_input);
-    ignore (Parseff_Arith_Generic.bench arith_input);
-    ignore (Angstrom_Arith.bench arith_input);
-    ignore (Angstrom_Arith_Optimized.bench arith_input);
-    ignore (MParser_Arith.bench arith_input)
+    ignore (Parseff_Arith_Fused.parse arith_input);
+    ignore (Parseff_Arith_Generic.parse arith_input);
+    ignore (Angstrom_Arith.parse arith_input);
+    ignore (Angstrom_Arith_Optimized.parse arith_input);
+    ignore (MParser_Arith.parse arith_input)
   done;
 
   Printf.printf "Arithmetic Benchmark: Parseff vs Angstrom vs MParser\n";
@@ -166,19 +240,19 @@ let () =
     latencyN ~repeat:3 5000000L
       [
         ( "Parseff (fused)",
-          (fun () -> ignore (Parseff_bench.parse_arithmetic arith_input)),
+          (fun () -> ignore (Parseff_Arith_Fused.parse arith_input)),
           ()
         );
         ( "Parseff (generic)",
-          (fun () -> ignore (Parseff_Arith_Generic.bench arith_input)),
+          (fun () -> ignore (Parseff_Arith_Generic.parse arith_input)),
           ()
         );
-        ("Angstrom", (fun () -> ignore (Angstrom_Arith.bench arith_input)), ());
+        ("Angstrom", (fun () -> ignore (Angstrom_Arith.parse arith_input)), ());
         ( "Angstrom (opt)",
-          (fun () -> ignore (Angstrom_Arith_Optimized.bench arith_input)),
+          (fun () -> ignore (Angstrom_Arith_Optimized.parse arith_input)),
           ()
         );
-        ("MParser", (fun () -> ignore (MParser_Arith.bench arith_input)), ());
+        ("MParser", (fun () -> ignore (MParser_Arith.parse arith_input)), ());
       ]
   in
 

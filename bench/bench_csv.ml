@@ -9,7 +9,7 @@ module Angstrom_CSV = struct
 
   let field = take_while (function ',' -> false | _ -> true)
   let csv = sep_by (char ',') field
-  let bench input = parse_string ~consume:All csv input |> Result.to_option
+  let parse input = parse_string ~consume:All csv input |> Result.to_option
 end
 
 (** {1 Angstrom (optimized)} *)
@@ -31,7 +31,7 @@ module Angstrom_CSV_Optimized = struct
     in
     loop [ first ]
 
-  let bench input = parse_string ~consume:All csv input |> Result.to_option
+  let parse input = parse_string ~consume:All csv input |> Result.to_option
 end
 
 (** {1 MParser} *)
@@ -42,7 +42,7 @@ module MParser_CSV = struct
   let field : (string, unit) t = many1_satisfy (fun c -> c <> ',') <|> return ""
   let csv : (string list, unit) t = sep_by1 field (char ',') << eof
 
-  let bench input =
+  let parse input =
     match parse_string csv input () with
     | MParser.Success result ->
         Some result
@@ -62,7 +62,23 @@ module Parseff_CSV_Generic = struct
     Parseff.end_of_input ();
     fields
 
-  let bench input =
+  let parse input =
+    match Parseff.parse input csv with
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
+end
+
+module Parseff_CSV_Fused = struct
+  let[@inline always] is_not_comma c = c <> ','
+  let csv () =
+    let spans = Parseff.sep_by_take_span (fun _ -> false) ',' is_not_comma in
+    let fields = List.map Parseff.span_to_string spans in
+    Parseff.end_of_input ();
+    fields
+
+  let parse input =
     match Parseff.parse input csv with
     | Ok result ->
         Some result
@@ -73,11 +89,11 @@ end
 let () =
   (* warmup *)
   for _ = 1 to 1000 do
-    ignore (Parseff_bench.parse_csv csv_input);
-    ignore (Parseff_CSV_Generic.bench csv_input);
-    ignore (Angstrom_CSV.bench csv_input);
-    ignore (Angstrom_CSV_Optimized.bench csv_input);
-    ignore (MParser_CSV.bench csv_input)
+    ignore (Parseff_CSV_Fused.parse csv_input);
+    ignore (Parseff_CSV_Generic.parse csv_input);
+    ignore (Angstrom_CSV.parse csv_input);
+    ignore (Angstrom_CSV_Optimized.parse csv_input);
+    ignore (MParser_CSV.parse csv_input)
   done;
 
   Printf.printf "CSV Benchmark: Parseff vs Angstrom vs MParser\n";
@@ -88,19 +104,19 @@ let () =
     latencyN ~repeat:3 2000000L
       [
         ( "Parseff (fused)",
-          (fun () -> ignore (Parseff_bench.parse_csv csv_input)),
+          (fun () -> ignore (Parseff_CSV_Fused.parse csv_input)),
           ()
         );
         ( "Parseff (generic)",
-          (fun () -> ignore (Parseff_CSV_Generic.bench csv_input)),
+          (fun () -> ignore (Parseff_CSV_Generic.parse csv_input)),
           ()
         );
-        ("Angstrom", (fun () -> ignore (Angstrom_CSV.bench csv_input)), ());
+        ("Angstrom", (fun () -> ignore (Angstrom_CSV.parse csv_input)), ());
         ( "Angstrom (opt)",
-          (fun () -> ignore (Angstrom_CSV_Optimized.bench csv_input)),
+          (fun () -> ignore (Angstrom_CSV_Optimized.parse csv_input)),
           ()
         );
-        ("MParser", (fun () -> ignore (MParser_CSV.bench csv_input)), ());
+        ("MParser", (fun () -> ignore (MParser_CSV.parse csv_input)), ());
       ]
   in
 
