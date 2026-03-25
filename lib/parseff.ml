@@ -1,7 +1,3 @@
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 1: Types                                                       *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 type span = { buf : string; off : int; len : int }
 
 let[@inline always] span_to_string s =
@@ -59,10 +55,6 @@ exception User_failure of int * string
 exception Propagated_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 2: State and Domain-Local Storage                              *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 type line_index = {
   mutable starts : int array;
   mutable count : int;
@@ -90,6 +82,215 @@ type state = {
   mutable active : bool;
 }
 
+let default_buf_size = 4096
+
+module Source = struct
+  type t = source
+
+  let[@inline always] make ~input ~input_len ~read ~eof ~tmp : t =
+    { input; input_len; read; eof; tmp }
+
+  let[@inline always] get_input (t : t) = t.input
+  let[@inline always] get_input_len (t : t) = t.input_len
+  let[@inline always] is_eof (t : t) = t.eof
+  let[@inline always] char_at (t : t) pos = String.unsafe_get t.input pos
+  let[@inline always] sub (t : t) off len = String.sub t.input off len
+  let[@inline always] span (t : t) off len = { buf = t.input; off; len }
+
+  let[@inline always] sync_state_input st (t : t) = st.input <- t.input
+
+  let[@inline always] sync_state_input_and_len st (t : t) =
+    st.input <- t.input;
+    st.input_len <- t.input_len
+
+  let[@inline always] set_buffer (t : t) ~input ~input_len =
+    t.input <- input;
+    t.input_len <- input_len
+
+  let[@inline never] try_refill (src : t) =
+    if src.eof then
+      false
+    else
+      let n = src.read src.tmp 0 (Bytes.length src.tmp) in
+      if n = 0 then begin
+        src.eof <- true;
+        false
+      end else begin
+        let old = src.input in
+        let old_len = src.input_len in
+        let new_len = old_len + n in
+        let buf = Bytes.create new_len in
+        Bytes.blit_string old 0 buf 0 old_len;
+        Bytes.blit src.tmp 0 buf old_len n;
+        set_buffer src ~input:(Bytes.unsafe_to_string buf) ~input_len:new_len;
+        true
+      end
+
+  let ensure_bytes (src : t) pos needed =
+    let rec loop () =
+      if pos + needed <= src.input_len then
+        true
+      else if not (try_refill src) then
+        false
+      else
+        loop ()
+    in
+    loop ()
+
+  let ensure_utf8_char src pos =
+    if not (ensure_bytes src pos 1) then
+      false
+    else
+      let lead = Char.code (char_at src pos) in
+      let needed =
+        if lead < 0x80 then
+          1
+        else if lead < 0xC2 then
+          1
+        else if lead < 0xE0 then
+          2
+        else if lead < 0xF0 then
+          3
+        else if lead < 0xF5 then
+          4
+        else
+          1
+      in
+      if needed <= 1 then
+        true
+      else
+        ensure_bytes src pos needed
+
+  let of_string s =
+    make ~input:s ~input_len:(String.length s)
+      ~read:(fun _ _ _ -> 0)
+      ~eof:true ~tmp:Bytes.empty
+
+  let of_channel ?(buf_size = default_buf_size) ic =
+    make ~input:"" ~input_len:0
+      ~read:(fun buf off len -> input ic buf off len)
+      ~eof:false ~tmp:(Bytes.create buf_size)
+
+  let of_function read =
+    make ~input:"" ~input_len:0 ~read ~eof:false
+      ~tmp:(Bytes.create default_buf_size)
+
+  let of_chunks read_chunk =
+    let pending = ref "" in
+    let pending_pos = ref 0 in
+    of_function (fun buf off len ->
+        if !pending_pos < String.length !pending then begin
+          let available = String.length !pending - !pending_pos in
+          let n = min len available in
+          Bytes.blit_string !pending !pending_pos buf off n;
+          pending_pos := !pending_pos + n;
+          n
+        end else
+          let rec next () =
+            match read_chunk () with
+            | None ->
+                0
+            | Some s when String.length s = 0 ->
+                next ()
+            | Some chunk ->
+                pending := chunk;
+                pending_pos := 0;
+                let n = min len (String.length chunk) in
+                Bytes.blit_string chunk 0 buf off n;
+                pending_pos := n;
+                n
+          in
+          next ()
+    )
+
+  let of_seq seq =
+    let r = ref seq in
+    of_chunks (fun () ->
+        match !r () with
+        | Seq.Nil ->
+            None
+        | Seq.Cons (s, rest) ->
+            r := rest;
+            Some s
+    )
+end
+
+module State = struct
+  type t = state
+
+  type saved = {
+    saved_input : string;
+    saved_pos : int;
+    saved_input_len : int;
+    saved_max_depth : int;
+    saved_current_depth : int;
+    saved_diagnostics_rev : (int * Obj.t) list;
+    saved_line_index : line_index option;
+    saved_source : source option;
+    saved_active : bool;
+  }
+
+  let default_max_depth = 128
+
+  let make () : t =
+    {
+      input = "";
+      pos = 0;
+      input_len = 0;
+      max_depth = default_max_depth;
+      current_depth = 0;
+      diagnostics_rev = [];
+      line_index = None;
+      source = None;
+      active = false;
+    }
+
+  let[@inline always] is_active (t : t) = t.active
+  let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
+
+  let save (t : t) =
+    {
+      saved_input = t.input;
+      saved_pos = t.pos;
+      saved_input_len = t.input_len;
+      saved_max_depth = t.max_depth;
+      saved_current_depth = t.current_depth;
+      saved_diagnostics_rev = t.diagnostics_rev;
+      saved_line_index = t.line_index;
+      saved_source = t.source;
+      saved_active = t.active;
+    }
+
+  let restore (t : t) saved =
+    t.input <- saved.saved_input;
+    t.pos <- saved.saved_pos;
+    t.input_len <- saved.saved_input_len;
+    t.max_depth <- saved.saved_max_depth;
+    t.current_depth <- saved.saved_current_depth;
+    t.diagnostics_rev <- saved.saved_diagnostics_rev;
+    t.line_index <- saved.saved_line_index;
+    t.source <- saved.saved_source;
+    t.active <- saved.saved_active
+
+  let reset (t : t) ~input ~input_len ~max_depth ~source =
+    t.input <- input;
+    t.pos <- 0;
+    t.input_len <- input_len;
+    t.max_depth <- max_depth;
+    t.current_depth <- 0;
+    t.diagnostics_rev <- [];
+    t.line_index <- None;
+    t.source <- source;
+    t.active <- true
+
+  let reset_for_input t ~input ~max_depth =
+    reset t ~input ~input_len:(String.length input) ~max_depth ~source:None
+
+  let reset_for_source t ~(src : source) ~max_depth =
+    reset t ~input:(Source.get_input src) ~input_len:(Source.get_input_len src)
+      ~max_depth ~source:(Some src)
+end
+
 exception Not_in_parse_context
 
 let () =
@@ -105,29 +306,12 @@ let () =
     )
 
 (* Domain-local state -- each domain gets its own parser state *)
-let state_key : state Domain.DLS.key =
-  Domain.DLS.new_key (fun () ->
-      {
-        input = "";
-        pos = 0;
-        input_len = 0;
-        max_depth = 128;
-        current_depth = 0;
-        diagnostics_rev = [];
-        line_index = None;
-        source = None;
-        active = false;
-      }
-  )
+let state_key : State.t Domain.DLS.key = Domain.DLS.new_key State.make
 
 let[@inline always] get_state () =
   let st = Domain.DLS.get state_key in
-  if not st.active then raise Not_in_parse_context;
+  if not (State.is_active st) then raise Not_in_parse_context;
   st
-
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 3: Handler helpers (reused from effects-based implementation)  *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
 
 (* Polymorphic record so handle_exn can be called at different types. *)
 type 'e exn_handler = { handle : 'a. exn -> ('a, 'e) result } [@@unboxed]
@@ -394,10 +578,6 @@ let[@inline never] handle_take st input_len n =
   end else
     raise (Unexpected_eof st.pos)
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 4: UTF-8 helpers                                               *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 exception Invalid_utf8 of int
 
 let[@inline] uchar_label u =
@@ -472,10 +652,6 @@ let[@inline never] handle_skip_while_then_uchar st input_len pred term =
     raise (Parse_error (pos, Msg ("expected " ^ uchar_label term)))
   end
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 5: Line index helpers                                          *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 let create_line_index () =
   let starts = Array.make 64 0 in
   starts.(0) <- 0;
@@ -527,99 +703,62 @@ let[@inline never] handle_location st input_len =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 6: Streaming helpers                                           *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
-let default_buf_size = 4096
-
-let try_refill (src : source) =
-  if src.eof then
-    false
-  else
-    let n = src.read src.tmp 0 (Bytes.length src.tmp) in
-    if n = 0 then begin
-      src.eof <- true;
-      false
-    end else begin
-      let old = src.input in
-      let old_len = src.input_len in
-      let new_len = old_len + n in
-      let buf = Bytes.create new_len in
-      Bytes.blit_string old 0 buf 0 old_len;
-      Bytes.blit src.tmp 0 buf old_len n;
-      src.input <- Bytes.unsafe_to_string buf;
-      src.input_len <- new_len;
-      true
-    end
-
-let ensure_bytes (src : source) pos needed =
-  let rec loop () =
-    if pos + needed <= src.input_len then
-      true
-    else if not (try_refill src) then
-      false
-    else
-      loop ()
-  in
-  loop ()
-
 let scan_while_source (src : source) st pred =
   let continue = ref true in
   while !continue do
-    if st.pos < src.input_len then
-      if pred (String.unsafe_get src.input st.pos) then
+    if st.pos < Source.get_input_len src then
+      if pred (Source.char_at src st.pos) then
         st.pos <- st.pos + 1
       else
         continue := false
-    else if try_refill src then
+    else if Source.try_refill src then
       ()
     else
       continue := false
   done;
-  st.input <- src.input
+  Source.sync_state_input st src
 
 let handle_take_while_source src st pred =
   let start = st.pos in
   scan_while_source src st pred;
   if st.pos > start then
-    String.sub src.input start (st.pos - start)
+    Source.sub src start (st.pos - start)
   else
     ""
 
 let handle_take_while_span_source src st pred =
   let start = st.pos in
   scan_while_source src st pred;
-  { buf = src.input; off = start; len = st.pos - start }
+  Source.span src start (st.pos - start)
 
 let handle_skip_while_source src st pred = scan_while_source src st pred
 
 let handle_skip_while_then_char_source src st pred c =
   handle_skip_while_source src st pred;
-  ignore (ensure_bytes src st.pos 1);
-  if st.pos < src.input_len && String.unsafe_get src.input st.pos = c then
+  ignore (Source.ensure_bytes src st.pos 1);
+  if st.pos < Source.get_input_len src && Source.char_at src st.pos = c then
     st.pos <- st.pos + 1
-  else if st.pos >= src.input_len then
+  else if st.pos >= Source.get_input_len src then
     raise (Unexpected_eof st.pos)
   else
     raise (Parse_error (st.pos, Expected_char c))
 
 let handle_fused_sep_take_source src st ws_pred sep_char take_pred =
   handle_skip_while_source src st ws_pred;
-  ignore (ensure_bytes src st.pos 1);
-  if st.pos < src.input_len && String.unsafe_get src.input st.pos = sep_char
+  ignore (Source.ensure_bytes src st.pos 1);
+  if st.pos < Source.get_input_len src && Source.char_at src st.pos = sep_char
   then begin
     st.pos <- st.pos + 1;
     handle_skip_while_source src st ws_pred;
     let start = st.pos in
     scan_while_source src st take_pred;
     if st.pos > start then
-      String.sub src.input start (st.pos - start)
-    else if st.pos >= src.input_len then
+      Source.sub src start (st.pos - start)
+    else if st.pos >= Source.get_input_len src then
       raise (Unexpected_eof st.pos)
     else
       raise (Parse_error (st.pos, Expected_value))
-  end else if st.pos >= src.input_len then
+  end else if st.pos >= Source.get_input_len src then
     raise (Unexpected_eof st.pos)
   else
     raise (Parse_error (st.pos, Expected_char sep_char))
@@ -630,28 +769,30 @@ let handle_sep_by_take_source_core src st ws_pred sep_char take_pred fn =
   if st.pos <= start then
     []
   else begin
-    let acc = ref [ fn src.input start (st.pos - start) ] in
+    let acc = ref [ fn src start (st.pos - start) ] in
     let continue_loop = ref true in
     while !continue_loop do
       let saved_pos = st.pos in
       handle_skip_while_source src st ws_pred;
-      ignore (ensure_bytes src st.pos 1);
-      if st.pos < src.input_len && String.unsafe_get src.input st.pos = sep_char
+      ignore (Source.ensure_bytes src st.pos 1);
+      if
+        st.pos < Source.get_input_len src
+        && Source.char_at src st.pos = sep_char
       then begin
         st.pos <- st.pos + 1;
         handle_skip_while_source src st ws_pred;
         let elem_start = st.pos in
         scan_while_source src st take_pred;
         if st.pos > elem_start then
-          acc := fn src.input elem_start (st.pos - elem_start) :: !acc
+          acc := fn src elem_start (st.pos - elem_start) :: !acc
         else begin
           st.pos <- saved_pos;
-          st.input <- src.input;
+          Source.sync_state_input st src;
           continue_loop := false
         end
       end else begin
         st.pos <- saved_pos;
-        st.input <- src.input;
+        Source.sync_state_input st src;
         continue_loop := false
       end
     done;
@@ -660,38 +801,39 @@ let handle_sep_by_take_source_core src st ws_pred sep_char take_pred fn =
 
 let handle_sep_by_take_source src st ws_pred sep_char take_pred =
   handle_sep_by_take_source_core src st ws_pred sep_char take_pred
-    (fun inp off len -> String.sub inp off len
+    (fun src off len -> Source.sub src off len
   )
 
 let handle_sep_by_take_span_source src st ws_pred sep_char take_pred =
   handle_sep_by_take_source_core src st ws_pred sep_char take_pred
-    (fun inp off len -> { buf = inp; off; len }
+    (fun src off len -> Source.span src off len
   )
 
 let handle_match_regex_source (src : source) st re =
   let rec loop () =
     try
-      let groups = Re.exec ~pos:st.pos re src.input in
+      let groups = Re.exec ~pos:st.pos re (Source.get_input src) in
       let match_start = Re.Group.start groups 0 in
       let match_end = Re.Group.stop groups 0 in
       if match_start <> st.pos then
         raise (Parse_error (st.pos, regex_failed))
-      else if match_end = src.input_len && not src.eof then begin
-        ignore (try_refill src);
-        st.input <- src.input;
+      else if match_end = Source.get_input_len src && not (Source.is_eof src)
+      then begin
+        ignore (Source.try_refill src);
+        Source.sync_state_input st src;
         loop ()
       end else begin
         let matched = Re.Group.get groups 0 in
         st.pos <- match_end;
-        st.input <- src.input;
+        Source.sync_state_input st src;
         matched
       end
     with Not_found ->
-      if st.pos >= src.input_len && not src.eof then begin
-        ignore (try_refill src);
-        st.input <- src.input;
+      if st.pos >= Source.get_input_len src && not (Source.is_eof src) then begin
+        ignore (Source.try_refill src);
+        Source.sync_state_input st src;
         loop ()
-      end else if st.pos >= src.input_len then
+      end else if st.pos >= Source.get_input_len src then
         raise (Unexpected_eof st.pos)
       else
         raise (Parse_error (st.pos, regex_failed))
@@ -699,48 +841,21 @@ let handle_match_regex_source (src : source) st re =
   loop ()
 
 let handle_end_of_input_source (src : source) st =
-  if st.pos = src.input_len && not src.eof then ignore (try_refill src);
-  if st.pos <> src.input_len then
+  if st.pos = Source.get_input_len src && not (Source.is_eof src) then
+    ignore (Source.try_refill src);
+  if st.pos <> Source.get_input_len src then
     raise (Parse_error (st.pos, expected_end_of_input))
-
-(* UTF-8 streaming helpers *)
-
-let ensure_utf8_char src pos =
-  if not (ensure_bytes src pos 1) then
-    false
-  else
-    let lead = Char.code (String.unsafe_get src.input pos) in
-    let needed =
-      if lead < 0x80 then
-        1
-      else if lead < 0xC2 then
-        1
-      (* continuation or overlong: let decode catch it *)
-      else if lead < 0xE0 then
-        2
-      else if lead < 0xF0 then
-        3
-      else if lead < 0xF5 then
-        4
-      else
-        1
-      (* invalid lead byte: let decode catch it *)
-    in
-    if needed <= 1 then
-      true
-    else
-      ensure_bytes src pos needed
 
 (* UTF-8 streaming handlers *)
 
 let handle_satisfy_uchar_source src st pred label =
-  if not (ensure_utf8_char src st.pos) then raise (Unexpected_eof st.pos);
-  let d = String.get_utf_8_uchar src.input st.pos in
+  if not (Source.ensure_utf8_char src st.pos) then raise (Unexpected_eof st.pos);
+  let d = String.get_utf_8_uchar (Source.get_input src) st.pos in
   if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
   let u = Uchar.utf_decode_uchar d in
   if pred u then begin
     st.pos <- st.pos + Uchar.utf_decode_length d;
-    st.input <- src.input;
+    Source.sync_state_input st src;
     u
   end else
     raise (Parse_error (st.pos, Expected_label label))
@@ -748,8 +863,8 @@ let handle_satisfy_uchar_source src st pred label =
 let scan_while_uchar_source src st pred =
   let continue_loop = ref true in
   while !continue_loop do
-    if ensure_utf8_char src st.pos then begin
-      let d = String.get_utf_8_uchar src.input st.pos in
+    if Source.ensure_utf8_char src st.pos then begin
+      let d = String.get_utf_8_uchar (Source.get_input src) st.pos in
       if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
       if pred (Uchar.utf_decode_uchar d) then
         st.pos <- st.pos + Uchar.utf_decode_length d
@@ -758,39 +873,35 @@ let scan_while_uchar_source src st pred =
     end else
       continue_loop := false
   done;
-  st.input <- src.input
+  Source.sync_state_input st src
 
 let handle_take_while_uchar_source src st pred =
   let start = st.pos in
   scan_while_uchar_source src st pred;
   if st.pos > start then
-    String.sub src.input start (st.pos - start)
+    Source.sub src start (st.pos - start)
   else
     ""
 
 let handle_take_while_span_uchar_source src st pred =
   let start = st.pos in
   scan_while_uchar_source src st pred;
-  { buf = src.input; off = start; len = st.pos - start }
+  Source.span src start (st.pos - start)
 
 let handle_skip_while_uchar_source src st pred =
   scan_while_uchar_source src st pred
 
 let handle_skip_while_then_uchar_source src st pred term =
   handle_skip_while_uchar_source src st pred;
-  if not (ensure_utf8_char src st.pos) then raise (Unexpected_eof st.pos);
-  let d = String.get_utf_8_uchar src.input st.pos in
+  if not (Source.ensure_utf8_char src st.pos) then raise (Unexpected_eof st.pos);
+  let d = String.get_utf_8_uchar (Source.get_input src) st.pos in
   if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 st.pos);
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u term then begin
     st.pos <- st.pos + Uchar.utf_decode_length d;
-    st.input <- src.input
+    Source.sync_state_input st src
   end else
     raise (Parse_error (st.pos, Msg ("expected " ^ uchar_label term)))
-
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 7: Error composition helpers                                   *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
 
 let[@inline always] pos_of_exn = function
   | Parse_error (p, _)
@@ -836,20 +947,15 @@ let[@inline] compose_branch_errors left_exn right_exn =
 let[@inline] wrap_invalid_utf8 f =
   try f () with Invalid_utf8 pos -> raise (Parse_error (pos, invalid_utf8_msg))
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 8: Core combinators (DLS-based, no effects)                    *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 let[@inline] consume s =
   let st = get_state () in
   match st.source with
   | None ->
       handle_consume st st.input_len s
   | Some src ->
-      ignore (ensure_bytes src st.pos (String.length s));
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_consume st src.input_len s
+      ignore (Source.ensure_bytes src st.pos (String.length s));
+      Source.sync_state_input_and_len st src;
+      handle_consume st (Source.get_input_len src) s
 
 let[@inline] satisfy pred ~label =
   let st = get_state () in
@@ -857,10 +963,9 @@ let[@inline] satisfy pred ~label =
   | None ->
       handle_satisfy st st.input_len pred label
   | Some src ->
-      ignore (ensure_bytes src st.pos 1);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_satisfy st src.input_len pred label
+      ignore (Source.ensure_bytes src st.pos 1);
+      Source.sync_state_input_and_len st src;
+      handle_satisfy st (Source.get_input_len src) pred label
 
 let[@inline] char c =
   let st = get_state () in
@@ -868,10 +973,9 @@ let[@inline] char c =
   | None ->
       handle_match_char st st.input_len c
   | Some src ->
-      ignore (ensure_bytes src st.pos 1);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_match_char st src.input_len c
+      ignore (Source.ensure_bytes src st.pos 1);
+      Source.sync_state_input_and_len st src;
+      handle_match_char st (Source.get_input_len src) c
 
 let[@inline] peek_char () =
   let st = get_state () in
@@ -882,11 +986,10 @@ let[@inline] peek_char () =
       else
         None
   | Some src ->
-      ignore (ensure_bytes src st.pos 1);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      if st.pos < src.input_len then
-        Some (String.unsafe_get src.input st.pos)
+      ignore (Source.ensure_bytes src st.pos 1);
+      Source.sync_state_input_and_len st src;
+      if st.pos < Source.get_input_len src then
+        Some (Source.char_at src st.pos)
       else
         None
 
@@ -900,8 +1003,8 @@ let[@inline] location () =
   | None ->
       handle_location st st.input_len
   | Some src ->
-      st.input <- src.input;
-      handle_location st src.input_len
+      Source.sync_state_input_and_len st src;
+      handle_location st (Source.get_input_len src)
 
 let[@inline] end_of_input () =
   let st = get_state () in
@@ -920,7 +1023,7 @@ let take_while ?(at_least = 0) ?label pred =
         handle_take_while st st.input_len pred
     | Some src ->
         let r = handle_take_while_source src st pred in
-        st.input_len <- src.input_len;
+        Source.sync_state_input_and_len st src;
         r
   in
   if at_least > 0 && String.length s < at_least then begin
@@ -938,7 +1041,7 @@ let[@inline] skip_while pred =
       handle_skip_while st st.input_len pred
   | Some src ->
       handle_skip_while_source src st pred;
-      st.input_len <- src.input_len
+      Source.sync_state_input_and_len st src
 
 let[@inline] skip_while_then_char pred c =
   let st = get_state () in
@@ -947,7 +1050,7 @@ let[@inline] skip_while_then_char pred c =
       handle_skip_while_then_char st st.input_len pred c
   | Some src ->
       handle_skip_while_then_char_source src st pred c;
-      st.input_len <- src.input_len
+      Source.sync_state_input_and_len st src
 
 let[@inline] take_while_span pred =
   let st = get_state () in
@@ -956,7 +1059,7 @@ let[@inline] take_while_span pred =
       handle_take_while_span st st.input_len pred
   | Some src ->
       let r = handle_take_while_span_source src st pred in
-      st.input_len <- src.input_len;
+      Source.sync_state_input_and_len st src;
       r
 
 let[@inline] sep_by_take ws_pred sep_char take_pred =
@@ -966,7 +1069,7 @@ let[@inline] sep_by_take ws_pred sep_char take_pred =
       handle_sep_by_take st st.input_len ws_pred sep_char take_pred
   | Some src ->
       let r = handle_sep_by_take_source src st ws_pred sep_char take_pred in
-      st.input_len <- src.input_len;
+      Source.sync_state_input_and_len st src;
       r
 
 let[@inline] sep_by_take_span ws_pred sep_char take_pred =
@@ -978,7 +1081,7 @@ let[@inline] sep_by_take_span ws_pred sep_char take_pred =
       let r =
         handle_sep_by_take_span_source src st ws_pred sep_char take_pred
       in
-      st.input_len <- src.input_len;
+      Source.sync_state_input_and_len st src;
       r
 
 let[@inline] fused_sep_take ws_pred sep_char take_pred =
@@ -988,7 +1091,7 @@ let[@inline] fused_sep_take ws_pred sep_char take_pred =
       handle_fused_sep_take st st.input_len ws_pred sep_char take_pred
   | Some src ->
       let r = handle_fused_sep_take_source src st ws_pred sep_char take_pred in
-      st.input_len <- src.input_len;
+      Source.sync_state_input_and_len st src;
       r
 
 let[@inline] match_regex re =
@@ -998,7 +1101,7 @@ let[@inline] match_regex re =
       handle_match_regex st st.input_len re
   | Some src ->
       let r = handle_match_regex_source src st re in
-      st.input_len <- src.input_len;
+      Source.sync_state_input_and_len st src;
       r
 
 let[@inline] fail msg =
@@ -1027,15 +1130,10 @@ let take n =
     | None ->
         handle_take st st.input_len n
     | Some src ->
-        ignore (ensure_bytes src st.pos n);
-        st.input <- src.input;
-        st.input_len <- src.input_len;
-        handle_take st src.input_len n
+        ignore (Source.ensure_bytes src st.pos n);
+        Source.sync_state_input_and_len st src;
+        handle_take st (Source.get_input_len src) n
   end
-
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 9: Control flow combinators                                    *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
 
 (* or_ -- backtracking via exception catch *)
 let or_ left right () =
@@ -1051,7 +1149,12 @@ let or_ left right () =
       if pos_of_exn left_exn < 0 then raise left_exn;
       st.pos <- saved_pos;
       st.diagnostics_rev <- saved_diag;
-      (match st.source with Some src -> st.input <- src.input | None -> ());
+      ( match st.source with
+      | Some src ->
+          Source.sync_state_input st src
+      | None ->
+          ()
+      );
       match right () with
       | v ->
           v
@@ -1071,12 +1174,22 @@ let look_ahead p =
   | v ->
       st.pos <- saved_pos;
       st.diagnostics_rev <- saved_diag;
-      (match st.source with Some src -> st.input <- src.input | None -> ());
+      ( match st.source with
+      | Some src ->
+          Source.sync_state_input st src
+      | None ->
+          ()
+      );
       v
   | exception exn ->
       st.pos <- saved_pos;
       st.diagnostics_rev <- saved_diag;
-      (match st.source with Some src -> st.input <- src.input | None -> ());
+      ( match st.source with
+      | Some src ->
+          Source.sync_state_input st src
+      | None ->
+          ()
+      );
       raise exn
 
 (* rec_ -- depth tracking *)
@@ -1116,7 +1229,12 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
           if pos_of_exn exn < 0 then raise exn;
           st.pos <- saved_pos;
           st.diagnostics_rev <- saved_diag;
-          (match st.source with Some src -> st.input <- src.input | None -> ());
+          ( match st.source with
+          | Some src ->
+              Source.sync_state_input st src
+          | None ->
+              ()
+          );
           continue_ref := false
     done;
     List.rev !acc
@@ -1143,15 +1261,16 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
           if pos_of_exn exn < 0 then raise exn;
           st.pos <- saved_pos;
           st.diagnostics_rev <- saved_diag;
-          (match st.source with Some src -> st.input <- src.input | None -> ());
+          ( match st.source with
+          | Some src ->
+              Source.sync_state_input st src
+          | None ->
+              ()
+          );
           continue_ref := false
     done;
     List.rev_append required_rev (List.rev !acc)
   end
-
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 10: Higher-level combinators                                   *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
 
 let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   if at_least <= 0 then
@@ -1283,10 +1402,6 @@ let one_of_labeled labeled_parsers () =
     raise
       (Parse_error (pos, Msg (Printf.sprintf "expected one of: %s" expected)))
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 11: Convenience combinators                                    *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 let digit () =
   let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
   Char.code c - Char.code '0'
@@ -1312,20 +1427,15 @@ let alphanum () =
 
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 12: Binary parsing modules                                     *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 let[@inline] binary_any_uint8 () =
   let st = get_state () in
   match st.source with
   | None ->
       handle_any_uint8 st st.input_len
   | Some src ->
-      ignore (ensure_bytes src st.pos 1);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_any_uint8 st src.input_len
+      ignore (Source.ensure_bytes src st.pos 1);
+      Source.sync_state_input_and_len st src;
+      handle_any_uint8 st (Source.get_input_len src)
 
 let[@inline] binary_any_int8 () =
   let st = get_state () in
@@ -1333,10 +1443,9 @@ let[@inline] binary_any_int8 () =
   | None ->
       handle_any_int8 st st.input_len
   | Some src ->
-      ignore (ensure_bytes src st.pos 1);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_any_int8 st src.input_len
+      ignore (Source.ensure_bytes src st.pos 1);
+      Source.sync_state_input_and_len st src;
+      handle_any_int8 st (Source.get_input_len src)
 
 let[@inline] binary_any_int16 endian () =
   let st = get_state () in
@@ -1344,10 +1453,9 @@ let[@inline] binary_any_int16 endian () =
   | None ->
       handle_any_int16 st st.input_len endian
   | Some src ->
-      ignore (ensure_bytes src st.pos 2);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_any_int16 st src.input_len endian
+      ignore (Source.ensure_bytes src st.pos 2);
+      Source.sync_state_input_and_len st src;
+      handle_any_int16 st (Source.get_input_len src) endian
 
 let[@inline] binary_any_int32 endian () =
   let st = get_state () in
@@ -1355,10 +1463,9 @@ let[@inline] binary_any_int32 endian () =
   | None ->
       handle_any_int32 st st.input_len endian
   | Some src ->
-      ignore (ensure_bytes src st.pos 4);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_any_int32 st src.input_len endian
+      ignore (Source.ensure_bytes src st.pos 4);
+      Source.sync_state_input_and_len st src;
+      handle_any_int32 st (Source.get_input_len src) endian
 
 let[@inline] binary_any_int64 endian () =
   let st = get_state () in
@@ -1366,10 +1473,9 @@ let[@inline] binary_any_int64 endian () =
   | None ->
       handle_any_int64 st st.input_len endian
   | Some src ->
-      ignore (ensure_bytes src st.pos 8);
-      st.input <- src.input;
-      st.input_len <- src.input_len;
-      handle_any_int64 st src.input_len endian
+      ignore (Source.ensure_bytes src st.pos 8);
+      Source.sync_state_input_and_len st src;
+      handle_any_int64 st (Source.get_input_len src) endian
 
 let expect_int16 any_fn expected =
   let actual = any_fn () in
@@ -1447,10 +1553,6 @@ module LE = struct
   let int64 = expect_int64 any_int64
 end
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 13: UTF-8 module                                               *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 module Utf8 = struct
   let[@inline] satisfy pred ~label =
     let st = get_state () in
@@ -1460,7 +1562,7 @@ module Utf8 = struct
             handle_satisfy_uchar st st.input_len pred label
         | Some src ->
             let r = handle_satisfy_uchar_source src st pred label in
-            st.input_len <- src.input_len;
+            Source.sync_state_input_and_len st src;
             r
     )
 
@@ -1477,7 +1579,7 @@ module Utf8 = struct
               handle_take_while_uchar st st.input_len pred
           | Some src ->
               let r = handle_take_while_uchar_source src st pred in
-              st.input_len <- src.input_len;
+              Source.sync_state_input_and_len st src;
               r
       )
     in
@@ -1510,7 +1612,7 @@ module Utf8 = struct
             handle_skip_while_uchar st st.input_len pred
         | Some src ->
             handle_skip_while_uchar_source src st pred;
-            st.input_len <- src.input_len
+            Source.sync_state_input_and_len st src
     )
 
   let[@inline] take_while_span pred =
@@ -1521,7 +1623,7 @@ module Utf8 = struct
             handle_take_while_span_uchar st st.input_len pred
         | Some src ->
             let r = handle_take_while_span_uchar_source src st pred in
-            st.input_len <- src.input_len;
+            Source.sync_state_input_and_len st src;
             r
     )
 
@@ -1533,7 +1635,7 @@ module Utf8 = struct
             handle_skip_while_then_uchar st st.input_len pred u
         | Some src ->
             handle_skip_while_then_uchar_source src st pred u;
-            st.input_len <- src.input_len
+            Source.sync_state_input_and_len st src
     )
 
   let[@inline] is_whitespace u = Uucp.White.is_white_space u
@@ -1567,10 +1669,6 @@ module Utf8 = struct
   let skip_whitespace () = skip_while Uucp.White.is_white_space
 end
 
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 14: Run functions                                              *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
 let default_handler : _ exn_handler =
   {
     handle =
@@ -1600,55 +1698,10 @@ let attach_diagnostics result diagnostics =
   | Error { pos; error } ->
       Stdlib.Error { pos; error; diagnostics }
 
-(* Save and restore DLS state for re-entrant parsing *)
-type saved_state = {
-  s_input : string;
-  s_pos : int;
-  s_input_len : int;
-  s_max_depth : int;
-  s_current_depth : int;
-  s_diagnostics_rev : (int * Obj.t) list;
-  s_line_index : line_index option;
-  s_source : source option;
-  s_active : bool;
-}
-
-let[@inline] save_state st =
-  {
-    s_input = st.input;
-    s_pos = st.pos;
-    s_input_len = st.input_len;
-    s_max_depth = st.max_depth;
-    s_current_depth = st.current_depth;
-    s_diagnostics_rev = st.diagnostics_rev;
-    s_line_index = st.line_index;
-    s_source = st.source;
-    s_active = st.active;
-  }
-
-let[@inline] restore_state st saved =
-  st.input <- saved.s_input;
-  st.pos <- saved.s_pos;
-  st.input_len <- saved.s_input_len;
-  st.max_depth <- saved.s_max_depth;
-  st.current_depth <- saved.s_current_depth;
-  st.diagnostics_rev <- saved.s_diagnostics_rev;
-  st.line_index <- saved.s_line_index;
-  st.source <- saved.s_source;
-  st.active <- saved.s_active
-
 let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
   let st = Domain.DLS.get state_key in
-  let saved = save_state st in
-  st.input <- input;
-  st.pos <- 0;
-  st.input_len <- String.length input;
-  st.max_depth <- max_depth;
-  st.current_depth <- 0;
-  st.diagnostics_rev <- [];
-  st.line_index <- None;
-  st.source <- None;
-  st.active <- true;
+  let saved = State.save st in
+  State.reset_for_input st ~input ~max_depth;
   let result =
     match parser () with
     | v ->
@@ -1660,7 +1713,7 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
     | exception exn ->
         default_handler.handle exn
   in
-  restore_state st saved;
+  State.restore st saved;
   result
 
 let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
@@ -1670,16 +1723,8 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
     )
     result_with_diagnostics =
   let st = Domain.DLS.get state_key in
-  let saved = save_state st in
-  st.input <- input;
-  st.pos <- 0;
-  st.input_len <- String.length input;
-  st.max_depth <- max_depth;
-  st.current_depth <- 0;
-  st.diagnostics_rev <- [];
-  st.line_index <- None;
-  st.source <- None;
-  st.active <- true;
+  let saved = State.save st in
+  State.reset_for_input st ~input ~max_depth;
   let result =
     match
       let v = parser () in
@@ -1695,97 +1740,15 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
     | exception exn ->
         default_handler.handle exn
   in
-  let diagnostics = to_diagnostics st.diagnostics_rev in
-  restore_state st saved;
+  let diagnostics = to_diagnostics (State.get_diagnostics_rev st) in
+  State.restore st saved;
   attach_diagnostics result diagnostics
-
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 15: Source module and streaming runners                        *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
-
-module Source = struct
-  type t = source
-
-  let of_string s =
-    {
-      input = s;
-      input_len = String.length s;
-      read = (fun _ _ _ -> 0);
-      eof = true;
-      tmp = Bytes.empty;
-    }
-
-  let of_channel ?(buf_size = default_buf_size) ic =
-    {
-      input = "";
-      input_len = 0;
-      read = (fun buf off len -> input ic buf off len);
-      eof = false;
-      tmp = Bytes.create buf_size;
-    }
-
-  let of_function read =
-    {
-      input = "";
-      input_len = 0;
-      read;
-      eof = false;
-      tmp = Bytes.create default_buf_size;
-    }
-
-  let of_chunks read_chunk =
-    let pending = ref "" in
-    let pending_pos = ref 0 in
-    of_function (fun buf off len ->
-        if !pending_pos < String.length !pending then begin
-          let available = String.length !pending - !pending_pos in
-          let n = min len available in
-          Bytes.blit_string !pending !pending_pos buf off n;
-          pending_pos := !pending_pos + n;
-          n
-        end else
-          let rec next () =
-            match read_chunk () with
-            | None ->
-                0
-            | Some s when String.length s = 0 ->
-                next ()
-            | Some chunk ->
-                pending := chunk;
-                pending_pos := 0;
-                let n = min len (String.length chunk) in
-                Bytes.blit_string chunk 0 buf off n;
-                pending_pos := n;
-                n
-          in
-          next ()
-    )
-
-  let of_seq seq =
-    let r = ref seq in
-    of_chunks (fun () ->
-        match !r () with
-        | Seq.Nil ->
-            None
-        | Seq.Cons (s, rest) ->
-            r := rest;
-            Some s
-    )
-end
 
 let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
     ('a, 'e) result =
   let st = Domain.DLS.get state_key in
-  let saved = save_state st in
-  st.input <- src.input;
-  st.pos <- 0;
-  st.input_len <- src.input_len;
-  st.max_depth <- max_depth;
-  st.current_depth <- 0;
-  st.diagnostics_rev <- [];
-  st.line_index <- None;
-  st.source <- Some src;
-  st.active <- true;
+  let saved = State.save st in
+  State.reset_for_source st ~src ~max_depth;
   let result =
     match parser () with
     | v ->
@@ -1797,7 +1760,7 @@ let parse_source ?(max_depth = 128) (src : Source.t) (parser : unit -> 'a) :
     | exception exn ->
         default_handler.handle exn
   in
-  restore_state st saved;
+  State.restore st saved;
   result
 
 let parse_source_until_end ?(max_depth = 128) (src : Source.t)
@@ -1808,16 +1771,8 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     )
     result_with_diagnostics =
   let st = Domain.DLS.get state_key in
-  let saved = save_state st in
-  st.input <- src.input;
-  st.pos <- 0;
-  st.input_len <- src.input_len;
-  st.max_depth <- max_depth;
-  st.current_depth <- 0;
-  st.diagnostics_rev <- [];
-  st.line_index <- None;
-  st.source <- Some src;
-  st.active <- true;
+  let saved = State.save st in
+  State.reset_for_source st ~src ~max_depth;
   let result =
     match
       let v = parser () in
@@ -1833,13 +1788,9 @@ let parse_source_until_end ?(max_depth = 128) (src : Source.t)
     | exception exn ->
         default_handler.handle exn
   in
-  let diagnostics = to_diagnostics st.diagnostics_rev in
-  restore_state st saved;
+  let diagnostics = to_diagnostics (State.get_diagnostics_rev st) in
+  State.restore st saved;
   attach_diagnostics result diagnostics
-
-(* ═══════════════════════════════════════════════════════════════════════ *)
-(* SECTION 16: Standalone utility                                         *)
-(* ═══════════════════════════════════════════════════════════════════════ *)
 
 let location_of_position input pos =
   let idx = create_line_index () in
