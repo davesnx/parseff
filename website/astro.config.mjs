@@ -91,8 +91,6 @@ export default defineConfig({
 						{ label: 'Parsing an IP address', slug: 'guides/ip-address' },
 						{ label: 'A JSON parser', slug: 'guides/json-parser' },
 						{ label: 'Expressions with precedence', slug: 'guides/expression-parser' },
-						{ label: 'Streaming a CSV parser', slug: 'guides/streaming-csv' },
-						{ label: 'Streaming with commit', slug: 'guides/streaming-commit' },
 					],
 				},
 			{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
