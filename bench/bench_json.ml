@@ -122,40 +122,46 @@ module Angstrom_JSON_Optimized = struct
 end
 
 let run_section title input iterations benches =
-  Printf.printf "%s\n" title;
-  Printf.printf "%s\n\n" (String.make (String.length title) '=');
-  Printf.printf "Input: %s\n\n" input;
-  let results = latencyN ~repeat:3 iterations benches in
+  Bench_style.print_banner title;
+  Bench_style.print_label_value "Input" input;
+  print_newline ();
+  let results =
+    latencyN ~repeat:3 iterations (List.map Bench_case.to_benchmark benches)
+  in
   print_newline ();
   tabulate results;
-  Printf.printf "\n"
+  Printf.printf "\n";
+  let section =
+    Bench_report.print_gc_quick ~title:"GC Quick Stats (single batch)" benches
+  in
+  { section with title }
 
 let () =
+  let benches =
+    [
+      Bench_case.make ~name:"Parseff (optimized)" ~iterations:1000000L
+        (fun () -> ignore (Parseff_JSON_Optimized.parse json_input)
+      );
+      Bench_case.make ~name:"Parseff (generic)" ~iterations:1000000L (fun () ->
+          ignore (Parseff_JSON.parse json_input)
+      );
+      Bench_case.make ~name:"Angstrom (generic)" ~iterations:1000000L (fun () ->
+          ignore (Angstrom_JSON.parse json_input)
+      );
+      Bench_case.make ~name:"Angstrom (optimized)" ~iterations:1000000L
+        (fun () -> ignore (Angstrom_JSON_Optimized.parse json_input)
+      );
+    ]
+  in
   for _ = 1 to 1000 do
-    ignore (Parseff_JSON.parse json_input);
-    ignore (Parseff_JSON_Optimized.parse json_input);
-    ignore (Angstrom_JSON.parse json_input);
-    ignore (Angstrom_JSON_Optimized.parse json_input)
+    List.iter Bench_case.run benches
   done;
 
-  run_section "JSON Benchmark: Parseff vs Angstrom" json_input 1000000L
-    [
-      ( "Parseff (optimized)",
-        (fun () -> ignore (Parseff_JSON_Optimized.parse json_input)),
-        ()
-      );
-      ( "Parseff (generic)",
-        (fun () -> ignore (Parseff_JSON.parse json_input)),
-        ()
-      );
-      ( "Angstrom (generic)",
-        (fun () -> ignore (Angstrom_JSON.parse json_input)),
-        ()
-      );
-      ( "Angstrom (optimized)",
-        (fun () -> ignore (Angstrom_JSON_Optimized.parse json_input)),
-        ()
-      );
-    ];
+  let section =
+    run_section "JSON Benchmark: Parseff vs Angstrom" json_input 1000000L
+      benches
+  in
+  Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_json"
+    ~bench_name:"JSON Benchmark: Parseff vs Angstrom" [ section ];
 
-  Printf.printf "Note: Higher throughput (N/s) is better.\n"
+  Bench_style.print_notice "Note" "Higher throughput (N/s) is better."

@@ -43,6 +43,14 @@ type location = { offset : int; line : int; col : int }
 (** A source location. [line] and [col] are 1-based. [col] counts bytes from the
     start of the line (not characters — relevant for UTF-8). *)
 
+type backtrack_window_error = { limit : int; oldest : int; current : int }
+(** Streaming backtracking exceeded the configured history window.
+
+    [oldest] is the earliest position the runtime still needs to rewind to,
+    [current] is the furthest byte position Parseff needed to retain or reach
+    when the overflow happened, and [limit] is the configured
+    [backtrack_window]. *)
+
 (** {1 Result Types} *)
 
 (** Parse result with support for custom error types.
@@ -58,6 +66,9 @@ type location = { offset : int; line : int; col : int }
     - [`Unexpected_end_of_input] — input ended before the parser could match
     - [`Depth_limit_exceeded of string] — recursive nesting exceeded [max_depth]
       (see {!rec_})
+    - [`Backtrack_window_exceeded of backtrack_window_error] — a streaming
+      parser needed to keep more rewind history than allowed by
+      [backtrack_window]
 
     User errors raised via {!val-error} are also returned as [Error]. *)
 type ('a, 'e) result =
@@ -388,6 +399,31 @@ val look_ahead : (unit -> 'a) -> 'a
     (* position hasn't moved *)
     ]} *)
 
+val commit : unit -> unit
+(** [commit ()] seals the nearest active backtracking frame.
+
+    After [commit], the enclosing choice/repetition frame no longer rewinds on
+    failure, which improves error locality and allows streaming sources to drop
+    older buffered input. Outside any active backtracking frame, [commit ()] is
+    a no-op.
+
+    Example:
+    {@ocaml[
+    let http_method () =
+      or_
+        (fun () ->
+          let _ = consume "GET " in
+          commit ();
+          `GET
+        )
+        (fun () ->
+          let _ = consume "POST " in
+          commit ();
+          `POST
+        )
+        ()
+    ]} *)
+
 val rec_ : (unit -> 'a) -> 'a
 (** [rec_ parser] marks a recursive entry point for depth tracking. Wrap the
     body of recursive parsers with [rec_] so that {!parse} can enforce
@@ -685,12 +721,14 @@ end
 
 val parse_source :
   ?max_depth:int ->
+  ?backtrack_window:int ->
   Source.t ->
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
     | `Failure of string
     | `Unexpected_end_of_input
+    | `Backtrack_window_exceeded of backtrack_window_error
     | `Depth_limit_exceeded of string ]
   )
   result
@@ -699,7 +737,10 @@ val parse_source :
     need to be fully available up front.
 
     The same parsers work with both [parse] and [parse_source] — no changes
-    required.
+    required. Streaming backtracking is bounded by [backtrack_window] (default:
+    [65536] bytes). If the parser needs to keep more rewind history than that,
+    parsing fails with [`Backtrack_window_exceeded]. Use {!commit} to seal
+    branches once the grammar has clearly chosen them.
 
     Example:
     {@ocaml[
@@ -712,12 +753,14 @@ val parse_source :
 
 val parse_source_until_end :
   ?max_depth:int ->
+  ?backtrack_window:int ->
   Source.t ->
   (unit -> 'a) ->
   ( 'a,
     [> `Expected of string
     | `Failure of string
     | `Unexpected_end_of_input
+    | `Backtrack_window_exceeded of backtrack_window_error
     | `Depth_limit_exceeded of string ],
     'd
   )

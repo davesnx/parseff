@@ -1,5 +1,11 @@
 (executables
- (names bench_json bench_csv bench_arithmetic bench_binary bench_utf8)
- (libraries parseff angstrom bigstringaf mparser re benchmark)
+ (names
+  bench_json
+  bench_csv
+  bench_arithmetic
+  bench_binary
+  bench_utf8
+  bench_streaming)
+ (libraries parseff angstrom bigstringaf mparser re benchmark bench_support)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures)))

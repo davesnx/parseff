@@ -96,38 +96,59 @@ let bench_streaming_be_any_int32 () =
   | Error _ ->
       failwith "bench_streaming_be_any_int32 failed"
 
-let run_section title iterations benches =
-  Printf.printf "%s\n" title;
-  Printf.printf "%s\n\n" (String.make (String.length title) '-');
-  let results = latencyN ~repeat:3 iterations benches in
+let run_section title benches =
+  let iterations =
+    match benches with
+    | first :: _ ->
+        Bench_case.iterations first
+    | [] ->
+        invalid_arg "run_section requires at least one benchmark case"
+  in
+  Bench_style.print_section title;
+  let results =
+    latencyN ~repeat:3 iterations (List.map Bench_case.to_benchmark benches)
+  in
   print_newline ();
   tabulate results;
-  print_newline ()
+  print_newline ();
+  let section =
+    Bench_report.print_gc_quick ~title:"GC Quick Stats (single batch)" benches
+  in
+  { section with title }
 
 let () =
+  let fixed_width_cases =
+    [
+      Bench_case.make ~name:"BE.any_uint8 (1 byte)" ~iterations:20000000L
+        bench_be_any_uint8;
+      Bench_case.make ~name:"BE.any_int32 (4 bytes)" ~iterations:20000000L
+        bench_be_any_int32;
+      Bench_case.make ~name:"BE.any_int64 (8 bytes)" ~iterations:20000000L
+        bench_be_any_int64;
+      Bench_case.make ~name:"take 16" ~iterations:20000000L bench_take_16;
+    ]
+  in
+  let structured_cases =
+    [
+      Bench_case.make ~name:"TLV 10x (tag+len+val)" ~iterations:2000000L
+        bench_tlv_10x;
+      Bench_case.make ~name:"streaming BE.any_int32" ~iterations:2000000L
+        bench_streaming_be_any_int32;
+    ]
+  in
+  let all_cases = fixed_width_cases @ structured_cases in
   (* Warmup *)
   for _ = 1 to 1000 do
-    bench_be_any_uint8 ();
-    bench_be_any_int32 ();
-    bench_be_any_int64 ();
-    bench_take_16 ();
-    bench_tlv_10x ();
-    bench_streaming_be_any_int32 ()
+    List.iter Bench_case.run all_cases
   done;
 
-  Printf.printf "Binary Parsing Benchmarks\n";
-  Printf.printf "=========================\n\n";
+  Bench_style.print_banner "Binary Parsing Benchmarks";
 
-  run_section "Fixed-width reads" 20000000L
-    [
-      ("BE.any_uint8 (1 byte)", bench_be_any_uint8, ());
-      ("BE.any_int32 (4 bytes)", bench_be_any_int32, ());
-      ("BE.any_int64 (8 bytes)", bench_be_any_int64, ());
-      ("take 16", bench_take_16, ());
-    ];
+  let fixed_section = run_section "Fixed-width reads" fixed_width_cases in
 
-  run_section "Structured and streaming parses" 2000000L
-    [
-      ("TLV 10x (tag+len+val)", bench_tlv_10x, ());
-      ("streaming BE.any_int32", bench_streaming_be_any_int32, ());
-    ]
+  let structured_section =
+    run_section "Structured and streaming parses" structured_cases
+  in
+  Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_binary"
+    ~bench_name:"Binary Parsing Benchmarks"
+    [ fixed_section; structured_section ]

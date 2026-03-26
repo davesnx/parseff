@@ -13,6 +13,10 @@ A {!type:Parseff.span} is a zero-copy slice of the input string. It holds a
 reference to the original buffer with an offset and length, avoiding string
 allocation until you explicitly call {!val:Parseff.span_to_string}.
 
+For parsers run with {!val:Parseff.parse_source}, spans may be materialized into
+owned strings internally so the streaming runtime can reclaim older buffer
+prefixes. In-memory {!val:Parseff.parse} still keeps the zero-copy behavior.
+
 {@ocaml skip[val span_to_string : span -> string]}
 
 {1 Span-based operations}
@@ -21,7 +25,9 @@ allocation until you explicitly call {!val:Parseff.span_to_string}.
 
 {!val:Parseff.take_while_span} is like {!val:Parseff.take_while} but returns a
 zero-copy {!type:Parseff.span} instead of allocating a string. No memory
-allocation until you call {!val:Parseff.span_to_string}.
+allocation until you call {!val:Parseff.span_to_string}. Under
+{!val:Parseff.parse_source}, the returned span may be backed by an owned copy
+instead of the live streaming buffer.
 
 {@ocaml skip[val take_while_span : (char -> bool) -> span]}
 
@@ -55,7 +61,9 @@ let fast_integer () =
 {2 [sep_by_take_span]}
 
 {!val:Parseff.sep_by_take_span} is like {!val:Parseff.sep_by_take} but returns
-zero-copy {!type:Parseff.span}s. No [String.sub] allocations per element.
+zero-copy {!type:Parseff.span}s. No [String.sub] allocations per element in the
+in-memory runner. Under {!val:Parseff.parse_source}, spans may be copied so the
+runtime can discard older chunks safely.
 
 {@ocaml skip[val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list]}
 

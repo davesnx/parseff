@@ -216,6 +216,78 @@ let test_look_ahead_no_consume () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_commit_noop_outside_frame () =
+  match
+    parse_with_pos "a" (fun () ->
+        Parseff.commit ();
+        Parseff.char 'a'
+    )
+  with
+  | Ok (c, pos) ->
+      Alcotest.(check char) "char" 'a' c;
+      Alcotest.(check int) "position" 1 pos
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_commit_blocks_or_backtracking () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        let _ = Parseff.consume "ab" in
+        Parseff.commit ();
+        let _ = Parseff.char 'x' in
+        "left"
+      )
+      (fun () -> Parseff.consume "abcd")
+      ()
+  in
+  match Parseff.parse "abcd" parser with
+  | Ok _ ->
+      Alcotest.fail "Expected committed branch failure"
+  | Error { pos; error = `Expected msg } ->
+      Alcotest.(check int) "error position" 2 pos;
+      Alcotest.(check string) "error message" "expected 'x'" msg
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+let test_commit_stops_many_from_succeeding () =
+  let item () =
+    let _ = Parseff.char 'a' in
+    let _ = Parseff.char ',' in
+    Parseff.commit ();
+    Parseff.char 'b'
+  in
+  match Parseff.parse "a,ba,c" (Parseff.many item) with
+  | Ok _ ->
+      Alcotest.fail "Expected committed repetition failure"
+  | Error { pos; error = `Expected msg } ->
+      Alcotest.(check int) "error position" 5 pos;
+      Alcotest.(check string) "error message" "expected 'b'" msg
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+let test_commit_does_not_escape_look_ahead () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        let _ =
+          Parseff.look_ahead (fun () ->
+              let _ = Parseff.consume "ab" in
+              Parseff.commit ();
+              Parseff.char 'x'
+          )
+        in
+        Parseff.consume "abcd"
+      )
+      (fun () -> Parseff.consume "abcd")
+      ()
+  in
+  match Parseff.parse "abcd" parser with
+  | Ok s ->
+      Alcotest.(check string) "fallback branch" "abcd" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let test_sep_by_empty () =
   match
     Parseff.parse "" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
@@ -1712,6 +1784,14 @@ let () =
           test_case "look_ahead success" `Quick test_look_ahead_success;
           test_case "look_ahead no consume" `Quick test_look_ahead_no_consume;
           test_case "look_ahead failure" `Quick test_look_ahead_failure;
+          test_case "commit noop outside frame" `Quick
+            test_commit_noop_outside_frame;
+          test_case "commit blocks alternation" `Quick
+            test_commit_blocks_or_backtracking;
+          test_case "commit stops many" `Quick
+            test_commit_stops_many_from_succeeding;
+          test_case "commit stays inside look_ahead" `Quick
+            test_commit_does_not_escape_look_ahead;
           test_case "skip_while" `Quick test_skip_while;
         ]
       );

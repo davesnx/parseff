@@ -223,40 +223,48 @@ module Parseff_Arith_Fused = struct
 end
 
 let () =
+  let benches =
+    [
+      Bench_case.make ~name:"Parseff (fused)" ~iterations:5000000L (fun () ->
+          ignore (Parseff_Arith_Fused.parse arith_input)
+      );
+      Bench_case.make ~name:"Parseff (generic)" ~iterations:5000000L (fun () ->
+          ignore (Parseff_Arith_Generic.parse arith_input)
+      );
+      Bench_case.make ~name:"Angstrom" ~iterations:5000000L (fun () ->
+          ignore (Angstrom_Arith.parse arith_input)
+      );
+      Bench_case.make ~name:"Angstrom (opt)" ~iterations:5000000L (fun () ->
+          ignore (Angstrom_Arith_Optimized.parse arith_input)
+      );
+      Bench_case.make ~name:"MParser" ~iterations:5000000L (fun () ->
+          ignore (MParser_Arith.parse arith_input)
+      );
+    ]
+  in
   (* warmup *)
   for _ = 1 to 1000 do
-    ignore (Parseff_Arith_Fused.parse arith_input);
-    ignore (Parseff_Arith_Generic.parse arith_input);
-    ignore (Angstrom_Arith.parse arith_input);
-    ignore (Angstrom_Arith_Optimized.parse arith_input);
-    ignore (MParser_Arith.parse arith_input)
+    List.iter Bench_case.run benches
   done;
 
-  Printf.printf "Arithmetic Benchmark: Parseff vs Angstrom vs MParser\n";
-  Printf.printf "=====================================================\n\n";
-  Printf.printf "Input: %s\n\n" arith_input;
+  Bench_style.print_banner
+    "Arithmetic Benchmark: Parseff vs Angstrom vs MParser";
+  Bench_style.print_label_value "Input" arith_input;
+  print_newline ();
 
   let results =
-    latencyN ~repeat:3 5000000L
-      [
-        ( "Parseff (fused)",
-          (fun () -> ignore (Parseff_Arith_Fused.parse arith_input)),
-          ()
-        );
-        ( "Parseff (generic)",
-          (fun () -> ignore (Parseff_Arith_Generic.parse arith_input)),
-          ()
-        );
-        ("Angstrom", (fun () -> ignore (Angstrom_Arith.parse arith_input)), ());
-        ( "Angstrom (opt)",
-          (fun () -> ignore (Angstrom_Arith_Optimized.parse arith_input)),
-          ()
-        );
-        ("MParser", (fun () -> ignore (MParser_Arith.parse arith_input)), ());
-      ]
+    latencyN ~repeat:3 5000000L (List.map Bench_case.to_benchmark benches)
   in
 
   print_newline ();
   tabulate results;
+  Printf.printf "\n";
+  let section =
+    Bench_report.print_gc_quick ~title:"GC Quick Stats (single batch)" benches
+  in
+  Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_arithmetic"
+    ~bench_name:"Arithmetic Benchmark: Parseff vs Angstrom vs MParser"
+    [ { section with title = "Main benchmark cases" } ];
 
-  Printf.printf "\nNote: Higher throughput (N/s) is better.\n"
+  print_newline ();
+  Bench_style.print_notice "Note" "Higher throughput (N/s) is better."
