@@ -2,7 +2,7 @@
 
 The `bench/` directory keeps the current throughput-focused benchmarks and adds a small support layer for extra observability.
 
-Structured artifacts are written to `bench/results/` by default as both JSON and CSV. Override that location with `PARSEFF_BENCH_RESULTS_DIR=/path/to/results`.
+Structured artifacts are written to `bench/results/<git-describe>/` by default as both JSON and CSV. If the tree is dirty, the folder name gets the usual `-dirty` suffix. Override the location entirely with `PARSEFF_BENCH_RESULTS_DIR=/path/to/results`.
 
 ## What is measured now
 
@@ -18,7 +18,7 @@ Structured artifacts are written to `bench/results/` by default as both JSON and
 - `make bench-arithmetic`
 - `make bench-streaming`
 
-Each run writes stable files such as `bench/results/bench_json.json` and `bench/results/bench_json.csv`, so you can diff or archive them across runs.
+Each run writes files such as `bench/results/v0.1.0-3-gabc123/bench_json.json` and `bench/results/v0.1.0-3-gabc123/bench_json.csv`, so results naturally group by commit while still staying easy to diff or archive.
 
 ## Reading the new GC tables
 

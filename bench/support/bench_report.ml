@@ -85,12 +85,55 @@ let utc_timestamp () =
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.tm_year + 1900)
     (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
 
+let read_command_output command =
+  try
+    let ic = Unix.open_process_in command in
+    let buf = Buffer.create 64 in
+    ( try
+        while true do
+          Buffer.add_string buf (input_line ic);
+          Buffer.add_char buf '\n'
+        done
+      with End_of_file -> ()
+    );
+    match Unix.close_process_in ic with
+    | Unix.WEXITED 0 ->
+        let output = String.trim (Buffer.contents buf) in
+        if output = "" then
+          None
+        else
+          Some output
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        None
+  with _ -> None
+
+let sanitize_path_component value =
+  let buf = Buffer.create (String.length value) in
+  String.iter
+    (function
+      | ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-') as c ->
+          Buffer.add_char buf c
+      | _ ->
+          Buffer.add_char buf '_'
+      )
+    value;
+  match Buffer.contents buf with "" -> "unknown" | sanitized -> sanitized
+
+let git_describe_folder () =
+  match
+    read_command_output "git describe --always --dirty --tags 2>/dev/null"
+  with
+  | Some description ->
+      sanitize_path_component description
+  | None ->
+      "unknown"
+
 let results_dir () =
   match Sys.getenv_opt "PARSEFF_BENCH_RESULTS_DIR" with
   | Some dir when dir <> "" ->
       dir
   | _ ->
-      "bench/results"
+      Filename.concat "bench/results" (git_describe_folder ())
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then
