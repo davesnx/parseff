@@ -87,40 +87,47 @@ module Parseff_CSV_Fused = struct
 end
 
 let () =
+  let benches =
+    [
+      Bench_case.make ~name:"Parseff (fused)" ~iterations:2000000L (fun () ->
+          ignore (Parseff_CSV_Fused.parse csv_input)
+      );
+      Bench_case.make ~name:"Parseff (generic)" ~iterations:2000000L (fun () ->
+          ignore (Parseff_CSV_Generic.parse csv_input)
+      );
+      Bench_case.make ~name:"Angstrom" ~iterations:2000000L (fun () ->
+          ignore (Angstrom_CSV.parse csv_input)
+      );
+      Bench_case.make ~name:"Angstrom (opt)" ~iterations:2000000L (fun () ->
+          ignore (Angstrom_CSV_Optimized.parse csv_input)
+      );
+      Bench_case.make ~name:"MParser" ~iterations:2000000L (fun () ->
+          ignore (MParser_CSV.parse csv_input)
+      );
+    ]
+  in
   (* warmup *)
   for _ = 1 to 1000 do
-    ignore (Parseff_CSV_Fused.parse csv_input);
-    ignore (Parseff_CSV_Generic.parse csv_input);
-    ignore (Angstrom_CSV.parse csv_input);
-    ignore (Angstrom_CSV_Optimized.parse csv_input);
-    ignore (MParser_CSV.parse csv_input)
+    List.iter Bench_case.run benches
   done;
 
-  Printf.printf "CSV Benchmark: Parseff vs Angstrom vs MParser\n";
-  Printf.printf "===============================================\n\n";
-  Printf.printf "Input: %s\n\n" csv_input;
+  Bench_style.print_banner "CSV Benchmark: Parseff vs Angstrom vs MParser";
+  Bench_style.print_label_value "Input" csv_input;
+  print_newline ();
 
   let results =
-    latencyN ~repeat:3 2000000L
-      [
-        ( "Parseff (fused)",
-          (fun () -> ignore (Parseff_CSV_Fused.parse csv_input)),
-          ()
-        );
-        ( "Parseff (generic)",
-          (fun () -> ignore (Parseff_CSV_Generic.parse csv_input)),
-          ()
-        );
-        ("Angstrom", (fun () -> ignore (Angstrom_CSV.parse csv_input)), ());
-        ( "Angstrom (opt)",
-          (fun () -> ignore (Angstrom_CSV_Optimized.parse csv_input)),
-          ()
-        );
-        ("MParser", (fun () -> ignore (MParser_CSV.parse csv_input)), ());
-      ]
+    latencyN ~repeat:3 2000000L (List.map Bench_case.to_benchmark benches)
   in
 
   print_newline ();
   tabulate results;
+  Printf.printf "\n";
+  let section =
+    Bench_report.print_gc_quick ~title:"GC Quick Stats (single batch)" benches
+  in
+  Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_csv"
+    ~bench_name:"CSV Benchmark: Parseff vs Angstrom vs MParser"
+    [ { section with title = "Main benchmark cases" } ];
 
-  Printf.printf "\nNote: Higher throughput (N/s) is better.\n"
+  print_newline ();
+  Bench_style.print_notice "Note" "Higher throughput (N/s) is better."

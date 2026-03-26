@@ -13,9 +13,10 @@ same parsers, same result type, same error handling.
 
 {@ocaml skip[val parse_source :
   ?max_depth:int ->
+  ?backtrack_window:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ]) result]}
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Backtrack_window_exceeded of Parseff.backtrack_window_error | `Depth_limit_exceeded of string ]) result]}
 
 {@ocaml skip[
   let ic = open_in "data.json" in
@@ -25,7 +26,9 @@ same parsers, same result type, same error handling.
   result
 ]}
 
-The [~max_depth] parameter works the same as in {!val:Parseff.parse}.
+The [~max_depth] parameter works the same as in {!val:Parseff.parse}. The
+[~backtrack_window] parameter bounds how much buffered input Parseff may retain
+for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 {1 [parse_source_until_end]}
 
@@ -35,9 +38,10 @@ diagnostics in both cases. See {!page:diagnostics}.
 
 {@ocaml skip[val parse_source_until_end :
   ?max_depth:int ->
+  ?backtrack_window:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
+  ('a, [> `Expected of string | `Unexpected_end_of_input | `Backtrack_window_exceeded of Parseff.backtrack_window_error | `Depth_limit_exceeded of string ], 'd)
   result_with_diagnostics]}
 
 {@ocaml skip[
@@ -230,27 +234,65 @@ The parser doesn't know which one it's running under. The code is identical:
     Parseff.parse_source (Parseff.Source.of_string "42") number
 ]}
 
-In Parseff, streaming is transparent: the same parser works against a fixed
-string or a streaming source. Other parser combinator libraries implement
-streaming through CPS. Every parser carries [fail] and [succ] callbacks, and
-suspension is encoded as closures returned in a [Partial] state.
+In Parseff, streaming is still transparent at the parser-function level: the
+same parser works against a fixed string or a streaming source. The runtime,
+however, now uses a bounded sliding buffer instead of an append-forever buffer.
 
 {1 How backtracking works across chunks}
 
-The internal buffer grows monotonically. When the streaming runtime needs more
-data, it appends to the buffer and never discards old data. This means
-backtracking ({!val:Parseff.or_}, {!val:Parseff.look_ahead}) works correctly
-even when the data spans multiple reads.
+When Parseff refills a source, it keeps only the region that is still needed for
+backtracking. The retained window starts at the oldest active rewind point and
+ends at the newest buffered byte.
 
-Example: parsing ["hello"] from a source that yields 3 bytes at a time:
+Two things keep old bytes alive:
 
-+ First read: buffer = ["hel"]
-+ [Parseff.consume "hello"] needs 5 bytes, only 3 available
-+ Handler reads again: buffer = ["hello "]
-+ [Parseff.consume "hello"] succeeds
+- active backtracking frames such as {!val:Parseff.or_}, {!val:Parseff.look_ahead},
+  and the internal rewind points used by repetition combinators
+- in-flight streaming primitives that still need earlier bytes to finish
+  building a value (for example {!val:Parseff.take_while})
 
-If {!val:Parseff.or_} needs to backtrack to a position before the current chunk,
-the data is still there in the buffer.
+{2 General advice}
+
+Most parsers become streaming parsers by changing only the runner: keep the same
+parser functions and switch from {!val:Parseff.parse} to
+{!val:Parseff.parse_source} or {!val:Parseff.parse_source_until_end}. Start
+there, then tune the streaming behavior only if the grammar needs it.
+
+In practice:
+
+- Think of [~backtrack_window] as retained undo history, not as a chunk size.
+- Prefer grammars that dispatch early, so the runtime does not need to keep a
+  long ambiguous prefix alive.
+- Call {!val:Parseff.commit} only when a branch has become logically certain.
+- If you hit [`Backtrack_window_exceeded], first try to commit earlier; only
+  increase [~backtrack_window] when the ambiguity is real.
+
+The guides section includes a small CSV walkthrough that starts with a normal
+string parser and only changes the runner, plus a second guide that focuses on
+[commit] and [~backtrack_window] for grammars with long-lived ambiguity.
+
+A small example:
+
+{@ocaml[
+let http_method () =
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.consume "GET " in
+      Parseff.commit ();
+      `GET)
+    (fun () ->
+      let _ = Parseff.consume "POST " in
+      Parseff.commit ();
+      `POST)
+    ()
+]}
+
+Before [commit ()], Parseff must keep enough buffered input to rewind and try
+the other branch. After [commit ()], that rewind point stops pinning the old
+prefix.
+
+If the retained region would exceed [~backtrack_window], parsing fails with
+[`Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
 
 {1 Thread safety}
 
@@ -276,11 +318,15 @@ concurrent access would race. Create a separate source per domain.
 
 {1 Limitations}
 
-{2 Memory growth}
+{2 Bounded backtracking}
 
-The buffer never shrinks. For a 100MB file, the buffer will eventually hold all
-100MB. This is the price of correct backtracking, since any position might need
-to be revisited.
+The buffer no longer grows forever, but a parser can still exceed the configured
+[~backtrack_window] if it keeps an old rewind point alive for too long. Typical
+fixes are:
+
+- dispatch earlier (for example with {!val:Parseff.peek_char})
+- call {!val:Parseff.commit} once the grammar has clearly committed to a branch
+- increase [~backtrack_window] for genuinely ambiguous grammars
 
 {2 Blocking reads}
 

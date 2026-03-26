@@ -94,40 +94,60 @@ let bench_byte_skip_while_ascii () =
   | Error _ ->
       failwith "bench_byte_skip_while_ascii failed"
 
-let run_section title iterations benches =
-  Printf.printf "%s\n" title;
-  Printf.printf "%s\n\n" (String.make (String.length title) '-');
-  let results = latencyN ~repeat:3 iterations benches in
+let run_section title benches =
+  let iterations =
+    match benches with
+    | first :: _ ->
+        Bench_case.iterations first
+    | [] ->
+        invalid_arg "run_section requires at least one benchmark case"
+  in
+  Bench_style.print_section title;
+  let results =
+    latencyN ~repeat:3 iterations (List.map Bench_case.to_benchmark benches)
+  in
   print_newline ();
   tabulate results;
-  print_newline ()
+  print_newline ();
+  let section =
+    Bench_report.print_gc_quick ~title:"GC Quick Stats (single batch)" benches
+  in
+  { section with title }
 
 let () =
+  let codepoint_cases =
+    [
+      Bench_case.make ~name:"Utf8.satisfy (ASCII)" ~iterations:18000000L
+        bench_utf8_satisfy_ascii;
+      Bench_case.make ~name:"Utf8.satisfy (3-byte CJK)" ~iterations:18000000L
+        bench_utf8_satisfy_3byte;
+    ]
+  in
+  let scanning_cases =
+    [
+      Bench_case.make ~name:"Utf8.take_while (10 ASCII)" ~iterations:12000000L
+        bench_utf8_take_while_ascii;
+      Bench_case.make ~name:"byte take_while (10 ASCII)" ~iterations:12000000L
+        bench_byte_take_while_ascii;
+      Bench_case.make ~name:"Utf8.take_while (mixed)" ~iterations:12000000L
+        bench_utf8_take_while_mixed;
+      Bench_case.make ~name:"Utf8.skip_while (10 ASCII)" ~iterations:12000000L
+        bench_utf8_skip_while_ascii;
+      Bench_case.make ~name:"byte skip_while (10 ASCII)" ~iterations:12000000L
+        bench_byte_skip_while_ascii;
+    ]
+  in
+  let all_cases = codepoint_cases @ scanning_cases in
   (* Warmup *)
   for _ = 1 to 1000 do
-    bench_utf8_satisfy_ascii ();
-    bench_utf8_satisfy_3byte ();
-    bench_utf8_take_while_ascii ();
-    bench_byte_take_while_ascii ();
-    bench_utf8_take_while_mixed ();
-    bench_utf8_skip_while_ascii ();
-    bench_byte_skip_while_ascii ()
+    List.iter Bench_case.run all_cases
   done;
 
-  Printf.printf "UTF-8 Parsing Benchmarks\n";
-  Printf.printf "========================\n\n";
+  Bench_style.print_banner "UTF-8 Parsing Benchmarks";
 
-  run_section "Codepoint checks" 18000000L
-    [
-      ("Utf8.satisfy (ASCII)", bench_utf8_satisfy_ascii, ());
-      ("Utf8.satisfy (3-byte CJK)", bench_utf8_satisfy_3byte, ());
-    ];
+  let codepoint_section = run_section "Codepoint checks" codepoint_cases in
 
-  run_section "Scanning" 12000000L
-    [
-      ("Utf8.take_while (10 ASCII)", bench_utf8_take_while_ascii, ());
-      ("byte take_while (10 ASCII)", bench_byte_take_while_ascii, ());
-      ("Utf8.take_while (mixed)", bench_utf8_take_while_mixed, ());
-      ("Utf8.skip_while (10 ASCII)", bench_utf8_skip_while_ascii, ());
-      ("byte skip_while (10 ASCII)", bench_byte_skip_while_ascii, ());
-    ]
+  let scanning_section = run_section "Scanning" scanning_cases in
+  Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_utf8"
+    ~bench_name:"UTF-8 Parsing Benchmarks"
+    [ codepoint_section; scanning_section ]

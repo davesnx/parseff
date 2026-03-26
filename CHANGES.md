@@ -1,5 +1,8 @@
 ## Unreleased
 
+- **Streaming now uses a bounded sliding buffer.** `parse_source` and `parse_source_until_end` accept `~backtrack_window` (default `65536`) and fail with `` `Backtrack_window_exceeded `` when a parser needs to retain more buffered input for backtracking.
+- **Add `commit`.** `commit ()` seals the nearest active backtracking frame, improving error locality and allowing streaming sources to drop older buffered input earlier.
+- **Streaming spans may be owned copies.** `take_while_span` and `sep_by_take_span` keep zero-copy behavior for `parse`, but `parse_source` may materialize owned spans so bounded streaming can reclaim old prefixes.
 - **Improve runtime performance and reduce allocation.** Parseff now uses a lower-overhead runtime internally, making generic parsers and backtracking-heavy workloads faster while keeping the API largely unchanged.
 - **Add `peek_char`.** Provides cheap single-character lookahead without backtracking.
 

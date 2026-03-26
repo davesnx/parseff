@@ -457,6 +457,71 @@ let test_backtrack_across_chunk () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_streaming_commit_blocks_backtrack () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        let _ = Parseff.consume "ab" in
+        Parseff.commit ();
+        let _ = Parseff.char 'x' in
+        "left"
+      )
+      (fun () -> Parseff.consume "abcd")
+      ()
+  in
+  let src = chunked_source ~chunk_size:2 "abcd" in
+  match Parseff.parse_source src parser with
+  | Ok _ ->
+      Alcotest.fail "Expected committed branch failure"
+  | Error { pos; error = `Expected msg } ->
+      Alcotest.(check int) "error position" 2 pos;
+      Alcotest.(check string) "error message" "expected 'x'" msg
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+let test_backtrack_window_exceeded () =
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.consume "abx")
+      (fun () -> Parseff.consume "abcd")
+      ()
+  in
+  let src = chunked_source ~chunk_size:2 "abcd" in
+  match Parseff.parse_source ~backtrack_window:2 src parser with
+  | Ok _ ->
+      Alcotest.fail "Expected backtrack window failure"
+  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest; current } }
+    ->
+      Alcotest.(check int) "error position" 3 pos;
+      Alcotest.(check int) "limit" 2 limit;
+      Alcotest.(check int) "oldest" 0 oldest;
+      Alcotest.(check int) "current" 3 current
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+let test_commit_releases_backtrack_window () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        let _ = Parseff.consume "ab" in
+        Parseff.commit ();
+        let chars = Parseff.many (fun () -> Parseff.char 'c') () in
+        Parseff.end_of_input ();
+        List.length chars
+      )
+      (fun () ->
+        let _ = Parseff.consume "ax" in
+        0
+      )
+      ()
+  in
+  let src = chunked_source ~chunk_size:1 "abcccc" in
+  match Parseff.parse_source ~backtrack_window:2 src parser with
+  | Ok n ->
+      Alcotest.(check int) "committed tail parsed" 4 n
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let test_look_ahead_across_chunk () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
@@ -849,6 +914,12 @@ let () =
           test_case "end_of_input after consume" `Quick
             test_end_of_input_after_consume;
           test_case "backtrack across chunk" `Quick test_backtrack_across_chunk;
+          test_case "commit blocks backtrack" `Quick
+            test_streaming_commit_blocks_backtrack;
+          test_case "backtrack window exceeded" `Quick
+            test_backtrack_window_exceeded;
+          test_case "commit releases backtrack window" `Quick
+            test_commit_releases_backtrack_window;
           test_case "look_ahead across chunk" `Quick
             test_look_ahead_across_chunk;
           test_case "many across chunks" `Quick test_many_across_chunks;

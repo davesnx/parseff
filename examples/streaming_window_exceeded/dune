@@ -1,0 +1,6 @@
+(executable
+ (name streaming_window_exceeded)
+ (libraries parseff))
+
+(cram
+ (deps streaming_window_exceeded.exe))

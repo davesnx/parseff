@@ -1,6 +1,7 @@
-(* Backtracking still works across source refills because Parseff keeps old
-   input buffered. The first branch reads across the chunk boundary and fails;
-   `or_` rewinds to position 0, then the second branch succeeds. *)
+(* Backtracking still works across source refills as long as the configured
+   backtrack window is large enough. The first branch reads across the chunk
+   boundary and fails; `or_` rewinds to position 0, then the second branch
+   succeeds. *)
 
 let parser () =
   Parseff.or_
@@ -28,6 +29,10 @@ let () =
             "unexpected end of input"
         | `Failure msg ->
             msg
+        | `Backtrack_window_exceeded { limit; oldest; current } ->
+            Printf.sprintf
+              "backtrack window exceeded (limit=%d oldest=%d current=%d)" limit
+              oldest current
         | `Depth_limit_exceeded msg ->
             msg
       in

@@ -1,0 +1,168 @@
+{0 Guide: Streaming with commit and backtrack windows}
+
+Some grammars stream naturally as soon as you switch from {!val:Parseff.parse}
+to {!val:Parseff.parse_source}. Others keep an old choice alive for too long and
+hit [`Backtrack_window_exceeded].
+
+This guide shows the smallest useful example of that second case: a request-line
+parser that chooses between two methods, then consumes a longer path. Without
+{!val:Parseff.commit}, the old branch stays rewindable for too long. With
+{!val:Parseff.commit}, the same parser shape works under a small
+[~backtrack_window].
+
+Source examples:
+
+{{:https://github.com/davesnx/parseff/blob/main/examples/streaming_commit/streaming_commit.ml} [examples/streaming_commit/streaming_commit.ml]}
+
+{{:https://github.com/davesnx/parseff/blob/main/examples/streaming_window_exceeded/streaming_window_exceeded.ml} [examples/streaming_window_exceeded/streaming_window_exceeded.ml]}
+
+{1 The parser shape}
+
+We will stream a tiny request line such as [GET /foo/bar].
+
+{@ocaml[
+type request = [ `GET | `POST ] * string
+
+let chunk_seq ?(chunk_size = 2) input =
+  let len = String.length input in
+  let rec go pos () =
+    if pos >= len then Seq.Nil
+    else
+      let n = min chunk_size (len - pos) in
+      Seq.Cons (String.sub input pos n, go (pos + n))
+  in
+  go 0
+
+let path () =
+  let _ = Parseff.char '/' in
+  let rest =
+    Parseff.take_while ~at_least:1
+      (fun c ->
+        (c >= 'a' && c <= 'z')
+        || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9') || c = '/' || c = '-' || c = '_')
+      ~label:"path"
+  in
+  "/" ^ rest
+]}
+
+The source arrives in tiny 2-byte chunks so the runtime has to refill several
+times while parsing the same logical line.
+
+{1 First version: no [commit]}
+
+Start with the obvious parser:
+
+{@ocaml[
+let request_line_without_commit () =
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.consume "GET " in
+      let p = path () in
+      Parseff.end_of_input ();
+      (`GET, p))
+    (fun () ->
+      let _ = Parseff.consume "POST " in
+      let p = path () in
+      Parseff.end_of_input ();
+      (`POST, p))
+    ()
+]}
+
+Now run it with a small window:
+
+{@ocaml[
+let source =
+  Parseff.Source.of_seq (chunk_seq "GET /foo/bar")
+
+let result =
+  Parseff.parse_source ~backtrack_window:8 source request_line_without_commit
+]}
+
+This fails with [`Backtrack_window_exceeded]. Why?
+
+- {!val:Parseff.or_} opened a rewind point at the start of the line.
+- The left branch matched ["GET "] and kept consuming the path.
+- Until the branch commits, Parseff must still be able to rewind all the way
+  back to try the [POST] branch.
+- The retained history grows past 8 bytes, so the runtime stops with a real
+  error instead of silently buffering forever.
+
+Output from the example program:
+
+{v
+backtrack window exceeded: limit=8 oldest=0 current=9
+v}
+
+Here [oldest=0] means the parser still needed to be able to rewind to the very
+start of the input.
+
+{1 Second version: commit once the branch is chosen}
+
+The method token already decides the branch. Once ["GET "] matched, there is no
+reason to keep the [POST] alternative alive.
+
+{@ocaml[
+let request_line () =
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.consume "GET " in
+      Parseff.commit ();
+      let p = path () in
+      Parseff.end_of_input ();
+      (`GET, p))
+    (fun () ->
+      let _ = Parseff.consume "POST " in
+      Parseff.commit ();
+      let p = path () in
+      Parseff.end_of_input ();
+      (`POST, p))
+    ()
+]}
+
+Run the same input, same chunking, same [~backtrack_window]:
+
+{@ocaml[
+let source =
+  Parseff.Source.of_seq (chunk_seq "GET /foo/bar")
+
+let result =
+  Parseff.parse_source ~backtrack_window:8 source request_line
+]}
+
+Now it succeeds:
+
+{v
+method=GET path=/foo/bar
+v}
+
+After {!val:Parseff.commit}, the nearest rewind frame is sealed. The parser can
+keep streaming the rest of the path without pinning the method choice all the
+way back to position 0.
+
+{1 Where to put [commit]}
+
+[commit] is best placed at a grammar boundary where the branch has become
+logically certain.
+
+Good places:
+
+- after a branch discriminator such as ["GET "] vs ["POST "]
+- after a token that makes later failure final for that branch
+
+Bad places:
+
+- after every successful primitive
+- before the grammar has actually chosen a branch
+
+Remember that {!val:Parseff.commit} is local to the nearest active backtracking
+frame and is a no-op if there is no such frame.
+
+{1 Takeaways}
+
+- Start by switching runners. Many parsers need no further changes.
+- If streaming fails with [`Backtrack_window_exceeded], ask which old branch is
+  still being kept alive.
+- Add {!val:Parseff.commit} at the point where the grammar has clearly chosen
+  that branch.
+- Increase [~backtrack_window] only when the ambiguity is real and expected.
