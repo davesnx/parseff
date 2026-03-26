@@ -1,5 +1,8 @@
 ## Unreleased
 
+- **Improve runtime performance and reduce allocation.** Parseff now uses a lower-overhead runtime internally, making generic parsers and backtracking-heavy workloads faster while keeping the API largely unchanged.
+- **Add `peek_char`.** Provides cheap single-character lookahead without backtracking.
+
 ## 0.3.0
 
 - **Add `Source.of_seq`.** Creates a source from a `string Seq.t`.
