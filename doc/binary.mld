@@ -212,11 +212,11 @@ Integer parsers use the OCaml stdlib's [String.get_int16_be],
 [String.get_int32_le], etc. directly on the input buffer with no intermediate
 allocations. Float and double parsers are derived from the integer parsers using
 [Int32.float_of_bits] and [Int64.float_of_bits] respectively — this avoids
-dedicated effects while remaining allocation-free.
+extra indirection while remaining allocation-free.
 
 {1 Streaming support}
 
 All binary parsers work with streaming input ({!val:Parseff.parse_source} and
 {!val:Parseff.parse_source_until_end}). Multi-byte reads that span chunk
-boundaries are handled correctly — the streaming handler ensures enough bytes are
+boundaries are handled correctly — the streaming runtime ensures enough bytes are
 buffered before each read.

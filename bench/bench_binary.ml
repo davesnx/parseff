@@ -96,6 +96,14 @@ let bench_streaming_be_any_int32 () =
   | Error _ ->
       failwith "bench_streaming_be_any_int32 failed"
 
+let run_section title iterations benches =
+  Printf.printf "%s\n" title;
+  Printf.printf "%s\n\n" (String.make (String.length title) '-');
+  let results = latencyN ~repeat:3 iterations benches in
+  print_newline ();
+  tabulate results;
+  print_newline ()
+
 let () =
   (* Warmup *)
   for _ = 1 to 1000 do
@@ -110,17 +118,16 @@ let () =
   Printf.printf "Binary Parsing Benchmarks\n";
   Printf.printf "=========================\n\n";
 
-  let results =
-    latencyN ~repeat:3 100000L
-      [
-        ("BE.any_uint8 (1 byte)", bench_be_any_uint8, ());
-        ("BE.any_int32 (4 bytes)", bench_be_any_int32, ());
-        ("BE.any_int64 (8 bytes)", bench_be_any_int64, ());
-        ("take 16", bench_take_16, ());
-        ("TLV 10x (tag+len+val)", bench_tlv_10x, ());
-        ("streaming BE.any_int32", bench_streaming_be_any_int32, ());
-      ]
-  in
+  run_section "Fixed-width reads" 20000000L
+    [
+      ("BE.any_uint8 (1 byte)", bench_be_any_uint8, ());
+      ("BE.any_int32 (4 bytes)", bench_be_any_int32, ());
+      ("BE.any_int64 (8 bytes)", bench_be_any_int64, ());
+      ("take 16", bench_take_16, ());
+    ];
 
-  print_newline ();
-  tabulate results
+  run_section "Structured and streaming parses" 2000000L
+    [
+      ("TLV 10x (tag+len+val)", bench_tlv_10x, ());
+      ("streaming BE.any_int32", bench_streaming_be_any_int32, ());
+    ]

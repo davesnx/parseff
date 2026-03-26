@@ -94,6 +94,14 @@ let bench_byte_skip_while_ascii () =
   | Error _ ->
       failwith "bench_byte_skip_while_ascii failed"
 
+let run_section title iterations benches =
+  Printf.printf "%s\n" title;
+  Printf.printf "%s\n\n" (String.make (String.length title) '-');
+  let results = latencyN ~repeat:3 iterations benches in
+  print_newline ();
+  tabulate results;
+  print_newline ()
+
 let () =
   (* Warmup *)
   for _ = 1 to 1000 do
@@ -109,18 +117,17 @@ let () =
   Printf.printf "UTF-8 Parsing Benchmarks\n";
   Printf.printf "========================\n\n";
 
-  let results =
-    latencyN ~repeat:3 100000L
-      [
-        ("Utf8.satisfy (ASCII)", bench_utf8_satisfy_ascii, ());
-        ("Utf8.satisfy (3-byte CJK)", bench_utf8_satisfy_3byte, ());
-        ("Utf8.take_while (10 ASCII)", bench_utf8_take_while_ascii, ());
-        ("byte take_while (10 ASCII)", bench_byte_take_while_ascii, ());
-        ("Utf8.take_while (mixed)", bench_utf8_take_while_mixed, ());
-        ("Utf8.skip_while (10 ASCII)", bench_utf8_skip_while_ascii, ());
-        ("byte skip_while (10 ASCII)", bench_byte_skip_while_ascii, ());
-      ]
-  in
+  run_section "Codepoint checks" 18000000L
+    [
+      ("Utf8.satisfy (ASCII)", bench_utf8_satisfy_ascii, ());
+      ("Utf8.satisfy (3-byte CJK)", bench_utf8_satisfy_3byte, ());
+    ];
 
-  print_newline ();
-  tabulate results
+  run_section "Scanning" 12000000L
+    [
+      ("Utf8.take_while (10 ASCII)", bench_utf8_take_while_ascii, ());
+      ("byte take_while (10 ASCII)", bench_byte_take_while_ascii, ());
+      ("Utf8.take_while (mixed)", bench_utf8_take_while_mixed, ());
+      ("Utf8.skip_while (10 ASCII)", bench_utf8_skip_while_ascii, ());
+      ("byte skip_while (10 ASCII)", bench_byte_skip_while_ascii, ());
+    ]

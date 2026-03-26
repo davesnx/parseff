@@ -50,17 +50,17 @@ parse_value ()
 
 ### Use fused operations
 
-Fewer round-trips between your parser and the effect handler means less work overall. Fused operations combine several steps into one, yielding a 2-4x improvement in hot paths by doing in a single call what would otherwise require multiple:
+Fewer parser round-trips means less work overall. Fused operations combine several steps into one, yielding a 2-4x improvement in hot paths by doing in a single call what would otherwise require multiple:
 
 ```ocaml
-(* 4 effect dispatches *)
+(* 4 parser steps *)
 Parseff.skip_whitespace ();
 let _ = Parseff.char ',' in
 Parseff.skip_whitespace ();
 let value = Parseff.take_while ~at_least:1 is_digit ~label:"digit" in
 ignore value
 
-(* 1 effect dispatch *)
+(* 1 fused step *)
 let value = Parseff.fused_sep_take is_whitespace ',' is_digit in
 ignore value
 ```
@@ -103,7 +103,7 @@ Each `Parseff.or_` sets up a backtracking checkpoint, which is extra work the ru
 
 ```ocaml
 let keyword () =
-  (* installs a handler per alternation, per iteration *)
+  (* installs a checkpoint per alternation, per iteration *)
   Parseff.or_
     (fun () -> Parseff.consume "class")
     (fun () ->
@@ -127,9 +127,9 @@ let keyword () =
 - Complex parsers where each branch has distinct structure
 - When the number of alternatives is small
 
-### Push work into handler-level operations
+### Push work into bulk operations
 
-The less your parser has to bounce back and forth with the effect handler, the faster it runs. Handler-level operations do the entire scan in one go instead of making repeated round-trips:
+The less your parser has to bounce back and forth between tiny operations, the faster it runs. Bulk operations do the entire scan in one go instead of making repeated round-trips:
 
 ```ocaml
 let parse_list () =

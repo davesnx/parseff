@@ -1,11 +1,11 @@
 ---
 title: Quick start
-description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and algebraic effects handle control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
 ---
 
 # Quick start
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed via polymorphic variants, and algebraic effects handle control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed via polymorphic variants, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
 
 ## Features
 
@@ -21,7 +21,11 @@ Parseff is a direct-style parser combinator library for OCaml 5 where parsers ar
 
 ## Performance
 
-In the JSON benchmark, `Parseff`'s baseline generic parser is ~1.4x faster than `Angstrom (generic)`, and its optimized path is ~2.1x faster. The optimized path is still ~1.6x faster than `Angstrom (optimized)` while reducing minor allocations from ~5.9 GB (`Angstrom (generic)`) to ~1.3 GB over the full 1,000,000-parse run. See the [full comparison](/parseff/guides/comparison/) for the full table and methodology, and [bench/bench\_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml) for the benchmark source.
+Parseff is built for throughput and low allocation: in the current benchmark suite, the generic Parseff parsers are up to ~1.5x faster than Angstrom's baselines, and its fused zero-copy paths roughly ~3x faster.
+
+Even against Angstrom's optimized JSON parser, Parseff's optimized path is still ~1.5x faster while cutting minor allocations from ~11.1 GB to ~1.3 GB; against Angstrom's generic JSON parser, the generic / optimized Parseff paths land at ~800 MB / ~1.3 GB versus ~5.9 GB.
+
+See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for the methodology and results, [bench/bench\_json.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml) for the JSON benchmark, and [bench/](https://github.com/davesnx/parseff/tree/main/bench) for the full suite.
 
 ## Installation
 

@@ -11,14 +11,27 @@ How Parseff compares to Angstrom in performance, API style, and trade-offs.
 
 ## Performance
 
-Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 1,000,000 iterations (3 runs). Source: [bench/bench_angstrom.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_angstrom.ml).
+This page focuses on the cross-library parser workloads in `bench/`: JSON, CSV, and arithmetic. As a high-level snapshot, the strongest Parseff results in those workloads are:
+
+```
+Benchmark    Best Parseff result                     What it measures
+JSON         ~2.30M/s optimized                      Full JSON array parser vs Angstrom
+CSV          ~3.62M/s fused                          CSV field parser vs Angstrom and MParser
+Arithmetic   ~9.67M/s fused                          Expression parser/evaluator vs Angstrom and MParser
+```
+
+Those rows are useful for a high-level snapshot, but they are not directly comparable across rows because the workloads differ.
+
+### JSON benchmark
+
+Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 1,000,000 iterations (3 runs). Source: [bench/bench_json.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml).
 
 ```
                         Parses/sec     vs. Angstrom (generic)   Minor allocs
-Parseff (optimized)     ~2,360,000     2.1x faster              1.3 GB
-Parseff (generic)       ~1,540,000     1.4x faster              800 MB
-Angstrom (optimized)    ~1,450,000     1.3x faster             11.1 GB
-Angstrom (generic)      ~1,110,000     baseline                 5.9 GB
+Parseff (optimized)     ~2,300,000     1.9x faster              1.3 GB
+Parseff (generic)       ~1,560,000     1.3x faster              800 MB
+Angstrom (optimized)    ~1,550,000     1.3x faster             11.1 GB
+Angstrom (generic)      ~1,190,000     baseline                 5.9 GB
 ```
 
 **Optimized** uses `sep_by_take_span` plus `List.map` over zero-copy spans. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.span_to_string`.
@@ -29,13 +42,27 @@ All parsers produce the same output (`float list`) from the same input and requi
 
 Minor allocation totals are the cumulative values reported by `Benchmark.latencyN` for the full 1,000,000-parse run.
 
+Against each library's best JSON parser, Parseff's optimized path is still ~1.5x faster, while the generic Parseff parser is roughly on par with Angstrom's optimized parser and still ~1.3x faster than Angstrom's generic baseline.
+
+### Other cross-library benchmarks
+
+The other cross-library workloads in `bench/` show the same pattern:
+
+```
+                       Parseff best     Parseff generic   Angstrom best   MParser
+CSV                    ~3,620,000       ~2,500,000       ~2,290,000      ~1,340,000
+Arithmetic             ~9,670,000       ~2,080,000       ~4,490,000      ~1,170,000
+```
+
+On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result, and the fused path is ~1.6x faster. On arithmetic, Parseff's generic parser is ~1.5x faster than Angstrom's generic baseline, and the fused evaluator is ~2.2x faster than Angstrom's optimized parser.
+
 ### Why Parseff is faster
 
 **Direct character scanning.** `Parseff.take_while` runs a tight `while` loop with character predicates. No regex compilation, no automaton overhead.
 
 **Fewer allocations.** Span-based APIs return `{ buf; off; len }` slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
 
-**Fused operations.** `Parseff.sep_by_take_span` parses an entire separated list in a single effect dispatch. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
+**Fused operations.** `Parseff.sep_by_take_span` parses an entire separated list in one fused operation. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
 
 **No monadic overhead.** Parsers are direct function calls. No CPS, no closure allocation for sequencing.
 
@@ -176,7 +203,7 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | Feature | Parseff | Angstrom |
 | --- | --- | --- |
 | OCaml version | 5\.3+ | 4\.x+ |
-| API style | Imperative (direct effects) | Monadic (CPS-based) |
+| API style | Imperative (direct style) | Monadic (CPS-based) |
 | Streaming | `parse_source` with `Source.t` | Buffered / Unbuffered modules |
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
 | Zero-copy | `span` type + fused ops | Limited via `Unsafe` / bigstring slices |

@@ -182,5 +182,5 @@ returns a byte offset.
 
 All UTF-8 primitives work with streaming input ({!val:Parseff.parse_source} and
 {!val:Parseff.parse_source_until_end}). Multi-byte UTF-8 sequences that span
-chunk boundaries are handled correctly, the streaming handlers ensure enough
+chunk boundaries are handled correctly, the streaming runtime ensures enough
 bytes are available before decoding each code point.

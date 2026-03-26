@@ -98,20 +98,20 @@ let csv_to_ints () =
 
 ### `fused_sep_take`
 
-`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while ~at\_least:1, all in a single effect dispatch. Much more efficient than separate calls.
+`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while ~at\_least:1, all in a single fused parser step. Much more efficient than separate calls.
 
 ```ocaml
 val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
 ```
 ```ocaml
-(* multiple effect dispatches *)
+(* multiple parser steps *)
 let parse_value_slow () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   Parseff.skip_whitespace ();
   Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
-(* single effect dispatch *)
+(* single fused step *)
 let parse_value_fast () =
   Parseff.fused_sep_take Parseff.is_whitespace ','
     (fun c -> c >= '0' && c <= '9')
@@ -125,7 +125,7 @@ let parse_value_fast () =
 val skip_while_then_char : (char -> bool) -> char -> unit
 ```
 ```ocaml
-(* two effect dispatches *)
+(* two parser steps *)
 let skip_ws_then_comma_slow () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
@@ -138,7 +138,7 @@ let skip_ws_then_comma_fast () =
 
 ### `sep_by_take`
 
-`Parseff.sep_by_take` parses zero or more separated values entirely in the handler. Returns a list of matched strings. Zero intermediate effect dispatches.
+`Parseff.sep_by_take` parses zero or more separated values entirely in the same fused pass. Returns a list of matched strings with no intermediate parser round-trips.
 
 ```ocaml
 val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
@@ -182,17 +182,17 @@ let parse_numbers_fast () =
   in
   List.map int_of_span spans
 ```
-Effect dispatches:
+Parser round-trips:
 
 ```ocaml
-(* multiple dispatches *)
+(* multiple parser steps *)
 let value () =
   Parseff.skip_whitespace ();
   let _ = Parseff.char ',' in
   Parseff.skip_whitespace ();
   Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
-(* single dispatch *)
+(* single fused step *)
 let value () =
   Parseff.fused_sep_take Parseff.is_whitespace ','
     (fun c -> c >= '0' && c <= '9')

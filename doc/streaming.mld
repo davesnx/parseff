@@ -93,7 +93,7 @@ signal EOF. Empty strings ([Some ""]) are silently skipped.
 
 {@ocaml skip[val of_chunks : (unit -> string option) -> Source.t]}
 
-This is the recommended way to wrap effectful or callback-based data sources.
+This is the recommended way to wrap stateful or callback-based data sources.
 The library handles buffer management internally — no manual [Bytes.blit_string],
 position tracking, or [min] calculations needed.
 
@@ -205,13 +205,12 @@ or {!val:Parseff.Source.of_seq} which handle buffer management automatically.
 
 {1 Why the same parser works for both}
 
-Parseff uses algebraic effects. Parsers are plain functions that perform effects
-when they need input. The effect handler interprets those effects differently
-depending on how you run the parser:
+Parseff uses the same parser API for both in-memory and streaming input. The
+runner decides where bytes come from:
 
-- {!val:Parseff.parse}: the handler reads from a fixed string
-- {!val:Parseff.parse_source}: the handler reads from a
-  {!type:Parseff.Source.t}, fetching more data on demand
+- {!val:Parseff.parse}: reads from a fixed string
+- {!val:Parseff.parse_source}: reads from a {!type:Parseff.Source.t}, fetching
+  more data on demand
 
 The parser doesn't know which one it's running under. The code is identical:
 
@@ -231,11 +230,14 @@ The parser doesn't know which one it's running under. The code is identical:
     Parseff.parse_source (Parseff.Source.of_string "42") number
 ]}
 
-In Parseff, effects make streaming transparent. Other parser combinator libraries implement streaming through CPS. Every parser carries [fail] and [succ] callbacks, and suspension is encoded as closures returned in a [Partial] state.
+In Parseff, streaming is transparent: the same parser works against a fixed
+string or a streaming source. Other parser combinator libraries implement
+streaming through CPS. Every parser carries [fail] and [succ] callbacks, and
+suspension is encoded as closures returned in a [Partial] state.
 
 {1 How backtracking works across chunks}
 
-The internal buffer grows monotonically. When the streaming handler needs more
+The internal buffer grows monotonically. When the streaming runtime needs more
 data, it appends to the buffer and never discards old data. This means
 backtracking ({!val:Parseff.or_}, {!val:Parseff.look_ahead}) works correctly
 even when the data spans multiple reads.
@@ -295,7 +297,7 @@ the parse call in a thread:
 
 {2 Regex at chunk boundaries}
 
-When a regex match extends to the end of the current buffer, the handler refills
+When a regex match extends to the end of the current buffer, the runtime refills
 and retries until the match no longer touches the boundary (or EOF). This is
 correct for typical patterns but may behave unexpectedly with zero-width matches
 at the end of input.
