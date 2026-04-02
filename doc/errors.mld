@@ -79,7 +79,7 @@ let number_quick () =
 
 {1 [catch]}
 
-Intercept a [{!val:Parseff.fail}] failure and recover from it.
+Intercept a {!val:Parseff.fail} failure and recover from it.
 
 {@ocaml skip[val catch : (unit -> 'a) -> (string -> 'a) -> 'a]}
 

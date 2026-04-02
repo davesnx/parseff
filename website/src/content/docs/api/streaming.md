@@ -197,6 +197,7 @@ Parseff uses the same parser API for both in-memory and streaming input. The run
 
 - `Parseff.parse`: reads from a fixed string
 - `Parseff.parse_source`: reads from a `Parseff.Source.t`, fetching more data on demand
+
 The parser doesn't know which one it's running under. The code is identical:
 
 ```ocaml
@@ -235,7 +236,8 @@ In practice:
 - Think of `~backtrack_window` as retained undo history, not as a chunk size.
 - Prefer grammars that dispatch early, so the runtime does not need to keep a long ambiguous prefix alive.
 - Call `Parseff.commit` only when a branch has become logically certain.
-- If you hit `Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
+- If you hit <code>`Backtrack_window_exceeded</code>, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
+
 The guides section includes a small CSV walkthrough that starts with a normal string parser and only changes the runner, plus a second guide that focuses on `commit` and `~backtrack_window` for grammars with long-lived ambiguity.
 
 A small example:
@@ -255,7 +257,7 @@ let http_method () =
 ```
 Before `commit ()`, Parseff must keep enough buffered input to rewind and try the other branch. After `commit ()`, that rewind point stops pinning the old prefix.
 
-If the retained region would exceed `~backtrack_window`, parsing fails with `Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
+If the retained region would exceed `~backtrack_window`, parsing fails with <code>`Backtrack_window_exceeded</code>. This is a real contract, not a best-effort hint.
 
 
 ## Thread safety

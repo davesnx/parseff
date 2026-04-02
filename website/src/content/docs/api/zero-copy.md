@@ -239,6 +239,7 @@ The zero-copy version is roughly 2\.5x faster than the standard API and uses 3x 
 - Performance is critical
 - You can process spans directly (e.g., custom number parsing)
 - Parsing hot paths (inner loops)
+
 **Skip zero-copy when:**
 
 - Readability is more important than performance
