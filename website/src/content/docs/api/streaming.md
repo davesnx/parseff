@@ -232,11 +232,10 @@ Most parsers become streaming parsers by changing only the runner: keep the same
 
 In practice:
 
-- think of `~backtrack_window` as retained undo history, not as a chunk size
-- prefer grammars that dispatch early, so the runtime does not need to keep a long ambiguous prefix alive
-- call `Parseff.commit` only when a branch has become logically certain
-- if you hit `` `Backtrack_window_exceeded ``, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real
-
+- Think of `~backtrack_window` as retained undo history, not as a chunk size.
+- Prefer grammars that dispatch early, so the runtime does not need to keep a long ambiguous prefix alive.
+- Call `Parseff.commit` only when a branch has become logically certain.
+- If you hit `Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
 The guides section includes a small CSV walkthrough that starts with a normal string parser and only changes the runner, plus a second guide that focuses on `commit` and `~backtrack_window` for grammars with long-lived ambiguity.
 
 A small example:
@@ -254,10 +253,9 @@ let http_method () =
       `POST)
     ()
 ```
-
 Before `commit ()`, Parseff must keep enough buffered input to rewind and try the other branch. After `commit ()`, that rewind point stops pinning the old prefix.
 
-If the retained region would exceed `~backtrack_window`, parsing fails with `` `Backtrack_window_exceeded ``. This is a real contract, not a best-effort hint.
+If the retained region would exceed `~backtrack_window`, parsing fails with `Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
 
 
 ## Thread safety
@@ -289,7 +287,6 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 - dispatch earlier (for example with `Parseff.peek_char`)
 - call `Parseff.commit` once the grammar has clearly committed to a branch
 - increase `~backtrack_window` for genuinely ambiguous grammars
-
 
 ### Blocking reads
 

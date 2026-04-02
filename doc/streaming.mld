@@ -264,7 +264,7 @@ In practice:
 - Prefer grammars that dispatch early, so the runtime does not need to keep a
   long ambiguous prefix alive.
 - Call {!val:Parseff.commit} only when a branch has become logically certain.
-- If you hit [`Backtrack_window_exceeded], first try to commit earlier; only
+- If you hit [Backtrack_window_exceeded], first try to commit earlier; only
   increase [~backtrack_window] when the ambiguity is real.
 
 The guides section includes a small CSV walkthrough that starts with a normal
@@ -292,7 +292,7 @@ the other branch. After [commit ()], that rewind point stops pinning the old
 prefix.
 
 If the retained region would exceed [~backtrack_window], parsing fails with
-[`Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
+[Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
 
 {1 Thread safety}
 
