@@ -1,6 +1,6 @@
 (executable
- (name routes)
+ (name main)
  (libraries parseff re))
 
 (cram
- (deps routes.exe))
+ (deps main.exe))

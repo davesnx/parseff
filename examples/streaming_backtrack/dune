@@ -1,6 +1,6 @@
 (executable
- (name streaming_backtrack)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps streaming_backtrack.exe))
+ (deps main.exe))

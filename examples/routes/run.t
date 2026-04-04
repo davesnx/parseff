@@ -1,19 +1,19 @@
 Route Parser
 
-  $ ./routes.exe "/"
+  $ ./main.exe "/"
   /                         -> Home
 
-  $ ./routes.exe "/about"
+  $ ./main.exe "/about"
   /about                    -> About
 
-  $ ./routes.exe "/legal/terms"
+  $ ./main.exe "/legal/terms"
   /legal/terms              -> Terms
 
-  $ ./routes.exe "/blog"
+  $ ./main.exe "/blog"
   /blog                     -> Blog_home
 
-  $ ./routes.exe "/blog/hello-world"
+  $ ./main.exe "/blog/hello-world"
   /blog/hello-world         -> Blog_article(hello-world)
 
-  $ ./routes.exe "/blog/ocaml-effects"
+  $ ./main.exe "/blog/ocaml-effects"
   /blog/ocaml-effects       -> Blog_article(ocaml-effects)

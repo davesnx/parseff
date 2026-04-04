@@ -1,4 +1,4 @@
 Streaming backtracking across refills
 
-  $ ./streaming_backtrack.exe
+  $ ./main.exe
   matched right branch

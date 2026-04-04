@@ -1,4 +1,4 @@
-  $ ./lambda.exe | sed 's/[[:blank:]]*$//'
+  $ ./main.exe | sed 's/[[:blank:]]*$//'
   Untyped Lambda Calculus Parser
   ==============================
   

@@ -1,6 +1,6 @@
 (executable
- (name sexpr)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps sexpr.exe))
+ (deps main.exe))

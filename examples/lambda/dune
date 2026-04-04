@@ -1,6 +1,6 @@
 (executable
- (name lambda)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps lambda.exe))
+ (deps main.exe))

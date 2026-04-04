@@ -1,6 +1,6 @@
 (executable
- (name playground)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps playground.exe))
+ (deps main.exe))

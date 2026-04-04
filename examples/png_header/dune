@@ -1,6 +1,6 @@
 (executable
- (name png_header)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps png_header.exe test.png bad.bin truncated.bin))
+ (deps main.exe test.png bad.bin truncated.bin))

@@ -1,13 +1,13 @@
 Simple S-Expression Parser (atoms only)
 
-  $ ./sexpr.exe "foo"
+  $ ./main.exe "foo"
   foo             -> [foo]
 
-  $ ./sexpr.exe "()"
+  $ ./main.exe "()"
   ()              -> []
 
-  $ ./sexpr.exe "(a)"
+  $ ./main.exe "(a)"
   (a)             -> [a]
 
-  $ ./sexpr.exe "(a b c)"
+  $ ./main.exe "(a b c)"
   (a b c)         -> [a; b; c]

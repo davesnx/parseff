@@ -1,10 +1,10 @@
 (executable
- (name eio_source)
+ (name main)
  (libraries parseff eio eio_main)
  (enabled_if
   (= %{arch_sixtyfour} true)))
 
 (cram
- (deps eio_source.exe)
+ (deps main.exe)
  (enabled_if
   (= %{arch_sixtyfour} true)))

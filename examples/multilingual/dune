@@ -1,6 +1,6 @@
 (executable
- (name multilingual)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps multilingual.exe))
+ (deps main.exe))

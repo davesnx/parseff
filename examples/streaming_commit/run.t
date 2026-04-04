@@ -1,4 +1,4 @@
 Streaming with commit and a tiny backtrack window
 
-  $ ./streaming_commit.exe
+  $ ./main.exe
   method=GET path=/foo/bar

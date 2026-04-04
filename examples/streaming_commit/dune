@@ -1,6 +1,6 @@
 (executable
- (name streaming_commit)
+ (name main)
  (libraries parseff))
 
 (cram
- (deps streaming_commit.exe))
+ (deps main.exe))

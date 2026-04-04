@@ -1,4 +1,4 @@
-  $ ./miou_source.exe
+  $ ./main.exe
   Parsed 9 log entries across 3 domains:
     2024-01-15T11:00:00 ERROR [db] Connection refused
     2024-01-15T12:00:30 ERROR [auth] Token expired
