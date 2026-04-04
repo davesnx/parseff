@@ -1,0 +1,6 @@
+(executable
+ (name playground)
+ (libraries parseff))
+
+(cram
+ (deps playground.exe))
