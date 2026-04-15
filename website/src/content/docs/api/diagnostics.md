@@ -72,7 +72,6 @@ val parse_until_end :
 ```
 - `Ok (value, diagnostics)` on success
 - `Error { pos; error; diagnostics }` on failure
-
 Semantically, this is equivalent to running your parser and then calling `Parseff.end_of_input` once more at the end. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser.
 
 
@@ -148,5 +147,4 @@ Diagnostics are transactional with parser control flow:
 - `Parseff.or_`: diagnostics from failed branches are rolled back
 - `Parseff.many`: diagnostics from the final failing attempt are rolled back
 - `Parseff.look_ahead`: diagnostics are rolled back
-
 This prevents diagnostics from leaking out of speculative branches.

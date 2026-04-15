@@ -17,7 +17,7 @@ Parseff exposes four main APIs for error handling:
 
 ## `fail`
 
-Abort parsing with a message. The message is returned as <code>Error { error = `Failure msg; ... }</code>.
+Abort parsing with a message. The message is returned as `Error { error = `Failure msg; ... }`.
 
 ```ocaml
 val fail : string -> 'a
@@ -92,7 +92,7 @@ Intercept a `Parseff.fail` failure and recover from it.
 ```ocaml
 val catch : (unit -> 'a) -> (string -> 'a) -> 'a
 ```
-Since `fail` produces <code>`Failure</code> errors that punch through backtracking, they cannot be recovered with `Parseff.or_` or `Parseff.optional`. Use `catch` when you want a failure to be recoverable:
+Since `fail` produces ``Failure` errors that punch through backtracking, they cannot be recovered with `Parseff.or_` or `Parseff.optional`. Use `catch` when you want a failure to be recoverable:
 
 ```ocaml
 (* Without catch: the fail punches through or_, second branch never runs *)
@@ -146,9 +146,8 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 
 Parseff adds four built-in error variants to every parse result:
 
-- <code>`Expected of string</code>: The parser encountered the wrong input at a given position. Produced by primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
-- <code>`Failure of string</code>: A user-initiated validation failure raised via `Parseff.fail`. Unlike <code>`Expected</code>, failures are not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
-- <code>`Unexpected_end_of_input</code>: The input ended before the parser could finish. Produced when primitives like `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input but have reached the end.
-- <code>`Depth_limit_exceeded of string</code>: A `Parseff.rec_` call exceeded the `~max_depth` limit. The message contains the depth that was exceeded.
-
+- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
+- ``Failure of string`: A user-initiated validation failure raised via `Parseff.fail`. Unlike ``Expected`, failures are not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
+- ``Unexpected_end_of_input`: The input ended before the parser could finish. Produced when primitives like `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input but have reached the end.
+- ``Depth_limit_exceeded of string`: A `Parseff.rec_` call exceeded the `~max_depth` limit. The message contains the depth that was exceeded.
 Your own error types from `Parseff.error` are merged with these via polymorphic variant row extension.
