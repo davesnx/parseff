@@ -143,7 +143,7 @@ jobs:
         run: opam install dune-release -y
 
       - name: Release
-        uses: davesnx/dune-release-action@v0.2.14
+        uses: davesnx/dune-release-action@v0.4.0
         with:
           packages: 'parseff'
           changelog: './CHANGES.md'
