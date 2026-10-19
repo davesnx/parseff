@@ -14,6 +14,9 @@ on:
 env:
   DUNE_PROFILE: release
   OCAMLRUNPARAM: b
+  PINS: |
+    odoc-parser https://github.com/davesnx/odoc.git#markdown-types
+    odoc https://github.com/davesnx/odoc.git#markdown-types
 
 permissions:
   contents: write
@@ -46,18 +49,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use OCaml ${{ matrix.ocaml-compiler }}
-        uses: ocaml/setup-ocaml@v3.4.5
+      - name: Setup OCaml and dependencies
+        uses: ml-in-barcelona/gh-ci-action@v1.0.0
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
-          dune-cache: false
-          opam-disable-sandboxing: true
+          pins: ${{ env.PINS }}
+          with-doc: true
+          with-dev-setup: true
 
-      - name: Pin dependencies
-        run: make pin
-
-      - name: Install opam deps
-        run: make install
+      - name: Load dune cache
+        uses: ml-in-barcelona/gh-ci-action/dune-cache/load@v1.0.0
 
       - name: Build
         run: make build
@@ -71,6 +72,10 @@ jobs:
       - name: Run benchmarks
         run: make bench
 
+      - name: Save dune cache
+        if: ${{ !cancelled() }}
+        uses: ml-in-barcelona/gh-ci-action/dune-cache/save@v1.0.0
+
   deploy:
     name: Deploy website
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -82,18 +87,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Use OCaml 5.3.0
-        uses: ocaml/setup-ocaml@v3.4.5
+      - name: Setup OCaml and dependencies
+        uses: ml-in-barcelona/gh-ci-action@v1.0.0
         with:
           ocaml-compiler: 5.3.0
-          dune-cache: false
-          opam-disable-sandboxing: true
-
-      - name: Pin dependencies
-        run: make pin
-
-      - name: Install opam deps
-        run: make install
+          pins: ${{ env.PINS }}
+          with-doc: true
+          with-dev-setup: true
 
       - name: Generate documentation markdown
         run: make docs
@@ -126,21 +126,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use OCaml 5.3.0
-        uses: ocaml/setup-ocaml@v3.4.5
+      - name: Setup OCaml and dependencies
+        uses: ml-in-barcelona/gh-ci-action@v1.0.0
         with:
           ocaml-compiler: 5.3.0
-          dune-cache: false
-          opam-disable-sandboxing: true
-
-      - name: Pin dependencies
-        run: make pin
-
-      - name: Install opam deps
-        run: make install
-
-      - name: Install dune-release
-        run: opam install dune-release -y
+          pins: ${{ env.PINS }}
+          with-doc: true
+          with-dev-setup: true
+          extra-packages: dune-release
 
       - name: Release
         uses: davesnx/dune-release-action@v0.4.0
