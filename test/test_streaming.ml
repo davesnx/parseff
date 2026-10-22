@@ -522,6 +522,20 @@ let test_commit_releases_backtrack_window () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_or_right_branch_releases_window () =
+  let input = String.make 5000 'a' in
+  let src = chunked_source ~chunk_size:64 input in
+  let parser =
+    Parseff.or_
+      (fun () -> [ Parseff.char 'x' ])
+      (Parseff.many (fun () -> Parseff.char 'a'))
+  in
+  match Parseff.parse_source ~backtrack_window:100 src parser with
+  | Ok l ->
+      Alcotest.(check int) "elements" 5000 (List.length l)
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let test_look_ahead_across_chunk () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
@@ -942,6 +956,12 @@ let () =
             test_streaming_location_across_chunks;
           test_case "multiple calls" `Quick
             test_streaming_location_multiple_calls;
+        ]
+      );
+      ( "backtrack window release",
+        [
+          test_case "or_ right branch" `Quick
+            test_or_right_branch_releases_window;
         ]
       );
       ( "Source.of_chunks",

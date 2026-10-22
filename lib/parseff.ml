@@ -69,7 +69,7 @@ type line_index = {
   mutable scanned_up_to : int;
 }
 
-type rewind_frame_kind = Choice | Repeat | Barrier
+type rewind_frame_kind = Choice | Repeat | Barrier | Last_branch
 
 type rewind_frame = {
   kind : rewind_frame_kind;
@@ -95,15 +95,14 @@ type state = {
   mutable input : string;
   mutable pos : int;
   mutable input_len : int;
-  mutable max_depth : int;
+  max_depth : int;
   mutable current_depth : int;
   mutable diagnostics_rev : (int * Obj.t) list;
   mutable line_index : line_index option;
-  mutable source : source option;
+  source : source option;
   mutable rewind_frames : rewind_frame list;
   mutable source_pins : int list;
-  mutable backtrack_window : int option;
-  mutable active : bool;
+  backtrack_window : int option;
 }
 
 let default_buf_size = 4096
@@ -243,41 +242,45 @@ end
 module State = struct
   type t = state
 
-  type saved = {
-    saved_input : string;
-    saved_pos : int;
-    saved_input_len : int;
-    saved_max_depth : int;
-    saved_current_depth : int;
-    saved_diagnostics_rev : (int * Obj.t) list;
-    saved_line_index : line_index option;
-    saved_source : source option;
-    saved_rewind_frames : rewind_frame list;
-    saved_source_pins : int list;
-    saved_backtrack_window : int option;
-    saved_active : bool;
-  }
-
-  let default_max_depth = 128
-
-  let make () : t =
+  let make ~input ~input_len ~max_depth ~source ~backtrack_window : t =
     {
-      input = "";
+      input;
       pos = 0;
-      input_len = 0;
-      max_depth = default_max_depth;
+      input_len;
+      max_depth;
       current_depth = 0;
       diagnostics_rev = [];
       line_index = None;
-      source = None;
+      source;
       rewind_frames = [];
       source_pins = [];
-      backtrack_window = None;
-      active = false;
+      backtrack_window;
     }
 
-  let key : t Domain.DLS.key = Domain.DLS.new_key make
-  let[@inline always] is_active (t : t) = t.active
+  let for_input ~input ~max_depth =
+    make ~input ~input_len:(String.length input) ~max_depth ~source:None
+      ~backtrack_window:None
+
+  let for_source ~(src : source) ~max_depth ~backtrack_window =
+    make ~input:(Source.get_input src) ~input_len:(Source.get_input_len src)
+      ~max_depth ~source:(Some src) ~backtrack_window:(Some backtrack_window)
+
+  let none = for_input ~input:"" ~max_depth:0
+
+  let key : t Domain.DLS.key = Domain.DLS.new_key (fun () -> none)
+
+  let run (t : t) f =
+    let previous = Domain.DLS.get key in
+    Domain.DLS.set key t;
+    match f () with
+    | v ->
+        Domain.DLS.set key previous;
+        v
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Domain.DLS.set key previous;
+        Printexc.raise_with_backtrace exn bt
+
   let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
 
   let push_rewind_frame (t : t) kind =
@@ -324,7 +327,9 @@ module State = struct
     List.iter
       (fun frame ->
         if
-          (frame.kind = Barrier || not frame.committed)
+          (frame.kind = Barrier
+          || (frame.kind <> Last_branch && not frame.committed)
+          )
           && frame.start_pos < !floor
         then
           floor := frame.start_pos
@@ -332,58 +337,6 @@ module State = struct
       t.rewind_frames;
     List.iter (fun pos -> if pos < !floor then floor := pos) t.source_pins;
     !floor
-
-  let save (t : t) =
-    {
-      saved_input = t.input;
-      saved_pos = t.pos;
-      saved_input_len = t.input_len;
-      saved_max_depth = t.max_depth;
-      saved_current_depth = t.current_depth;
-      saved_diagnostics_rev = t.diagnostics_rev;
-      saved_line_index = t.line_index;
-      saved_source = t.source;
-      saved_rewind_frames = t.rewind_frames;
-      saved_source_pins = t.source_pins;
-      saved_backtrack_window = t.backtrack_window;
-      saved_active = t.active;
-    }
-
-  let restore (t : t) saved =
-    t.input <- saved.saved_input;
-    t.pos <- saved.saved_pos;
-    t.input_len <- saved.saved_input_len;
-    t.max_depth <- saved.saved_max_depth;
-    t.current_depth <- saved.saved_current_depth;
-    t.diagnostics_rev <- saved.saved_diagnostics_rev;
-    t.line_index <- saved.saved_line_index;
-    t.source <- saved.saved_source;
-    t.rewind_frames <- saved.saved_rewind_frames;
-    t.source_pins <- saved.saved_source_pins;
-    t.backtrack_window <- saved.saved_backtrack_window;
-    t.active <- saved.saved_active
-
-  let reset (t : t) ~input ~input_len ~max_depth ~source ~backtrack_window =
-    t.input <- input;
-    t.pos <- 0;
-    t.input_len <- input_len;
-    t.max_depth <- max_depth;
-    t.current_depth <- 0;
-    t.diagnostics_rev <- [];
-    t.line_index <- None;
-    t.source <- source;
-    t.rewind_frames <- [];
-    t.source_pins <- [];
-    t.backtrack_window <- backtrack_window;
-    t.active <- true
-
-  let reset_for_input t ~input ~max_depth =
-    reset t ~input ~input_len:(String.length input) ~max_depth ~source:None
-      ~backtrack_window:None
-
-  let reset_for_source t ~(src : source) ~max_depth ~backtrack_window =
-    reset t ~input:(Source.get_input src) ~input_len:(Source.get_input_len src)
-      ~max_depth ~source:(Some src) ~backtrack_window:(Some backtrack_window)
 end
 
 exception Not_in_parse_context
@@ -402,7 +355,7 @@ let () =
 
 let[@inline always] get_state () =
   let st = Domain.DLS.get State.key in
-  if not (State.is_active st) then raise Not_in_parse_context;
+  if st == State.none then raise Not_in_parse_context;
   st
 
 let[@inline always] buffer_base st =
@@ -1444,17 +1397,19 @@ let or_ left right () =
         raise left_exn
       end;
       restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      let right_frame = State.push_rewind_frame st Last_branch in
       match right () with
       | v ->
-          State.pop_rewind_frame st frame;
+          State.pop_rewind_frame st right_frame;
           v
       | exception (User_failure _ as exn) ->
-          State.pop_rewind_frame st frame;
+          State.pop_rewind_frame st right_frame;
           raise exn
       | exception right_exn ->
-          State.pop_rewind_frame st frame;
+          State.pop_rewind_frame st right_frame;
           if pos_of_exn right_exn < 0 then raise right_exn;
-          if frame.committed then
+          if right_frame.committed then
             raise right_exn
           else
             raise (compose_branch_errors left_exn right_exn)
@@ -2015,10 +1970,9 @@ let attach_diagnostics result diagnostics =
       Stdlib.Error { pos; error; diagnostics }
 
 let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
-  let st = Domain.DLS.get State.key in
-  let saved = State.save st in
-  State.reset_for_input st ~input ~max_depth;
+  let st = State.for_input ~input ~max_depth in
   let result =
+    State.run st @@ fun () ->
     match parser () with
     | v ->
         Ok v
@@ -2029,7 +1983,6 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
     | exception exn ->
         default_handler.handle exn
   in
-  State.restore st saved;
   result
 
 let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
@@ -2038,10 +1991,9 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
       'd
     )
     result_with_diagnostics =
-  let st = Domain.DLS.get State.key in
-  let saved = State.save st in
-  State.reset_for_input st ~input ~max_depth;
+  let st = State.for_input ~input ~max_depth in
   let result =
+    State.run st @@ fun () ->
     match
       let v = parser () in
       end_of_input ();
@@ -2057,7 +2009,6 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
         default_handler.handle exn
   in
   let diagnostics = to_diagnostics (State.get_diagnostics_rev st) in
-  State.restore st saved;
   attach_diagnostics result diagnostics
 
 let parse_source ?(max_depth = 128)
@@ -2071,10 +2022,9 @@ let parse_source ?(max_depth = 128)
       | `Depth_limit_exceeded of string ]
     )
     result =
-  let st = Domain.DLS.get State.key in
-  let saved = State.save st in
-  State.reset_for_source st ~src ~max_depth ~backtrack_window;
+  let st = State.for_source ~src ~max_depth ~backtrack_window in
   let result =
+    State.run st @@ fun () ->
     match parser () with
     | v ->
         Ok v
@@ -2087,7 +2037,6 @@ let parse_source ?(max_depth = 128)
     | exception exn ->
         default_handler.handle exn
   in
-  State.restore st saved;
   result
 
 let parse_source_until_end ?(max_depth = 128)
@@ -2102,10 +2051,9 @@ let parse_source_until_end ?(max_depth = 128)
       'd
     )
     result_with_diagnostics =
-  let st = Domain.DLS.get State.key in
-  let saved = State.save st in
-  State.reset_for_source st ~src ~max_depth ~backtrack_window;
+  let st = State.for_source ~src ~max_depth ~backtrack_window in
   let result =
+    State.run st @@ fun () ->
     match
       let v = parser () in
       end_of_input ();
@@ -2123,7 +2071,6 @@ let parse_source_until_end ?(max_depth = 128)
         default_handler.handle exn
   in
   let diagnostics = to_diagnostics (State.get_diagnostics_rev st) in
-  State.restore st saved;
   attach_diagnostics result diagnostics
 
 let location_of_position input pos =
