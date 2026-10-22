@@ -781,12 +781,21 @@ let[@inline never] scan_uchars inp start limit pred =
   let pos = ref start in
   let continue_loop = ref true in
   while !pos < limit && !continue_loop do
-    let d = String.get_utf_8_uchar inp !pos in
-    if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
-    if pred (Uchar.utf_decode_uchar d) then
-      pos := !pos + Uchar.utf_decode_length d
-    else
-      continue_loop := false
+    let b = Char.code (String.unsafe_get inp !pos) in
+    if b < 0x80 then
+      begin if pred (Uchar.unsafe_of_int b) then
+        incr pos
+      else
+        continue_loop := false
+    end
+    else begin
+      let d = String.get_utf_8_uchar inp !pos in
+      if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+      if pred (Uchar.utf_decode_uchar d) then
+        pos := !pos + Uchar.utf_decode_length d
+      else
+        continue_loop := false
+    end
   done;
   !pos
 

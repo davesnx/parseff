@@ -959,6 +959,26 @@ let test_utf8_truncated_at_eof () =
       Parseff.Utf8.skip_while (fun _ -> true)
   )
 
+let test_utf8_scan_after_ascii () =
+  let all () = Parseff.Utf8.take_while (fun _ -> true) in
+  ( match Parseff.parse "ab\xFFc" all with
+  | Error { pos; _ } ->
+      Alcotest.(check int) "invalid byte position" 2 pos
+  | Ok s ->
+      Alcotest.failf "expected invalid UTF-8, got %S" s
+  );
+  check_matches_parse "Utf8.take_while invalid after ascii" "ab\xFFc" all;
+  let not_c () =
+    Parseff.Utf8.take_while (fun u -> not (Uchar.equal u (Uchar.of_char 'c')))
+  in
+  ( match Parseff.parse "ab\xCE\xBBc" not_c with
+  | Ok s ->
+      Alcotest.(check string) "ascii then lambda" "ab\xCE\xBB" s
+  | Error _ ->
+      Alcotest.fail "expected success"
+  );
+  check_matches_parse "Utf8.take_while lambda after ascii" "ab\xCE\xBBc" not_c
+
 let test_streaming_matches_parse () =
   let letters () = Parseff.take_while is_lower in
   let cases =
@@ -1130,6 +1150,7 @@ let () =
           test_case "sep_by_take leading whitespace" `Quick
             test_sep_by_take_leading_whitespace;
           test_case "utf8 truncated at eof" `Quick test_utf8_truncated_at_eof;
+          test_case "utf8 scan after ascii" `Quick test_utf8_scan_after_ascii;
           test_case "matches parse" `Quick test_streaming_matches_parse;
           test_case "regex needs more input" `Quick test_regex_needs_more_input;
           test_case "regex lookbehind" `Quick test_regex_lookbehind;
