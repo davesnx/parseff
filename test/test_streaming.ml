@@ -490,12 +490,10 @@ let test_backtrack_window_exceeded () =
   match Parseff.parse_source ~backtrack_window:2 src parser with
   | Ok _ ->
       Alcotest.fail "Expected backtrack window failure"
-  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest; current } }
-    ->
+  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest } } ->
       Alcotest.(check int) "error position" 3 pos;
       Alcotest.(check int) "limit" 2 limit;
-      Alcotest.(check int) "oldest" 0 oldest;
-      Alcotest.(check int) "current" 3 current
+      Alcotest.(check int) "oldest" 0 oldest
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 

@@ -78,9 +78,9 @@ type rewind_frame = {
   mutable committed : bool;
 }
 
-type backtrack_window_error = { limit : int; oldest : int; current : int }
+type backtrack_window_error = { limit : int; oldest : int }
 
-exception Backtrack_window_exceeded of backtrack_window_error
+exception Backtrack_window_exceeded of int * backtrack_window_error
 
 type source = {
   initial : string;
@@ -383,8 +383,7 @@ let[@inline never] rec fill st ~keep_from need =
           imin (limit - (st.input_len - floor)) (Bytes.length src.tmp)
         in
         if max_bytes <= 0 then
-          raise
-            (Backtrack_window_exceeded { limit; oldest = floor; current = need })
+          raise (Backtrack_window_exceeded (need, { limit; oldest = floor }))
         else
           let n = src.read src.tmp 0 max_bytes in
           if n = 0 then begin
@@ -1595,8 +1594,8 @@ let parse_source ?(max_depth = 128)
     match parser () with
     | v ->
         Ok v
-    | exception Backtrack_window_exceeded info ->
-        Error { pos = info.current; error = `Backtrack_window_exceeded info }
+    | exception Backtrack_window_exceeded (pos, info) ->
+        Error { pos; error = `Backtrack_window_exceeded info }
     | exception User_failure (pos, msg) ->
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
@@ -1628,8 +1627,8 @@ let parse_source_until_end ?(max_depth = 128)
     with
     | v ->
         Ok v
-    | exception Backtrack_window_exceeded info ->
-        Error { pos = info.current; error = `Backtrack_window_exceeded info }
+    | exception Backtrack_window_exceeded (pos, info) ->
+        Error { pos; error = `Backtrack_window_exceeded info }
     | exception User_failure (pos, msg) ->
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
