@@ -1024,6 +1024,55 @@ let test_streaming_matches_parse () =
     (fun (name, input, parser) -> check_matches_parse name input parser)
     cases
 
+let re_str s = Parseff.match_regex (Re.compile s)
+
+let test_regex_needs_more_input () =
+  check_matches_parse "str" "abcd" (fun () -> re_str (Re.str "abcd"));
+  check_matches_parse "longest alt" "abcd" (fun () ->
+      re_str (Re.longest (Re.alt [ Re.str "ab"; Re.str "abcd" ]))
+  );
+  check_matches_parse "opt" "abcd" (fun () ->
+      re_str (Re.seq [ Re.str "ab"; Re.opt (Re.str "cd") ])
+  )
+
+let test_regex_lookbehind () =
+  let after_consume prefix re input =
+    check_matches_parse ("lookbehind " ^ input) input (fun () ->
+        let _ = Parseff.consume prefix in
+        re_str re
+    )
+  in
+  let bol_ab = Re.seq [ Re.bol; Re.str "ab" ] in
+  after_consume "x\n" bol_ab "x\nab";
+  after_consume "x" bol_ab "xab";
+  after_consume "x " (Re.seq [ Re.bow; Re.str "ab" ]) "x ab";
+  after_consume "x" (Re.seq [ Re.bow; Re.str "ab" ]) "xab";
+  after_consume "x" (Re.seq [ Re.not_boundary; Re.str "ab" ]) "xab"
+
+let test_take_beyond_end_of_input () =
+  check_matches_parse "take 100000" "abc" (fun () -> Parseff.take 100000);
+  let result =
+    Parseff.parse_source ~backtrack_window:4 (chunked_source "abc") (fun () ->
+        Parseff.take 10
+    )
+  in
+  match result with
+  | Parseff.Error { error = `Unexpected_end_of_input; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "Expected Unexpected_end_of_input"
+
+let test_take_beyond_window () =
+  match
+    Parseff.parse_source ~backtrack_window:4
+      (chunked_source (String.make 100 'a'))
+      (fun () -> Parseff.take 10)
+  with
+  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "Expected Backtrack_window_exceeded"
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -1069,6 +1118,11 @@ let () =
             test_sep_by_take_leading_whitespace;
           test_case "utf8 truncated at eof" `Quick test_utf8_truncated_at_eof;
           test_case "matches parse" `Quick test_streaming_matches_parse;
+          test_case "regex needs more input" `Quick test_regex_needs_more_input;
+          test_case "regex lookbehind" `Quick test_regex_lookbehind;
+          test_case "take beyond end of input" `Quick
+            test_take_beyond_end_of_input;
+          test_case "take beyond window" `Quick test_take_beyond_window;
           test_case "end_of_input after consume" `Quick
             test_end_of_input_after_consume;
           test_case "backtrack across chunk" `Quick test_backtrack_across_chunk;

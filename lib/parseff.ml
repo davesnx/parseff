@@ -355,6 +355,18 @@ let[@inline never] handle_location st =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
+let[@inline never] append st ~floor chunk n =
+  let cur_len = st.input_len - st.base in
+  let drop = imin (imax 0 (floor - st.base)) cur_len in
+  if drop > 0 then ensure_line_index_preserved_through st floor;
+  let kept = cur_len - drop in
+  let buf = Bytes.create (kept + n) in
+  Bytes.blit_string st.input drop buf 0 kept;
+  Bytes.blit chunk 0 buf kept n;
+  st.input <- Bytes.unsafe_to_string buf;
+  st.base <- st.base + drop;
+  st.input_len <- st.input_len + n
+
 let[@inline never] rec fill st ~keep_from need =
   match st.source with
   | None ->
@@ -367,30 +379,19 @@ let[@inline never] rec fill st ~keep_from need =
       else
         let floor = State.reclaim_floor st ~keep_from in
         let limit = src.window in
-        if need - floor > limit then
-          raise
-            (Backtrack_window_exceeded { limit; oldest = floor; current = need });
         let max_bytes =
           imin (limit - (st.input_len - floor)) (Bytes.length src.tmp)
         in
         if max_bytes <= 0 then
-          false
+          raise
+            (Backtrack_window_exceeded { limit; oldest = floor; current = need })
         else
           let n = src.read src.tmp 0 max_bytes in
           if n = 0 then begin
             src.eof <- true;
             false
           end else begin
-            let cur_len = st.input_len - st.base in
-            let drop = imin (imax 0 (floor - st.base)) cur_len in
-            if drop > 0 then ensure_line_index_preserved_through st floor;
-            let kept = cur_len - drop in
-            let buf = Bytes.create (kept + n) in
-            Bytes.blit_string st.input drop buf 0 kept;
-            Bytes.blit src.tmp 0 buf kept n;
-            st.input <- Bytes.unsafe_to_string buf;
-            st.base <- st.base + drop;
-            st.input_len <- st.input_len + n;
+            append st ~floor src.tmp n;
             fill st ~keep_from need
           end
 
@@ -619,29 +620,43 @@ let[@inline always] handle_sep_by_take_span st ws_pred sep_char take_pred =
 let regex_failed = Msg "regex match failed"
 let invalid_utf8_msg = Msg "invalid UTF-8"
 
+let[@inline never] buffer_for_regex st =
+  match st.source with
+  | Some src when (not src.eof) && st.input_len - st.pos < src.window / 2 ->
+      let floor = State.reclaim_floor st ~keep_from:(imax 0 (st.pos - 1)) in
+      let room = src.window - (st.input_len - floor) in
+      if room > 0 then begin
+        let chunk = Bytes.create room in
+        let got = ref 0 in
+        while !got < room && not src.eof do
+          let n = src.read chunk !got (room - !got) in
+          if n = 0 then
+            src.eof <- true
+          else
+            got := !got + n
+        done;
+        if !got > 0 then append st ~floor chunk !got
+      end
+  | _ ->
+      ()
+
 let[@inline never] handle_match_regex st re =
-  let rec loop () =
-    match Re.exec ~pos:(st.pos - st.base) re st.input with
-    | groups ->
-        let match_start = st.base + Re.Group.start groups 0 in
-        let match_end = st.base + Re.Group.stop groups 0 in
-        if match_start <> st.pos then
-          raise (Parse_error (st.pos, regex_failed))
-        else if match_end = st.input_len && refill_at st st.pos st.pos then
-          loop ()
-        else begin
-          st.pos <- match_end;
-          Re.Group.get groups 0
-        end
-    | exception Not_found ->
-        if st.pos >= st.input_len && refill_at st st.pos st.pos then
-          loop ()
-        else if st.pos >= st.input_len then
-          raise (Unexpected_eof st.pos)
-        else
-          raise (Parse_error (st.pos, regex_failed))
-  in
-  loop ()
+  buffer_for_regex st;
+  match Re.exec ~pos:(st.pos - st.base) re st.input with
+  | groups ->
+      let match_start = st.base + Re.Group.start groups 0 in
+      let match_end = st.base + Re.Group.stop groups 0 in
+      if match_start <> st.pos then
+        raise (Parse_error (st.pos, regex_failed))
+      else begin
+        st.pos <- match_end;
+        Re.Group.get groups 0
+      end
+  | exception Not_found ->
+      if st.pos >= st.input_len then
+        raise (Unexpected_eof st.pos)
+      else
+        raise (Parse_error (st.pos, regex_failed))
 
 let expected_end_of_input = Msg "expected end of input"
 

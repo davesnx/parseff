@@ -189,6 +189,12 @@ val match_regex : Re.re -> string
 (** [match_regex re] matches a regular expression. The regex must be compiled
     with [Re.compile].
 
+    In streaming mode, the parser keeps at least half of the backtrack window
+    buffered ahead of the current position, unless the source has ended. A match
+    is limited to the buffered input, so it cannot extend past the window. The
+    byte before the current position stays visible to [Re.bol] and word
+    boundaries.
+
     Example:
     {@ocaml[
     let identifier () =
