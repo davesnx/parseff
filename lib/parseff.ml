@@ -563,7 +563,7 @@ let[@inline never] handle_fused_sep_take st ws_pred sep_char take_pred =
   end
 
 let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
-  let start = scan_while st ~keep_from:no_keep st.pos ws_pred in
+  let start = st.pos in
   let first_end = scan_while st ~keep_from:start start take_pred in
   if first_end <= start then begin
     st.pos <- first_end;
@@ -590,7 +590,7 @@ let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
   end
 
 let[@inline always] handle_sep_by_take_span st ws_pred sep_char take_pred =
-  let start = scan_while st ~keep_from:no_keep st.pos ws_pred in
+  let start = st.pos in
   let first_end = scan_while st ~keep_from:start start take_pred in
   if first_end <= start then begin
     st.pos <- first_end;

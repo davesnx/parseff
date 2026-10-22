@@ -925,13 +925,28 @@ let test_sep_by_take_long_whitespace () =
     sep_take_span_position_take
 
 let test_sep_by_take_leading_whitespace () =
-  check_matches_parse "sep_by_take" "  a,b" (fun () ->
-      Parseff.sep_by_take is_space ',' is_lower
-  );
-  check_matches_parse "sep_by_take_span" "  a,b" (fun () ->
-      List.map Parseff.span_to_string
-        (Parseff.sep_by_take_span is_space ',' is_lower)
-  )
+  let with_pos l = (l, Parseff.position ()) in
+  let take () = with_pos (Parseff.sep_by_take is_space ',' is_lower) in
+  let take_span () =
+    with_pos
+      (List.map Parseff.span_to_string
+         (Parseff.sep_by_take_span is_space ',' is_lower)
+      )
+  in
+  let expect name input expected parser =
+    ( match Parseff.parse input parser with
+    | Ok (l, pos) ->
+        Alcotest.(check (list string)) (name ^ " elements") (fst expected) l;
+        Alcotest.(check int) (name ^ " position") (snd expected) pos
+    | Error _ ->
+        Alcotest.fail (name ^ ": expected success")
+    );
+    check_matches_parse name input parser
+  in
+  expect "sep_by_take leading" "  a,b" ([], 0) take;
+  expect "sep_by_take_span leading" "  a,b" ([], 0) take_span;
+  expect "sep_by_take around separator" "a , b" ([ "a"; "b" ], 5) take;
+  expect "sep_by_take_span around separator" "a , b" ([ "a"; "b" ], 5) take_span
 
 let test_utf8_truncated_at_eof () =
   check_matches_parse "Utf8.take_while" "a\xE2" (fun () ->
