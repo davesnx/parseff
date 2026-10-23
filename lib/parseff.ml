@@ -70,14 +70,13 @@ type line_index = {
   mutable line_base : int;
 }
 
-type rewind_frame_kind = Choice | Repeat | Barrier | Last_branch
-
-type rewind_frame = {
-  kind : rewind_frame_kind;
-  start_pos : int;
-  saved_diagnostics_rev : (int * Obj.t) list;
-  mutable committed : bool;
-}
+let frame_choice = 0
+let frame_repeat = 1
+let frame_barrier = 2
+let frame_last_branch = 3
+let frame_kind_mask = 3
+let frame_committed_bit = 4
+let frame_stride = 3
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -103,9 +102,11 @@ type state = {
   max_depth : int;
   mutable current_depth : int;
   mutable diagnostics_rev : (int * Obj.t) list;
+  mutable diagnostics_len : int;
   mutable line_index : line_index option;
   source : source option;
-  mutable rewind_frames : rewind_frame list;
+  mutable frames : int array;
+  mutable frames_top : int;
   mutable active : bool;
 }
 
@@ -197,9 +198,11 @@ module State = struct
       max_depth;
       current_depth = 0;
       diagnostics_rev = [];
+      diagnostics_len = 0;
       line_index = None;
       source;
-      rewind_frames = [];
+      frames = [||];
+      frames_top = 0;
       active = false;
     }
 
@@ -256,51 +259,76 @@ module State = struct
   let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
 
   let push_rewind_frame (t : t) kind =
-    let frame =
-      {
-        kind;
-        start_pos = t.pos;
-        saved_diagnostics_rev = t.diagnostics_rev;
-        committed = false;
-      }
-    in
-    t.rewind_frames <- frame :: t.rewind_frames;
-    frame
+    let index = t.frames_top in
+    let base = index * frame_stride in
+    if base + frame_stride > Array.length t.frames then begin
+      let grown = Array.make (imax 48 (2 * Array.length t.frames)) 0 in
+      Array.blit t.frames 0 grown 0 base;
+      t.frames <- grown
+    end;
+    let frames = t.frames in
+    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames (base + 1) kind;
+    Array.unsafe_set frames (base + 2) t.diagnostics_len;
+    t.frames_top <- index + 1;
+    index
 
   let pop_rewind_frame (t : t) frame =
-    match t.rewind_frames with
-    | top :: rest when top == frame ->
-        t.rewind_frames <- rest
-    | _ ->
-        invalid_arg "Parseff.State.pop_rewind_frame"
+    if t.frames_top - 1 = frame then
+      t.frames_top <- frame
+    else
+      invalid_arg "Parseff.State.pop_rewind_frame"
+
+  let[@inline always] frame_committed (t : t) frame =
+    Array.unsafe_get t.frames ((frame * frame_stride) + 1)
+    land frame_committed_bit
+    <> 0
+
+  let restore_rewind_frame (t : t) frame =
+    let base = frame * frame_stride in
+    t.pos <- Array.unsafe_get t.frames base;
+    let saved = Array.unsafe_get t.frames (base + 2) in
+    if t.diagnostics_len > saved then begin
+      let rec drop l n =
+        if n = 0 then
+          l
+        else
+          match l with _ :: rest -> drop rest (n - 1) | [] -> l
+      in
+      t.diagnostics_rev <- drop t.diagnostics_rev (t.diagnostics_len - saved);
+      t.diagnostics_len <- saved
+    end
+
+  let add_diagnostic (t : t) pos diagnostic =
+    t.diagnostics_rev <- (pos, diagnostic) :: t.diagnostics_rev;
+    t.diagnostics_len <- t.diagnostics_len + 1
 
   let commit_nearest (t : t) =
-    let loop = function
-      | [] ->
-          ()
-      | { kind = Barrier; _ } :: _ ->
-          ()
-      | frame :: _ ->
-          frame.committed <- true
-    in
-    loop t.rewind_frames
+    let top = t.frames_top in
+    if top > 0 then begin
+      let slot = ((top - 1) * frame_stride) + 1 in
+      let flags = Array.unsafe_get t.frames slot in
+      if flags land frame_kind_mask <> frame_barrier then
+        Array.unsafe_set t.frames slot (flags lor frame_committed_bit)
+    end
 
   let reclaim_floor (t : t) ~keep_from =
-    let rec go floor = function
-      | [] ->
-          floor
-      | frame :: rest ->
-          if
-            (frame.kind = Barrier
-            || (frame.kind <> Last_branch && not frame.committed)
-            )
-            && frame.start_pos < floor
-          then
-            go frame.start_pos rest
-          else
-            go floor rest
-    in
-    go keep_from t.rewind_frames
+    let frames = t.frames in
+    let floor = ref keep_from in
+    for i = t.frames_top - 1 downto 0 do
+      let base = i * frame_stride in
+      let flags = Array.unsafe_get frames (base + 1) in
+      let kind = flags land frame_kind_mask in
+      let start = Array.unsafe_get frames base in
+      if
+        (kind = frame_barrier
+        || (kind <> frame_last_branch && flags land frame_committed_bit = 0)
+        )
+        && start < !floor
+      then
+        floor := start
+    done;
+    !floor
 end
 
 exception Not_in_parse_context
@@ -1009,8 +1037,7 @@ let[@inline] turn_invalid_utf8_to_parse_error f =
   try f () with Invalid_utf8 pos -> raise (Parse_error (pos, invalid_utf8_msg))
 
 let[@inline always] restore_rewind_frame st frame =
-  st.pos <- frame.start_pos;
-  st.diagnostics_rev <- frame.saved_diagnostics_rev
+  State.restore_rewind_frame st frame
 
 let[@inline] consume s =
   let st = get_state () in
@@ -1094,11 +1121,11 @@ let[@inline] error e =
 
 let[@inline] warn diagnostic =
   let st = get_state () in
-  st.diagnostics_rev <- (st.pos, Obj.repr diagnostic) :: st.diagnostics_rev
+  State.add_diagnostic st st.pos (Obj.repr diagnostic)
 
 let[@inline] warn_at ~pos diagnostic =
   let st = get_state () in
-  st.diagnostics_rev <- (pos, Obj.repr diagnostic) :: st.diagnostics_rev
+  State.add_diagnostic st pos (Obj.repr diagnostic)
 
 let[@inline] commit () =
   let st = get_state () in
@@ -1115,7 +1142,7 @@ let take n =
 
 let or_ left right () =
   let st = get_state () in
-  let frame = State.push_rewind_frame st Choice in
+  let frame = State.push_rewind_frame st frame_choice in
   match left () with
   | v ->
       State.pop_rewind_frame st frame;
@@ -1128,13 +1155,13 @@ let or_ left right () =
         State.pop_rewind_frame st frame;
         raise left_exn
       end;
-      if frame.committed then begin
+      if State.frame_committed st frame then begin
         State.pop_rewind_frame st frame;
         raise left_exn
       end;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
-      let right_frame = State.push_rewind_frame st Last_branch in
+      let right_frame = State.push_rewind_frame st frame_last_branch in
       match right () with
       | v ->
           State.pop_rewind_frame st right_frame;
@@ -1145,7 +1172,7 @@ let or_ left right () =
       | exception right_exn ->
           State.pop_rewind_frame st right_frame;
           if pos_of_exn right_exn < 0 then raise right_exn;
-          if right_frame.committed then
+          if State.frame_committed st right_frame then
             raise right_exn
           else
             raise (compose_branch_errors left_exn right_exn)
@@ -1153,7 +1180,7 @@ let or_ left right () =
 
 let look_ahead p =
   let st = get_state () in
-  let frame = State.push_rewind_frame st Barrier in
+  let frame = State.push_rewind_frame st frame_barrier in
   match p () with
   | v ->
       restore_rewind_frame st frame;
@@ -1188,7 +1215,7 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
     let acc = ref [] in
     let continue_ref = ref true in
     while !continue_ref do
-      let frame = State.push_rewind_frame st Repeat in
+      let frame = State.push_rewind_frame st frame_repeat in
       let start = st.pos in
       match p () with
       | v ->
@@ -1203,7 +1230,7 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
       | exception exn ->
           State.pop_rewind_frame st frame;
           if pos_of_exn exn < 0 then raise exn;
-          if frame.committed then
+          if State.frame_committed st frame then
             raise exn
           else begin
             restore_rewind_frame st frame;
@@ -1223,7 +1250,7 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
     let acc = ref [] in
     let continue_ref = ref true in
     while !continue_ref do
-      let frame = State.push_rewind_frame st Repeat in
+      let frame = State.push_rewind_frame st frame_repeat in
       let start = st.pos in
       match p () with
       | v ->
@@ -1238,7 +1265,7 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
       | exception exn ->
           State.pop_rewind_frame st frame;
           if pos_of_exn exn < 0 then raise exn;
-          if frame.committed then
+          if State.frame_committed st frame then
             raise exn
           else begin
             restore_rewind_frame st frame;
@@ -1251,14 +1278,14 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
 let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   let st = get_state () in
   if at_least <= 0 then (
-    let start_frame = State.push_rewind_frame st Repeat in
+    let start_frame = State.push_rewind_frame st frame_repeat in
     match p () with
     | first ->
         State.pop_rewind_frame st start_frame;
         let acc = ref [ first ] in
         let continue_ref = ref true in
         while !continue_ref do
-          let frame = State.push_rewind_frame st Repeat in
+          let frame = State.push_rewind_frame st frame_repeat in
           let start = st.pos in
           try
             let _ = sep () in
@@ -1275,7 +1302,7 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
           | exn ->
               State.pop_rewind_frame st frame;
               if pos_of_exn exn < 0 then raise exn;
-              if frame.committed then
+              if State.frame_committed st frame then
                 raise exn
               else begin
                 restore_rewind_frame st frame;
@@ -1289,7 +1316,7 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
     | exception exn ->
         State.pop_rewind_frame st start_frame;
         if pos_of_exn exn < 0 then raise exn;
-        if start_frame.committed then
+        if State.frame_committed st start_frame then
           raise exn
         else begin
           restore_rewind_frame st start_frame;
@@ -1326,7 +1353,7 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
   let acc = ref (p ()) in
   let continue_ref = ref true in
   while !continue_ref do
-    let frame = State.push_rewind_frame st Repeat in
+    let frame = State.push_rewind_frame st frame_repeat in
     let start = st.pos in
     match
       let f = op () in
@@ -1345,7 +1372,7 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     | exception exn ->
         State.pop_rewind_frame st frame;
         if pos_of_exn exn < 0 then raise exn;
-        if frame.committed then
+        if State.frame_committed st frame then
           raise exn
         else begin
           restore_rewind_frame st frame;
