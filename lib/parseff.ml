@@ -213,13 +213,31 @@ module State = struct
 
   let key : t Domain.DLS.key = Domain.DLS.new_key (fun () -> none)
 
-  let run (t : t) f =
-    let previous = Domain.DLS.get key in
+  type slot = { owner : int; state : t }
+
+  let cache : slot ref = ref { owner = -1; state = none }
+
+  let[@inline always] install (t : t) =
     Domain.DLS.set key t;
+    cache := { owner = (Domain.self () :> int); state = t }
+
+  let[@inline always] current () =
+    let slot = !cache in
+    if slot.owner = (Domain.self () :> int) then
+      slot.state
+    else begin
+      let t = Domain.DLS.get key in
+      cache := { owner = (Domain.self () :> int); state = t };
+      t
+    end
+
+  let run (t : t) f =
+    let previous = current () in
+    install t;
     t.active <- true;
     let leave () =
       t.active <- false;
-      Domain.DLS.set key
+      install
         ( if previous.active then
             previous
           else
@@ -300,7 +318,7 @@ let () =
     )
 
 let[@inline always] get_state () =
-  let st = Domain.DLS.get State.key in
+  let st = State.current () in
   if st == State.none then raise Not_in_parse_context;
   st
 
@@ -395,7 +413,7 @@ let[@inline never] append st ~floor chunk n =
 
 let[@inline never] read_source st src buf off len =
   let n = src.read buf off len in
-  Domain.DLS.set State.key st;
+  State.install st;
   if n < 0 || n > len then
     invalid_arg
       (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);
