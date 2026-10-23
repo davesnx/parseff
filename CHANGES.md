@@ -6,7 +6,8 @@
 - **Improve runtime performance and reduce allocation.** Parseff now uses a lower-overhead runtime internally, making generic parsers and backtracking-heavy workloads faster while keeping the API largely unchanged.
 - **Add `peek_char`.** Provides cheap single-character lookahead without backtracking.
 - **Fix streaming results that differed from `parse`.** `Utf8.take_while` and related scans now report a truncated UTF-8 sequence at the end of input. `match_regex` now finds matches that need more than the buffered input, and `Re.bol` and word boundaries see the byte before the current position.
-- **`match_regex` reads ahead in streaming mode.** It keeps at least half the backtrack window buffered before it matches, so on an interactive source it waits for that input or the end of the source. A match cannot extend past the window.
+- **Fix `location` line numbers after backtracking.** Lines were counted twice when a parser asked for `location` after backtracking to an earlier position.
+- **`match_regex` reads ahead in streaming mode.** It reads until about half the backtrack window is buffered ahead before it matches, so on an interactive source it waits for that input or the end of the source. A match cannot extend past the window.
 
 ## 0.3.0
 

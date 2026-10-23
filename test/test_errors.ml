@@ -7,6 +7,29 @@ let check_parseff_error exn =
     "mentions parse context" true
     (Re.(execp (compile (str "parse context"))) msg)
 
+let test_fold_left_user_exception () =
+  let op () =
+    ignore (Parseff.char '+');
+    fun a b ->
+      if a = 2 then
+        raise Exit
+      else
+        a + b
+  in
+  ( match Parseff.parse "1+1+1" (Parseff.fold_left Parseff.digit op) with
+  | _ ->
+      Alcotest.fail "expected Exit"
+  | exception Exit ->
+      ()
+  | exception exn ->
+      Alcotest.failf "wrong exception: %s" (Printexc.to_string exn)
+  );
+  match Parseff.position () with
+  | _ ->
+      Alcotest.fail "expected failure outside parse"
+  | exception _ ->
+      ()
+
 let test_unhandled_effect_digit () =
   match Parseff.digit () with
   | _ ->
@@ -212,6 +235,12 @@ let () =
             test_or_right_commit_stops_at_or;
           test_case "or_ right commit does not seal many" `Quick
             test_or_right_commit_does_not_seal_many;
+        ]
+      );
+      ( "fold exceptions",
+        [
+          test_case "fold_left user exception propagates" `Quick
+            test_fold_left_user_exception;
         ]
       );
       ( "unhandled effect message",

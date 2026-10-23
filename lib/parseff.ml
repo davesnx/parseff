@@ -309,7 +309,7 @@ let extend_line_index idx ?(base_offset = 0) input up_to =
     end;
     incr i
   done;
-  idx.scanned_up_to <- up_to
+  idx.scanned_up_to <- imax idx.scanned_up_to up_to
 
 let find_line idx offset =
   let lo = ref 0 and hi = ref (idx.count - 1) in
@@ -356,6 +356,7 @@ let[@inline never] handle_location st =
   }
 
 let[@inline never] append st ~floor chunk n =
+  let floor = imax 0 (floor - 1) in
   let cur_len = st.input_len - st.base in
   let drop = imin (imax 0 (floor - st.base)) cur_len in
   if drop > 0 then ensure_line_index_preserved_through st floor;
@@ -622,12 +623,13 @@ let invalid_utf8_msg = Msg "invalid UTF-8"
 let[@inline never] buffer_for_regex st =
   match st.source with
   | Some src when (not src.eof) && st.input_len - st.pos < src.window / 2 ->
-      let floor = State.reclaim_floor st ~keep_from:(imax 0 (st.pos - 1)) in
+      let floor = State.reclaim_floor st ~keep_from:st.pos in
       let room = src.window - (st.input_len - floor) in
       if room > 0 then begin
         let chunk = Bytes.create room in
         let got = ref 0 in
-        while !got < room && not src.eof do
+        let want = imin room ((src.window / 2) - (st.input_len - st.pos)) in
+        while !got < want && not src.eof do
           let n = src.read chunk !got (room - !got) in
           if n = 0 then
             src.eof <- true
@@ -1214,16 +1216,18 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
   let continue_ref = ref true in
   while !continue_ref do
     let frame = State.push_rewind_frame st Repeat in
-    try
+    match
       let f = op () in
       let rhs = p () in
       State.pop_rewind_frame st frame;
-      acc := f !acc rhs
+      (f, rhs)
     with
-    | User_failure _ as exn ->
+    | f, rhs ->
+        acc := f !acc rhs
+    | exception (User_failure _ as exn) ->
         State.pop_rewind_frame st frame;
         raise exn
-    | exn ->
+    | exception exn ->
         State.pop_rewind_frame st frame;
         if pos_of_exn exn < 0 then raise exn;
         if frame.committed then

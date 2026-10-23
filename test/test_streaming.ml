@@ -902,6 +902,106 @@ let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
     )
     chunk_sizes
 
+let lookbehind_parser re () =
+  ignore (Parseff.consume "xy");
+  ignore (Parseff.peek_char ());
+  Parseff.match_regex re
+
+let test_regex_lookbehind_after_peek () =
+  let input = "xyab" in
+  let cases =
+    [
+      ("bol", Re.(compile (seq [ bol; str "ab" ])), Error 2);
+      ("bow", Re.(compile (seq [ bow; str "ab" ])), Error 2);
+      ("bos", Re.(compile (seq [ bos; str "ab" ])), Error 2);
+      ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
+    ]
+  in
+  List.iter
+    (fun (name, re, expected) ->
+      let parser = lookbehind_parser re in
+      Alcotest.(check (result string int))
+        (name ^ " parse") expected
+        (norm (Parseff.parse input parser));
+      check_matches_parse name input parser
+    )
+    cases
+
+let test_regex_lookbehind_window_accounting () =
+  let input = "xyab" ^ String.make 100 'z' in
+  let parser () =
+    ignore (Parseff.consume "xy");
+    ignore (Parseff.peek_char ());
+    Parseff.match_regex Re.(compile (str "ab"))
+  in
+  match
+    Parseff.parse_source ~backtrack_window:8
+      (chunked_source ~chunk_size:1 input)
+      parser
+  with
+  | Parseff.Ok s ->
+      Alcotest.(check string) "match" "ab" s
+  | Parseff.Error _ ->
+      Alcotest.fail "unexpected error"
+
+let test_regex_readahead_half_window () =
+  let total = ref 0 in
+  let src =
+    Parseff.Source.of_function (fun buf off len ->
+        let remaining = 5000 - !total in
+        let n = min (min 10 len) remaining in
+        Bytes.fill buf off n 'a';
+        total := !total + n;
+        n
+    )
+  in
+  let seen = ref (-1) in
+  let _ =
+    Parseff.parse_source ~backtrack_window:1000 src (fun () ->
+        ignore (Parseff.match_regex Re.(compile (str "aa")));
+        seen := !total
+    )
+  in
+  if !seen < 0 then Alcotest.fail "match_regex did not succeed";
+  if !seen > 510 then
+    Alcotest.failf "read %d bytes ahead, expected about 500" !seen
+
+let test_location_after_backtrack () =
+  let input = "a\n\nb" in
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.consume input);
+        ignore (Parseff.location ());
+        ignore (Parseff.char 'z');
+        ""
+      )
+      (fun () ->
+        let l1 = Parseff.location () in
+        ignore (Parseff.consume input);
+        let l2 = Parseff.location () in
+        Printf.sprintf "%d:%d %d:%d" l1.line l1.col l2.line l2.col
+      )
+      ()
+  in
+  ( match Parseff.parse input parser with
+  | Parseff.Ok s ->
+      Alcotest.(check string) "parse" "1:1 3:2" s
+  | Parseff.Error _ ->
+      Alcotest.fail "parse failed"
+  );
+  List.iter
+    (fun chunk_size ->
+      match Parseff.parse_source (chunked_source ~chunk_size input) parser with
+      | Parseff.Ok s ->
+          Alcotest.(check string)
+            (Printf.sprintf "parse_source %d" chunk_size)
+            "1:1 3:2" s
+      | Parseff.Error _ ->
+          Alcotest.fail "parse_source failed"
+    )
+    [ 1; 3; 4096 ]
+
 let is_space c = c = ' '
 let is_lower c = c >= 'a' && c <= 'z'
 
@@ -1188,6 +1288,18 @@ let () =
             test_streaming_location_across_chunks;
           test_case "multiple calls" `Quick
             test_streaming_location_multiple_calls;
+        ]
+      );
+      ( "regex and location regressions",
+        [
+          test_case "regex lookbehind after peek_char" `Quick
+            test_regex_lookbehind_after_peek;
+          test_case "regex lookbehind window accounting" `Quick
+            test_regex_lookbehind_window_accounting;
+          test_case "regex read-ahead stops at half window" `Quick
+            test_regex_readahead_half_window;
+          test_case "location after backtrack" `Quick
+            test_location_after_backtrack;
         ]
       );
       ( "backtrack window release",
