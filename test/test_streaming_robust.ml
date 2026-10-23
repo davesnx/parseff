@@ -196,6 +196,53 @@ let test_regex_window_pinned () =
   | Parseff.Error _ ->
       Alcotest.fail "wrong error"
 
+let pinned_regex_parser re () =
+  Parseff.or_
+    (fun () ->
+      ignore (Parseff.take 10);
+      Parseff.match_regex re
+    )
+    (fun () -> "ALT")
+    ()
+
+let test_regex_pinned_complete_match () =
+  let re = Re.compile (Re.rep1 (Re.char 'a')) in
+  let data = String.make 10 'x' ^ "aabccc" in
+  let expected =
+    match Parseff.parse data (pinned_regex_parser re) with
+    | Parseff.Ok s ->
+        s
+    | Parseff.Error _ ->
+        Alcotest.fail "memory parse failed"
+  in
+  Alcotest.(check string) "memory" "aa" expected;
+  List.iter
+    (fun chunk ->
+      match
+        Parseff.parse_source ~backtrack_window:16 (fn_src data chunk)
+          (pinned_regex_parser re)
+      with
+      | Parseff.Ok s ->
+          Alcotest.(check string) (Printf.sprintf "chunk %d" chunk) expected s
+      | Parseff.Error _ ->
+          Alcotest.failf "chunk %d failed" chunk
+    )
+    [ 1; 3; 4; 4096 ]
+
+let test_regex_pinned_match_at_buffer_end () =
+  let re = Re.compile (Re.rep1 (Re.char 'a')) in
+  let data = String.make 10 'x' ^ "aaaaaab" in
+  match
+    Parseff.parse_source ~backtrack_window:16 (fn_src data 4096)
+      (pinned_regex_parser re)
+  with
+  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+      ()
+  | Parseff.Ok s ->
+      Alcotest.failf "unexpected Ok %s" s
+  | Parseff.Error _ ->
+      Alcotest.fail "wrong error"
+
 let test_small_window_rejected () =
   List.iter
     (fun w ->
@@ -267,6 +314,10 @@ let () =
       ( "window",
         [
           test_case "regex with pinned window" `Quick test_regex_window_pinned;
+          test_case "regex pinned complete match" `Quick
+            test_regex_pinned_complete_match;
+          test_case "regex pinned match at buffer end" `Quick
+            test_regex_pinned_match_at_buffer_end;
           test_case "small window rejected" `Quick test_small_window_rejected;
         ]
       );

@@ -198,6 +198,11 @@ val match_regex : Re.re -> string
     byte before the current position stays visible to [Re.bol] and word
     boundaries.
 
+    If the window is full of rewind history, the regex runs on the buffered
+    input. A match that ends before the end of the buffer is returned. A failed
+    match, or one that reaches the end of the buffer, fails with
+    [`Backtrack_window_exceeded], because more input could change the result.
+
     The match must start at the current position, but [Re] searches forward when
     it does not. A failed match therefore scans the rest of the input, and a
     loop that fails at each position takes quadratic time.

@@ -673,10 +673,7 @@ let[@inline never] buffer_for_regex st =
       let floor = State.reclaim_floor st ~keep_from:st.pos in
       let room = src.window - (st.input_len - floor) in
       if room <= 0 then
-        raise
-          (Backtrack_window_exceeded
-             (st.pos + (src.window / 2), { limit = src.window; oldest = floor })
-          )
+        Some (st.pos + (src.window / 2), { limit = src.window; oldest = floor })
       else begin
         let chunk = Bytes.create room in
         let got = ref 0 in
@@ -688,24 +685,35 @@ let[@inline never] buffer_for_regex st =
           else
             got := !got + n
         done;
-        if !got > 0 then append st ~floor chunk !got
+        if !got > 0 then append st ~floor chunk !got;
+        None
       end
   | _ ->
-      ()
+      None
 
 let[@inline never] handle_match_regex st re =
-  buffer_for_regex st;
+  let pinned = buffer_for_regex st in
+  let raise_if_pinned () =
+    match pinned with
+    | Some (need, info) ->
+        raise (Backtrack_window_exceeded (need, info))
+    | None ->
+        ()
+  in
   match Re.exec ~pos:(st.pos - st.base) re st.input with
   | groups ->
       let match_start = st.base + Re.Group.start groups 0 in
       let match_end = st.base + Re.Group.stop groups 0 in
-      if match_start <> st.pos then
+      if match_start <> st.pos then begin
+        raise_if_pinned ();
         raise (Parse_error (st.pos, regex_failed))
-      else begin
+      end else begin
+        if match_end >= st.input_len then raise_if_pinned ();
         st.pos <- match_end;
         Re.Group.get groups 0
       end
   | exception Not_found ->
+      raise_if_pinned ();
       if st.pos >= st.input_len then
         raise (Unexpected_eof st.pos)
       else
