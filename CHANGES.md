@@ -1,10 +1,13 @@
-## Unreleased
+## 0.4.0
 
-- **Streaming now uses a bounded sliding buffer.** `parse_source` and `parse_source_until_end` accept `~backtrack_window` (default `65536`) and fail with <code>`Backtrack_window_exceeded</code> when a parser needs to retain more buffered input for backtracking.
-- **Add `commit`.** `commit ()` seals the nearest active backtracking frame, improving error locality and allowing streaming sources to drop older buffered input earlier.
-- **Streaming spans may be owned copies.** `take_while_span` and `sep_by_take_span` keep zero-copy behavior for `parse`, but `parse_source` may materialize owned spans so bounded streaming can reclaim old prefixes.
+- **Breaking: streaming now uses a bounded sliding buffer.** `parse_source` and `parse_source_until_end` accept `~backtrack_window` (default `65536`) and fail with <code>`Backtrack_window_exceeded of backtrack_window_error</code> when a parser needs to keep more input than that for backtracking. This includes a single `take_while` or `take_while_span` token longer than the window. Exhaustive matches on the error type must handle the new case. Raise `~backtrack_window` if a parser needs more.
+- **Add `commit`.** `commit ()` seals the innermost choice or repetition frame, improving error locality and allowing streaming sources to drop older buffered input earlier. It does not release outer frames: a `commit` inside the `or_` of `many (fun () -> or_ a b ())` leaves the `many` frame in place.
+- **Breaking: streaming spans may be owned copies.** `take_while_span` and `sep_by_take_span` keep zero-copy behavior for `parse`, but `parse_source` may materialize owned spans so bounded streaming can reclaim old prefixes.
 - **Improve runtime performance and reduce allocation.** Parseff now uses a lower-overhead runtime internally, making generic parsers and backtracking-heavy workloads faster while keeping the API largely unchanged.
 - **Add `peek_char`.** Provides cheap single-character lookahead without backtracking.
+- **Fix streaming results that differed from `parse`.** `Utf8.take_while` and related scans now report a truncated UTF-8 sequence at the end of input. `match_regex` now finds matches that need more than the buffered input, and `Re.bol` and word boundaries see the byte before the current position.
+- **Fix `location` line numbers after backtracking.** Lines were counted twice when a parser asked for `location` after backtracking to an earlier position.
+- **`match_regex` reads ahead in streaming mode.** It reads until about half the backtrack window is buffered ahead before it matches, so on an interactive source it waits for that input or the end of the source. A match cannot extend past the window.
 
 ## 0.3.0
 

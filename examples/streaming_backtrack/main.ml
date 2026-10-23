@@ -29,10 +29,9 @@ let () =
             "unexpected end of input"
         | `Failure msg ->
             msg
-        | `Backtrack_window_exceeded { limit; oldest; current } ->
-            Printf.sprintf
-              "backtrack window exceeded (limit=%d oldest=%d current=%d)" limit
-              oldest current
+        | `Backtrack_window_exceeded { limit; oldest } ->
+            Printf.sprintf "backtrack window exceeded (limit=%d oldest=%d)"
+              limit oldest
         | `Depth_limit_exceeded msg ->
             msg
       in

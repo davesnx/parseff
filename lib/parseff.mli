@@ -43,13 +43,13 @@ type location = { offset : int; line : int; col : int }
 (** A source location. [line] and [col] are 1-based. [col] counts bytes from the
     start of the line (not characters — relevant for UTF-8). *)
 
-type backtrack_window_error = { limit : int; oldest : int; current : int }
+type backtrack_window_error = { limit : int; oldest : int }
 (** Streaming backtracking exceeded the configured history window.
 
-    [oldest] is the earliest position the runtime still needs to rewind to,
-    [current] is the furthest byte position Parseff needed to retain or reach
-    when the overflow happened, and [limit] is the configured
-    [backtrack_window]. *)
+    [oldest] is the earliest position the runtime still needs to rewind to and
+    [limit] is the configured [backtrack_window]. The error position [pos] is
+    the furthest byte position Parseff needed to retain or reach when the
+    overflow happened. *)
 
 (** {1 Result Types} *)
 
@@ -188,6 +188,12 @@ val char : char -> char
 val match_regex : Re.re -> string
 (** [match_regex re] matches a regular expression. The regex must be compiled
     with [Re.compile].
+
+    In streaming mode, the parser keeps at least half of the backtrack window
+    buffered ahead of the current position, unless the source has ended. A match
+    is limited to the buffered input, so it cannot extend past the window. The
+    byte before the current position stays visible to [Re.bol] and word
+    boundaries.
 
     Example:
     {@ocaml[
@@ -400,12 +406,21 @@ val look_ahead : (unit -> 'a) -> 'a
     ]} *)
 
 val commit : unit -> unit
-(** [commit ()] seals the nearest active backtracking frame.
+(** [commit ()] seals the innermost active choice or repetition frame: the
+    nearest enclosing {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} or
+    [fold_*] frame.
 
-    After [commit], the enclosing choice/repetition frame no longer rewinds on
-    failure, which improves error locality and allows streaming sources to drop
-    older buffered input. Outside any active backtracking frame, [commit ()] is
-    a no-op.
+    After [commit], that frame no longer rewinds on failure, which improves
+    error locality and allows streaming sources to drop the buffered input that
+    only that frame kept alive.
+
+    [commit ()] does nothing outside any frame. It does nothing inside
+    {!look_ahead}, and it does not reach the frames outside the look-ahead.
+
+    [commit ()] does not seal or release outer frames. In
+    [many (fun () -> or_ a b ())], a [commit ()] inside [a] seals the [or_]
+    only. The [many] frame still rewinds to the start of the current iteration,
+    and streaming sources keep that input buffered.
 
     Example:
     {@ocaml[

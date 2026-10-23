@@ -490,12 +490,10 @@ let test_backtrack_window_exceeded () =
   match Parseff.parse_source ~backtrack_window:2 src parser with
   | Ok _ ->
       Alcotest.fail "Expected backtrack window failure"
-  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest; current } }
-    ->
+  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest } } ->
       Alcotest.(check int) "error position" 3 pos;
       Alcotest.(check int) "limit" 2 limit;
-      Alcotest.(check int) "oldest" 0 oldest;
-      Alcotest.(check int) "current" 3 current
+      Alcotest.(check int) "oldest" 0 oldest
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -519,6 +517,20 @@ let test_commit_releases_backtrack_window () =
   match Parseff.parse_source ~backtrack_window:2 src parser with
   | Ok n ->
       Alcotest.(check int) "committed tail parsed" 4 n
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_or_right_branch_releases_window () =
+  let input = String.make 5000 'a' in
+  let src = chunked_source ~chunk_size:64 input in
+  let parser =
+    Parseff.or_
+      (fun () -> [ Parseff.char 'x' ])
+      (Parseff.many (fun () -> Parseff.char 'a'))
+  in
+  match Parseff.parse_source ~backtrack_window:100 src parser with
+  | Ok l ->
+      Alcotest.(check int) "elements" 5000 (List.length l)
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -872,6 +884,328 @@ let test_of_seq_take_while () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let norm = function
+  | Parseff.Ok v ->
+      Ok v
+  | Parseff.Error { pos; _ } ->
+      Error pos
+
+let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
+  let expected = norm (Parseff.parse input parser) in
+  List.iter
+    (fun chunk_size ->
+      let actual =
+        norm (Parseff.parse_source (chunked_source ~chunk_size input) parser)
+      in
+      if actual <> expected then
+        Alcotest.failf "%s: chunk_size %d differs from parse" name chunk_size
+    )
+    chunk_sizes
+
+let lookbehind_parser re () =
+  ignore (Parseff.consume "xy");
+  ignore (Parseff.peek_char ());
+  Parseff.match_regex re
+
+let test_regex_lookbehind_after_peek () =
+  let input = "xyab" in
+  let cases =
+    [
+      ("bol", Re.(compile (seq [ bol; str "ab" ])), Error 2);
+      ("bow", Re.(compile (seq [ bow; str "ab" ])), Error 2);
+      ("bos", Re.(compile (seq [ bos; str "ab" ])), Error 2);
+      ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
+    ]
+  in
+  List.iter
+    (fun (name, re, expected) ->
+      let parser = lookbehind_parser re in
+      Alcotest.(check (result string int))
+        (name ^ " parse") expected
+        (norm (Parseff.parse input parser));
+      check_matches_parse name input parser
+    )
+    cases
+
+let test_regex_lookbehind_window_accounting () =
+  let input = "xyab" ^ String.make 100 'z' in
+  let parser () =
+    ignore (Parseff.consume "xy");
+    ignore (Parseff.peek_char ());
+    Parseff.match_regex Re.(compile (str "ab"))
+  in
+  match
+    Parseff.parse_source ~backtrack_window:8
+      (chunked_source ~chunk_size:1 input)
+      parser
+  with
+  | Parseff.Ok s ->
+      Alcotest.(check string) "match" "ab" s
+  | Parseff.Error _ ->
+      Alcotest.fail "unexpected error"
+
+let test_regex_readahead_half_window () =
+  let total = ref 0 in
+  let src =
+    Parseff.Source.of_function (fun buf off len ->
+        let remaining = 5000 - !total in
+        let n = min (min 10 len) remaining in
+        Bytes.fill buf off n 'a';
+        total := !total + n;
+        n
+    )
+  in
+  let seen = ref (-1) in
+  let _ =
+    Parseff.parse_source ~backtrack_window:1000 src (fun () ->
+        ignore (Parseff.match_regex Re.(compile (str "aa")));
+        seen := !total
+    )
+  in
+  if !seen < 0 then Alcotest.fail "match_regex did not succeed";
+  if !seen > 510 then
+    Alcotest.failf "read %d bytes ahead, expected about 500" !seen
+
+let test_location_after_backtrack () =
+  let input = "a\n\nb" in
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.consume input);
+        ignore (Parseff.location ());
+        ignore (Parseff.char 'z');
+        ""
+      )
+      (fun () ->
+        let l1 = Parseff.location () in
+        ignore (Parseff.consume input);
+        let l2 = Parseff.location () in
+        Printf.sprintf "%d:%d %d:%d" l1.line l1.col l2.line l2.col
+      )
+      ()
+  in
+  ( match Parseff.parse input parser with
+  | Parseff.Ok s ->
+      Alcotest.(check string) "parse" "1:1 3:2" s
+  | Parseff.Error _ ->
+      Alcotest.fail "parse failed"
+  );
+  List.iter
+    (fun chunk_size ->
+      match Parseff.parse_source (chunked_source ~chunk_size input) parser with
+      | Parseff.Ok s ->
+          Alcotest.(check string)
+            (Printf.sprintf "parse_source %d" chunk_size)
+            "1:1 3:2" s
+      | Parseff.Error _ ->
+          Alcotest.fail "parse_source failed"
+    )
+    [ 1; 3; 4096 ]
+
+let is_space c = c = ' '
+let is_lower c = c >= 'a' && c <= 'z'
+
+let sep_take_position_take () =
+  let l = Parseff.sep_by_take is_space ',' is_lower in
+  let pos = Parseff.position () in
+  let rest = Parseff.take 3 in
+  (l, pos, rest)
+
+let sep_take_span_position_take () =
+  let l = Parseff.sep_by_take_span is_space ',' is_lower in
+  let pos = Parseff.position () in
+  let rest = Parseff.take 3 in
+  (List.map Parseff.span_to_string l, pos, rest)
+
+let test_sep_by_take_long_whitespace () =
+  let input = "a" ^ String.make 5000 ' ' ^ "b" in
+  check_matches_parse ~chunk_sizes:[ 4096 ] "sep_by_take" input
+    sep_take_position_take;
+  check_matches_parse ~chunk_sizes:[ 4096 ] "sep_by_take_span" input
+    sep_take_span_position_take
+
+let test_sep_by_take_leading_whitespace () =
+  let with_pos l = (l, Parseff.position ()) in
+  let take () = with_pos (Parseff.sep_by_take is_space ',' is_lower) in
+  let take_span () =
+    with_pos
+      (List.map Parseff.span_to_string
+         (Parseff.sep_by_take_span is_space ',' is_lower)
+      )
+  in
+  let expect name input expected parser =
+    ( match Parseff.parse input parser with
+    | Ok (l, pos) ->
+        Alcotest.(check (list string)) (name ^ " elements") (fst expected) l;
+        Alcotest.(check int) (name ^ " position") (snd expected) pos
+    | Error _ ->
+        Alcotest.fail (name ^ ": expected success")
+    );
+    check_matches_parse name input parser
+  in
+  expect "sep_by_take leading" "  a,b" ([], 0) take;
+  expect "sep_by_take_span leading" "  a,b" ([], 0) take_span;
+  expect "sep_by_take around separator" "a , b" ([ "a"; "b" ], 5) take;
+  expect "sep_by_take_span around separator" "a , b" ([ "a"; "b" ], 5) take_span
+
+let test_utf8_truncated_at_eof () =
+  check_matches_parse "Utf8.take_while" "a\xE2" (fun () ->
+      Parseff.Utf8.take_while (fun _ -> true)
+  );
+  check_matches_parse "Utf8.take_while_span" "a\xE2" (fun () ->
+      Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true))
+  );
+  check_matches_parse "Utf8.skip_while" "a\xE2" (fun () ->
+      Parseff.Utf8.skip_while (fun _ -> true)
+  )
+
+let test_utf8_scan_after_ascii () =
+  let all () = Parseff.Utf8.take_while (fun _ -> true) in
+  ( match Parseff.parse "ab\xFFc" all with
+  | Error { pos; _ } ->
+      Alcotest.(check int) "invalid byte position" 2 pos
+  | Ok s ->
+      Alcotest.failf "expected invalid UTF-8, got %S" s
+  );
+  check_matches_parse "Utf8.take_while invalid after ascii" "ab\xFFc" all;
+  let not_c () =
+    Parseff.Utf8.take_while (fun u -> not (Uchar.equal u (Uchar.of_char 'c')))
+  in
+  ( match Parseff.parse "ab\xCE\xBBc" not_c with
+  | Ok s ->
+      Alcotest.(check string) "ascii then lambda" "ab\xCE\xBB" s
+  | Error _ ->
+      Alcotest.fail "expected success"
+  );
+  check_matches_parse "Utf8.take_while lambda after ascii" "ab\xCE\xBBc" not_c
+
+let test_streaming_matches_parse () =
+  let letters () = Parseff.take_while is_lower in
+  let cases =
+    [
+      ( "consume",
+        "hello world",
+        fun () ->
+          let a = Parseff.consume "hello" in
+          let _ = Parseff.skip_whitespace () in
+          a ^ Parseff.consume "world"
+      );
+      ( "location",
+        "ab\ncd\nef",
+        fun () ->
+          let _ = Parseff.take 4 in
+          let l = Parseff.location () in
+          Printf.sprintf "%d:%d:%d" l.offset l.line l.col
+      );
+      ( "or_ failure",
+        "abc",
+        fun () ->
+          Parseff.or_
+            (fun () -> Parseff.consume "abx")
+            (fun () -> Parseff.consume "aby")
+            ()
+      );
+      ( "skip_while_then_char",
+        "   ;x",
+        fun () ->
+          Parseff.skip_while_then_char is_space ';';
+          letters ()
+      );
+      ( "fused_sep_take",
+        "  : value",
+        fun () -> Parseff.fused_sep_take is_space ':' is_lower
+      );
+      ( "regex",
+        "123abc",
+        fun () -> Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+      );
+      ( "regex failure",
+        "abc",
+        fun () -> Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+      );
+      ( "binary",
+        "\x01\x02\x03\x04\x05\x06\x07\x08\x09",
+        fun () ->
+          let a = Parseff.BE.any_int16 () in
+          let b = Parseff.LE.any_int32 () in
+          Printf.sprintf "%d %ld" a b
+      );
+      ( "binary eof",
+        "\x01\x02\x03",
+        fun () -> Int32.to_string (Parseff.BE.any_int32 ())
+      );
+      ( "utf8",
+        "h\xC3\xA9llo wor",
+        fun () ->
+          let a = Parseff.Utf8.take_while (fun u -> Uchar.to_int u <> 0x20) in
+          Parseff.Utf8.skip_whitespace ();
+          a ^ letters ()
+      );
+      ( "utf8 invalid",
+        "ab\xFFcd",
+        fun () -> Parseff.Utf8.take_while (fun _ -> true)
+      );
+      ( "end_of_input",
+        "ab",
+        fun () ->
+          Parseff.end_of_input ();
+          ""
+      );
+    ]
+  in
+  List.iter
+    (fun (name, input, parser) -> check_matches_parse name input parser)
+    cases
+
+let re_str s = Parseff.match_regex (Re.compile s)
+
+let test_regex_needs_more_input () =
+  check_matches_parse "str" "abcd" (fun () -> re_str (Re.str "abcd"));
+  check_matches_parse "longest alt" "abcd" (fun () ->
+      re_str (Re.longest (Re.alt [ Re.str "ab"; Re.str "abcd" ]))
+  );
+  check_matches_parse "opt" "abcd" (fun () ->
+      re_str (Re.seq [ Re.str "ab"; Re.opt (Re.str "cd") ])
+  )
+
+let test_regex_lookbehind () =
+  let after_consume prefix re input =
+    check_matches_parse ("lookbehind " ^ input) input (fun () ->
+        let _ = Parseff.consume prefix in
+        re_str re
+    )
+  in
+  let bol_ab = Re.seq [ Re.bol; Re.str "ab" ] in
+  after_consume "x\n" bol_ab "x\nab";
+  after_consume "x" bol_ab "xab";
+  after_consume "x " (Re.seq [ Re.bow; Re.str "ab" ]) "x ab";
+  after_consume "x" (Re.seq [ Re.bow; Re.str "ab" ]) "xab";
+  after_consume "x" (Re.seq [ Re.not_boundary; Re.str "ab" ]) "xab"
+
+let test_take_beyond_end_of_input () =
+  check_matches_parse "take 100000" "abc" (fun () -> Parseff.take 100000);
+  let result =
+    Parseff.parse_source ~backtrack_window:4 (chunked_source "abc") (fun () ->
+        Parseff.take 10
+    )
+  in
+  match result with
+  | Parseff.Error { error = `Unexpected_end_of_input; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "Expected Unexpected_end_of_input"
+
+let test_take_beyond_window () =
+  match
+    Parseff.parse_source ~backtrack_window:4
+      (chunked_source (String.make 100 'a'))
+      (fun () -> Parseff.take 10)
+  with
+  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "Expected Backtrack_window_exceeded"
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -911,6 +1245,18 @@ let () =
         [
           test_case "empty source" `Quick test_empty_source;
           test_case "end_of_input with data" `Quick test_end_of_input_with_data;
+          test_case "sep_by_take long whitespace" `Quick
+            test_sep_by_take_long_whitespace;
+          test_case "sep_by_take leading whitespace" `Quick
+            test_sep_by_take_leading_whitespace;
+          test_case "utf8 truncated at eof" `Quick test_utf8_truncated_at_eof;
+          test_case "utf8 scan after ascii" `Quick test_utf8_scan_after_ascii;
+          test_case "matches parse" `Quick test_streaming_matches_parse;
+          test_case "regex needs more input" `Quick test_regex_needs_more_input;
+          test_case "regex lookbehind" `Quick test_regex_lookbehind;
+          test_case "take beyond end of input" `Quick
+            test_take_beyond_end_of_input;
+          test_case "take beyond window" `Quick test_take_beyond_window;
           test_case "end_of_input after consume" `Quick
             test_end_of_input_after_consume;
           test_case "backtrack across chunk" `Quick test_backtrack_across_chunk;
@@ -942,6 +1288,24 @@ let () =
             test_streaming_location_across_chunks;
           test_case "multiple calls" `Quick
             test_streaming_location_multiple_calls;
+        ]
+      );
+      ( "regex and location regressions",
+        [
+          test_case "regex lookbehind after peek_char" `Quick
+            test_regex_lookbehind_after_peek;
+          test_case "regex lookbehind window accounting" `Quick
+            test_regex_lookbehind_window_accounting;
+          test_case "regex read-ahead stops at half window" `Quick
+            test_regex_readahead_half_window;
+          test_case "location after backtrack" `Quick
+            test_location_after_backtrack;
+        ]
+      );
+      ( "backtrack window release",
+        [
+          test_case "or_ right branch" `Quick
+            test_or_right_branch_releases_window;
         ]
       );
       ( "Source.of_chunks",

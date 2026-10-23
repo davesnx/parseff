@@ -51,10 +51,8 @@ let () =
       Printf.printf "method=GET path=%s\n" p
   | Ok (`POST, p) ->
       Printf.printf "method=POST path=%s\n" p
-  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest; current } }
-    ->
-      Printf.printf "window error at %d: limit=%d oldest=%d current=%d\n" pos
-        limit oldest current
+  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest } } ->
+      Printf.printf "window error at %d: limit=%d oldest=%d\n" pos limit oldest
   | Error { pos; error = `Expected msg } ->
       Printf.printf "parse error at %d: %s\n" pos msg
   | Error { pos; error = `Unexpected_end_of_input } ->
