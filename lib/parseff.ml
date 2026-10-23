@@ -370,12 +370,33 @@ let ensure_line_index_preserved_through st up_to =
           st.line_index <- Some idx;
           idx
     in
-    extend_line_index idx ~base_offset:st.base st.input up_to;
-    let line = find_line idx up_to in
-    if line > 0 then begin
-      Array.blit idx.starts line idx.starts 0 (idx.count - line);
-      idx.count <- idx.count - line;
-      idx.line_base <- idx.line_base + line
+    if up_to <= idx.scanned_up_to then begin
+      let line = find_line idx up_to in
+      if line > 0 then begin
+        Array.blit idx.starts line idx.starts 0 (idx.count - line);
+        idx.count <- idx.count - line;
+        idx.line_base <- idx.line_base + line
+      end
+    end else begin
+      let input = st.input in
+      let base = st.base in
+      let stop = imin (up_to - base) (String.length input) in
+      let newlines = ref 0 and last = ref (-1) in
+      for rel = imax 0 (idx.scanned_up_to - base) to stop - 1 do
+        if String.unsafe_get input rel = '\n' then begin
+          incr newlines;
+          last := rel
+        end
+      done;
+      idx.line_base <- idx.line_base + idx.count - 1 + !newlines;
+      idx.starts.(0) <-
+        ( if !newlines > 0 then
+            base + !last + 1
+          else
+            idx.starts.(idx.count - 1)
+        );
+      idx.count <- 1;
+      idx.scanned_up_to <- up_to
     end
   end
 
