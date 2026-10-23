@@ -67,6 +67,7 @@ type line_index = {
   mutable starts : int array;
   mutable count : int;
   mutable scanned_up_to : int;
+  mutable line_base : int;
 }
 
 type rewind_frame_kind = Choice | Repeat | Barrier | Last_branch
@@ -105,6 +106,7 @@ type state = {
   mutable line_index : line_index option;
   source : source option;
   mutable rewind_frames : rewind_frame list;
+  mutable active : bool;
 }
 
 let[@inline always] imin (a : int) b =
@@ -120,6 +122,10 @@ let[@inline always] imax (a : int) b =
 let default_buf_size = 4096
 let default_backtrack_window = 65_536
 
+let check_backtrack_window w =
+  if w < 2 then
+    invalid_arg "Parseff.parse_source: backtrack_window must be at least 2"
+
 module Source = struct
   type t = source
 
@@ -130,6 +136,8 @@ module Source = struct
     make ~initial:s ~read:(fun _ _ _ -> 0) ~eof:true ~tmp:Bytes.empty
 
   let of_channel ?(buf_size = default_buf_size) ic =
+    if buf_size < 1 then
+      invalid_arg "Parseff.Source.of_channel: buf_size must be at least 1";
     make ~initial:""
       ~read:(fun buf off len -> input ic buf off len)
       ~eof:false ~tmp:(Bytes.create buf_size)
@@ -192,6 +200,7 @@ module State = struct
       line_index = None;
       source;
       rewind_frames = [];
+      active = false;
     }
 
   let for_input ~input ~max_depth = make ~input ~max_depth ~source:None
@@ -207,13 +216,23 @@ module State = struct
   let run (t : t) f =
     let previous = Domain.DLS.get key in
     Domain.DLS.set key t;
+    t.active <- true;
+    let leave () =
+      t.active <- false;
+      Domain.DLS.set key
+        ( if previous.active then
+            previous
+          else
+            none
+        )
+    in
     match f () with
     | v ->
-        Domain.DLS.set key previous;
+        leave ();
         v
     | exception exn ->
         let bt = Printexc.get_raw_backtrace () in
-        Domain.DLS.set key previous;
+        leave ();
         Printexc.raise_with_backtrace exn bt
 
   let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
@@ -288,7 +307,7 @@ let[@inline always] get_state () =
 let create_line_index () =
   let starts = Array.make 64 0 in
   starts.(0) <- 0;
-  { starts; count = 1; scanned_up_to = 0 }
+  { starts; count = 1; scanned_up_to = 0; line_base = 0 }
 
 let extend_line_index idx ?(base_offset = 0) input up_to =
   let i = ref idx.scanned_up_to in
@@ -333,7 +352,13 @@ let ensure_line_index_preserved_through st up_to =
           st.line_index <- Some idx;
           idx
     in
-    extend_line_index idx ~base_offset:st.base st.input up_to
+    extend_line_index idx ~base_offset:st.base st.input up_to;
+    let line = find_line idx up_to in
+    if line > 0 then begin
+      Array.blit idx.starts line idx.starts 0 (idx.count - line);
+      idx.count <- idx.count - line;
+      idx.line_base <- idx.line_base + line
+    end
   end
 
 let[@inline never] handle_location st =
@@ -351,7 +376,7 @@ let[@inline never] handle_location st =
   let line_idx = find_line idx st.pos in
   {
     offset = st.pos;
-    line = line_idx + 1;
+    line = idx.line_base + line_idx + 1;
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
@@ -367,6 +392,14 @@ let[@inline never] append st ~floor chunk n =
   st.input <- Bytes.unsafe_to_string buf;
   st.base <- st.base + drop;
   st.input_len <- st.input_len + n
+
+let[@inline never] read_source st src buf off len =
+  let n = src.read buf off len in
+  Domain.DLS.set State.key st;
+  if n < 0 || n > len then
+    invalid_arg
+      (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);
+  n
 
 let[@inline never] rec fill st ~keep_from need =
   match st.source with
@@ -386,7 +419,7 @@ let[@inline never] rec fill st ~keep_from need =
         if max_bytes <= 0 then
           raise (Backtrack_window_exceeded (need, { limit; oldest = floor }))
         else
-          let n = src.read src.tmp 0 max_bytes in
+          let n = read_source st src src.tmp 0 max_bytes in
           if n = 0 then begin
             src.eof <- true;
             false
@@ -396,8 +429,14 @@ let[@inline never] rec fill st ~keep_from need =
           end
 
 let[@inline always] have st n =
-  st.pos + n <= st.input_len
-  || (st.source != None && fill st ~keep_from:st.pos (st.pos + n))
+  n <= st.input_len - st.pos
+  || st.source != None
+     && fill st ~keep_from:st.pos
+          ( if n > max_int - st.pos then
+              max_int
+            else
+              st.pos + n
+          )
 
 let no_keep = max_int
 
@@ -439,23 +478,31 @@ let[@inline never] handle_consume st s =
           raise (Parse_error (st.pos, Expected_string s))
       else
         raise (Unexpected_eof st.pos)
-  end else if have st len then begin
+  end else begin
+    let complete = have st len in
     let pos = st.pos in
+    let avail =
+      if complete then
+        len
+      else
+        st.input_len - pos
+    in
     let rec check i =
-      if i >= len then
+      if i >= avail then
         true
       else if char_at st (pos + i) = String.unsafe_get s i then
         check (i + 1)
       else
         false
     in
-    if check 0 then begin
+    if not (check 0) then
+      raise (Parse_error (pos, Expected_string s))
+    else if complete then begin
       st.pos <- pos + len;
       s
     end else
-      raise (Parse_error (pos, Expected_string s))
-  end else
-    raise (Unexpected_eof st.pos)
+      raise (Unexpected_eof pos)
+  end
 
 let[@inline] handle_satisfy st pred label =
   if have st 1 then
@@ -625,12 +672,17 @@ let[@inline never] buffer_for_regex st =
   | Some src when (not src.eof) && st.input_len - st.pos < src.window / 2 ->
       let floor = State.reclaim_floor st ~keep_from:st.pos in
       let room = src.window - (st.input_len - floor) in
-      if room > 0 then begin
+      if room <= 0 then
+        raise
+          (Backtrack_window_exceeded
+             (st.pos + (src.window / 2), { limit = src.window; oldest = floor })
+          )
+      else begin
         let chunk = Bytes.create room in
         let got = ref 0 in
         let want = imin room ((src.window / 2) - (st.input_len - st.pos)) in
         while !got < want && not src.eof do
-          let n = src.read chunk !got (room - !got) in
+          let n = read_source st src chunk !got (room - !got) in
           if n = 0 then
             src.eof <- true
           else
@@ -1090,10 +1142,14 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
     let continue_ref = ref true in
     while !continue_ref do
       let frame = State.push_rewind_frame st Repeat in
+      let start = st.pos in
       match p () with
       | v ->
           State.pop_rewind_frame st frame;
-          acc := v :: !acc
+          if st.pos = start then
+            continue_ref := false
+          else
+            acc := v :: !acc
       | exception (User_failure _ as exn) ->
           State.pop_rewind_frame st frame;
           raise exn
@@ -1121,10 +1177,14 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
     let continue_ref = ref true in
     while !continue_ref do
       let frame = State.push_rewind_frame st Repeat in
+      let start = st.pos in
       match p () with
       | v ->
           State.pop_rewind_frame st frame;
-          acc := v :: !acc
+          if st.pos = start then
+            continue_ref := false
+          else
+            acc := v :: !acc
       | exception (User_failure _ as exn) ->
           State.pop_rewind_frame st frame;
           raise exn
@@ -1152,11 +1212,15 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
         let continue_ref = ref true in
         while !continue_ref do
           let frame = State.push_rewind_frame st Repeat in
+          let start = st.pos in
           try
             let _ = sep () in
             let v = p () in
             State.pop_rewind_frame st frame;
-            acc := v :: !acc
+            if st.pos = start then
+              continue_ref := false
+            else
+              acc := v :: !acc
           with
           | User_failure _ as exn ->
               State.pop_rewind_frame st frame;
@@ -1216,6 +1280,7 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
   let continue_ref = ref true in
   while !continue_ref do
     let frame = State.push_rewind_frame st Repeat in
+    let start = st.pos in
     match
       let f = op () in
       let rhs = p () in
@@ -1223,7 +1288,10 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
       (f, rhs)
     with
     | f, rhs ->
-        acc := f !acc rhs
+        if st.pos = start then
+          continue_ref := false
+        else
+          acc := f !acc rhs
     | exception (User_failure _ as exn) ->
         State.pop_rewind_frame st frame;
         raise exn
@@ -1286,8 +1354,6 @@ let expect msg p =
       raise (Parse_error (pos, err_msg))
   | Unexpected_eof pos ->
       raise (Parse_error (pos, err_msg))
-  | Propagated_error (pos, _) ->
-      raise (Parse_error (pos, err_msg))
 
 let catch p handler = try p () with User_failure (_pos, msg) -> handler msg
 
@@ -1306,8 +1372,7 @@ let one_of parsers () =
 let one_of_labeled labeled_parsers () =
   let parsers = List.map snd labeled_parsers in
   try one_of parsers ()
-  with
-  | Parse_error (pos, _) | Unexpected_eof pos | Propagated_error (pos, _) ->
+  with Parse_error (pos, _) | Unexpected_eof pos ->
     let expected = String.concat ", " (List.map fst labeled_parsers) in
     raise
       (Parse_error (pos, Msg (Printf.sprintf "expected one of: %s" expected)))
@@ -1601,6 +1666,7 @@ let parse_source ?(max_depth = 128)
       | `Depth_limit_exceeded of string ]
     )
     result =
+  check_backtrack_window backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window in
   let result =
     State.run st @@ fun () ->
@@ -1630,6 +1696,7 @@ let parse_source_until_end ?(max_depth = 128)
       'd
     )
     result_with_diagnostics =
+  check_backtrack_window backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window in
   let result =
     State.run st @@ fun () ->

@@ -118,11 +118,10 @@ let test_one_of_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
-      (* Parse_error from "if" branch (which could check but mismatched) is
-         preferred over Unexpected_eof from "else"/"while" branches (which were
-         too short to even check) at the same position. *)
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected \"if\"" expected
+      Alcotest.(check string)
+        "error message"
+        "expected \"if\" or expected \"else\" or expected \"while\"" expected
   | Error _ ->
       Alcotest.fail "Expected `Expected"
 

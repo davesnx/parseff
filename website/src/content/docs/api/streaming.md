@@ -278,6 +278,13 @@ If the retained region would exceed `~backtrack_window`, parsing fails with ``Ba
 ```
 The one constraint: do not share a single `Parseff.Source.t` across domains. Each source has mutable read state (buffer position, EOF flag), so concurrent access would race. Create a separate source per domain.
 
+A source is for one parse. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first parse read ahead are lost.
+
+
+### Concurrent parses on one domain
+
+Two parses can run at the same time on one domain, for example in two Eio fibers, when the only thing that suspends is the source `read` function. The parse state is stored per domain and Parseff installs it again each time `read` returns. A suspension inside a parser callback, such as a `satisfy` predicate or a `many` body, is not supported.
+
 
 ## Limitations
 
@@ -302,7 +309,7 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 
 ### Regex at chunk boundaries
 
-When a regex match extends to the end of the current buffer, the runtime refills and retries until the match no longer touches the boundary (or EOF). This is correct for typical patterns but may behave unexpectedly with zero-width matches at the end of input.
+Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input only, so a match cannot extend past the window. If the window is already full of rewind history and the source has not ended, `Parseff.match_regex` fails with ``Backtrack_window_exceeded`. `~backtrack_window` must be at least `2`.
 
 
 ### No partial results

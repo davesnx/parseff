@@ -2,8 +2,8 @@
 
    The callback inside Source.of_chunks performs an Eio effect
    (Promise.await) which suspends the fiber until data arrives.
-   This works because parseff's deep effect handlers forward
-   unrecognised effects to the outer Eio scheduler. *)
+   This works because only the source's read function suspends. Parseff
+   installs its parse state again each time read returns. *)
 
 open Eio.Std
 

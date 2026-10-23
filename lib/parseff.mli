@@ -30,8 +30,9 @@
 (** {1 Span Type} *)
 
 type span = { buf : string; off : int; len : int }
-(** A zero-copy slice of the input string. Use [span_to_string] to materialize
-    when needed. *)
+(** A slice of the input string. With [parse] it is zero-copy: [buf] is the
+    input string. With [parse_source] it is an owned copy with [off = 0]. Use
+    [span_to_string] to materialize when needed. *)
 
 val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
@@ -157,7 +158,9 @@ val parse_until_end :
 (** {1 Primitive Combinators} *)
 
 val consume : string -> string
-(** [consume s] matches the exact literal string [s].
+(** [consume s] matches the exact literal string [s]. Fails with [`Expected] as
+    soon as the available input differs from [s], and with
+    [`Unexpected_end_of_input] only when the input ends inside a prefix of [s].
 
     Example:
     {@ocaml[
@@ -194,6 +197,10 @@ val match_regex : Re.re -> string
     is limited to the buffered input, so it cannot extend past the window. The
     byte before the current position stays visible to [Re.bol] and word
     boundaries.
+
+    The match must start at the current position, but [Re] searches forward when
+    it does not. A failed match therefore scans the rest of the input, and a
+    loop that fails at each position takes quadratic time.
 
     Example:
     {@ocaml[
@@ -558,6 +565,9 @@ val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
     When [~at_least] is specified, requires at least that many successful
     matches. Fails if [parser] doesn't succeed enough times.
 
+    The loop also stops after an iteration that consumes no input, and that
+    iteration's result is dropped.
+
     Example:
     {@ocaml[
     let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
@@ -569,6 +579,9 @@ val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     [separator] between each pair. Returns a list of the parsed elements.
 
     When [~at_least] is specified, requires at least that many elements.
+
+    The loop stops after a separator and element that together consume no input,
+    and that element is dropped.
 
     Example:
     {@ocaml[
@@ -592,7 +605,8 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 (** [end_by element separator] parses zero or more [element]s, each followed by
     [separator].
 
-    When [~at_least] is specified, requires at least that many elements. *)
+    When [~at_least] is specified, requires at least that many elements. The
+    loop stops after an iteration that consumes no input, as in {!many}. *)
 
 val fold_left :
   (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
@@ -601,7 +615,10 @@ val fold_left :
     values.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
-    [element] values instead of failing. *)
+    [element] values instead of failing.
+
+    The loop stops after an [op] and [element] that together consume no input,
+    and that pair is not applied. *)
 
 val fold_right :
   (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
@@ -684,8 +701,12 @@ val take : int -> string
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
     — a channel, file descriptor, or custom reader — behind a uniform interface.
-    The parser pulls data on demand through the effect handler; existing parser
-    code works unchanged. *)
+    The parser pulls data on demand by calling the source's read function;
+    existing parser code works unchanged.
+
+    A source is for one parse. [of_string] starts again from the beginning, but
+    the other sources continue where the last read stopped, and bytes that the
+    first parse read ahead are lost. *)
 module Source : sig
   type t
 
@@ -695,12 +716,14 @@ module Source : sig
 
   val of_channel : ?buf_size:int -> in_channel -> t
   (** [of_channel ?buf_size ic] creates a source that reads from [ic].
-      [buf_size] controls the internal read buffer (default 4096). *)
+      [buf_size] controls the internal read buffer (default 4096). Raises
+      [Invalid_argument] if [buf_size] is less than [1]. *)
 
   val of_function : (bytes -> int -> int -> int) -> t
   (** [of_function read] creates a source that calls [read buf off len] to
       obtain up to [len] bytes starting at offset [off] in [buf]. Must return
-      the number of bytes actually read; return [0] to signal EOF.
+      the number of bytes actually read; return [0] to signal EOF. A result
+      outside [0..len] raises [Invalid_argument] from the parse.
 
       This is the low-level escape hatch for byte sources that fill a
       pre-allocated buffer, such as [Unix.read] or [Unix.recv]. For most use
@@ -756,6 +779,14 @@ val parse_source :
     [65536] bytes). If the parser needs to keep more rewind history than that,
     parsing fails with [`Backtrack_window_exceeded]. Use {!commit} to seal
     branches once the grammar has clearly chosen them.
+
+    [backtrack_window] must be at least [2], because {!match_regex} reads ahead
+    half of the window. Smaller values raise [Invalid_argument].
+
+    Only the source's read function may suspend, for example to wait on an Eio
+    promise or yield to a scheduler. Two parses on one domain can then run
+    concurrently. A parser callback that suspends, such as a [satisfy] predicate
+    or a [many] body, is not supported.
 
     Example:
     {@ocaml[

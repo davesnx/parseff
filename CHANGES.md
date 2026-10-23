@@ -1,3 +1,16 @@
+## Unreleased
+
+- **Fix concurrent parses on one domain.** Two `parse_source` calls whose `read` suspends, for example in two Eio fibers, corrupted each other's state and raised `Invalid_argument "Parseff.State.pop_rewind_frame"`. Parseff now installs the parse state again after every `read`, and a finished parse no longer leaves its state behind. Only `read` may suspend; a suspension inside a parser callback is still not supported.
+- **Fix streaming memory growing with the input.** Compaction kept one line index entry per newline for the whole stream. The index now keeps only the retained buffer and a count of dropped lines, so `location` stays correct and memory is bounded by the window.
+- **Fix `match_regex` hiding a full backtrack window.** When the window was full and the source had not ended, the regex ran on the short buffer and failed, so `or_` took another branch. It now fails with <code>`Backtrack_window_exceeded</code>, as `take` does.
+- **Check streaming arguments.** `parse_source` and `parse_source_until_end` raise `Invalid_argument` for `~backtrack_window` below `2`, `Source.of_channel` for `~buf_size` below `1`, and a parse for a `read` result outside `0..len`. A window of `0` or `1` used to report a false end of input.
+- **Fix streaming documentation.** `span` is an owned copy in streaming, `match_regex` reads ahead half a window instead of retrying at chunk boundaries, and a source is for one parse.
+- **Fix `expect` and `one_of_labeled` relabeling user errors.** A user error raised through an `or_` or `one_of` with several branches was replaced by the `expect` or `one_of_labeled` message. It now passes through unchanged, as documented.
+- **Fix `many`, `sep_by`, `end_by` and `fold_left` looping forever on parsers that consume no input.** The loop now stops after an iteration that consumes nothing and drops that iteration's result. `~at_least` still applies to the kept results.
+- **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with <code>`Unexpected_end_of_input</code>.
+- **Document the cost of `match_regex` failures.** `Re` searches forward when the regex does not match at the current position, so a failed match scans the rest of the input and a loop of failing matches takes quadratic time.
+- **`consume` reports a mismatch instead of end of input.** When fewer bytes remain than the literal needs but the available bytes already differ, `consume` now fails with <code>`Expected</code>, so `or_` composes the messages of its branches. Only input that ends inside a prefix of the literal gives <code>`Unexpected_end_of_input</code>.
+
 ## 0.4.0
 
 - **Breaking: streaming now uses a bounded sliding buffer.** `parse_source` and `parse_source_until_end` accept `~backtrack_window` (default `65536`) and fail with <code>`Backtrack_window_exceeded of backtrack_window_error</code> when a parser needs to keep more input than that for backtracking. This includes a single `take_while` or `take_while_span` token longer than the window. Exhaustive matches on the error type must handle the new case. Raise `~backtrack_window` if a parser needs more.

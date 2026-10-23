@@ -40,7 +40,7 @@ Using one_of and one_of_labeled
   if                   -> if
 
   $ ./main.exe keyword "xyz"
-  xyz                  -> Error at pos 0: expected "if"
+  xyz                  -> Error at pos 0: expected "if" or expected "else" or expected "while"
 
   $ ./main.exe literal "99"
   99                   -> 9
