@@ -1431,24 +1431,29 @@ let[@inline] binary_any_int64 endian () =
   handle_any_int64 st endian
 
 let expect_int16 any_fn expected =
-  let actual = any_fn () in
+  if expected < -0x8000 || expected > 0xFFFF then
+    invalid_arg "Parseff.int16: value must be in -32768..65535";
+  let st = get_state () in
+  let start = st.pos in
+  let actual = any_fn () land 0xFFFF in
+  let expected = expected land 0xFFFF in
   if actual <> expected then
-    let st = get_state () in
     raise
       (Parse_error
-         ( st.pos,
+         ( start,
            Msg
              (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
          )
       )
 
 let expect_int32 any_fn expected =
+  let st = get_state () in
+  let start = st.pos in
   let actual = any_fn () in
   if actual <> expected then
-    let st = get_state () in
     raise
       (Parse_error
-         ( st.pos,
+         ( start,
            Msg
              (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected
                 actual
@@ -1457,12 +1462,13 @@ let expect_int32 any_fn expected =
       )
 
 let expect_int64 any_fn expected =
+  let st = get_state () in
+  let start = st.pos in
   let actual = any_fn () in
   if actual <> expected then
-    let st = get_state () in
     raise
       (Parse_error
-         ( st.pos,
+         ( start,
            Msg
              (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected
                 actual

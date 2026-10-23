@@ -887,8 +887,21 @@ let test_of_seq_take_while () =
 let norm = function
   | Parseff.Ok v ->
       Ok v
-  | Parseff.Error { pos; _ } ->
-      Error pos
+  | Parseff.Error { pos; error } ->
+      let kind =
+        match error with
+        | `Expected m ->
+            "Expected " ^ m
+        | `Unexpected_end_of_input ->
+            "Unexpected_end_of_input"
+        | `Failure m ->
+            "Failure " ^ m
+        | `Depth_limit_exceeded m ->
+            "Depth_limit_exceeded " ^ m
+        | `Backtrack_window_exceeded _ ->
+            "Backtrack_window_exceeded"
+      in
+      Error (pos, kind)
 
 let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
   let expected = norm (Parseff.parse input parser) in
@@ -911,16 +924,25 @@ let test_regex_lookbehind_after_peek () =
   let input = "xyab" in
   let cases =
     [
-      ("bol", Re.(compile (seq [ bol; str "ab" ])), Error 2);
-      ("bow", Re.(compile (seq [ bow; str "ab" ])), Error 2);
-      ("bos", Re.(compile (seq [ bos; str "ab" ])), Error 2);
+      ( "bol",
+        Re.(compile (seq [ bol; str "ab" ])),
+        Error (2, "Expected regex match failed")
+      );
+      ( "bow",
+        Re.(compile (seq [ bow; str "ab" ])),
+        Error (2, "Expected regex match failed")
+      );
+      ( "bos",
+        Re.(compile (seq [ bos; str "ab" ])),
+        Error (2, "Expected regex match failed")
+      );
       ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
     ]
   in
   List.iter
     (fun (name, re, expected) ->
       let parser = lookbehind_parser re in
-      Alcotest.(check (result string int))
+      Alcotest.(check (result string (pair int string)))
         (name ^ " parse") expected
         (norm (Parseff.parse input parser));
       check_matches_parse name input parser
@@ -1049,15 +1071,36 @@ let test_sep_by_take_leading_whitespace () =
   expect "sep_by_take_span around separator" "a , b" ([ "a"; "b" ], 5) take_span
 
 let test_utf8_truncated_at_eof () =
-  check_matches_parse "Utf8.take_while" "a\xE2" (fun () ->
-      Parseff.Utf8.take_while (fun _ -> true)
+  let rejects name parser =
+    check_matches_parse name "a\xE2" parser;
+    match Parseff.parse "a\xE2" parser with
+    | Parseff.Error _ ->
+        ()
+    | Parseff.Ok _ ->
+        Alcotest.failf "%s: parse accepted truncated UTF-8" name
+  in
+  rejects "Utf8.take_while" (fun () ->
+      ignore (Parseff.Utf8.take_while (fun _ -> true))
   );
-  check_matches_parse "Utf8.take_while_span" "a\xE2" (fun () ->
-      Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true))
+  rejects "Utf8.take_while_span" (fun () ->
+      ignore
+        (Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true)))
   );
-  check_matches_parse "Utf8.skip_while" "a\xE2" (fun () ->
-      Parseff.Utf8.skip_while (fun _ -> true)
-  )
+  rejects "Utf8.skip_while" (fun () -> Parseff.Utf8.skip_while (fun _ -> true));
+  List.iter
+    (fun chunk_size ->
+      match
+        Parseff.parse_source (chunked_source ~chunk_size "a\xE2") (fun () ->
+            ignore (Parseff.Utf8.take_while (fun _ -> true))
+        )
+      with
+      | Parseff.Error _ ->
+          ()
+      | Parseff.Ok _ ->
+          Alcotest.failf "chunk_size %d: streaming accepted truncated UTF-8"
+            chunk_size
+    )
+    [ 1; 3; 4096 ]
 
 let test_utf8_scan_after_ascii () =
   let all () = Parseff.Utf8.take_while (fun _ -> true) in

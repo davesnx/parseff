@@ -881,15 +881,17 @@ module BE : sig
 
   val int16 : int -> unit
   (** [int16 i] matches exactly the 2 bytes that encode [i] in big-endian order.
-      Fails if the bytes don't match. *)
+      Accepts values from [-32768] to [65535], so [int16 0xFFFE] and
+      [int16 (-2)] match the same bytes. Raises [Invalid_argument] outside that
+      range. Fails at the start of the field if the bytes don't match. *)
 
   val int32 : int32 -> unit
   (** [int32 i] matches exactly the 4 bytes that encode [i] in big-endian order.
-      Fails if the bytes don't match. *)
+      Fails at the start of the field if the bytes don't match. *)
 
   val int64 : int64 -> unit
   (** [int64 i] matches exactly the 8 bytes that encode [i] in big-endian order.
-      Fails if the bytes don't match. *)
+      Fails at the start of the field if the bytes don't match. *)
 end
 
 (** Little-endian binary parsers. *)
@@ -920,15 +922,17 @@ module LE : sig
 
   val int16 : int -> unit
   (** [int16 i] matches exactly the 2 bytes that encode [i] in little-endian
-      order. Fails if the bytes don't match. *)
+      order. Accepts values from [-32768] to [65535]. Raises [Invalid_argument]
+      outside that range. Fails at the start of the field if the bytes don't
+      match. *)
 
   val int32 : int32 -> unit
   (** [int32 i] matches exactly the 4 bytes that encode [i] in little-endian
-      order. Fails if the bytes don't match. *)
+      order. Fails at the start of the field if the bytes don't match. *)
 
   val int64 : int64 -> unit
   (** [int64 i] matches exactly the 8 bytes that encode [i] in little-endian
-      order. Fails if the bytes don't match. *)
+      order. Fails at the start of the field if the bytes don't match. *)
 end
 
 (** {1 UTF-8 Parsing}

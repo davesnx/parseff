@@ -260,6 +260,121 @@ let test_le_int32_match () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let expect_error_at pos msg result =
+  match result with
+  | Parseff.Error { pos = p; error = `Expected m } ->
+      Alcotest.(check int) "error position" pos p;
+      Alcotest.(check string) "error message" msg m
+  | Parseff.Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Parseff.Error _ ->
+      Alcotest.fail "Expected Expected error"
+
+let expect_ok result =
+  match result with
+  | Parseff.Ok () ->
+      ()
+  | Parseff.Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_be_int16_high_bit () =
+  expect_ok (Parseff.parse "\xFF\xFE" (fun () -> Parseff.BE.int16 0xFFFE))
+
+let test_be_int16_negative () =
+  expect_ok (Parseff.parse "\xFF\xFE" (fun () -> Parseff.BE.int16 (-2)))
+
+let test_le_int16_high_bit () =
+  expect_ok (Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.int16 0xFFFE))
+
+let test_int16_mismatch_message () =
+  expect_error_at 0 "expected int16 0xFFFE, got 0x0102"
+    (Parseff.parse "\x01\x02" (fun () -> Parseff.BE.int16 0xFFFE));
+  expect_error_at 0 "expected int16 0xFFFE, got 0xFFFF"
+    (Parseff.parse "\xFF\xFF" (fun () -> Parseff.BE.int16 0xFFFE))
+
+let test_int16_out_of_range () =
+  List.iter
+    (fun v ->
+      match Parseff.parse "\x00\x00" (fun () -> Parseff.BE.int16 v) with
+      | _ ->
+          Alcotest.failf "%d accepted" v
+      | exception Invalid_argument _ ->
+          ()
+    )
+    [ -32769; 65536 ]
+
+let test_int16_mismatch_position_after_prefix () =
+  expect_error_at 1 "expected int16 0x0102, got 0x0201"
+    (Parseff.parse "\x00\x02\x01" (fun () ->
+         ignore (Parseff.any_char ());
+         Parseff.BE.int16 0x0102
+     )
+    )
+
+let test_be_int32_mismatch () =
+  expect_error_at 0 "expected int32 0x01020304, got 0x04030201"
+    (Parseff.parse "\x04\x03\x02\x01" (fun () -> Parseff.BE.int32 0x01020304l))
+
+let test_be_int64_mismatch () =
+  expect_error_at 0 "expected int64 0x0102030405060708, got 0x0807060504030201"
+    (Parseff.parse "\x08\x07\x06\x05\x04\x03\x02\x01" (fun () ->
+         Parseff.BE.int64 0x0102030405060708L
+     )
+    )
+
+let test_le_int32_mismatch_position () =
+  expect_error_at 1 "expected int32 0x01020304, got 0x04030201"
+    (Parseff.parse "\x00\x01\x02\x03\x04" (fun () ->
+         ignore (Parseff.any_char ());
+         Parseff.LE.int32 0x01020304l
+     )
+    )
+
+let test_int64_mismatch_position () =
+  expect_error_at 1 "expected int64 0x0000000000000001, got 0x0100000000000000"
+    (Parseff.parse "\x00\x01\x00\x00\x00\x00\x00\x00\x00" (fun () ->
+         ignore (Parseff.any_char ());
+         Parseff.BE.int64 1L
+     )
+    )
+
+let test_le_any_uint16_high_bits () =
+  match Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.any_uint16 ()) with
+  | Parseff.Ok v ->
+      Alcotest.(check int) "0xFFFE" 0xFFFE v
+  | Parseff.Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_le_any_int16_high_bits () =
+  match Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.any_int16 ()) with
+  | Parseff.Ok v ->
+      Alcotest.(check int) "-2" (-2) v
+  | Parseff.Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_le_int64_high_bits () =
+  match
+    Parseff.parse "\xF8\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (fun () ->
+        Parseff.LE.any_int64 ()
+    )
+  with
+  | Parseff.Ok v ->
+      Alcotest.(check int64_testable) "-8" (-8L) v
+  | Parseff.Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_le_int64_match_high_bits () =
+  expect_ok
+    (Parseff.parse "\xF8\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (fun () ->
+         Parseff.LE.int64 (-8L)
+     )
+    );
+  expect_ok
+    (Parseff.parse "\x01\x02\x03\x04\x05\x06\x07\x88" (fun () ->
+         Parseff.LE.int64 0x8807060504030201L
+     )
+    )
+
 let test_take_exact () =
   match
     Parseff.parse "abcdef" (fun () ->
@@ -339,8 +454,7 @@ let test_backtracking () =
   let parser () =
     Parseff.or_
       (fun () ->
-        (* Try to match 0xFFFF — will fail *)
-        Parseff.BE.int16 0xFFFF;
+        Parseff.BE.int16 0x0201;
         "matched_first"
       )
       (fun () ->
@@ -486,6 +600,28 @@ let () =
           Alcotest.test_case "BE.int32 match" `Quick test_be_int32_match;
           Alcotest.test_case "BE.int64 match" `Quick test_be_int64_match;
           Alcotest.test_case "LE.int32 match" `Quick test_le_int32_match;
+          Alcotest.test_case "BE.int16 high bit" `Quick test_be_int16_high_bit;
+          Alcotest.test_case "BE.int16 negative" `Quick test_be_int16_negative;
+          Alcotest.test_case "LE.int16 high bit" `Quick test_le_int16_high_bit;
+          Alcotest.test_case "int16 mismatch message" `Quick
+            test_int16_mismatch_message;
+          Alcotest.test_case "int16 out of range" `Quick test_int16_out_of_range;
+          Alcotest.test_case "int16 mismatch position" `Quick
+            test_int16_mismatch_position_after_prefix;
+          Alcotest.test_case "BE.int32 mismatch" `Quick test_be_int32_mismatch;
+          Alcotest.test_case "BE.int64 mismatch" `Quick test_be_int64_mismatch;
+          Alcotest.test_case "LE.int32 mismatch position" `Quick
+            test_le_int32_mismatch_position;
+          Alcotest.test_case "int64 mismatch position" `Quick
+            test_int64_mismatch_position;
+          Alcotest.test_case "LE.any_uint16 high bits" `Quick
+            test_le_any_uint16_high_bits;
+          Alcotest.test_case "LE.any_int16 high bits" `Quick
+            test_le_any_int16_high_bits;
+          Alcotest.test_case "LE.any_int64 high bits" `Quick
+            test_le_int64_high_bits;
+          Alcotest.test_case "LE.int64 match high bits" `Quick
+            test_le_int64_match_high_bits;
         ]
       );
       ( "take",
