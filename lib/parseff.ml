@@ -542,9 +542,9 @@ let[@inline never] handle_consume st s =
           st.pos <- st.pos + 1;
           s
         end else
-          raise (Parse_error (st.pos, Expected_string s))
+          raise_notrace (Parse_error (st.pos, Expected_string s))
       else
-        raise (Unexpected_eof st.pos)
+        raise_notrace (Unexpected_eof st.pos)
   end else begin
     let complete = have st len in
     let pos = st.pos in
@@ -563,12 +563,12 @@ let[@inline never] handle_consume st s =
         false
     in
     if not (check 0) then
-      raise (Parse_error (pos, Expected_string s))
+      raise_notrace (Parse_error (pos, Expected_string s))
     else if complete then begin
       st.pos <- pos + len;
       s
     end else
-      raise (Unexpected_eof pos)
+      raise_notrace (Unexpected_eof pos)
   end
 
 let[@inline] handle_satisfy st pred label =
@@ -578,9 +578,9 @@ let[@inline] handle_satisfy st pred label =
       st.pos <- st.pos + 1;
       c
     end else
-      raise (Parse_error (st.pos, Expected_label label))
+      raise_notrace (Parse_error (st.pos, Expected_label label))
   else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 (* dedicated char handler it avoids closure + String.make allocation *)
 let[@inline] handle_match_char st c =
@@ -590,9 +590,9 @@ let[@inline] handle_match_char st c =
       st.pos <- st.pos + 1;
       c
     end else
-      raise (Parse_error (st.pos, Expected_char c))
+      raise_notrace (Parse_error (st.pos, Expected_char c))
   else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 let[@inline never] scan_while_refilling st ~keep_from start pred =
   let p = ref start in
@@ -649,9 +649,9 @@ let[@inline never] handle_skip_while_then_char st pred c =
   end else begin
     st.pos <- pos;
     if pos >= st.input_len then
-      raise (Unexpected_eof pos)
+      raise_notrace (Unexpected_eof pos)
     else
-      raise (Parse_error (pos, Expected_char c))
+      raise_notrace (Parse_error (pos, Expected_char c))
   end
 
 let[@inline never] handle_fused_sep_take st ws_pred sep_char take_pred =
@@ -665,16 +665,16 @@ let[@inline never] handle_fused_sep_take st ws_pred sep_char take_pred =
     end else begin
       st.pos <- end_pos;
       if end_pos >= st.input_len then
-        raise (Unexpected_eof end_pos)
+        raise_notrace (Unexpected_eof end_pos)
       else
-        raise (Parse_error (end_pos, Expected_value))
+        raise_notrace (Parse_error (end_pos, Expected_value))
     end
   end else begin
     st.pos <- pos;
     if pos >= st.input_len then
-      raise (Unexpected_eof pos)
+      raise_notrace (Unexpected_eof pos)
     else
-      raise (Parse_error (pos, Expected_char sep_char))
+      raise_notrace (Parse_error (pos, Expected_char sep_char))
   end
 
 let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
@@ -773,7 +773,7 @@ let[@inline never] handle_match_regex st re =
       let match_end = st.base + Re.Group.stop groups 0 in
       if match_start <> st.pos then begin
         raise_if_pinned ();
-        raise (Parse_error (st.pos, regex_failed))
+        raise_notrace (Parse_error (st.pos, regex_failed))
       end else begin
         if match_end >= st.input_len then raise_if_pinned ();
         st.pos <- match_end;
@@ -782,9 +782,9 @@ let[@inline never] handle_match_regex st re =
   | exception Not_found ->
       raise_if_pinned ();
       if st.pos >= st.input_len then
-        raise (Unexpected_eof st.pos)
+        raise_notrace (Unexpected_eof st.pos)
       else
-        raise (Parse_error (st.pos, regex_failed))
+        raise_notrace (Parse_error (st.pos, regex_failed))
 
 let expected_end_of_input = Msg "expected end of input"
 
@@ -794,7 +794,7 @@ let[@inline never] handle_any_uint8 st =
     st.pos <- st.pos + 1;
     v
   end else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 let[@inline never] handle_any_int8 st =
   if have st 1 then begin
@@ -802,7 +802,7 @@ let[@inline never] handle_any_int8 st =
     st.pos <- st.pos + 1;
     v
   end else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 let[@inline never] handle_any_int16 st endian =
   if have st 2 then begin
@@ -817,7 +817,7 @@ let[@inline never] handle_any_int16 st endian =
     st.pos <- st.pos + 2;
     v
   end else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 let[@inline never] handle_any_int32 st endian =
   if have st 4 then begin
@@ -832,7 +832,7 @@ let[@inline never] handle_any_int32 st endian =
     st.pos <- st.pos + 4;
     v
   end else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 let[@inline never] handle_any_int64 st endian =
   if have st 8 then begin
@@ -847,7 +847,7 @@ let[@inline never] handle_any_int64 st endian =
     st.pos <- st.pos + 8;
     v
   end else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 let[@inline never] handle_take st n =
   if have st n then begin
@@ -855,7 +855,7 @@ let[@inline never] handle_take st n =
     st.pos <- st.pos + n;
     s
   end else
-    raise (Unexpected_eof st.pos)
+    raise_notrace (Unexpected_eof st.pos)
 
 exception Invalid_utf8 of int
 
@@ -892,7 +892,7 @@ let[@inline never] utf8_fill st keep_from p =
 
 let[@inline] decode_uchar st ~keep_from p =
   if p + 4 > st.input_len then utf8_fill st keep_from p;
-  if p >= st.input_len then raise (Unexpected_eof p);
+  if p >= st.input_len then raise_notrace (Unexpected_eof p);
   let d = String.get_utf_8_uchar st.input (p - st.base) in
   if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 p);
   d
@@ -904,7 +904,7 @@ let[@inline never] handle_satisfy_uchar st pred label =
     st.pos <- st.pos + Uchar.utf_decode_length d;
     u
   end else
-    raise (Parse_error (st.pos, Expected_label label))
+    raise_notrace (Parse_error (st.pos, Expected_label label))
 
 let[@inline never] scan_uchars inp start limit pred =
   let pos = ref start in
@@ -982,7 +982,7 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
   let pos = scan_while_uchar st ~keep_from:no_keep st.pos pred in
   if pos >= st.input_len then begin
     st.pos <- pos;
-    raise (Unexpected_eof pos)
+    raise_notrace (Unexpected_eof pos)
   end;
   let d = decode_uchar st ~keep_from:pos pos in
   let u = Uchar.utf_decode_uchar d in
@@ -990,7 +990,7 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
     st.pos <- pos + Uchar.utf_decode_length d
   else begin
     st.pos <- pos;
-    raise (Parse_error (pos, Msg ("expected " ^ uchar_label term)))
+    raise_notrace (Parse_error (pos, Msg ("expected " ^ uchar_label term)))
   end
 
 let[@inline always] pos_of_exn = function
@@ -1034,7 +1034,8 @@ let[@inline] compose_branch_errors left_exn right_exn =
         right
 
 let[@inline] turn_invalid_utf8_to_parse_error f =
-  try f () with Invalid_utf8 pos -> raise (Parse_error (pos, invalid_utf8_msg))
+  try f ()
+  with Invalid_utf8 pos -> raise_notrace (Parse_error (pos, invalid_utf8_msg))
 
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
@@ -1070,7 +1071,7 @@ let[@inline] end_of_input () =
   let st = get_state () in
   ignore (have st 1);
   if st.pos <> st.input_len then
-    raise (Parse_error (st.pos, expected_end_of_input))
+    raise_notrace (Parse_error (st.pos, expected_end_of_input))
 
 let take_while ?(at_least = 0) ?label pred =
   let st = get_state () in
@@ -1157,7 +1158,7 @@ let or_ left right () =
       end;
       if State.frame_committed st frame then begin
         State.pop_rewind_frame st frame;
-        raise left_exn
+        raise_notrace left_exn
       end;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
@@ -1173,9 +1174,9 @@ let or_ left right () =
           State.pop_rewind_frame st right_frame;
           if pos_of_exn right_exn < 0 then raise right_exn;
           if State.frame_committed st right_frame then
-            raise right_exn
+            raise_notrace right_exn
           else
-            raise (compose_branch_errors left_exn right_exn)
+            raise_notrace (compose_branch_errors left_exn right_exn)
     )
 
 let look_ahead p =
@@ -1425,9 +1426,9 @@ let expect msg p =
   let err_msg = Msg msg in
   try p () with
   | Parse_error (pos, _) ->
-      raise (Parse_error (pos, err_msg))
+      raise_notrace (Parse_error (pos, err_msg))
   | Unexpected_eof pos ->
-      raise (Parse_error (pos, err_msg))
+      raise_notrace (Parse_error (pos, err_msg))
 
 let catch p handler = try p () with User_failure (_pos, msg) -> handler msg
 
@@ -1435,7 +1436,7 @@ let one_of parsers () =
   let rec try_all = function
     | [] ->
         let st = get_state () in
-        raise (Parse_error (st.pos, No_alternative))
+        raise_notrace (Parse_error (st.pos, No_alternative))
     | [ p ] ->
         p ()
     | p :: rest ->
