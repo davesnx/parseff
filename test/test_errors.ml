@@ -1364,6 +1364,298 @@ let test_render_streaming_opener_dropped () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
+let render_error ?(name = "input.json") input parser =
+  match Parseff.Internal.parse input parser with
+  | Stdlib.Ok _ ->
+      "ok"
+  | Stdlib.Error (e : unit E.t) ->
+      E.render ~name e
+
+let digits_parser () =
+  ignore
+    (Parseff.take_while ~at_least:1 ~label:"number" (fun c ->
+         c >= '0' && c <= '9'
+     )
+    )
+
+let test_fail_from_span () =
+  let parser () =
+    ignore (Parseff.consume "x = ");
+    let start = Parseff.position () in
+    digits_parser ();
+    Parseff.fail ~from:start "number is too large"
+  in
+  check_render "span from"
+    (lines
+       [
+         "input.json:1:5: error: number is too large";
+         "1 | x = 300;";
+         "  |     ^^^";
+       ]
+    )
+    (render_error "x = 300;" parser);
+  match Parseff.parse "x = 300;" parser with
+  | Parseff.Error { pos = 7; error = `Failure "number is too large" } ->
+      ()
+  | _ ->
+      Alcotest.fail "legacy result must not change"
+
+let test_fail_from_after_position_is_normalized () =
+  let parser () = Parseff.fail ~from:5 "backwards" in
+  check_render "span is never reversed"
+    (lines [ "input.json:1:1: error: backwards"; "1 | abcdef"; "  | ^^^^^" ])
+    (render_error "abcdef" parser);
+  let parser () =
+    ignore (Parseff.consume "abc");
+    Parseff.fail ~from:1 "short"
+  in
+  check_render "span covers from to position"
+    (lines [ "input.json:1:2: error: short"; "1 | abcdef"; "  |  ^^" ])
+    (render_error "abcdef" parser)
+
+let test_loose_note () =
+  let parser () =
+    Parseff.fail
+      ~notes:[ { Parseff.at = None; text = "keys must be unique" } ]
+      "duplicate key"
+  in
+  check_render "note line"
+    (lines
+       [
+         "input.json:1:1: error: duplicate key";
+         "1 | abc";
+         "  | ^";
+         "  = note: keys must be unique";
+       ]
+    )
+    (render_error "abc" parser)
+
+let paren_note start =
+  {
+    Parseff.at = Some { Parseff.start; stop = start + 1 };
+    text = "to match this";
+  }
+
+let test_secondary_underline_same_line () =
+  let parser () =
+    ignore (Parseff.consume "foo(1, 2");
+    Parseff.fail ~notes:[ paren_note 3 ] "missing )"
+  in
+  check_render "underline under the error line"
+    (lines
+       [
+         "input.json:1:9: error: missing )";
+         "1 | foo(1, 2";
+         "  |         ^";
+         "  |    - to match this";
+       ]
+    )
+    (render_error "foo(1, 2" parser)
+
+let test_secondary_underline_earlier_lines () =
+  let input = "foo(\na,\nb,\nc,\nd" in
+  let parser () =
+    ignore (Parseff.consume input);
+    Parseff.fail ~notes:[ paren_note 3 ] "missing )"
+  in
+  check_render "far line gets its own row and a gap"
+    (lines
+       [
+         "input.json:5:2: error: missing )";
+         "1 | foo(";
+         "  |    - to match this";
+         "...";
+         "4 | c,";
+         "5 | d";
+         "  |  ^";
+       ]
+    )
+    (render_error input parser);
+  let input = "foo(\na,\nb" in
+  let parser () =
+    ignore (Parseff.consume input);
+    Parseff.fail ~notes:[ paren_note 3 ] "missing )"
+  in
+  check_render "one hidden line is shown"
+    (lines
+       [
+         "input.json:3:2: error: missing )";
+         "1 | foo(";
+         "  |    - to match this";
+         "2 | a,";
+         "3 | b";
+         "  |  ^";
+       ]
+    )
+    (render_error input parser)
+
+let test_error_from_and_notes () =
+  let parser () =
+    ignore (Parseff.consume "ab");
+    Parseff.error ~from:0
+      ~notes:[ { Parseff.at = None; text = "see the manual" } ]
+      `Boom
+  in
+  ( match Parseff.Internal.parse "abcd" parser with
+  | Stdlib.Error e ->
+      Alcotest.(check string)
+        "user error"
+        (lines
+           [
+             "1:1: error: boom!";
+             "1 | abcd";
+             "  | ^^";
+             "  = note: see the manual";
+           ]
+        )
+        (E.render ~user:(fun `Boom -> "boom!") e)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  match Parseff.parse "abcd" parser with
+  | Parseff.Error { pos = 2; error = `Boom } ->
+      ()
+  | _ ->
+      Alcotest.fail "legacy result must not change"
+
+let test_catch_with_extras () =
+  let parser () =
+    Parseff.catch
+      (fun () ->
+        Parseff.fail ~from:0
+          ~notes:[ { Parseff.at = None; text = "n" } ]
+          "inner"
+      )
+      (fun msg -> msg ^ "!")
+  in
+  both_runners (fun s -> s) "abc" parser "Ok inner!"
+
+let test_fail_does_not_hide_furthest_failure () =
+  let parser () =
+    ignore
+      (Parseff.optional
+         (fun () ->
+           ignore (Parseff.consume "abcd");
+           Parseff.consume "X"
+         )
+         ()
+      );
+    ignore (Parseff.catch (fun () -> Parseff.fail "boom") (fun _ -> ()));
+    ignore (Parseff.consume "Q")
+  in
+  check_render "furthest failure survives a caught fail"
+    (lines
+       [
+         "input.json:1:5: error: expected \"X\", found 'Y'";
+         "1 | abcdY";
+         "  |     ^";
+       ]
+    )
+    (render_error "abcdY" parser)
+
+let test_fail_frames () =
+  let parser () =
+    Parseff.context ~delimited:true "outer" (fun () ->
+        ignore (Parseff.consume "a");
+        Parseff.context "inner" (fun () ->
+            ignore (Parseff.consume "b");
+            Parseff.context "empty" (fun () -> Parseff.fail "boom")
+        )
+    )
+  in
+  check_render "fail goes through the contexts it unwinds"
+    (lines
+       [
+         "input.json:1:3: error: boom";
+         "1 | abc";
+         "  |   ^";
+         "  = while parsing inner, from 1:2";
+         "  = while parsing outer, from 1:1";
+       ]
+    )
+    (render_error "abc" parser);
+  Alcotest.(check string) "frames" "outer@0!; inner@1" (frames_of "abc" parser)
+
+let test_fail_frames_with_catch_in_between () =
+  let parser () =
+    Parseff.context "outer" (fun () ->
+        ignore (Parseff.consume "a");
+        ignore
+          (Parseff.catch
+             (fun () ->
+               Parseff.context "inner" (fun () ->
+                   ignore (Parseff.consume "b");
+                   Parseff.fail "ignored"
+               )
+             )
+             (fun _ -> ())
+          );
+        Parseff.fail "real"
+    )
+  in
+  Alcotest.(check string)
+    "only the contexts open at the real failure" "outer@0"
+    (frames_of "ab" parser)
+
+let id_re = Re.compile (Re.Posix.re "[a-z]+")
+let digit_re = Re.compile (Re.Posix.re "[0-9]+")
+
+let test_match_regex_label () =
+  let parser () = ignore (Parseff.match_regex ~label:"identifier" id_re) in
+  both_runners
+    (fun s -> s)
+    "x"
+    (fun () -> Parseff.match_regex ~label:"identifier" id_re)
+    "Ok x";
+  both_runners show_unit "1" parser {|Error@0 Expected "expected identifier"|};
+  both_runners show_unit "" parser "Error@0 Unexpected_end_of_input";
+  let both () =
+    ignore
+      (Parseff.or_
+         (fun () -> Parseff.match_regex ~label:"number" digit_re)
+         (fun () -> Parseff.match_regex ~label:"identifier" id_re)
+         ()
+      )
+  in
+  both_runners show_unit "!" both
+    {|Error@0 Expected "expected identifier or number"|};
+  check_render "label is rendered"
+    (lines
+       [
+         "input.json:1:1: error: expected identifier or number, found '!'";
+         "1 | !";
+         "  | ^";
+       ]
+    )
+    (render_error "!" both);
+  both_runners show_unit "!"
+    (fun () -> ignore (Parseff.match_regex id_re))
+    {|Error@0 Expected "regex match failed"|}
+
+let test_note_on_dropped_line () =
+  let input = String.make 2000 'a' ^ "!" in
+  let chunked =
+    let pos = ref 0 in
+    Parseff.Source.of_function (fun buf off len ->
+        let n = min (min 5 len) (String.length input - !pos) in
+        Bytes.blit_string input !pos buf off n;
+        pos := !pos + n;
+        n
+    )
+  in
+  let parser () =
+    ignore (Parseff.many (fun () -> Parseff.char 'a') ());
+    Parseff.fail ~notes:[ paren_note 0 ] "stray"
+  in
+  match Parseff.Internal.parse_source ~backtrack_window:64 chunked parser with
+  | Stdlib.Error (e : unit E.t) ->
+      let out = E.render e in
+      Alcotest.(check bool)
+        "falls back to a note line" true
+        (List.mem "  = note: to match this" (String.split_on_char '\n' out))
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
 let () =
   let open Alcotest in
   run "Errors"
@@ -1486,6 +1778,27 @@ let () =
           test_case "other kinds" `Quick test_render_other_kinds;
           test_case "streaming opener dropped" `Quick
             test_render_streaming_opener_dropped;
+        ]
+      );
+      ( "error extras",
+        [
+          test_case "fail ~from span" `Quick test_fail_from_span;
+          test_case "span is normalized" `Quick
+            test_fail_from_after_position_is_normalized;
+          test_case "note line" `Quick test_loose_note;
+          test_case "underline on the error line" `Quick
+            test_secondary_underline_same_line;
+          test_case "underline on earlier lines" `Quick
+            test_secondary_underline_earlier_lines;
+          test_case "error ~from ~notes" `Quick test_error_from_and_notes;
+          test_case "catch with extras" `Quick test_catch_with_extras;
+          test_case "caught fail keeps the furthest failure" `Quick
+            test_fail_does_not_hide_furthest_failure;
+          test_case "fail frames" `Quick test_fail_frames;
+          test_case "fail frames, catch in between" `Quick
+            test_fail_frames_with_catch_in_between;
+          test_case "match_regex label" `Quick test_match_regex_label;
+          test_case "note on a dropped line" `Quick test_note_on_dropped_line;
         ]
       );
       ( "fold exceptions",

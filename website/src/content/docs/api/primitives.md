@@ -175,12 +175,24 @@ let csv_value () =
 `Parseff.match_regex` matches a compiled regular expression. The regex must be compiled with `Re.compile`.
 
 ```ocaml
-val match_regex : Re.re -> string
+val match_regex : ?label:string -> Re.re -> string
 ```
 ```ocaml
 (* Pre-compile at module level. Never inside a parser function *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number_from_re () = Parseff.match_regex number_re
+```
+Without `~label`, a failed match reports `"regex match failed"`. With `~label`, it reports `expected <label>` and merges with what the other alternatives expected at the same position, like `satisfy` and `take_while ~label`:
+
+```ocaml
+let identifier_re = Re.compile (Re.Posix.re "[a-z]+")
+
+let value () =
+  Parseff.or_
+    (fun () -> Parseff.match_regex ~label:"number" number_re)
+    (fun () -> Parseff.match_regex ~label:"identifier" identifier_re)
+    ()
+(* "!" -> Error: expected identifier or number *)
 ```
 **Danger:** Always pre-compile regexes at module level. Compiling inside a parser function recompiles on every call (100x+ slower). For simple character classes, prefer `Parseff.take_while` which avoids regex overhead entirely:
 

@@ -44,6 +44,15 @@ type location = { offset : int; line : int; col : int }
 (** A source location. [line] and [col] are 1-based. [col] counts bytes from the
     start of the line (not characters — relevant for UTF-8). *)
 
+type range = { start : int; stop : int }
+(** A range of byte offsets, [start] included and [stop] excluded, with
+    [start <= stop]. *)
+
+type note = { at : range option; text : string }
+(** An annotation on an error. [at = Some r] underlines the bytes [r] in the
+    source excerpt with the text next to the underline. [at = None] adds a
+    ["= note:"] line under the excerpt. *)
+
 type backtrack_window_error = { limit : int; oldest : int }
 (** Streaming backtracking exceeded the configured history window.
 
@@ -197,9 +206,14 @@ val char : char -> char
     let comma () = char ','
     ]} *)
 
-val match_regex : Re.re -> string
-(** [match_regex re] matches a regular expression. The regex must be compiled
-    with [Re.compile].
+val match_regex : ?label:string -> Re.re -> string
+(** [match_regex ?label re] matches a regular expression. The regex must be
+    compiled with [Re.compile].
+
+    When the regex does not match, the parse fails with [expected <label>] if
+    [~label] is given, so the failure merges with the other alternatives
+    expected at the same position like any other primitive. Without [~label] the
+    message is ["regex match failed"].
 
     In streaming mode, the parser keeps at least half of the backtrack window
     buffered ahead of the current position, unless the source has ended. A match
@@ -281,9 +295,14 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     operation. Returns the taken string. Much more efficient than calling each
     step separately when parsing separated values. *)
 
-val fail : string -> 'a
-(** [fail msg] aborts parsing with a [`Failure msg] error. This is intended for
-    user-initiated validation failures (e.g. a parsed value is out of range).
+val fail : ?from:int -> ?notes:note list -> string -> 'a
+(** [fail ?from ?notes msg] aborts parsing with a [`Failure msg] error.
+
+    [~from] makes the error cover the bytes from [from] up to the current
+    position instead of a single position, and [~notes] attaches {!note}s. Both
+    are used by the detailed error report and do not change [`Failure msg]. This
+    is intended for user-initiated validation failures (e.g. a parsed value is
+    out of range).
 
     [`Failure] errors are not caught by backtracking combinators ({!val:or_},
     {!val:many}, {!val:one_of}, {!val:optional}, {!val:look_ahead}) or
@@ -303,8 +322,9 @@ val fail : string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : 'e -> 'a
-(** [error e] aborts parsing with a user-defined typed error value.
+val error : ?from:int -> ?notes:note list -> 'e -> 'a
+(** [error ?from ?notes e] aborts parsing with a user-defined typed error value.
+    [~from] and [~notes] work as in {!fail}.
 
     The error is returned as [Error { pos; error = e }]. Use polymorphic
     variants for rich error reporting:
@@ -1131,8 +1151,11 @@ end
 (**/**)
 
 module Internal : sig
+  type range_alias = range = { start : int; stop : int }
+  type note_alias = note = { at : range option; text : string }
+
   module Error : sig
-    type range = { start : int; stop : int }
+    type range = range_alias = { start : int; stop : int }
 
     type expected =
       | Char of Uchar.t
@@ -1142,7 +1165,7 @@ module Internal : sig
 
     type found = Text of string | End
     type frame = { name : string; start : int; delimited : bool }
-    type note = { at : range option; text : string }
+    type note = note_alias = { at : range option; text : string }
     type excerpt
 
     type 'e kind =
