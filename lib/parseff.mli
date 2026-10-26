@@ -473,10 +473,15 @@ val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
     [~delimited:true] marks a construct that has an opening token, such as an
     array or a block. An error renderer can then point to where it was opened.
 
+    A construct is only reported when the failure is strictly past the place
+    where it started. A [context] whose parser fails at its first byte, such as
+    an array alternative tried at a position that holds no opening bracket, is
+    not part of the chain.
+
     A parser that never calls [context] pays nothing for it. [context] itself
-    adds a small cost per call: it keeps the name and the start offset on a
-    stack. At the furthest failure only the first group of failures keeps its
-    chain: when two failures tie, the chain of the first one is reported.
+    adds a small cost per call. At the furthest failure only the first group of
+    failures keeps its chain: when two failures tie, the chain of the first one
+    is reported.
 
     {!cut} inside [parser] makes the whole construct decided: if [parser] then
     fails, no enclosing {!or_}, {!many}, {!sep_by} or similar combinator
@@ -1125,10 +1130,80 @@ end
 
 (**/**)
 
-val parse_failure_frames :
-  ?max_depth:int ->
-  string ->
-  (unit -> 'a) ->
-  ('a, (string * int * bool) list) Stdlib.result
+module Internal : sig
+  module Error : sig
+    type range = { start : int; stop : int }
+
+    type expected =
+      | Char of Uchar.t
+      | Literal of string
+      | Label of string
+      | End_of_input
+
+    type found = Text of string | End
+    type frame = { name : string; start : int; delimited : bool }
+    type note = { at : range option; text : string }
+    type excerpt
+
+    type 'e kind =
+      | Expected of { items : expected * expected list; found : found }
+      | Message of string
+      | User of 'e
+      | Depth_limit_exceeded of { limit : int }
+      | Backtrack_window_exceeded of backtrack_window_error
+
+    type 'e t = {
+      kind : 'e kind;
+      span : range;
+      location : location;
+      code_point_col : int option;
+      frames : frame list;
+      notes : note list;
+      excerpt : excerpt;
+    }
+
+    type columns = [ `Bytes | `Code_points ]
+
+    val pos : 'e t -> int
+    val message : ?user:('e -> string) -> 'e t -> string
+
+    val render :
+      ?name:string ->
+      ?source:string ->
+      ?columns:columns ->
+      ?user:('e -> string) ->
+      'e t ->
+      string
+
+    val pp :
+      ?name:string ->
+      ?source:string ->
+      ?columns:columns ->
+      ?user:(Format.formatter -> 'e -> unit) ->
+      Format.formatter ->
+      'e t ->
+      unit
+  end
+
+  val parse :
+    ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e Error.t) Stdlib.result
+
+  val parse_until_end :
+    ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e Error.t) Stdlib.result
+
+  val parse_source :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    Source.t ->
+    (unit -> 'a) ->
+    ('a, 'e Error.t) Stdlib.result
+
+  val parse_source_until_end :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    Source.t ->
+    (unit -> 'a) ->
+    ('a, 'e Error.t) Stdlib.result
+end
 
 (**/**)

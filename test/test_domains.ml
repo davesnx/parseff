@@ -419,8 +419,15 @@ let test_context_across_domains () =
             ignore (Parseff.consume "!")
         )
       in
-      match Parseff.parse_failure_frames "ababx" parser with
-      | Stdlib.Error [ (n, 0, false) ] when n = name ->
+      match Parseff.Internal.parse "ababx" parser with
+      | Stdlib.Error (e : unit Parseff.Internal.Error.t)
+        when match e.frames with
+             | [
+              { Parseff.Internal.Error.name = n; start = 0; delimited = false };
+             ] ->
+                 n = name
+             | _ ->
+                 false ->
           ()
       | _ ->
           results := i :: !results
