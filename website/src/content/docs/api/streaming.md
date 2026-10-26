@@ -30,6 +30,8 @@ val parse_source :
   close_in ic;
   result
 ```
+Error positions are absolute offsets from the start of the stream, also after Parseff dropped old input to keep the buffer bounded. An error does not keep the dropped input alive: failures that are older than the buffered input still count for the position of the error, but the buffer does not grow for them.
+
 The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 

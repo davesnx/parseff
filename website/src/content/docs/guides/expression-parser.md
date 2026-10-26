@@ -100,17 +100,19 @@ Each precedence level calls the next one for its operands. `expr` parses `term (
 
 ## How `expect` improves errors
 
-Without `expect`, a failure on the closing parenthesis would say something like `expected ')'`. With `expect`, it says `expected a closing parenthesis`. This matters when users see the error.
+Without `expect`, the errors name raw tokens. With `expect`, they use the words of the grammar. This matters when users see the error.
 
-Compare the error messages on `"1+"`:
+Parseff reports everything that was expected at the furthest position, so the message lists each alternative that could have continued the input. Compare the error messages on `"1+x"`:
 
-- Without `expect`: `expected digit`
-- With `expect`: `expected a number`
+- Without `expect`: `expected digit or '('`
+- With `expect`: `expected a number or an opening parenthesis`
 
-And on `"(1+2"`:
+And on `"(1+2x"`, where the `)`, a `*` or another `+` could follow:
 
-- Without `expect`: `expected ')'`
-- With `expect`: `expected a closing parenthesis`
+- Without `expect`: `expected ')', '*', or '+'`
+- With `expect`: `expected a '*' operator, a '+' operator, or a closing parenthesis`
+
+When the input ends early, as in `"1+"` or `"(1+2"`, the error is `` `Unexpected_end_of_input `` at the end of the input.
 
 ## Tracing a parse
 

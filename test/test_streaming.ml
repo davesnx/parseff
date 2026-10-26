@@ -1249,10 +1249,75 @@ let test_take_beyond_window () =
   | _ ->
       Alcotest.fail "Expected Backtrack_window_exceeded"
 
+let show_failure = function
+  | Parseff.Ok _ ->
+      "ok"
+  | Parseff.Error { pos; error = `Expected msg } ->
+      Printf.sprintf "%d %s" pos msg
+  | Parseff.Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.sprintf "%d end of input" pos
+  | Parseff.Error _ ->
+      "other"
+
+let test_error_position_across_chunk_boundary () =
+  List.iter
+    (fun chunk_size ->
+      let r =
+        Parseff.parse_source (chunked_source ~chunk_size "help") (fun () ->
+            ignore (Parseff.consume "hello")
+        )
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "chunk %d" chunk_size)
+        "3 expected \"lo\"" (show_failure r)
+    )
+    [ 1; 2; 3; 4; 100 ]
+
+let test_error_position_after_compaction () =
+  let item = "ab" in
+  let count = 20_000 in
+  let input = String.concat "" (List.init count (fun _ -> item)) ^ "ax" in
+  List.iter
+    (fun chunk_size ->
+      let r =
+        Parseff.parse_source ~backtrack_window:64
+          (chunked_source ~chunk_size input) (fun () ->
+            ignore (Parseff.many (fun () -> Parseff.consume item) ());
+            Parseff.end_of_input ()
+        )
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "chunk %d" chunk_size)
+        (Printf.sprintf "%d expected \"b\"" ((2 * count) + 1))
+        (show_failure r)
+    )
+    [ 7; 1000 ]
+
+let test_error_at_end_of_input_after_compaction () =
+  let input = String.make 10_000 'a' in
+  let r =
+    Parseff.parse_source ~backtrack_window:64
+      (chunked_source ~chunk_size:100 input) (fun () ->
+        ignore (Parseff.many (fun () -> Parseff.char 'a') ());
+        ignore (Parseff.char 'b')
+    )
+  in
+  Alcotest.(check string) "eof" "10000 end of input" (show_failure r)
+
 let () =
   let open Alcotest in
   run "Streaming"
     [
+      ( "error positions",
+        [
+          test_case "across chunk boundary" `Quick
+            test_error_position_across_chunk_boundary;
+          test_case "after compaction" `Quick
+            test_error_position_after_compaction;
+          test_case "end of input after compaction" `Quick
+            test_error_at_end_of_input_after_compaction;
+        ]
+      );
       ( "Source.of_string",
         [
           test_case "consume" `Quick test_of_string_consume;

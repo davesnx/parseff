@@ -82,7 +82,10 @@ Let's look at what happens with bad input:
 ['.'] and fails because the input is exhausted.
 
 {b Trailing data}: ["1.2.3.4 extra"] parses all four octets, then [end_of_input]
-fails because there are characters remaining.
+fails because there are characters remaining. The error is at position 7 and
+says [expected digit or end of input]: the last [many] stopped at the space
+because it needed another digit, and Parseff reports every failure at the
+furthest position.
 
 {1 Improving error messages with [expect]}
 
@@ -111,9 +114,11 @@ let ip_address () =
   (a, b, c, d)
 ]}
 
-Now on ["192.168.1."], instead of [expected digit], the error says
-[expected a digit (0-9)]. On ["192.168.1"], instead of [expected '.'], it says
-[expected a dot separator].
+Now on ["192.168.1.x"], instead of [expected digit], the error says
+[expected a digit (0-9)]. On ["192.168.1x"], the parser could take another digit
+or the dot, so the error lists both: [expected a digit (0-9) or a dot
+separator]. When the input ends early, as in ["192.168.1"], the error is
+[`Unexpected_end_of_input] at the end of the input.
 
 {1 Using typed errors}
 

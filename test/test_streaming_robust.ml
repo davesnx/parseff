@@ -87,6 +87,37 @@ let test_interleaved_parses_second_finishes_first () =
   Alcotest.(check string) "second" "1|2" b;
   check_outside_parse ()
 
+let show_failure = function
+  | Parseff.Ok _ ->
+      "ok"
+  | Parseff.Error { pos; error = `Expected msg } ->
+      Printf.sprintf "%d %s" pos msg
+  | Parseff.Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.sprintf "%d end of input" pos
+  | Parseff.Error _ ->
+      "other"
+
+let test_interleaved_failures_keep_separate_groups () =
+  let a = ref "unset" and b = ref "unset" in
+  let parser () =
+    ignore (Parseff.optional (fun () -> Parseff.consume "abd") ());
+    ignore (Parseff.consume "abc");
+    ignore (Parseff.consume "d")
+  in
+  let go r data =
+    spawn (fun () ->
+        r :=
+          show_failure
+            (Parseff.parse_source (yielding_source ~chunk:1 data) parser)
+    )
+  in
+  go a "abcx";
+  go b "abxx";
+  run ();
+  Alcotest.(check string) "first" "3 expected \"d\"" !a;
+  Alcotest.(check string) "second" "2 expected \"c\" or \"d\"" !b;
+  check_outside_parse ()
+
 let chunk_source ?(chunk = 3000) total line =
   let block =
     String.concat "" (List.init (chunk / String.length line) (fun _ -> line))
@@ -302,6 +333,8 @@ let () =
           test_case "two parses" `Quick test_interleaved_parses;
           test_case "second finishes first" `Quick
             test_interleaved_parses_second_finishes_first;
+          test_case "failures keep separate groups" `Quick
+            test_interleaved_failures_keep_separate_groups;
         ]
       );
       ( "memory",

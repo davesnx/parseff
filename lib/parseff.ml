@@ -31,36 +31,8 @@ type ('e, 'd) error_with_diagnostics = {
 type ('a, 'e, 'd) result_with_diagnostics =
   ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 
-type error_msg =
-  | Msg of string
-  | Expected_string of string
-  | Expected_char of char
-  | Expected_label of string
-  | Expected_value
-  | Composed of error_msg * error_msg
-  | No_alternative
-
-let rec format_error_msg = function
-  | Msg s ->
-      s
-  | Expected_string s ->
-      "expected \"" ^ String.escaped s ^ "\""
-  | Expected_char c ->
-      "expected '" ^ String.make 1 c ^ "'"
-  | Expected_label l ->
-      "expected " ^ l
-  | Expected_value ->
-      "expected value"
-  | Composed (l, r) ->
-      format_error_msg l ^ " or " ^ format_error_msg r
-  | No_alternative ->
-      "no alternative matched"
-
-exception Parse_error of int * error_msg
-exception Unexpected_eof of int
-exception User_error of int * Obj.t
+exception Fail
 exception User_failure of int * string
-exception Propagated_error of int * Obj.t
 exception Depth_limit_exceeded of int * string
 
 type line_index = {
@@ -90,6 +62,33 @@ type source = {
   mutable window : int;
 }
 
+type far = {
+  mutable pos : int;
+  mutable n : int;
+  mutable k0 : int;
+  mutable s0 : string;
+  mutable k1 : int;
+  mutable s1 : string;
+  mutable kinds : int array;
+  mutable strs : string array;
+  mutable special : int;
+  mutable obj : Obj.t;
+}
+
+let far_none =
+  {
+    pos = -1;
+    n = 0;
+    k0 = 0;
+    s0 = "";
+    k1 = 0;
+    s1 = "";
+    kinds = [||];
+    strs = [||];
+    special = 0;
+    obj = Obj.repr 0;
+  }
+
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
    [base, input_len) are buffered. [input] is never mutated, only replaced, so
    slices taken from it stay valid after a refill. Memory input has
@@ -103,6 +102,7 @@ type state = {
   mutable current_depth : int;
   mutable diagnostics_rev : (int * Obj.t) list;
   mutable diagnostics_len : int;
+  mutable far : far;
   mutable line_index : line_index option;
   source : source option;
   mutable frames : int array;
@@ -199,6 +199,7 @@ module State = struct
       current_depth = 0;
       diagnostics_rev = [];
       diagnostics_len = 0;
+      far = far_none;
       line_index = None;
       source;
       frames = [||];
@@ -234,26 +235,26 @@ module State = struct
       t
     end
 
+  let leave (t : t) (previous : t) =
+    t.active <- false;
+    install
+      ( if previous.active then
+          previous
+        else
+          none
+      )
+
   let run (t : t) f =
     let previous = current () in
     install t;
     t.active <- true;
-    let leave () =
-      t.active <- false;
-      install
-        ( if previous.active then
-            previous
-          else
-            none
-        )
-    in
     match f () with
     | v ->
-        leave ();
+        leave t previous;
         v
     | exception exn ->
         let bt = Printexc.get_raw_backtrace () in
-        leave ();
+        leave t previous;
         Printexc.raise_with_backtrace exn bt
 
   let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
@@ -283,6 +284,9 @@ module State = struct
     Array.unsafe_get t.frames ((frame * frame_stride) + 1)
     land frame_committed_bit
     <> 0
+
+  let[@inline always] set_frame_kind (t : t) frame kind =
+    Array.unsafe_set t.frames ((frame * frame_stride) + 1) kind
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
@@ -529,22 +533,270 @@ let[@inline always] span st off len =
       let s = slice st off len in
       { buf = s; off = 0; len = String.length s }
 
-(* Polymorphic record so handle_exn can be called at different types. *)
-type 'e exn_handler = { handle : 'a. exn -> ('a, 'e) result } [@@unboxed]
+let tag_char = 0
+let tag_byte = 1
+let tag_literal = 2
+let tag_label = 3
+let tag_end_of_input = 4
+let tag_bytes = 5
+let tag_at_least = 6
+let far_max_capacity = 62
+
+let[@inline never] far_advance_int st p k =
+  let f = st.far in
+  if f == far_none then
+    st.far <-
+      {
+        pos = p;
+        n = 1;
+        k0 = k;
+        s0 = "";
+        k1 = 0;
+        s1 = "";
+        kinds = [||];
+        strs = [||];
+        special = 0;
+        obj = Obj.repr 0;
+      }
+  else begin
+    f.pos <- p;
+    f.special <- 0;
+    f.k0 <- k;
+    f.n <- 1
+  end
+
+let[@inline never] far_advance_str st p k s =
+  let f = st.far in
+  if f == far_none then
+    st.far <-
+      {
+        pos = p;
+        n = 1;
+        k0 = k;
+        s0 = s;
+        k1 = 0;
+        s1 = "";
+        kinds = [||];
+        strs = [||];
+        special = 0;
+        obj = Obj.repr 0;
+      }
+  else begin
+    f.pos <- p;
+    f.special <- 0;
+    f.k0 <- k;
+    if f.s0 != s then f.s0 <- s;
+    f.n <- 1
+  end
+
+let[@inline never] far_advance_special st p =
+  let f = st.far in
+  if f == far_none then
+    st.far <-
+      {
+        pos = p;
+        n = 1;
+        k0 = 0;
+        s0 = "";
+        k1 = 0;
+        s1 = "";
+        kinds = [||];
+        strs = [||];
+        special = 0;
+        obj = Obj.repr 0;
+      }
+  else begin
+    f.pos <- p;
+    f.special <- 0;
+    f.n <- 1
+  end
+
+let far_item_kind f i =
+  if i = 0 then
+    f.k0
+  else if i = 1 then
+    f.k1
+  else
+    Array.unsafe_get f.kinds (i - 2)
+
+let far_item_str f i =
+  if i = 0 then
+    f.s0
+  else if i = 1 then
+    f.s1
+  else
+    Array.unsafe_get f.strs (i - 2)
+
+let far_set_item f i k s =
+  if i = 0 then begin
+    f.k0 <- k;
+    f.s0 <- s
+  end else if i = 1 then begin
+    f.k1 <- k;
+    f.s1 <- s
+  end else begin
+    f.kinds.(i - 2) <- k;
+    f.strs.(i - 2) <- s
+  end
+
+let far_compact f =
+  let items = ref [] in
+  for i = f.n - 1 downto 0 do
+    let k = far_item_kind f i in
+    let tag = k land 7 in
+    let s =
+      if tag = tag_literal || tag = tag_label then
+        far_item_str f i
+      else
+        ""
+    in
+    items := (k, s) :: !items
+  done;
+  let items = List.sort_uniq compare !items in
+  f.n <- 0;
+  List.iteri
+    (fun i (k, s) ->
+      far_set_item f i k s;
+      f.n <- i + 1
+    )
+    items
+
+let[@inline never] far_push_slow f k s =
+  let cap = Array.length f.kinds in
+  if cap = 0 then begin
+    f.kinds <- [| 0; 0; 0; 0; 0; 0 |];
+    f.strs <- [| ""; ""; ""; ""; ""; "" |]
+  end else if cap < far_max_capacity then begin
+    let ncap = imin ((2 * cap) + 2) far_max_capacity in
+    let kinds = Array.make ncap 0 in
+    let strs = Array.make ncap "" in
+    Array.blit f.kinds 0 kinds 0 cap;
+    Array.blit f.strs 0 strs 0 cap;
+    f.kinds <- kinds;
+    f.strs <- strs
+  end else
+    far_compact f;
+  let i = f.n - 2 in
+  if i >= 0 then
+    begin if i < Array.length f.kinds then begin
+      f.kinds.(i) <- k;
+      if f.strs.(i) != s then f.strs.(i) <- s;
+      f.n <- f.n + 1
+    end
+  end
+  else begin
+    far_set_item f f.n k s;
+    f.n <- f.n + 1
+  end
+
+let[@inline always] far_push_int f k =
+  let n = f.n in
+  if n = 1 then begin
+    f.k1 <- k;
+    f.n <- 2
+  end else begin
+    let i = n - 2 in
+    if i >= 0 && i < Array.length f.kinds then begin
+      Array.unsafe_set f.kinds i k;
+      f.n <- n + 1
+    end else
+      far_push_slow f k ""
+  end
+
+let[@inline always] far_push_str f k s =
+  let n = f.n in
+  if n = 1 then begin
+    f.k1 <- k;
+    if f.s1 != s then f.s1 <- s;
+    f.n <- 2
+  end else begin
+    let i = n - 2 in
+    if i >= 0 && i < Array.length f.kinds then begin
+      Array.unsafe_set f.kinds i k;
+      if Array.unsafe_get f.strs i != s then Array.unsafe_set f.strs i s;
+      f.n <- n + 1
+    end else
+      far_push_slow f k s
+  end
+
+let far_relabel f n0 label =
+  f.n <- n0;
+  if n0 = 0 then begin
+    f.k0 <- tag_label;
+    f.s0 <- label;
+    f.n <- 1
+  end else
+    far_push_str f tag_label label
+
+let[@inline always] fail_int st p k =
+  let f = st.far in
+  let fp = f.pos in
+  if p < fp then raise_notrace Fail;
+  if p = fp then
+    far_push_int f k
+  else
+    far_advance_int st p k;
+  raise_notrace Fail
+
+let[@inline always] fail_str st p k s =
+  let f = st.far in
+  let fp = f.pos in
+  if p < fp then raise_notrace Fail;
+  if p = fp then
+    far_push_str f k s
+  else
+    far_advance_str st p k s;
+  raise_notrace Fail
+
+let[@inline never] fail_int_cold st p k = fail_int st p k
+let[@inline never] fail_str_cold st p k s = fail_str st p k s
+
+let special_message = 1
+let special_user = 2
+
+let[@inline never] fail_special st p kind obj =
+  let f = st.far in
+  if p < f.pos then raise_notrace Fail;
+  if p > f.pos then far_advance_special st p;
+  let f = st.far in
+  if f.special = 0 then begin
+    f.special <- kind;
+    f.obj <- obj
+  end;
+  raise_notrace Fail
+
+let[@inline always] char_kind c =
+  let code = Char.code c in
+  if code < 0x80 then
+    code lsl 3
+  else
+    (code lsl 3) lor tag_byte
+
+let[@inline always] bytes_kind n = (imin n (max_int lsr 3) lsl 3) lor tag_bytes
+
+let[@inline always] at_least_kind n =
+  (imin n (max_int lsr 3) lsl 3) lor tag_at_least
+let label_value = "value"
+let label_regex = "regex match"
+
+let[@inline never] far_commit_reset st =
+  let f = st.far in
+  f.pos <- -1;
+  f.n <- 0;
+  f.special <- 0
 
 let[@inline never] handle_consume st s =
   let len = String.length s in
   if len = 1 then begin
-    (* O5: Special-case single-char strings -- skip loop overhead *)
-      let c = String.unsafe_get s 0 in
-      if have st 1 then
-        if char_at st st.pos = c then begin
-          st.pos <- st.pos + 1;
-          s
-        end else
-          raise_notrace (Parse_error (st.pos, Expected_string s))
-      else
-        raise_notrace (Unexpected_eof st.pos)
+    let c = String.unsafe_get s 0 in
+    if have st 1 then
+      if char_at st st.pos = c then begin
+        st.pos <- st.pos + 1;
+        s
+      end else
+        fail_str st st.pos tag_literal s
+    else
+      fail_str st st.pos tag_literal s
   end else begin
     let complete = have st len in
     let pos = st.pos in
@@ -556,19 +808,19 @@ let[@inline never] handle_consume st s =
     in
     let rec check i =
       if i >= avail then
-        true
+        i
       else if char_at st (pos + i) = String.unsafe_get s i then
         check (i + 1)
       else
-        false
+        i
     in
-    if not (check 0) then
-      raise_notrace (Parse_error (pos, Expected_string s))
-    else if complete then begin
+    let matched = check 0 in
+    if matched < avail || not complete then
+      fail_str st (pos + matched) ((matched lsl 3) lor tag_literal) s
+    else begin
       st.pos <- pos + len;
       s
-    end else
-      raise_notrace (Unexpected_eof pos)
+    end
   end
 
 let[@inline] handle_satisfy st pred label =
@@ -578,9 +830,9 @@ let[@inline] handle_satisfy st pred label =
       st.pos <- st.pos + 1;
       c
     end else
-      raise_notrace (Parse_error (st.pos, Expected_label label))
+      fail_str st st.pos tag_label label
   else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_str st st.pos tag_label label
 
 (* dedicated char handler it avoids closure + String.make allocation *)
 let[@inline] handle_match_char st c =
@@ -590,9 +842,9 @@ let[@inline] handle_match_char st c =
       st.pos <- st.pos + 1;
       c
     end else
-      raise_notrace (Parse_error (st.pos, Expected_char c))
+      fail_int st st.pos (char_kind c)
   else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (char_kind c)
 
 let[@inline never] scan_while_refilling st ~keep_from start pred =
   let p = ref start in
@@ -648,10 +900,7 @@ let[@inline never] handle_skip_while_then_char st pred c =
     st.pos <- pos + 1
   end else begin
     st.pos <- pos;
-    if pos >= st.input_len then
-      raise_notrace (Unexpected_eof pos)
-    else
-      raise_notrace (Parse_error (pos, Expected_char c))
+    fail_int st pos (char_kind c)
   end
 
 let[@inline never] handle_fused_sep_take st ws_pred sep_char take_pred =
@@ -664,17 +913,11 @@ let[@inline never] handle_fused_sep_take st ws_pred sep_char take_pred =
       slice st pos2 (end_pos - pos2)
     end else begin
       st.pos <- end_pos;
-      if end_pos >= st.input_len then
-        raise_notrace (Unexpected_eof end_pos)
-      else
-        raise_notrace (Parse_error (end_pos, Expected_value))
+      fail_str st end_pos tag_label label_value
     end
   end else begin
     st.pos <- pos;
-    if pos >= st.input_len then
-      raise_notrace (Unexpected_eof pos)
-    else
-      raise_notrace (Parse_error (pos, Expected_char sep_char))
+    fail_int st pos (char_kind sep_char)
   end
 
 let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
@@ -731,8 +974,8 @@ let[@inline always] handle_sep_by_take_span st ws_pred sep_char take_pred =
     List.rev !acc
   end
 
-let regex_failed = Msg "regex match failed"
-let invalid_utf8_msg = Msg "invalid UTF-8"
+let regex_failed = "regex match failed"
+let invalid_utf8_msg = "invalid UTF-8"
 
 let[@inline never] buffer_for_regex st =
   match st.source with
@@ -773,7 +1016,7 @@ let[@inline never] handle_match_regex st re =
       let match_end = st.base + Re.Group.stop groups 0 in
       if match_start <> st.pos then begin
         raise_if_pinned ();
-        raise_notrace (Parse_error (st.pos, regex_failed))
+        fail_special st st.pos special_message (Obj.repr regex_failed)
       end else begin
         if match_end >= st.input_len then raise_if_pinned ();
         st.pos <- match_end;
@@ -782,11 +1025,9 @@ let[@inline never] handle_match_regex st re =
   | exception Not_found ->
       raise_if_pinned ();
       if st.pos >= st.input_len then
-        raise_notrace (Unexpected_eof st.pos)
+        fail_str st st.pos tag_label label_regex
       else
-        raise_notrace (Parse_error (st.pos, regex_failed))
-
-let expected_end_of_input = Msg "expected end of input"
+        fail_special st st.pos special_message (Obj.repr regex_failed)
 
 let[@inline never] handle_any_uint8 st =
   if have st 1 then begin
@@ -794,7 +1035,7 @@ let[@inline never] handle_any_uint8 st =
     st.pos <- st.pos + 1;
     v
   end else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (bytes_kind 1)
 
 let[@inline never] handle_any_int8 st =
   if have st 1 then begin
@@ -802,7 +1043,7 @@ let[@inline never] handle_any_int8 st =
     st.pos <- st.pos + 1;
     v
   end else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (bytes_kind 1)
 
 let[@inline never] handle_any_int16 st endian =
   if have st 2 then begin
@@ -817,7 +1058,7 @@ let[@inline never] handle_any_int16 st endian =
     st.pos <- st.pos + 2;
     v
   end else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (bytes_kind 2)
 
 let[@inline never] handle_any_int32 st endian =
   if have st 4 then begin
@@ -832,7 +1073,7 @@ let[@inline never] handle_any_int32 st endian =
     st.pos <- st.pos + 4;
     v
   end else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (bytes_kind 4)
 
 let[@inline never] handle_any_int64 st endian =
   if have st 8 then begin
@@ -847,7 +1088,7 @@ let[@inline never] handle_any_int64 st endian =
     st.pos <- st.pos + 8;
     v
   end else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (bytes_kind 8)
 
 let[@inline never] handle_take st n =
   if have st n then begin
@@ -855,16 +1096,9 @@ let[@inline never] handle_take st n =
     st.pos <- st.pos + n;
     s
   end else
-    raise_notrace (Unexpected_eof st.pos)
+    fail_int st st.pos (bytes_kind n)
 
 exception Invalid_utf8 of int
-
-let[@inline] uchar_label u =
-  let i = Uchar.to_int u in
-  if i < 0x80 then
-    Printf.sprintf "%C" (Char.chr i)
-  else
-    Printf.sprintf "U+%04X" i
 
 let[@inline] utf8_sequence_length lead =
   if lead < 0xC2 then
@@ -890,21 +1124,35 @@ let[@inline never] utf8_fill st keep_from p =
         if needed > 1 then ignore (fill st ~keep_from:keep (p + needed))
       end
 
-let[@inline] decode_uchar st ~keep_from p =
-  if p + 4 > st.input_len then utf8_fill st keep_from p;
-  if p >= st.input_len then raise_notrace (Unexpected_eof p);
-  let d = String.get_utf_8_uchar st.input (p - st.base) in
-  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 p);
-  d
+let[@inline] fill_uchar st ~keep_from p =
+  if p + 4 > st.input_len then utf8_fill st keep_from p
 
 let[@inline never] handle_satisfy_uchar st pred label =
-  let d = decode_uchar st ~keep_from:st.pos st.pos in
+  let p = st.pos in
+  fill_uchar st ~keep_from:p p;
+  if p >= st.input_len then fail_str st p tag_label label;
+  let d = String.get_utf_8_uchar st.input (p - st.base) in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 p);
   let u = Uchar.utf_decode_uchar d in
   if pred u then begin
-    st.pos <- st.pos + Uchar.utf_decode_length d;
+    st.pos <- p + Uchar.utf_decode_length d;
     u
   end else
-    raise_notrace (Parse_error (st.pos, Expected_label label))
+    fail_str st p tag_label label
+
+let[@inline never] handle_char_uchar st expected =
+  let p = st.pos in
+  fill_uchar st ~keep_from:p p;
+  let kind = Uchar.to_int expected lsl 3 in
+  if p >= st.input_len then fail_int st p kind;
+  let d = String.get_utf_8_uchar st.input (p - st.base) in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 p);
+  let u = Uchar.utf_decode_uchar d in
+  if Uchar.equal u expected then begin
+    st.pos <- p + Uchar.utf_decode_length d;
+    u
+  end else
+    fail_int st p kind
 
 let[@inline never] scan_uchars inp start limit pred =
   let pos = ref start in
@@ -980,62 +1228,27 @@ let[@inline never] handle_skip_while_uchar st pred =
 
 let[@inline never] handle_skip_while_then_uchar st pred term =
   let pos = scan_while_uchar st ~keep_from:no_keep st.pos pred in
+  let kind = Uchar.to_int term lsl 3 in
   if pos >= st.input_len then begin
     st.pos <- pos;
-    raise_notrace (Unexpected_eof pos)
+    fail_int st pos kind
   end;
-  let d = decode_uchar st ~keep_from:pos pos in
+  fill_uchar st ~keep_from:pos pos;
+  if pos >= st.input_len then fail_int st pos kind;
+  let d = String.get_utf_8_uchar st.input (pos - st.base) in
+  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 pos);
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u term then
     st.pos <- pos + Uchar.utf_decode_length d
   else begin
     st.pos <- pos;
-    raise_notrace (Parse_error (pos, Msg ("expected " ^ uchar_label term)))
+    fail_int st pos kind
   end
 
-let[@inline always] pos_of_exn = function
-  | Parse_error (p, _)
-  | Unexpected_eof p
-  | User_error (p, _)
-  | Propagated_error (p, _) ->
-      p
-  | _ ->
-      -1
-
-let[@inline] compose_branch_errors left_exn right_exn =
-  let lpos = pos_of_exn left_exn in
-  let rpos = pos_of_exn right_exn in
-  if lpos <> rpos then
-    let exn =
-      if lpos > rpos then
-        left_exn
-      else
-        right_exn
-    in
-    match exn with
-    | User_error (pos, obj) ->
-        Propagated_error (pos, obj)
-    | _ ->
-        exn
-  else
-    match (left_exn, right_exn) with
-    | Parse_error (_, lmsg), Parse_error (pos, rmsg) ->
-        Parse_error (pos, Composed (lmsg, rmsg))
-    | Parse_error _, Unexpected_eof _ ->
-        left_exn
-    | Unexpected_eof _, Parse_error _ ->
-        right_exn
-    | Unexpected_eof pos, Unexpected_eof _ ->
-        Unexpected_eof pos
-    | _, User_error (pos, obj) ->
-        (* in case of being different exn, we 2nd user_error is propagated *)
-        Propagated_error (pos, obj)
-    | _, right ->
-        right
-
-let[@inline] turn_invalid_utf8_to_parse_error f =
+let[@inline] turn_invalid_utf8_to_parse_error st f =
   try f ()
-  with Invalid_utf8 pos -> raise_notrace (Parse_error (pos, invalid_utf8_msg))
+  with Invalid_utf8 pos ->
+    fail_special st pos special_message (Obj.repr invalid_utf8_msg)
 
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
@@ -1070,18 +1283,19 @@ let[@inline] location () =
 let[@inline] end_of_input () =
   let st = get_state () in
   ignore (have st 1);
-  if st.pos <> st.input_len then
-    raise_notrace (Parse_error (st.pos, expected_end_of_input))
+  if st.pos <> st.input_len then fail_int_cold st st.pos tag_end_of_input
 
 let take_while ?(at_least = 0) ?label pred =
   let st = get_state () in
   let s = handle_take_while st pred in
-  if at_least > 0 && String.length s < at_least then begin
-    raise
-      (Parse_error
-         (st.pos, Msg (match label with Some l -> l | None -> "take_while"))
-      )
-  end else
+  if at_least > 0 && String.length s < at_least then
+    begin match label with
+    | Some l ->
+        fail_str_cold st st.pos tag_label l
+    | None ->
+        fail_int_cold st st.pos (at_least_kind at_least)
+  end
+  else
     s
 
 let[@inline] skip_while pred =
@@ -1118,7 +1332,7 @@ let[@inline] fail msg =
 
 let[@inline] error e =
   let st = get_state () in
-  raise (User_error (st.pos, Obj.repr e))
+  fail_special st st.pos special_user (Obj.repr e)
 
 let[@inline] warn diagnostic =
   let st = get_state () in
@@ -1130,7 +1344,8 @@ let[@inline] warn_at ~pos diagnostic =
 
 let[@inline] commit () =
   let st = get_state () in
-  State.commit_nearest st
+  State.commit_nearest st;
+  if st.far.pos >= st.pos then far_commit_reset st
 
 let take n =
   if n < 0 then fail "Parseff.take: count must be non-negative";
@@ -1148,36 +1363,27 @@ let or_ left right () =
   | v ->
       State.pop_rewind_frame st frame;
       v
-  | exception (User_failure _ as exn) ->
-      State.pop_rewind_frame st frame;
-      raise exn
-  | exception left_exn -> (
-      if pos_of_exn left_exn < 0 then begin
-        State.pop_rewind_frame st frame;
-        raise left_exn
-      end;
+  | exception Fail -> (
       if State.frame_committed st frame then begin
         State.pop_rewind_frame st frame;
-        raise_notrace left_exn
+        raise_notrace Fail
       end;
       restore_rewind_frame st frame;
-      State.pop_rewind_frame st frame;
-      let right_frame = State.push_rewind_frame st frame_last_branch in
+      State.set_frame_kind st frame frame_last_branch;
       match right () with
       | v ->
-          State.pop_rewind_frame st right_frame;
+          State.pop_rewind_frame st frame;
           v
-      | exception (User_failure _ as exn) ->
-          State.pop_rewind_frame st right_frame;
+      | exception Fail ->
+          State.pop_rewind_frame st frame;
+          raise_notrace Fail
+      | exception exn ->
+          State.pop_rewind_frame st frame;
           raise exn
-      | exception right_exn ->
-          State.pop_rewind_frame st right_frame;
-          if pos_of_exn right_exn < 0 then raise right_exn;
-          if State.frame_committed st right_frame then
-            raise_notrace right_exn
-          else
-            raise_notrace (compose_branch_errors left_exn right_exn)
     )
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
 
 let look_ahead p =
   let st = get_state () in
@@ -1225,18 +1431,17 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
             continue_ref := false
           else
             acc := v :: !acc
-      | exception (User_failure _ as exn) ->
+      | exception Fail ->
           State.pop_rewind_frame st frame;
-          raise exn
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          if pos_of_exn exn < 0 then raise exn;
           if State.frame_committed st frame then
-            raise exn
+            raise_notrace Fail
           else begin
             restore_rewind_frame st frame;
             continue_ref := false
           end
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
     done;
     List.rev !acc
   end else begin
@@ -1260,18 +1465,17 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
             continue_ref := false
           else
             acc := v :: !acc
-      | exception (User_failure _ as exn) ->
+      | exception Fail ->
           State.pop_rewind_frame st frame;
-          raise exn
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          if pos_of_exn exn < 0 then raise exn;
           if State.frame_committed st frame then
-            raise exn
+            raise_notrace Fail
           else begin
             restore_rewind_frame st frame;
             continue_ref := false
           end
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
     done;
     List.rev_append required_rev (List.rev !acc)
   end
@@ -1297,32 +1501,30 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
             else
               acc := v :: !acc
           with
-          | User_failure _ as exn ->
+          | Fail ->
               State.pop_rewind_frame st frame;
-              raise exn
-          | exn ->
-              State.pop_rewind_frame st frame;
-              if pos_of_exn exn < 0 then raise exn;
               if State.frame_committed st frame then
-                raise exn
+                raise_notrace Fail
               else begin
                 restore_rewind_frame st frame;
                 continue_ref := false
               end
+          | exn ->
+              State.pop_rewind_frame st frame;
+              raise exn
         done;
         List.rev !acc
-    | exception (User_failure _ as exn) ->
+    | exception Fail ->
         State.pop_rewind_frame st start_frame;
-        raise exn
-    | exception exn ->
-        State.pop_rewind_frame st start_frame;
-        if pos_of_exn exn < 0 then raise exn;
         if State.frame_committed st start_frame then
-          raise exn
+          raise_notrace Fail
         else begin
           restore_rewind_frame st start_frame;
           []
         end
+    | exception exn ->
+        State.pop_rewind_frame st start_frame;
+        raise exn
   ) else
     let first = p () in
     let sep_then_p () =
@@ -1367,18 +1569,17 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
           continue_ref := false
         else
           acc := f !acc rhs
-    | exception (User_failure _ as exn) ->
+    | exception Fail ->
         State.pop_rewind_frame st frame;
-        raise exn
-    | exception exn ->
-        State.pop_rewind_frame st frame;
-        if pos_of_exn exn < 0 then raise exn;
         if State.frame_committed st frame then
-          raise exn
+          raise_notrace Fail
         else begin
           restore_rewind_frame st frame;
           continue_ref := false
         end
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        raise exn
   done;
   !acc
 
@@ -1422,13 +1623,22 @@ let count n (p : unit -> 'a) () : 'a list =
   in
   loop [] n
 
-let expect msg p =
-  let err_msg = Msg msg in
-  try p () with
-  | Parse_error (pos, _) ->
-      raise_notrace (Parse_error (pos, err_msg))
-  | Unexpected_eof pos ->
-      raise_notrace (Parse_error (pos, err_msg))
+let expect label p =
+  let st = get_state () in
+  let start = st.pos in
+  let n0 =
+    if st.far.pos = start then
+      st.far.n
+    else
+      0
+  in
+  match p () with
+  | v ->
+      v
+  | exception Fail ->
+      let f = st.far in
+      if f.pos = start && f.n > n0 then far_relabel f n0 label;
+      raise_notrace Fail
 
 let catch p handler = try p () with User_failure (_pos, msg) -> handler msg
 
@@ -1436,7 +1646,8 @@ let one_of parsers () =
   let rec try_all = function
     | [] ->
         let st = get_state () in
-        raise_notrace (Parse_error (st.pos, No_alternative))
+        fail_special st st.pos special_message
+          (Obj.repr "no alternative matched")
     | [ p ] ->
         p ()
     | p :: rest ->
@@ -1445,12 +1656,7 @@ let one_of parsers () =
   try_all parsers
 
 let one_of_labeled labeled_parsers () =
-  let parsers = List.map snd labeled_parsers in
-  try one_of parsers ()
-  with Parse_error (pos, _) | Unexpected_eof pos ->
-    let expected = String.concat ", " (List.map fst labeled_parsers) in
-    raise
-      (Parse_error (pos, Msg (Printf.sprintf "expected one of: %s" expected)))
+  one_of (List.map (fun (label, p) () -> expect label p) labeled_parsers) ()
 
 let digit () =
   let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
@@ -1505,12 +1711,9 @@ let expect_int16 any_fn expected =
   let actual = any_fn () land 0xFFFF in
   let expected = expected land 0xFFFF in
   if actual <> expected then
-    raise
-      (Parse_error
-         ( start,
-           Msg
-             (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
-         )
+    fail_special st start special_message
+      (Obj.repr
+         (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
       )
 
 let expect_int32 any_fn expected =
@@ -1518,14 +1721,9 @@ let expect_int32 any_fn expected =
   let start = st.pos in
   let actual = any_fn () in
   if actual <> expected then
-    raise
-      (Parse_error
-         ( start,
-           Msg
-             (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected
-                actual
-             )
-         )
+    fail_special st start special_message
+      (Obj.repr
+         (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual)
       )
 
 let expect_int64 any_fn expected =
@@ -1533,14 +1731,9 @@ let expect_int64 any_fn expected =
   let start = st.pos in
   let actual = any_fn () in
   if actual <> expected then
-    raise
-      (Parse_error
-         ( start,
-           Msg
-             (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected
-                actual
-             )
-         )
+    fail_special st start special_message
+      (Obj.repr
+         (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected actual)
       )
 
 module BE = struct
@@ -1582,18 +1775,20 @@ end
 module Utf8 = struct
   let[@inline] satisfy pred ~label =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error (fun () ->
+    turn_invalid_utf8_to_parse_error st (fun () ->
         handle_satisfy_uchar st pred label
     )
 
-  let[@inline] char u = satisfy (Uchar.equal u) ~label:(uchar_label u)
+  let[@inline] char u =
+    let st = get_state () in
+    turn_invalid_utf8_to_parse_error st (fun () -> handle_char_uchar st u)
 
   let[@inline] any_char () = satisfy (fun _ -> true) ~label:"any character"
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
     let s =
-      turn_invalid_utf8_to_parse_error (fun () ->
+      turn_invalid_utf8_to_parse_error st (fun () ->
           handle_take_while_uchar st pred
       )
     in
@@ -1606,31 +1801,33 @@ module Utf8 = struct
         i := !i + Uchar.utf_decode_length d;
         incr count
       done;
-      if !count < at_least then begin
-        raise
-          (Parse_error
-             ( st.pos,
-               Msg (match label with Some l -> l | None -> "take_while")
-             )
-          )
-      end else
+      if !count < at_least then
+        begin match label with
+        | Some l ->
+            fail_str_cold st st.pos tag_label l
+        | None ->
+            fail_int_cold st st.pos (at_least_kind at_least)
+      end
+      else
         s
     end else
       s
 
   let[@inline] skip_while pred =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error (fun () -> handle_skip_while_uchar st pred)
+    turn_invalid_utf8_to_parse_error st (fun () ->
+        handle_skip_while_uchar st pred
+    )
 
   let[@inline] take_while_span pred =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error (fun () ->
+    turn_invalid_utf8_to_parse_error st (fun () ->
         handle_take_while_span_uchar st pred
     )
 
   let[@inline] skip_while_then_char pred u =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error (fun () ->
+    turn_invalid_utf8_to_parse_error st (fun () ->
         handle_skip_while_then_uchar st pred u
     )
 
@@ -1665,22 +1862,93 @@ module Utf8 = struct
   let skip_whitespace () = skip_while Uucp.White.is_white_space
 end
 
-let default_handler : _ exn_handler =
-  {
-    handle =
-      (function
-      | Parse_error (pos, msg) ->
-          Error { pos; error = `Expected (format_error_msg msg) }
-      | Unexpected_eof pos ->
-          Error { pos; error = `Unexpected_end_of_input }
-      | User_error (pos, obj) ->
-          Error { pos; error = Obj.obj obj }
-      | Propagated_error (pos, obj) ->
-          Error { pos; error = Obj.obj obj }
-      | e ->
-          raise e
-      );
-  }
+let format_char code =
+  if code < 0x80 then
+    "'" ^ Char.escaped (Char.chr code) ^ "'"
+  else begin
+    let b = Buffer.create 6 in
+    Buffer.add_char b '\'';
+    Buffer.add_utf_8_uchar b (Uchar.of_int code);
+    Buffer.add_char b '\'';
+    Buffer.contents b
+  end
+
+let describe_item kind s =
+  let payload = kind lsr 3 in
+  let tag = kind land 7 in
+  if tag = tag_char then
+    (1, format_char payload)
+  else if tag = tag_byte then
+    (2, "\"" ^ String.escaped (String.make 1 (Char.chr payload)) ^ "\"")
+  else if tag = tag_literal then
+    ( 2,
+      "\""
+      ^ String.escaped (String.sub s payload (String.length s - payload))
+      ^ "\""
+    )
+  else if tag = tag_label then
+    (0, s)
+  else if tag = tag_end_of_input then
+    (3, "end of input")
+  else if tag = tag_bytes then
+    ( 0,
+      if payload = 1 then
+        "1 byte"
+      else
+        string_of_int payload ^ " bytes"
+    )
+  else
+    ( 0,
+      if payload = 1 then
+        "at least 1 character"
+      else
+        "at least " ^ string_of_int payload ^ " characters"
+    )
+
+let format_expected f =
+  let items = ref [] in
+  for i = 0 to f.n - 1 do
+    items := describe_item (far_item_kind f i) (far_item_str f i) :: !items
+  done;
+  let items = List.sort_uniq compare !items in
+  match List.map snd items with
+  | [] ->
+      "expected something else"
+  | [ a ] ->
+      "expected " ^ a
+  | [ a; b ] ->
+      "expected " ^ a ^ " or " ^ b
+  | first :: rest ->
+      let rec join = function
+        | [] ->
+            ""
+        | [ last ] ->
+            "or " ^ last
+        | x :: tl ->
+            x ^ ", " ^ join tl
+      in
+      "expected " ^ first ^ ", " ^ join rest
+
+let truncated_read f =
+  let found = ref false in
+  for i = 0 to f.n - 1 do
+    if far_item_kind f i land 7 = tag_bytes then found := true
+  done;
+  !found
+
+let far_error st =
+  let f = st.far in
+  let pos = f.pos in
+  if pos < 0 then
+    failwith "Parseff: internal error: failure without a recorded position";
+  if f.special = special_user then
+    Error { pos; error = Obj.obj f.obj }
+  else if f.special = special_message then
+    Error { pos; error = `Expected (Obj.obj f.obj : string) }
+  else if pos >= st.input_len || truncated_read f then
+    Error { pos; error = `Unexpected_end_of_input }
+  else
+    Error { pos; error = `Expected (format_expected f) }
 
 let to_diagnostics diagnostics_rev =
   List.rev_map
@@ -1705,8 +1973,8 @@ let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
-    | exception exn ->
-        default_handler.handle exn
+    | exception Fail ->
+        far_error (State.current ())
   in
   result
 
@@ -1730,8 +1998,8 @@ let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
-    | exception exn ->
-        default_handler.handle exn
+    | exception Fail ->
+        far_error (State.current ())
   in
   let diagnostics = to_diagnostics (State.get_diagnostics_rev st) in
   attach_diagnostics result diagnostics
@@ -1760,8 +2028,8 @@ let parse_source ?(max_depth = 128)
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
-    | exception exn ->
-        default_handler.handle exn
+    | exception Fail ->
+        far_error (State.current ())
   in
   result
 
@@ -1794,8 +2062,8 @@ let parse_source_until_end ?(max_depth = 128)
         Error { pos; error = `Failure msg }
     | exception Depth_limit_exceeded (pos, msg) ->
         Error { pos; error = `Depth_limit_exceeded msg }
-    | exception exn ->
-        default_handler.handle exn
+    | exception Fail ->
+        far_error (State.current ())
   in
   let diagnostics = to_diagnostics (State.get_diagnostics_rev st) in
   attach_diagnostics result diagnostics

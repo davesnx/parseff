@@ -72,6 +72,8 @@ let () =
 ```
 Use this when callers need to pattern match on specific failure cases.
 
+A typed error behaves like any other failure for backtracking: `Parseff.or_` and the repetition combinators absorb it and try something else. If the parse then fails and the typed error is at the furthest failure position, it is the error that `parse` returns. At the same position a typed error wins over an ``Expected` message, and the first of two typed errors wins.
+
 Polymorphic variants work great with `error` for quick error types:
 
 ```ocaml
@@ -113,7 +115,7 @@ The handler receives the failure message and can return a value, raise a differe
 
 ## `expect`
 
-Run a parser and replace its failure message with a clearer description.
+Run a parser and replace its failure message with a clearer description. The error reads `expected <description>`.
 
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
@@ -141,13 +143,28 @@ let ip_address () =
 ```
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.
 
+`expect` replaces only what the parser expected at the position where it started. If the parser got further before it failed, its own message stays, because it is more precise. See [`combinators`](./combinators.md).
+
+
+## Which error a parse reports
+
+When a parse fails, Parseff reports the *furthest* failure: the failure of any primitive that happened at the highest input position, also inside branches that `or_`, `many`, `sep_by`, `optional` or `fold_left` abandoned. Everything that was expected at that position is merged into one message, sorted and without duplicates:
+
+```ocaml
+(* "x" with one_of [consume "if"; consume "else"; consume "while"] *)
+(* Error { pos = 0; error = `Expected "expected \"else\", \"if\", or \"while\"" } *)
+```
+This also explains errors after a loop. With `sep_by (fun () -> consume "ab") (fun () -> char ',')` followed by `end_of_input`, the input `"ab,ab,ax"` reports `expected "b"` at offset 7\. The loop stopped because `"ax"` is not `"ab"`, and that is further than the `end_of_input` failure at offset 5\.
+
+`consume` fails at the first byte that differs from the literal and expects the rest of it. `Parseff.commit` forgets the failures at or beyond its position, so a committed branch reports only what it expected itself.
+
 
 ## Built-in error variants
 
 Parseff adds four built-in error variants to every parse result:
 
-- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
+- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling. The message is `expected A`, `expected A or B`, or `expected A, B, or C`. Characters appear as `'x'`, literals as `"abc"` and labels as written.
 - ``Failure of string`: A user-initiated validation failure raised via `Parseff.fail`. Unlike ``Expected`, failures are not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
-- ``Unexpected_end_of_input`: The input ended before the parser could finish. Produced when primitives like `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input but have reached the end.
+- ``Unexpected_end_of_input`: The input ended before the parser could finish. Produced when the furthest failure is at the end of the input, for example when `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input. It carries no list of what was expected.
 - ``Depth_limit_exceeded of string`: A `Parseff.rec_` call exceeded the `~max_depth` limit. The message contains the depth that was exceeded.
 Your own error types from `Parseff.error` are merged with these via polymorphic variant row extension.

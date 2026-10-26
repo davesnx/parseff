@@ -168,7 +168,7 @@ let test_consume_prefix_mismatch () =
     "mismatch" {|Error@0 Expected "expected \"true\""|} (show show_string r);
   let r = Parseff.parse "tr" (fun () -> Parseff.consume "true") in
   Alcotest.(check string)
-    "proper prefix" "Error@0 Unexpected_end_of_input" (show show_string r)
+    "proper prefix" "Error@2 Unexpected_end_of_input" (show show_string r)
 
 let test_consume_or_mismatch () =
   let p () =
@@ -177,9 +177,7 @@ let test_consume_or_mismatch () =
       (fun () -> Parseff.consume "false")
       ()
   in
-  let expected =
-    {|Error@0 Expected "expected \"true\" or expected \"false\""|}
-  in
+  let expected = {|Error@0 Expected "expected \"false\" or \"true\""|} in
   Alcotest.(check string)
     "parse" expected
     (show show_string (Parseff.parse "no" p));

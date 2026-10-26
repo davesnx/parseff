@@ -72,7 +72,8 @@ let test_invalid_trailing () =
       Alcotest.fail "Expected failure for trailing data"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 7 pos;
-      Alcotest.(check string) "error message" "expected end of input" expected
+      Alcotest.(check string)
+        "error message" "expected digit or end of input" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 

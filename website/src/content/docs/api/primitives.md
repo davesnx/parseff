@@ -28,6 +28,8 @@ let parser () =
 
 (* Matches "helloworld" *)
 ```
+When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error is ``Unexpected_end_of_input` at the end of the input.
+
 **Performance:** `consume` is optimized for literal string matching. It's much faster than using regex for exact matches.
 
 
@@ -138,7 +140,8 @@ let identifier1 () =
     ~label:"identifier character"
 
 (* Matches "foo123" -> "foo123" *)
-(* Fails on "" -> Error: expected identifier character *)
+(* Fails on "!" -> Error: expected identifier character *)
+(* Fails on ""  -> Error: Unexpected_end_of_input *)
 ```
 
 ### `skip_while`
@@ -319,7 +322,7 @@ let report_error input result =
   match result with
   | Parseff.Error { pos; error = `Expected msg } ->
       let loc = Parseff.location_of_position input pos in
-      Printf.printf "line %d, col %d: expected %s\n" loc.line loc.col msg
+      Printf.printf "line %d, col %d: %s\n" loc.line loc.col msg
   | _ -> ()
 ```
 **Tip:** Use `location` during parsing to attach source positions to AST nodes or other parsed structures. Use `location_of_position` after parsing to convert byte offsets from error results into line and column numbers for diagnostics.

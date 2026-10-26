@@ -128,6 +128,16 @@ let literal () =
     ]
     ()
 
+let pairs () =
+  let items =
+    Parseff.sep_by
+      (fun () -> Parseff.consume "ab")
+      (fun () -> Parseff.char ',')
+      ()
+  in
+  Parseff.end_of_input ();
+  List.length items
+
 let format_error pos error = Printf.sprintf "Error at pos %d: %s" pos error
 
 let run_ip input =
@@ -193,6 +203,17 @@ let run_literal input =
   | Error _ ->
       Printf.printf "%-20s -> Unknown error\n" input
 
+let run_pairs input =
+  match Parseff.parse input pairs with
+  | Ok n ->
+      Printf.printf "%-20s -> %d items\n" input n
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
+  | Error _ ->
+      Printf.printf "%-20s -> Unknown error\n" input
+
 let () =
   let cmd = Sys.argv.(1) in
   let input = Sys.argv.(2) in
@@ -207,6 +228,8 @@ let () =
       run_keyword input
   | "literal" ->
       run_literal input
+  | "pairs" ->
+      run_pairs input
   | _ ->
       Printf.eprintf "Unknown command: %s\n" cmd;
       exit 1

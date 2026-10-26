@@ -99,9 +99,8 @@ let test_alternation_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
-      Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string)
-        "error message" "expected \"foo\" or expected \"bar\"" expected
+      Alcotest.(check int) "error position" 2 pos;
+      Alcotest.(check string) "error message" "expected \"r\"" expected
   | Error _ ->
       Alcotest.fail "Expected `Expected error variant"
 
@@ -120,8 +119,7 @@ let test_one_of_failure () =
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
-        "error message"
-        "expected \"if\" or expected \"else\" or expected \"while\"" expected
+        "error message" "expected \"else\", \"if\", or \"while\"" expected
   | Error _ ->
       Alcotest.fail "Expected `Expected"
 
@@ -812,7 +810,7 @@ let test_expect_relabels_parse_error () =
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "a digit (0-9)" expected
+      Alcotest.(check string) "error message" "expected a digit (0-9)" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -863,7 +861,7 @@ let test_expect_relabels_or_error () =
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "a keyword" expected
+      Alcotest.(check string) "error message" "expected a keyword" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -899,7 +897,7 @@ let test_one_of_labeled_failure () =
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
-        "error message" "expected one of: number, greeting" expected
+        "error message" "expected greeting or number" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -1161,7 +1159,7 @@ let test_take_while_at_least_produces_expected () =
     )
   with
   | Error { error = `Expected msg; _ } ->
-      Alcotest.(check string) "expected message" "digit" msg
+      Alcotest.(check string) "expected message" "expected digit" msg
   | _ ->
       Alcotest.fail "take_while ~at_least failure should produce `Expected"
 
@@ -1348,7 +1346,7 @@ let test_whitespace1_failure () =
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "whitespace" expected
+      Alcotest.(check string) "error message" "expected whitespace" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 

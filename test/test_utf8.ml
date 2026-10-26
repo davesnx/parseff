@@ -216,10 +216,38 @@ let test_take_while_at_least_failure () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Alcotest.(check int) "error position" 1 pos
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+let test_take_while_at_least_failure_message () =
+  match
+    Parseff.parse "a1" (fun () ->
+        Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
+          Uucp.Alpha.is_alphabetic
+    )
+  with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
-      (* at_least check fails at the current position *)
       Alcotest.(check int) "error position" 1 pos;
-      Alcotest.(check string) "error message" "letters" expected
+      Alcotest.(check string) "error message" "expected letters" expected
+  | Error _ ->
+      Alcotest.fail "Unexpected error type"
+
+let test_take_while_at_least_without_label () =
+  match
+    Parseff.parse "a1" (fun () ->
+        Parseff.Utf8.take_while ~at_least:2 Uucp.Alpha.is_alphabetic
+    )
+  with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error { pos; error = `Expected expected } ->
+      Alcotest.(check int) "error position" 1 pos;
+      Alcotest.(check string)
+        "error message" "expected at least 2 characters" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -246,8 +274,8 @@ let test_take_while_at_least_codepoint_count_fail () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Expected expected; _ } ->
-      Alcotest.(check string) "error message" "letters" expected
+  | Error { error = `Unexpected_end_of_input; _ } ->
+      ()
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -481,7 +509,7 @@ let test_whitespace_at_least_failure () =
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "whitespace" expected
+      Alcotest.(check string) "error message" "expected whitespace" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -608,6 +636,10 @@ let () =
           test_case "empty" `Quick test_take_while_empty;
           test_case "at_least success" `Quick test_take_while_at_least;
           test_case "at_least failure" `Quick test_take_while_at_least_failure;
+          test_case "at_least failure message" `Quick
+            test_take_while_at_least_failure_message;
+          test_case "at_least failure without label" `Quick
+            test_take_while_at_least_without_label;
           test_case "at_least counts codepoints" `Quick
             test_take_while_at_least_counts_codepoints;
           test_case "at_least codepoint count fail" `Quick

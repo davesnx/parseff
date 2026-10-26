@@ -71,7 +71,14 @@ type backtrack_window_error = { limit : int; oldest : int }
       parser needed to keep more rewind history than allowed by
       [backtrack_window]
 
-    User errors raised via {!val-error} are also returned as [Error]. *)
+    User errors raised via {!val-error} are also returned as [Error].
+
+    When a parse fails, [pos] is the furthest position where any primitive
+    failed, including primitives in branches that [or_], [many], [sep_by],
+    [optional] or [fold_*] abandoned. [`Expected] lists everything that was
+    expected at that position, sorted and without duplicates:
+    [expected "else", "if", or "while"]. A failure at the end of the input is
+    reported as [`Unexpected_end_of_input]. *)
 type ('a, 'e) result =
   | Ok of 'a  (** Success: parsed value *)
   | Error of {
@@ -158,9 +165,11 @@ val parse_until_end :
 (** {1 Primitive Combinators} *)
 
 val consume : string -> string
-(** [consume s] matches the exact literal string [s]. Fails with [`Expected] as
-    soon as the available input differs from [s], and with
-    [`Unexpected_end_of_input] only when the input ends inside a prefix of [s].
+(** [consume s] matches the exact literal string [s]. Fails with [`Expected] at
+    the first byte that differs from [s], and with [`Unexpected_end_of_input]
+    only when the input ends inside a prefix of [s]. The failure position is the
+    mismatch, not the start of [s]: [consume "ab"] on ["ax"] fails at offset [1]
+    and expects ["b"].
 
     Example:
     {@ocaml[
@@ -221,7 +230,9 @@ val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
     classes.
 
     When [~at_least] is specified, requires at least that many characters to
-    match. Fails with [~label] in the error message if fewer characters match.
+    match. Fails with [expected <label>] if fewer characters match, or with
+    [expected at least n characters] when [~label] is missing. The failure
+    position is the end of the characters that matched.
 
     Example:
     {@ocaml[
@@ -317,7 +328,10 @@ val error : 'e -> 'a
     {!val:one_of_labeled} without being caught or relabeled. However,
     backtracking combinators ({!val:or_}, {!val:many}, {!val:one_of},
     {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
-    like any other parse failure.
+    like any other parse failure. An absorbed user error is still reported when
+    the parse fails and the error is at the furthest failure position. At the
+    same position, a user error wins over [`Expected]. Between two user errors
+    at the same position, the first one wins.
 
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
@@ -379,17 +393,14 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 (** [or_] is the alternation combinator. Tries the left parser; if it fails,
     backtracks and tries the right parser.
 
-    When both branches fail, error composition depends on position:
-    - {b Same position}: if both produce [Expected] errors, the messages are
-      joined with [" or "]. If one is [Expected] and the other is
-      [Unexpected_end_of_input], the [Expected] error is preferred (it carries
-      more information). Two [Unexpected_end_of_input] stay as-is.
-    - {b Different positions}: the error from the branch that consumed more
-      input (furthest position) is kept, since it likely reflects the more
-      relevant failure.
+    When both branches fail, the parse reports the furthest failure. If both
+    branches fail at the same position, the [`Expected] messages are merged into
+    one sorted list without duplicates. A failure that is behind another one is
+    dropped.
 
-    This means [one_of] (which chains [or_]) naturally produces composed
-    messages like ["expected \"if\" or expected \"else\""].
+    This means [one_of] (which chains [or_]) naturally produces messages like
+    ["expected \"else\", \"if\", or \"while\""], in the same order whatever the
+    order of the branches.
 
     Example:
     {@ocaml[
@@ -424,7 +435,10 @@ val commit : unit -> unit
 
     After [commit], that frame no longer rewinds on failure, which improves
     error locality and allows streaming sources to drop the buffered input that
-    only that frame kept alive.
+    only that frame kept alive. [commit] also forgets the failures recorded at
+    or beyond the current position, such as the failure of a previous branch of
+    the same [or_]. The error then reports only what the committed branch
+    expected.
 
     [commit ()] does nothing outside any frame. It does nothing inside
     {!look_ahead}, and it does not reach the frames outside the look-ahead.
@@ -468,11 +482,17 @@ val rec_ : (unit -> 'a) -> 'a
     ]} *)
 
 val expect : string -> (unit -> 'a) -> 'a
-(** [expect description parser] runs [parser] and, if it fails with a parse
-    error, replaces the error message with [description]. Reads naturally:
-    "expect a dot separator".
+(** [expect description parser] runs [parser] and, if it fails where it started,
+    replaces what the failure expected with [description]. The error reads
+    [expected <description>]. Reads naturally: "expect a dot separator".
 
-    Only parse errors (from {!consume}, {!satisfy}, etc.) are relabeled.
+    Only parse errors (from {!consume}, {!satisfy}, etc.) at the position where
+    [parser] started are relabeled. A failure deeper in the input keeps its own
+    message, because it says more than [description]:
+    [expect "key" (fun () -> consume "id:"; digit ())] on ["id:x"] reports
+    [expected digit] at offset [3], and [expected key] on ["foo"]. A failure at
+    the end of the input stays [`Unexpected_end_of_input].
+
     Failures from {!val:fail} propagate unchanged (use {!val:catch} to intercept
     those). User errors raised via {!val-error} propagate unchanged — this lets
     you use [expect] around parsers that perform validation without losing the
@@ -526,7 +546,9 @@ val catch : (unit -> 'a) -> (string -> 'a) -> 'a
     ]} *)
 
 val one_of : (unit -> 'a) list -> unit -> 'a
-(** [one_of parsers] tries each parser in order until one succeeds.
+(** [one_of parsers] tries each parser in order until one succeeds. When every
+    parser fails, the error lists what the parsers expected at the furthest
+    position, as for {!or_}. [one_of []] fails with ["no alternative matched"].
 
     Example:
     {@ocaml[
@@ -544,8 +566,10 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 (** [one_of_labeled labeled_parsers] tries each parser in order. On failure,
     reports all labels in the error message.
 
-    Like {!expect}, only parse errors are relabeled. User errors raised via
-    {!val-error} inside any branch propagate unchanged.
+    Each branch is wrapped by {!expect} with its label, so only failures at the
+    position where [one_of_labeled] started are relabeled. A branch that fails
+    deeper keeps its own message. User errors raised via {!val-error} inside any
+    branch propagate unchanged.
 
     Example:
     {@ocaml[
@@ -557,7 +581,7 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
           ("boolean", bool_parser);
         ]
         ()
-    (* On failure: "expected one of: number, string, boolean" *)
+    (* On failure: "expected boolean, number, or string" *)
     ]} *)
 
 (** {1 Repetition Combinators} *)

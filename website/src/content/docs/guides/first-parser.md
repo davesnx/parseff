@@ -53,7 +53,7 @@ let entry () =
   (k, v)
 ```
 
-`take_while ~at_least:1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
+`take_while ~at_least:1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches, as `expected <label>`. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
 
 Sequencing is just `let` bindings. Each line advances the cursor through the input.
 
