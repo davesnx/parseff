@@ -207,7 +207,7 @@ let array_parser value () =
       let _ = Parseff.char ']' in
       xs)
 ```
-Use `~delimited:true` for constructs that have an opening token, such as an array or a block. A parser that never calls `context` pays nothing for it. Each call costs a few dozen instructions, so name constructs, not single tokens.
+Use `~delimited:true` for constructs that have an opening token, such as an array or a block. A parser that never calls `context` pays nothing for it. Each call costs about 100 instructions, so name constructs, not single tokens.
 
 A construct is reported only when the failure is strictly past the place where it started. An alternative that fails at its first byte, such as an array tried where there is no opening bracket, does not appear in the list.
 
