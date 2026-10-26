@@ -5,7 +5,7 @@ let int64_testable =
 
 let test_be_any_uint8 () =
   match
-    Legacy.parse "\x00\x7F\xFF" (fun () ->
+    Parseff.parse "\x00\x7F\xFF" (fun () ->
         let a = Parseff.BE.any_uint8 () in
         let b = Parseff.BE.any_uint8 () in
         let c = Parseff.BE.any_uint8 () in
@@ -21,7 +21,7 @@ let test_be_any_uint8 () =
 
 let test_be_any_int8 () =
   match
-    Legacy.parse "\x00\x7F\xFF\x80" (fun () ->
+    Parseff.parse "\x00\x7F\xFF\x80" (fun () ->
         let a = Parseff.BE.any_int8 () in
         let b = Parseff.BE.any_int8 () in
         let c = Parseff.BE.any_int8 () in
@@ -38,84 +38,97 @@ let test_be_any_int8 () =
       Alcotest.fail "Expected success"
 
 let test_le_uint8_same_as_be () =
-  match Legacy.parse "\xAB" (fun () -> Parseff.LE.any_uint8 ()) with
+  match Parseff.parse "\xAB" (fun () -> Parseff.LE.any_uint8 ()) with
   | Ok v ->
       Alcotest.(check int) "single byte is endian-agnostic" 0xAB v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_uint8_eof () =
-  match Legacy.parse "" (fun () -> Parseff.BE.any_uint8 ()) with
+  match Parseff.parse "" (fun () -> Parseff.BE.any_uint8 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 1 byte, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected unexpected end of input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_be_any_int16 () =
-  match Legacy.parse "\x01\x02" (fun () -> Parseff.BE.any_int16 ()) with
+  match Parseff.parse "\x01\x02" (fun () -> Parseff.BE.any_int16 ()) with
   | Ok v ->
       Alcotest.(check int) "0x0102" 0x0102 v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_le_any_int16 () =
-  match Legacy.parse "\x01\x02" (fun () -> Parseff.LE.any_int16 ()) with
+  match Parseff.parse "\x01\x02" (fun () -> Parseff.LE.any_int16 ()) with
   | Ok v ->
       Alcotest.(check int) "0x0201" 0x0201 v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_be_any_uint16 () =
-  match Legacy.parse "\xFF\xFE" (fun () -> Parseff.BE.any_uint16 ()) with
+  match Parseff.parse "\xFF\xFE" (fun () -> Parseff.BE.any_uint16 ()) with
   | Ok v ->
       Alcotest.(check int) "0xFFFE unsigned" 0xFFFE v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_be_any_int16_signed () =
-  match Legacy.parse "\xFF\xFE" (fun () -> Parseff.BE.any_int16 ()) with
+  match Parseff.parse "\xFF\xFE" (fun () -> Parseff.BE.any_int16 ()) with
   | Ok v ->
       Alcotest.(check int) "0xFFFE signed = -2" (-2) v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_int16_eof () =
-  match Legacy.parse "\x01" (fun () -> Parseff.BE.any_int16 ()) with
+  match Parseff.parse "\x01" (fun () -> Parseff.BE.any_int16 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 2 bytes, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected unexpected end of input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_be_any_int32 () =
-  match Legacy.parse "\x01\x02\x03\x04" (fun () -> Parseff.BE.any_int32 ()) with
+  match
+    Parseff.parse "\x01\x02\x03\x04" (fun () -> Parseff.BE.any_int32 ())
+  with
   | Ok v ->
       Alcotest.(check int32_testable) "0x01020304" 0x01020304l v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_le_any_int32 () =
-  match Legacy.parse "\x01\x02\x03\x04" (fun () -> Parseff.LE.any_int32 ()) with
+  match
+    Parseff.parse "\x01\x02\x03\x04" (fun () -> Parseff.LE.any_int32 ())
+  with
   | Ok v ->
       Alcotest.(check int32_testable) "0x04030201" 0x04030201l v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_int32_eof () =
-  match Legacy.parse "\x01\x02\x03" (fun () -> Parseff.BE.any_int32 ()) with
+  match Parseff.parse "\x01\x02\x03" (fun () -> Parseff.BE.any_int32 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 4 bytes, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected unexpected end of input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_be_any_int64 () =
   match
-    Legacy.parse "\x01\x02\x03\x04\x05\x06\x07\x08" (fun () ->
+    Parseff.parse "\x01\x02\x03\x04\x05\x06\x07\x08" (fun () ->
         Parseff.BE.any_int64 ()
     )
   with
@@ -126,7 +139,7 @@ let test_be_any_int64 () =
 
 let test_le_any_int64 () =
   match
-    Legacy.parse "\x01\x02\x03\x04\x05\x06\x07\x08" (fun () ->
+    Parseff.parse "\x01\x02\x03\x04\x05\x06\x07\x08" (fun () ->
         Parseff.LE.any_int64 ()
     )
   with
@@ -137,20 +150,25 @@ let test_le_any_int64 () =
 
 let test_int64_eof () =
   match
-    Legacy.parse "\x01\x02\x03\x04\x05\x06\x07" (fun () ->
+    Parseff.parse "\x01\x02\x03\x04\x05\x06\x07" (fun () ->
         Parseff.BE.any_int64 ()
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 8 bytes, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected unexpected end of input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_be_any_float () =
   (* IEEE 754: 1.0f = 0x3F800000 *)
-  match Legacy.parse "\x3F\x80\x00\x00" (fun () -> Parseff.BE.any_float ()) with
+  match
+    Parseff.parse "\x3F\x80\x00\x00" (fun () -> Parseff.BE.any_float ())
+  with
   | Ok v ->
       Alcotest.(check (float 0.0)) "1.0" 1.0 v
   | Error _ ->
@@ -158,7 +176,9 @@ let test_be_any_float () =
 
 let test_le_any_float () =
   (* IEEE 754: 1.0f = 0x3F800000, little-endian: 00 00 80 3F *)
-  match Legacy.parse "\x00\x00\x80\x3F" (fun () -> Parseff.LE.any_float ()) with
+  match
+    Parseff.parse "\x00\x00\x80\x3F" (fun () -> Parseff.LE.any_float ())
+  with
   | Ok v ->
       Alcotest.(check (float 0.0)) "1.0" 1.0 v
   | Error _ ->
@@ -167,7 +187,7 @@ let test_le_any_float () =
 let test_be_any_double () =
   (* IEEE 754: 1.0 = 0x3FF0000000000000 *)
   match
-    Legacy.parse "\x3F\xF0\x00\x00\x00\x00\x00\x00" (fun () ->
+    Parseff.parse "\x3F\xF0\x00\x00\x00\x00\x00\x00" (fun () ->
         Parseff.BE.any_double ()
     )
   with
@@ -179,7 +199,7 @@ let test_be_any_double () =
 let test_le_any_double () =
   (* IEEE 754: 1.0 = 0x3FF0000000000000, little-endian *)
   match
-    Legacy.parse "\x00\x00\x00\x00\x00\x00\xF0\x3F" (fun () ->
+    Parseff.parse "\x00\x00\x00\x00\x00\x00\xF0\x3F" (fun () ->
         Parseff.LE.any_double ()
     )
   with
@@ -189,7 +209,9 @@ let test_le_any_double () =
       Alcotest.fail "Expected success"
 
 let test_be_any_float_zero () =
-  match Legacy.parse "\x00\x00\x00\x00" (fun () -> Parseff.BE.any_float ()) with
+  match
+    Parseff.parse "\x00\x00\x00\x00" (fun () -> Parseff.BE.any_float ())
+  with
   | Ok v ->
       Alcotest.(check (float 0.0)) "0.0" 0.0 v
   | Error _ ->
@@ -197,31 +219,33 @@ let test_be_any_float_zero () =
 
 let test_be_any_float_neg () =
   (* IEEE 754: -1.0f = 0xBF800000 *)
-  match Legacy.parse "\xBF\x80\x00\x00" (fun () -> Parseff.BE.any_float ()) with
+  match
+    Parseff.parse "\xBF\x80\x00\x00" (fun () -> Parseff.BE.any_float ())
+  with
   | Ok v ->
       Alcotest.(check (float 0.0)) "-1.0" (-1.0) v
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_be_int16_match () =
-  match Legacy.parse "\x01\x02" (fun () -> Parseff.BE.int16 0x0102) with
+  match Parseff.parse "\x01\x02" (fun () -> Parseff.BE.int16 0x0102) with
   | Ok () ->
       ()
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_be_int16_mismatch () =
-  match Legacy.parse "\x02\x01" (fun () -> Parseff.BE.int16 0x0102) with
+  match Parseff.parse "\x02\x01" (fun () -> Parseff.BE.int16 0x0102) with
   | Ok () ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Message _; _ } ->
+  | Error { kind = Message _; _ } ->
       ()
   | Error _ ->
       Alcotest.fail "Expected Message error"
 
 let test_be_int32_match () =
   match
-    Legacy.parse "\x01\x02\x03\x04" (fun () -> Parseff.BE.int32 0x01020304l)
+    Parseff.parse "\x01\x02\x03\x04" (fun () -> Parseff.BE.int32 0x01020304l)
   with
   | Ok () ->
       ()
@@ -230,7 +254,7 @@ let test_be_int32_match () =
 
 let test_be_int64_match () =
   match
-    Legacy.parse "\x01\x02\x03\x04\x05\x06\x07\x08" (fun () ->
+    Parseff.parse "\x01\x02\x03\x04\x05\x06\x07\x08" (fun () ->
         Parseff.BE.int64 0x0102030405060708L
     )
   with
@@ -241,49 +265,46 @@ let test_be_int64_match () =
 
 let test_le_int32_match () =
   match
-    Legacy.parse "\x04\x03\x02\x01" (fun () -> Parseff.LE.int32 0x01020304l)
+    Parseff.parse "\x04\x03\x02\x01" (fun () -> Parseff.LE.int32 0x01020304l)
   with
   | Ok () ->
       ()
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let expect_error_at pos msg result =
+let expect_error_at pos msg (result : (_, unit) Parseff.result) =
   match result with
-  | Legacy.Error { pos = p; error = `Message m } ->
+  | Error ({ kind = Message m; _ } as e) ->
+      let p = Parseff.Error.pos e in
       Alcotest.(check int) "error position" pos p;
       Alcotest.(check string) "error message" msg m
-  | Legacy.Ok _ ->
+  | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "Expected Message error"
 
 let expect_ok result =
-  match result with
-  | Legacy.Ok () ->
-      ()
-  | Legacy.Error _ ->
-      Alcotest.fail "Expected success"
+  match result with Ok () -> () | Error _ -> Alcotest.fail "Expected success"
 
 let test_be_int16_high_bit () =
-  expect_ok (Legacy.parse "\xFF\xFE" (fun () -> Parseff.BE.int16 0xFFFE))
+  expect_ok (Parseff.parse "\xFF\xFE" (fun () -> Parseff.BE.int16 0xFFFE))
 
 let test_be_int16_negative () =
-  expect_ok (Legacy.parse "\xFF\xFE" (fun () -> Parseff.BE.int16 (-2)))
+  expect_ok (Parseff.parse "\xFF\xFE" (fun () -> Parseff.BE.int16 (-2)))
 
 let test_le_int16_high_bit () =
-  expect_ok (Legacy.parse "\xFE\xFF" (fun () -> Parseff.LE.int16 0xFFFE))
+  expect_ok (Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.int16 0xFFFE))
 
 let test_int16_mismatch_message () =
   expect_error_at 0 "expected int16 0xFFFE, got 0x0102"
-    (Legacy.parse "\x01\x02" (fun () -> Parseff.BE.int16 0xFFFE));
+    (Parseff.parse "\x01\x02" (fun () -> Parseff.BE.int16 0xFFFE));
   expect_error_at 0 "expected int16 0xFFFE, got 0xFFFF"
-    (Legacy.parse "\xFF\xFF" (fun () -> Parseff.BE.int16 0xFFFE))
+    (Parseff.parse "\xFF\xFF" (fun () -> Parseff.BE.int16 0xFFFE))
 
 let test_int16_out_of_range () =
   List.iter
     (fun v ->
-      match Legacy.parse "\x00\x00" (fun () -> Parseff.BE.int16 v) with
+      match Parseff.parse "\x00\x00" (fun () -> Parseff.BE.int16 v) with
       | _ ->
           Alcotest.failf "%d accepted" v
       | exception Invalid_argument _ ->
@@ -293,7 +314,7 @@ let test_int16_out_of_range () =
 
 let test_int16_mismatch_position_after_prefix () =
   expect_error_at 1 "expected int16 0x0102, got 0x0201"
-    (Legacy.parse "\x00\x02\x01" (fun () ->
+    (Parseff.parse "\x00\x02\x01" (fun () ->
          ignore (Parseff.any_char ());
          Parseff.BE.int16 0x0102
      )
@@ -301,18 +322,18 @@ let test_int16_mismatch_position_after_prefix () =
 
 let test_be_int32_mismatch () =
   expect_error_at 0 "expected int32 0x01020304, got 0x04030201"
-    (Legacy.parse "\x04\x03\x02\x01" (fun () -> Parseff.BE.int32 0x01020304l))
+    (Parseff.parse "\x04\x03\x02\x01" (fun () -> Parseff.BE.int32 0x01020304l))
 
 let test_be_int64_mismatch () =
   expect_error_at 0 "expected int64 0x0102030405060708, got 0x0807060504030201"
-    (Legacy.parse "\x08\x07\x06\x05\x04\x03\x02\x01" (fun () ->
+    (Parseff.parse "\x08\x07\x06\x05\x04\x03\x02\x01" (fun () ->
          Parseff.BE.int64 0x0102030405060708L
      )
     )
 
 let test_le_int32_mismatch_position () =
   expect_error_at 1 "expected int32 0x01020304, got 0x04030201"
-    (Legacy.parse "\x00\x01\x02\x03\x04" (fun () ->
+    (Parseff.parse "\x00\x01\x02\x03\x04" (fun () ->
          ignore (Parseff.any_char ());
          Parseff.LE.int32 0x01020304l
      )
@@ -320,52 +341,52 @@ let test_le_int32_mismatch_position () =
 
 let test_int64_mismatch_position () =
   expect_error_at 1 "expected int64 0x0000000000000001, got 0x0100000000000000"
-    (Legacy.parse "\x00\x01\x00\x00\x00\x00\x00\x00\x00" (fun () ->
+    (Parseff.parse "\x00\x01\x00\x00\x00\x00\x00\x00\x00" (fun () ->
          ignore (Parseff.any_char ());
          Parseff.BE.int64 1L
      )
     )
 
 let test_le_any_uint16_high_bits () =
-  match Legacy.parse "\xFE\xFF" (fun () -> Parseff.LE.any_uint16 ()) with
-  | Legacy.Ok v ->
+  match Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.any_uint16 ()) with
+  | Ok v ->
       Alcotest.(check int) "0xFFFE" 0xFFFE v
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_le_any_int16_high_bits () =
-  match Legacy.parse "\xFE\xFF" (fun () -> Parseff.LE.any_int16 ()) with
-  | Legacy.Ok v ->
+  match Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.any_int16 ()) with
+  | Ok v ->
       Alcotest.(check int) "-2" (-2) v
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_le_int64_high_bits () =
   match
-    Legacy.parse "\xF8\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (fun () ->
+    Parseff.parse "\xF8\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (fun () ->
         Parseff.LE.any_int64 ()
     )
   with
-  | Legacy.Ok v ->
+  | Ok v ->
       Alcotest.(check int64_testable) "-8" (-8L) v
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_le_int64_match_high_bits () =
   expect_ok
-    (Legacy.parse "\xF8\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (fun () ->
+    (Parseff.parse "\xF8\xFF\xFF\xFF\xFF\xFF\xFF\xFF" (fun () ->
          Parseff.LE.int64 (-8L)
      )
     );
   expect_ok
-    (Legacy.parse "\x01\x02\x03\x04\x05\x06\x07\x88" (fun () ->
+    (Parseff.parse "\x01\x02\x03\x04\x05\x06\x07\x88" (fun () ->
          Parseff.LE.int64 0x8807060504030201L
      )
     )
 
 let test_take_exact () =
   match
-    Legacy.parse "abcdef" (fun () ->
+    Parseff.parse "abcdef" (fun () ->
         let s = Parseff.take 4 in
         let pos = Parseff.position () in
         (s, pos)
@@ -379,7 +400,7 @@ let test_take_exact () =
 
 let test_take_zero () =
   match
-    Legacy.parse "abc" (fun () ->
+    Parseff.parse "abc" (fun () ->
         let s = Parseff.take 0 in
         let pos = Parseff.position () in
         (s, pos)
@@ -392,17 +413,20 @@ let test_take_zero () =
       Alcotest.fail "Expected success"
 
 let test_take_eof () =
-  match Legacy.parse "abc" (fun () -> Parseff.take 10) with
+  match Parseff.parse "abc" (fun () -> Parseff.take 10) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 10 bytes, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected unexpected end of input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_take_negative () =
-  match Legacy.parse "abc" (fun () -> Parseff.take (-1)) with
-  | Error { error = `Message _; _ } ->
+  match Parseff.parse "abc" (fun () -> Parseff.take (-1)) with
+  | Error { kind = Message _; _ } ->
       ()
   | _ ->
       Alcotest.fail "Expected failure for negative take"
@@ -427,7 +451,7 @@ let test_tlv_header () =
     Parseff.end_of_input ();
     (version, fields)
   in
-  match Legacy.parse input parser with
+  match Parseff.parse input parser with
   | Ok (version, fields) ->
       Alcotest.(check int) "version" 1 version;
       Alcotest.(check int) "field count" 1 (List.length fields);
@@ -452,7 +476,7 @@ let test_backtracking () =
       )
       ()
   in
-  match Legacy.parse input parser with
+  match Parseff.parse input parser with
   | Ok s ->
       Alcotest.(check string) "backtracked" "got_0102" s
   | Error _ ->
@@ -474,7 +498,7 @@ let byte_at_a_time s =
 
 let test_streaming_be_int32 () =
   let src = byte_at_a_time "\x01\x02\x03\x04" in
-  match Legacy.parse_source src (fun () -> Parseff.BE.any_int32 ()) with
+  match Parseff.parse_source src (fun () -> Parseff.BE.any_int32 ()) with
   | Ok v ->
       Alcotest.(check int32_testable) "0x01020304" 0x01020304l v
   | Error _ ->
@@ -482,7 +506,7 @@ let test_streaming_be_int32 () =
 
 let test_streaming_le_int64 () =
   let src = byte_at_a_time "\x01\x02\x03\x04\x05\x06\x07\x08" in
-  match Legacy.parse_source src (fun () -> Parseff.LE.any_int64 ()) with
+  match Parseff.parse_source src (fun () -> Parseff.LE.any_int64 ()) with
   | Ok v ->
       Alcotest.(check int64_testable) "0x0807060504030201" 0x0807060504030201L v
   | Error _ ->
@@ -490,7 +514,7 @@ let test_streaming_le_int64 () =
 
 let test_streaming_take () =
   let src = byte_at_a_time "hello world" in
-  match Legacy.parse_source src (fun () -> Parseff.take 5) with
+  match Parseff.parse_source src (fun () -> Parseff.take 5) with
   | Ok v ->
       Alcotest.(check string) "taken" "hello" v
   | Error _ ->
@@ -498,13 +522,16 @@ let test_streaming_take () =
 
 let test_streaming_eof () =
   let src = byte_at_a_time "\x01" in
-  match Legacy.parse_source src (fun () -> Parseff.BE.any_int16 ()) with
+  match Parseff.parse_source src (fun () -> Parseff.BE.any_int16 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 2 bytes, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected unexpected end of input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_streaming_composition () =
   let input = "TL\x01\x00\x01\x0A\x00\x03foo" in
@@ -526,7 +553,7 @@ let test_streaming_composition () =
     Parseff.end_of_input ();
     (version, fields)
   in
-  match Legacy.parse_source src parser with
+  match Parseff.parse_source src parser with
   | Ok (version, fields) ->
       Alcotest.(check int) "version" 1 version;
       let tag, value = List.hd fields in

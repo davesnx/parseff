@@ -16,7 +16,7 @@ let test_fold_left_user_exception () =
       else
         a + b
   in
-  ( match Legacy.parse "1+1+1" (Parseff.fold_left Parseff.digit op) with
+  ( match Parseff.parse "1+1+1" (Parseff.fold_left Parseff.digit op) with
   | _ ->
       Alcotest.fail "expected Exit"
   | exception Exit ->
@@ -97,7 +97,7 @@ let check_outside_parse () =
 
 let test_escaping_exception_leaves_context () =
   ( match
-      Legacy.parse "abc" (fun () ->
+      Parseff.parse "abc" (fun () ->
           ignore (Parseff.char 'a');
           failwith "boom"
       )
@@ -112,7 +112,7 @@ let test_escaping_exception_leaves_context () =
 let test_escaping_exception_leaves_context_source () =
   let src = Parseff.Source.of_string "abc" in
   ( match
-      Legacy.parse_source src (fun () ->
+      Parseff.parse_source src (fun () ->
           ignore (Parseff.char 'a');
           failwith "boom"
       )
@@ -126,11 +126,11 @@ let test_escaping_exception_leaves_context_source () =
 
 let test_nested_parse_exception_keeps_outer_state () =
   match
-    Legacy.parse "abcdef" (fun () ->
+    Parseff.parse "abcdef" (fun () ->
         ignore (Parseff.char 'a');
         ( try
             ignore
-              (Legacy.parse "zzzzzz" (fun () ->
+              (Parseff.parse "zzzzzz" (fun () ->
                    ignore (Parseff.take 4);
                    failwith "x"
                )
@@ -147,11 +147,11 @@ let test_nested_parse_exception_keeps_outer_state () =
 
 let test_nested_parse_source_exception_keeps_outer_state () =
   match
-    Legacy.parse "abcdef" (fun () ->
+    Parseff.parse "abcdef" (fun () ->
         ignore (Parseff.char 'a');
         ( try
             ignore
-              (Legacy.parse_source (Parseff.Source.of_string "zzzzzz")
+              (Parseff.parse_source (Parseff.Source.of_string "zzzzzz")
                  (fun () ->
                    ignore (Parseff.take 4);
                    failwith "x"
@@ -169,7 +169,7 @@ let test_nested_parse_source_exception_keeps_outer_state () =
 
 let test_or_right_commit_stops_at_or () =
   match
-    Legacy.parse "z" (fun () ->
+    Parseff.parse "z" (fun () ->
         Parseff.or_
           (fun () ->
             ignore (Parseff.consume "x");
@@ -185,15 +185,17 @@ let test_or_right_commit_stops_at_or () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected msg } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let msg = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "right error only" "expected 'y'" msg
+      Alcotest.(check string) "right error only" "expected 'y', found 'z'" msg
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_or_right_commit_does_not_seal_many () =
   match
-    Legacy.parse "abd" (fun () ->
+    Parseff.parse "abd" (fun () ->
         let items =
           Parseff.many
             (fun () ->
@@ -217,25 +219,24 @@ let test_or_right_commit_does_not_seal_many () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let show_error = function
-  | `Expected s ->
-      Printf.sprintf "Expected %S" s
-  | `Unexpected_end_of_input ->
-      "Unexpected_end_of_input"
-  | `Message s ->
+let show_error (e : [> `E | `Other ] Parseff.Error.t) =
+  match e.kind with
+  | Expected _ ->
+      Printf.sprintf "Expected %S" (Parseff.Error.message e)
+  | Message s ->
       Printf.sprintf "Message %S" s
-  | `E ->
+  | User `E ->
       "E"
-  | `Other ->
+  | User `Other ->
       "Other"
   | _ ->
       "other"
 
 let show_result show_v = function
-  | Legacy.Ok v ->
+  | Ok v ->
       "Ok " ^ show_v v
-  | Legacy.Error { pos; error } ->
-      Printf.sprintf "Error@%d %s" pos (show_error error)
+  | Error e ->
+      Printf.sprintf "Error@%d %s" (Parseff.Error.pos e) (show_error e)
 
 let show_unit () = "()"
 let ws () = Parseff.skip_whitespace ()
@@ -290,30 +291,32 @@ and json_member () =
 let both_runners show_v input parser expected =
   Alcotest.(check string)
     "parse" expected
-    (show_result show_v (Legacy.parse input parser));
+    (show_result show_v (Parseff.parse input parser));
   Alcotest.(check string)
     "parse_source" expected
     (show_result show_v
-       (Legacy.parse_source (Parseff.Source.of_string input) parser)
+       (Parseff.parse_source (Parseff.Source.of_string input) parser)
     )
 
 let test_trailing_comma_reports_value () =
   both_runners show_unit "[1, 2, 3,]" json_value
-    {|Error@9 Expected "expected value"|}
+    {|Error@9 Expected "expected value, found ']'"|}
 
 let test_missing_colon () =
   both_runners show_unit {|{"a" 1}|} json_value
-    {|Error@5 Expected "expected ':'"|}
+    {|Error@5 Expected "expected ':', found '1'"|}
 
 let test_unclosed_array_end_of_input () =
-  both_runners show_unit "[1, 2" json_value "Error@5 Unexpected_end_of_input"
+  both_runners show_unit "[1, 2" json_value
+    {|Error@5 Expected "expected ',' or ']', found end of input"|}
 
 let test_loop_exit_failure_is_furthest () =
   let parser () =
     ignore (Parseff.sep_by (fun () -> Parseff.consume "ab") comma ());
     Parseff.end_of_input ()
   in
-  both_runners show_unit "ab,ab,ax" parser {|Error@7 Expected "expected \"b\""|}
+  both_runners show_unit "ab,ab,ax" parser
+    {|Error@7 Expected "expected \"b\", found 'x'"|}
 
 let test_loop_exit_ties_with_next_item () =
   let parser () =
@@ -321,14 +324,15 @@ let test_loop_exit_ties_with_next_item () =
     Parseff.end_of_input ()
   in
   both_runners show_unit "12x" parser
-    {|Error@2 Expected "expected digit or end of input"|}
+    {|Error@2 Expected "expected digit or end of input, found 'x'"|}
 
 let test_duplicate_labels_once () =
   let parser () =
     ignore (Parseff.or_ Parseff.digit Parseff.digit ());
     ()
   in
-  both_runners show_unit "x" parser {|Error@0 Expected "expected digit"|}
+  both_runners show_unit "x" parser
+    {|Error@0 Expected "expected digit, found 'x'"|}
 
 let test_alternatives_sorted () =
   let keyword k () = ignore (Parseff.consume k) in
@@ -337,7 +341,7 @@ let test_alternatives_sorted () =
     Parseff.one_of [ keyword "while"; keyword "if"; keyword "else" ]
   in
   let expected =
-    {|Error@0 Expected "expected \"else\", \"if\", or \"while\""|}
+    {|Error@0 Expected "expected \"else\", \"if\", or \"while\", found 'xyz'"|}
   in
   both_runners show_unit "xyz" order_a expected;
   both_runners show_unit "xyz" order_b expected
@@ -345,10 +349,10 @@ let test_alternatives_sorted () =
 let test_literal_suffix_after_matched_prefix () =
   both_runners show_unit "ax"
     (fun () -> ignore (Parseff.consume "ab"))
-    {|Error@1 Expected "expected \"b\""|};
+    {|Error@1 Expected "expected \"b\", found 'x'"|};
   both_runners show_unit "hel"
     (fun () -> ignore (Parseff.consume "hello"))
-    "Error@3 Unexpected_end_of_input"
+    {|Error@3 Expected "expected \"lo\", found end of input"|}
 
 let test_expect_relabels_at_start_only () =
   let parser () =
@@ -357,8 +361,10 @@ let test_expect_relabels_at_start_only () =
         ignore (Parseff.digit ())
     )
   in
-  both_runners show_unit "foo" parser {|Error@0 Expected "expected key"|};
-  both_runners show_unit "id:x" parser {|Error@3 Expected "expected digit"|}
+  both_runners show_unit "foo" parser
+    {|Error@0 Expected "expected key, found 'foo'"|};
+  both_runners show_unit "id:x" parser
+    {|Error@3 Expected "expected digit, found 'x'"|}
 
 let test_one_of_labeled_relabels_at_start_only () =
   let number () = ignore (Parseff.take_while ~at_least:1 (fun c -> c = '1')) in
@@ -371,8 +377,9 @@ let test_one_of_labeled_relabels_at_start_only () =
     Parseff.one_of_labeled [ ("number", number); ("string", string_) ]
   in
   both_runners show_unit "?" parser
-    {|Error@0 Expected "expected number or string"|};
-  both_runners show_unit {|"abc|} parser "Error@4 Unexpected_end_of_input"
+    {|Error@0 Expected "expected number or string, found '?'"|};
+  both_runners show_unit {|"abc|} parser
+    {|Error@4 Expected "expected '\"', found end of input"|}
 
 let test_commit_forgets_earlier_alternative () =
   let parser () =
@@ -385,7 +392,8 @@ let test_commit_forgets_earlier_alternative () =
       )
       ()
   in
-  both_runners show_unit "ax" parser {|Error@1 Expected "expected \"z\""|}
+  both_runners show_unit "ax" parser
+    {|Error@1 Expected "expected \"z\", found 'x'"|}
 
 let test_fail_escapes_or_many_expect () =
   let boom () = Parseff.fail "boom" in
@@ -443,7 +451,9 @@ let test_behind_failure_ignored () =
       (fun () -> Parseff.consume "x")
       ()
   in
-  both_runners (fun s -> s) "abq" parser {|Error@2 Expected "expected \"c\""|}
+  both_runners
+    (fun s -> s)
+    "abq" parser {|Error@2 Expected "expected \"c\", found 'q'"|}
 
 let test_item_buffer_overflow () =
   let alternatives =
@@ -451,9 +461,14 @@ let test_item_buffer_overflow () =
         ignore (Parseff.consume (Printf.sprintf "item%03d" i))
     )
   in
-  match Legacy.parse "zzz" (Parseff.one_of alternatives) with
-  | Legacy.Error { pos = 0; error = `Expected msg } ->
-      let items = List.length (String.split_on_char ',' msg) in
+  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
+    when Parseff.Error.pos e = 0 ->
+      let msg = Parseff.Error.message e in
+      Alcotest.(check bool)
+        "found text" true
+        (String.ends_with ~suffix:", found 'zzz'" msg);
+      let items = List.length (String.split_on_char ',' msg) - 1 in
       Alcotest.(check bool) "at most 64 items" true (items <= 64);
       Alcotest.(check bool) "at least 60 items" true (items >= 60)
   | _ ->
@@ -465,10 +480,12 @@ let test_item_buffer_dedupes_on_overflow () =
         ignore (Parseff.consume (Printf.sprintf "item%d" (i mod 3)))
     )
   in
-  match Legacy.parse "zzz" (Parseff.one_of alternatives) with
-  | Legacy.Error { pos = 0; error = `Expected msg } ->
+  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
+    when Parseff.Error.pos e = 0 ->
+      let msg = Parseff.Error.message e in
       Alcotest.(check string)
-        "three items" {|expected "item0", "item1", or "item2"|} msg
+        "three items" {|expected "item0", "item1", or "item2", found 'zzz'|} msg
   | _ ->
       Alcotest.fail "Expected an Expected error at 0"
 
@@ -476,7 +493,7 @@ let test_utf8_char_does_not_format_labels () =
   let u = Uchar.of_int 0x61 in
   let words = ref 0. in
   match
-    Legacy.parse (String.make 1000 'a') (fun () ->
+    Parseff.parse (String.make 1000 'a') (fun () ->
         let before = Gc.minor_words () in
         for _ = 1 to 1000 do
           ignore (Parseff.Utf8.char u)
@@ -484,18 +501,18 @@ let test_utf8_char_does_not_format_labels () =
         words := Gc.minor_words () -. before
     )
   with
-  | Legacy.Ok () ->
+  | Ok () ->
       Alcotest.(check bool) "no formatting per call" true (!words /. 1000. < 20.)
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_utf8_char_error_text () =
   both_runners show_unit "b"
     (fun () -> ignore (Parseff.Utf8.char (Uchar.of_int 0x61)))
-    {|Error@0 Expected "expected 'a'"|};
+    {|Error@0 Expected "expected 'a', found 'b'"|};
   both_runners show_unit "b"
     (fun () -> ignore (Parseff.Utf8.char (Uchar.of_int 0xE9)))
-    {|Error@0 Expected "expected '\195\169'"|}
+    {|Error@0 Expected "expected '\195\169', found 'b'"|}
 
 let test_recorded_failures_do_not_fail_success () =
   let parser () =
@@ -589,9 +606,11 @@ let test_context_chain_after_frame_closes () =
   in
   Alcotest.(check string)
     "chain copied when inner closed" "outer@0; inner@0" (frames_of "abx" parser);
-  match Legacy.parse "abx" parser with
-  | Legacy.Error { pos = 2; error = `Expected "expected \"c\"" } ->
-      ()
+  match Parseff.parse "abx" parser with
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
+    when Parseff.Error.pos e = 2 ->
+      Alcotest.(check string)
+        "message" "expected \"c\", found 'x'" (Parseff.Error.message e)
   | _ ->
       Alcotest.fail "unexpected error"
 
@@ -663,7 +682,7 @@ let test_context_grows_deep () =
 
 let test_context_does_not_change_result () =
   both_runners show_unit "[1, 2, 3,]" ctx_array_parser
-    {|Error@9 Expected "expected value"|}
+    {|Error@9 Expected "expected value, found ']'"|}
 
 let let_statement_parser () =
   let ident () =
@@ -716,7 +735,7 @@ let let_statement_parser () =
 
 let test_cut_seals_whole_construct () =
   both_runners string_of_int "let x = ;" let_statement_parser
-    {|Error@8 Expected "expected expression"|};
+    {|Error@8 Expected "expected expression, found ';'"|};
   both_runners string_of_int "let x = 1; 2;" let_statement_parser "Ok 2";
   Alcotest.(check string)
     "frames" "statement@0"
@@ -733,7 +752,9 @@ let test_cut_without_context () =
       (fun () -> Parseff.consume "ac")
       ()
   in
-  both_runners (fun s -> s) "ac" parser {|Error@1 Expected "expected \"b\""|};
+  both_runners
+    (fun s -> s)
+    "ac" parser {|Error@1 Expected "expected \"b\", found 'c'"|};
   both_runners (fun s -> s) "ab" parser "Ok b"
 
 let test_cut_stops_at_look_ahead () =
@@ -776,7 +797,8 @@ let test_cut_seals_outer_frames_only_on_failure () =
   in
   let parser () = List.length (Parseff.many item ()) in
   both_runners string_of_int "kvkv" parser "Ok 2";
-  both_runners string_of_int "kvkx" parser {|Error@3 Expected "expected \"v\""|}
+  both_runners string_of_int "kvkx" parser
+    {|Error@3 Expected "expected \"v\", found 'x'"|}
 
 let test_cut_inside_nested_context_keeps_outer_open () =
   let parser () =
@@ -796,7 +818,7 @@ let test_cut_inside_nested_context_keeps_outer_open () =
   in
   both_runners
     (fun _ -> "ok")
-    "abd" parser {|Error@2 Expected "expected \"c\""|}
+    "abd" parser {|Error@2 Expected "expected \"c\", found 'd'"|}
 
 let lines l = String.concat "\n" l
 
@@ -1399,11 +1421,12 @@ let test_fail_from_span () =
        ]
     )
     (render_error "x = 300;" parser);
-  match Legacy.parse "x = 300;" parser with
-  | Legacy.Error { pos = 4; error = `Message "number is too large" } ->
+  match Parseff.parse "x = 300;" parser with
+  | Error ({ kind = Message "number is too large"; _ } as e)
+    when Parseff.Error.pos e = 4 ->
       ()
   | _ ->
-      Alcotest.fail "legacy result must not change"
+      Alcotest.fail "expected a Message error positioned at the span start"
 
 let test_fail_from_after_position_is_normalized () =
   let parser () = Parseff.fail ~from:5 "backwards" in
@@ -1517,11 +1540,11 @@ let test_error_from_and_notes () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
-  match Legacy.parse "abcd" parser with
-  | Legacy.Error { pos = 0; error = `Boom } ->
+  match Parseff.parse "abcd" parser with
+  | Error ({ kind = User `Boom; _ } as e) when Parseff.Error.pos e = 0 ->
       ()
   | _ ->
-      Alcotest.fail "legacy result must not change"
+      Alcotest.fail "expected a User error positioned at the span start"
 
 let test_catch_with_extras () =
   let parser () =
@@ -1612,8 +1635,10 @@ let test_match_regex_label () =
     "x"
     (fun () -> Parseff.match_regex ~label:"identifier" id_re)
     "Ok x";
-  both_runners show_unit "1" parser {|Error@0 Expected "expected identifier"|};
-  both_runners show_unit "" parser "Error@0 Unexpected_end_of_input";
+  both_runners show_unit "1" parser
+    {|Error@0 Expected "expected identifier, found '1'"|};
+  both_runners show_unit "" parser
+    {|Error@0 Expected "expected identifier, found end of input"|};
   let both () =
     ignore
       (Parseff.or_
@@ -1623,7 +1648,7 @@ let test_match_regex_label () =
       )
   in
   both_runners show_unit "!" both
-    {|Error@0 Expected "expected identifier or number"|};
+    {|Error@0 Expected "expected identifier or number, found '!'"|};
   check_render "label is rendered"
     (lines
        [

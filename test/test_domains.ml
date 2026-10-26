@@ -136,16 +136,16 @@ let test_basic_parallel_parsing () =
   let results =
     parallel num_domains (fun i ->
         let input = inputs.(i mod Array.length inputs) in
-        Legacy.parse input (fun () -> Parseff.consume input)
+        Parseff.parse input (fun () -> Parseff.consume input)
     )
   in
   List.iteri
     (fun i result ->
       let input = inputs.(i mod Array.length inputs) in
       match result with
-      | Legacy.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "matched" input s
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success for %S" i input)
     )
@@ -157,17 +157,17 @@ let test_same_parser_many_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = String.init (i + 1) (fun j -> Char.chr (48 + (j mod 10))) in
-        (input, Legacy.parse input digit_list_parser)
+        (input, Parseff.parse input digit_list_parser)
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Legacy.Ok lst ->
+      | Ok lst ->
           Alcotest.(check int)
             (Printf.sprintf "domain %d length" i)
             (String.length input) (List.length lst)
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: expected success" i)
     )
     results
@@ -188,15 +188,15 @@ let test_alternation_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = choices.(i mod Array.length choices) in
-        (input, Legacy.parse input parser)
+        (input, Parseff.parse input parser)
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Legacy.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "matched choice" input s
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success for %S" i input)
     )
@@ -219,18 +219,18 @@ let test_json_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = docs.(i mod Array.length docs) in
-        (i, input, Legacy.parse input json)
+        (i, input, Parseff.parse input json)
     )
   in
   List.iter
     (fun (i, input, result) ->
       match result with
-      | Legacy.Ok _ ->
+      | Ok _ ->
           ()
-      | Legacy.Error { pos; _ } ->
+      | Error e ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: JSON parse failed at pos %d for %S" i
-               pos input
+               (Parseff.Error.pos e) input
             )
     )
     results
@@ -241,15 +241,15 @@ let test_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "item%d" i in
         let source = Parseff.Source.of_string input in
-        (input, Legacy.parse_source source (fun () -> Parseff.consume input))
+        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Legacy.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "streaming result" input s
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: streaming parse failed for %S" i input)
     )
@@ -265,10 +265,10 @@ let test_high_contention () =
         for iter = 0 to iterations - 1 do
           let input = Printf.sprintf "%d" ((domain_id * iterations) + iter) in
           let parser () = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
-          match Legacy.parse input parser with
-          | Legacy.Ok s ->
+          match Parseff.parse input parser with
+          | Ok s ->
               if s <> input then incr failures
-          | Legacy.Error _ ->
+          | Error _ ->
               incr failures
         done;
         !failures
@@ -288,24 +288,24 @@ let test_errors_isolated_across_domains () =
         if i mod 2 = 0 then
           (* Valid parse *)
           let input = "hello" in
-          (i, true, Legacy.parse input (fun () -> Parseff.consume "hello"))
+          (i, true, Parseff.parse input (fun () -> Parseff.consume "hello"))
         else
           (* Invalid parse — should fail *)
           let input = "xyz" in
-          (i, false, Legacy.parse input (fun () -> Parseff.consume "hello"))
+          (i, false, Parseff.parse input (fun () -> Parseff.consume "hello"))
     )
   in
   List.iter
     (fun (i, should_succeed, result) ->
       match (should_succeed, result) with
-      | true, Legacy.Ok s ->
+      | true, Ok s ->
           Alcotest.(check string) (Printf.sprintf "domain %d ok" i) "hello" s
-      | true, Legacy.Error _ ->
+      | true, Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success, got error" i)
-      | false, Legacy.Error _ ->
+      | false, Error _ ->
           ()
-      | false, Legacy.Ok _ ->
+      | false, Ok _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected error, got success" i)
     )
@@ -320,18 +320,18 @@ let test_complex_combinators_across_domains () =
         let parser =
           Parseff.sep_by Parseff.digit (fun () -> Parseff.char ',')
         in
-        (i, Legacy.parse input parser)
+        (i, Parseff.parse input parser)
     )
   in
   List.iter
     (fun (i, result) ->
       match result with
-      | Legacy.Ok lst ->
+      | Ok lst ->
           Alcotest.(check (list int))
             (Printf.sprintf "domain %d sep_by" i)
             [ i; i + 1; i + 2 ]
             lst
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: sep_by parse failed" i)
     )
     results
@@ -354,13 +354,13 @@ let test_streaming_json_across_domains () =
     parallel num_domains (fun i ->
         let input, expected_name = docs.(i mod Array.length docs) in
         let source = Parseff.Source.of_string input in
-        (i, expected_name, Legacy.parse_source source json)
+        (i, expected_name, Parseff.parse_source source json)
     )
   in
   List.iter
     (fun (i, expected_name, result) ->
       match result with
-      | Legacy.Ok (Object pairs) ->
+      | Ok (Object pairs) ->
           let name =
             List.assoc_opt "name" pairs
             |> Option.map (function String s -> s | _ -> "<not string>")
@@ -369,11 +369,13 @@ let test_streaming_json_across_domains () =
           Alcotest.(check string)
             (Printf.sprintf "domain %d name" i)
             expected_name name
-      | Legacy.Ok _ ->
+      | Ok _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: expected Object" i)
-      | Legacy.Error { pos; _ } ->
+      | Error e ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i pos)
+            (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i
+               (Parseff.Error.pos e)
+            )
     )
     results
 
@@ -393,15 +395,15 @@ let test_chunked_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "hello%d" i in
         let source = chunked_source 2 input in
-        (input, Legacy.parse_source source (fun () -> Parseff.consume input))
+        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Legacy.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "chunked result" input s
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: chunked parse failed for %S" i input)
     )

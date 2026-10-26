@@ -587,6 +587,8 @@ let tag_label = 3
 let tag_end_of_input = 4
 let tag_bytes = 5
 let tag_at_least = 6
+let tag_big = 7
+let max_small_count = max_int lsr 3
 let far_max_capacity = 62
 
 let[@inline never] far_advance_int st p k =
@@ -704,7 +706,7 @@ let far_compact f =
     let k = far_item_kind f i in
     let tag = k land 7 in
     let s =
-      if tag = tag_literal || tag = tag_label then
+      if tag = tag_literal || tag = tag_label || tag = tag_big then
         far_item_str f i
       else
         ""
@@ -832,10 +834,21 @@ let[@inline always] char_kind c =
   else
     (code lsl 3) lor tag_byte
 
-let[@inline always] bytes_kind n = (imin n (max_int lsr 3) lsl 3) lor tag_bytes
+let[@inline always] bytes_kind n = (n lsl 3) lor tag_bytes
 
-let[@inline always] at_least_kind n =
-  (imin n (max_int lsr 3) lsl 3) lor tag_at_least
+let[@inline always] at_least_kind n = (n lsl 3) lor tag_at_least
+
+let[@inline never] fail_bytes st n =
+  if n <= max_small_count then
+    fail_int st st.pos (bytes_kind n)
+  else
+    fail_str st st.pos tag_big (string_of_int n)
+
+let[@inline never] fail_at_least st n =
+  if n <= max_small_count then
+    fail_int st st.pos (at_least_kind n)
+  else
+    fail_str st st.pos ((1 lsl 3) lor tag_big) (string_of_int n)
 let label_value = "value"
 let label_regex = "regex match"
 
@@ -1166,7 +1179,7 @@ let[@inline never] handle_take st n =
     st.pos <- st.pos + n;
     s
   end else
-    fail_int st st.pos (bytes_kind n)
+    fail_bytes st n
 
 exception Invalid_utf8 of int
 
@@ -1363,7 +1376,7 @@ let take_while ?(at_least = 0) ?label pred =
     | Some l ->
         fail_str_cold st st.pos tag_label l
     | None ->
-        fail_int_cold st st.pos (at_least_kind at_least)
+        fail_at_least st at_least
   end
   else
     s
@@ -1947,7 +1960,7 @@ module Utf8 = struct
         | Some l ->
             fail_str_cold st st.pos tag_label l
         | None ->
-            fail_int_cold st st.pos (at_least_kind at_least)
+            fail_at_least st at_least
       end
       else
         s
@@ -2006,7 +2019,8 @@ end
 let truncated_read f =
   let found = ref false in
   for i = 0 to f.n - 1 do
-    if far_item_kind f i land 7 = tag_bytes then found := true
+    let k = far_item_kind f i in
+    if k land 7 = tag_bytes || k = tag_big then found := true
   done;
   !found
 
@@ -2603,6 +2617,13 @@ let expected_of_far f =
             "1 byte"
           else
             string_of_int payload ^ " bytes"
+        )
+    else if tag = tag_big then
+      Error.Label
+        ( if payload = 0 then
+            s ^ " bytes"
+          else
+            "at least " ^ s ^ " characters"
         )
     else
       Error.Label

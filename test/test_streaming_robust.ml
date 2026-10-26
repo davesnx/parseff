@@ -54,10 +54,10 @@ let run_pair first_data second_data =
   let go r data =
     spawn (fun () ->
         r :=
-          match Legacy.parse_source (yielding_source data) words with
-          | Legacy.Ok s ->
+          match Parseff.parse_source (yielding_source data) words with
+          | Ok s ->
               s
-          | Legacy.Error _ ->
+          | Error _ ->
               "error"
           | exception e ->
               "EXN " ^ Printexc.to_string e
@@ -88,14 +88,10 @@ let test_interleaved_parses_second_finishes_first () =
   check_outside_parse ()
 
 let show_failure = function
-  | Legacy.Ok _ ->
+  | Ok _ ->
       "ok"
-  | Legacy.Error { pos; error = `Expected msg } ->
-      Printf.sprintf "%d %s" pos msg
-  | Legacy.Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.sprintf "%d end of input" pos
-  | Legacy.Error _ ->
-      "other"
+  | Error e ->
+      Printf.sprintf "%d %s" (Parseff.Error.pos e) (Parseff.Error.message e)
 
 let test_interleaved_failures_keep_separate_groups () =
   let a = ref "unset" and b = ref "unset" in
@@ -108,14 +104,14 @@ let test_interleaved_failures_keep_separate_groups () =
     spawn (fun () ->
         r :=
           show_failure
-            (Legacy.parse_source (yielding_source ~chunk:1 data) parser)
+            (Parseff.parse_source (yielding_source ~chunk:1 data) parser)
     )
   in
   go a "abcx";
   go b "abxx";
   run ();
-  Alcotest.(check string) "first" "3 expected \"d\"" !a;
-  Alcotest.(check string) "second" "2 expected \"c\" or \"d\"" !b;
+  Alcotest.(check string) "first" "3 expected \"d\", found 'x'" !a;
+  Alcotest.(check string) "second" "2 expected \"c\" or \"d\", found 'xx'" !b;
   check_outside_parse ()
 
 let chunk_source ?(chunk = 3000) total line =
@@ -143,11 +139,11 @@ let count_lines () =
 
 let test_bounded_heap () =
   let before = (Gc.quick_stat ()).Gc.top_heap_words in
-  let r = Legacy.parse_source (chunk_source 20_000_000 "ab\n") count_lines in
+  let r = Parseff.parse_source (chunk_source 20_000_000 "ab\n") count_lines in
   ( match r with
-  | Legacy.Ok n ->
+  | Ok n ->
       Alcotest.(check bool) "lines" true (n > 6_000_000)
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "parse failed"
   );
   let after = (Gc.quick_stat ()).Gc.top_heap_words in
@@ -175,10 +171,10 @@ let test_location_after_compaction () =
     String.concat " " (List.rev (show_loc (Parseff.location ()) :: !locs))
   in
   let expected =
-    match Legacy.parse text parser with
-    | Legacy.Ok s ->
+    match Parseff.parse text parser with
+    | Ok s ->
         s
-    | Legacy.Error _ ->
+    | Error _ ->
         Alcotest.fail "memory parse failed"
   in
   let chunked =
@@ -190,10 +186,10 @@ let test_location_after_compaction () =
         n
     )
   in
-  match Legacy.parse_source ~backtrack_window:256 chunked parser with
-  | Legacy.Ok s ->
+  match Parseff.parse_source ~backtrack_window:256 chunked parser with
+  | Ok s ->
       Alcotest.(check string) "locations" expected s
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "streaming parse failed"
 
 let fn_src data chunk =
@@ -209,7 +205,7 @@ let test_regex_window_pinned () =
   let re = Re.compile (Re.rep1 (Re.char 'a')) in
   let data = String.make 16 'x' ^ String.make 8 'a' in
   let r =
-    Legacy.parse_source ~backtrack_window:16 (fn_src data 4) (fun () ->
+    Parseff.parse_source ~backtrack_window:16 (fn_src data 4) (fun () ->
         Parseff.or_
           (fun () ->
             ignore (Parseff.take 16);
@@ -220,11 +216,11 @@ let test_regex_window_pinned () =
     )
   in
   match r with
-  | Legacy.Error { error = `Backtrack_window_exceeded _; _ } ->
+  | Error { kind = Backtrack_window_exceeded _; _ } ->
       ()
-  | Legacy.Ok s ->
+  | Ok s ->
       Alcotest.failf "unexpected Ok %s" s
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "wrong error"
 
 let pinned_regex_parser re () =
@@ -240,22 +236,22 @@ let test_regex_pinned_complete_match () =
   let re = Re.compile (Re.rep1 (Re.char 'a')) in
   let data = String.make 10 'x' ^ "aabccc" in
   let expected =
-    match Legacy.parse data (pinned_regex_parser re) with
-    | Legacy.Ok s ->
+    match Parseff.parse data (pinned_regex_parser re) with
+    | Ok s ->
         s
-    | Legacy.Error _ ->
+    | Error _ ->
         Alcotest.fail "memory parse failed"
   in
   Alcotest.(check string) "memory" "aa" expected;
   List.iter
     (fun chunk ->
       match
-        Legacy.parse_source ~backtrack_window:16 (fn_src data chunk)
+        Parseff.parse_source ~backtrack_window:16 (fn_src data chunk)
           (pinned_regex_parser re)
       with
-      | Legacy.Ok s ->
+      | Ok s ->
           Alcotest.(check string) (Printf.sprintf "chunk %d" chunk) expected s
-      | Legacy.Error _ ->
+      | Error _ ->
           Alcotest.failf "chunk %d failed" chunk
     )
     [ 1; 3; 4; 4096 ]
@@ -264,21 +260,21 @@ let test_regex_pinned_match_at_buffer_end () =
   let re = Re.compile (Re.rep1 (Re.char 'a')) in
   let data = String.make 10 'x' ^ "aaaaaab" in
   match
-    Legacy.parse_source ~backtrack_window:16 (fn_src data 4096)
+    Parseff.parse_source ~backtrack_window:16 (fn_src data 4096)
       (pinned_regex_parser re)
   with
-  | Legacy.Error { error = `Backtrack_window_exceeded _; _ } ->
+  | Error { kind = Backtrack_window_exceeded _; _ } ->
       ()
-  | Legacy.Ok s ->
+  | Ok s ->
       Alcotest.failf "unexpected Ok %s" s
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "wrong error"
 
 let test_small_window_rejected () =
   List.iter
     (fun w ->
       match
-        Legacy.parse_source ~backtrack_window:w (fn_src "hello" 5) (fun () ->
+        Parseff.parse_source ~backtrack_window:w (fn_src "hello" 5) (fun () ->
             Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
         )
       with
@@ -289,13 +285,13 @@ let test_small_window_rejected () =
     )
     [ -5; 0; 1 ];
   match
-    Legacy.parse_source ~backtrack_window:2 (fn_src "hello" 5) (fun () ->
+    Parseff.parse_source ~backtrack_window:2 (fn_src "hello" 5) (fun () ->
         Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
     )
   with
-  | Legacy.Ok s ->
+  | Ok s ->
       Alcotest.(check bool) "matched a prefix" true (String.length s >= 1)
-  | Legacy.Error _ ->
+  | Error _ ->
       Alcotest.fail "window 2 should not report end of input"
 
 let test_buf_size_rejected () =
@@ -313,7 +309,7 @@ let test_bad_read_result () =
   List.iter
     (fun bad ->
       let src = Parseff.Source.of_function (fun _ _ _ -> bad) in
-      match Legacy.parse_source src (fun () -> Parseff.any_char ()) with
+      match Parseff.parse_source src (fun () -> Parseff.any_char ()) with
       | _ ->
           Alcotest.failf "read result %d accepted" bad
       | exception Invalid_argument msg ->

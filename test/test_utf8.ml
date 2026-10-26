@@ -4,14 +4,14 @@ let uchar_testable =
     Uchar.equal
 
 let parse_with_pos input parser =
-  Legacy.parse input (fun () ->
+  Parseff.parse input (fun () ->
       let value = parser () in
       (value, Parseff.position ())
   )
 
 let test_satisfy_ascii () =
   match
-    Legacy.parse "a" (fun () ->
+    Parseff.parse "a" (fun () ->
         Parseff.Utf8.satisfy (fun u -> Uchar.to_int u = 0x61) ~label:"'a'"
     )
   with
@@ -61,39 +61,49 @@ let test_satisfy_4byte () =
 
 let test_satisfy_failure () =
   match
-    Legacy.parse "a" (fun () ->
+    Parseff.parse "a" (fun () ->
         Parseff.Utf8.satisfy (fun u -> Uchar.to_int u > 0x7F) ~label:"non-ASCII"
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected non-ASCII" expected
+      Alcotest.(check string)
+        "error message" "expected non-ASCII, found 'a'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_satisfy_eof () =
   match
-    Legacy.parse "" (fun () -> Parseff.Utf8.satisfy (fun _ -> true) ~label:"any")
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Alcotest.(check int) "error position" 0 pos
-  | Error _ ->
-      Alcotest.fail "Expected `Unexpected_end_of_input"
-
-let test_satisfy_invalid_utf8 () =
-  (* 0xFF is never valid in UTF-8 *)
-  match
-    Legacy.parse "\xFF" (fun () ->
+    Parseff.parse "" (fun () ->
         Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Message expected } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      Alcotest.(check string)
+        "expected items" "expected any, found end of input"
+        (Parseff.Error.message e);
+      Alcotest.(check int) "error position" 0 pos
+  | Error _ ->
+      Alcotest.fail "Expected an end of input error"
+
+let test_satisfy_invalid_utf8 () =
+  (* 0xFF is never valid in UTF-8 *)
+  match
+    Parseff.parse "\xFF" (fun () ->
+        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+    )
+  with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error ({ kind = Message expected; _ } as e) ->
+      let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string) "error message" "invalid UTF-8" expected
   | Error _ ->
@@ -121,16 +131,17 @@ let test_char_multibyte () =
       Alcotest.fail "Expected success"
 
 let test_char_failure () =
-  match Legacy.parse "a" (fun () -> Parseff.Utf8.char (Uchar.of_int 0x62)) with
+  match Parseff.parse "a" (fun () -> Parseff.Utf8.char (Uchar.of_int 0x62)) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected _ } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error position" 0 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_any_char_ascii () =
-  match Legacy.parse "x" Parseff.Utf8.any_char with
+  match Parseff.parse "x" Parseff.Utf8.any_char with
   | Ok u ->
       Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0x78) u
   | Error _ ->
@@ -138,20 +149,23 @@ let test_any_char_ascii () =
 
 let test_any_char_multibyte () =
   (* ñ = U+00F1 *)
-  match Legacy.parse "\xC3\xB1" Parseff.Utf8.any_char with
+  match Parseff.parse "\xC3\xB1" Parseff.Utf8.any_char with
   | Ok u ->
       Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0xF1) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_any_char_eof () =
-  match Legacy.parse "" Parseff.Utf8.any_char with
+  match Parseff.parse "" Parseff.Utf8.any_char with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected any character, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
-      Alcotest.fail "Expected `Unexpected_end_of_input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_take_while_ascii () =
   match
@@ -184,7 +198,7 @@ let test_take_while_unicode () =
 
 let test_take_while_empty () =
   match
-    Legacy.parse "123" (fun () ->
+    Parseff.parse "123" (fun () ->
         Parseff.Utf8.take_while Uucp.Alpha.is_alphabetic
     )
   with
@@ -195,7 +209,7 @@ let test_take_while_empty () =
 
 let test_take_while_at_least () =
   match
-    Legacy.parse "abc" (fun () ->
+    Parseff.parse "abc" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
           Uucp.Alpha.is_alphabetic
     )
@@ -207,52 +221,61 @@ let test_take_while_at_least () =
 
 let test_take_while_at_least_failure () =
   match
-    Legacy.parse "a" (fun () ->
+    Parseff.parse "a" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
           Uucp.Alpha.is_alphabetic
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Unexpected_end_of_input } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      Alcotest.(check string)
+        "expected items" "expected letters, found end of input"
+        (Parseff.Error.message e);
       Alcotest.(check int) "error position" 1 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_take_while_at_least_failure_message () =
   match
-    Legacy.parse "a1" (fun () ->
+    Parseff.parse "a1" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
           Uucp.Alpha.is_alphabetic
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 1 pos;
-      Alcotest.(check string) "error message" "expected letters" expected
+      Alcotest.(check string)
+        "error message" "expected letters, found '1'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_take_while_at_least_without_label () =
   match
-    Legacy.parse "a1" (fun () ->
+    Parseff.parse "a1" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 Uucp.Alpha.is_alphabetic
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 1 pos;
       Alcotest.(check string)
-        "error message" "expected at least 2 characters" expected
+        "error message" "expected at least 2 characters, found '1'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_take_while_at_least_counts_codepoints () =
   (* "éà" = 2 code points, 4 bytes. at_least:2 should succeed *)
   match
-    Legacy.parse "\xC3\xA9\xC3\xA0" (fun () ->
+    Parseff.parse "\xC3\xA9\xC3\xA0" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
           Uucp.Alpha.is_alphabetic
     )
@@ -265,14 +288,17 @@ let test_take_while_at_least_counts_codepoints () =
 let test_take_while_at_least_codepoint_count_fail () =
   (* "é" = 1 code point, 2 bytes. at_least:2 should fail *)
   match
-    Legacy.parse "\xC3\xA9" (fun () ->
+    Parseff.parse "\xC3\xA9" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
           Uucp.Alpha.is_alphabetic
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected letters, found end of input"
+        (Parseff.Error.message e);
       ()
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -280,11 +306,12 @@ let test_take_while_at_least_codepoint_count_fail () =
 let test_take_while_invalid_utf8 () =
   (* Valid ASCII then invalid byte *)
   match
-    Legacy.parse "a\xFF" (fun () -> Parseff.Utf8.take_while (fun _ -> true))
+    Parseff.parse "a\xFF" (fun () -> Parseff.Utf8.take_while (fun _ -> true))
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Message expected } ->
+  | Error ({ kind = Message expected; _ } as e) ->
+      let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error at invalid byte" 1 pos;
       Alcotest.(check string) "error message" "invalid UTF-8" expected
   | Error _ ->
@@ -368,34 +395,39 @@ let test_skip_while_then_char_unicode_term () =
 
 let test_skip_while_then_char_failure () =
   match
-    Legacy.parse "  x" (fun () ->
+    Parseff.parse "  x" (fun () ->
         Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
           (Uchar.of_int 0x3A)
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected _ } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error at non-matching char" 2 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_skip_while_then_char_eof () =
   match
-    Legacy.parse "  " (fun () ->
+    Parseff.parse "  " (fun () ->
         Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
           (Uchar.of_int 0x3A)
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Unexpected_end_of_input } ->
+  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      Alcotest.(check string)
+        "expected items" "expected ':', found end of input"
+        (Parseff.Error.message e);
       Alcotest.(check int) "error at eof" 2 pos
   | Error _ ->
-      Alcotest.fail "Expected `Unexpected_end_of_input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_letter_ascii () =
-  match Legacy.parse "a" Parseff.Utf8.letter with
+  match Parseff.parse "a" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "ASCII letter" (Uchar.of_int 0x61) u
   | Error _ ->
@@ -403,7 +435,7 @@ let test_letter_ascii () =
 
 let test_letter_accented () =
   (* é = U+00E9 *)
-  match Legacy.parse "\xC3\xA9" Parseff.Utf8.letter with
+  match Parseff.parse "\xC3\xA9" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "accented letter" (Uchar.of_int 0xE9) u
   | Error _ ->
@@ -411,7 +443,7 @@ let test_letter_accented () =
 
 let test_letter_cjk () =
   (* 中 = U+4E2D *)
-  match Legacy.parse "\xE4\xB8\xAD" Parseff.Utf8.letter with
+  match Parseff.parse "\xE4\xB8\xAD" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "CJK letter" (Uchar.of_int 0x4E2D) u
   | Error _ ->
@@ -419,65 +451,74 @@ let test_letter_cjk () =
 
 let test_letter_cyrillic () =
   (* д = U+0434 *)
-  match Legacy.parse "\xD0\xB4" Parseff.Utf8.letter with
+  match Parseff.parse "\xD0\xB4" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "Cyrillic letter" (Uchar.of_int 0x434) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_letter_failure () =
-  match Legacy.parse "1" Parseff.Utf8.letter with
+  match Parseff.parse "1" Parseff.Utf8.letter with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected letter" expected
+      Alcotest.(check string)
+        "error message" "expected letter, found '1'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_digit_success () =
-  match Legacy.parse "7" Parseff.Utf8.digit with
+  match Parseff.parse "7" Parseff.Utf8.digit with
   | Ok n ->
       Alcotest.(check int) "digit value" 7 n
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_digit_failure_letter () =
-  match Legacy.parse "a" Parseff.Utf8.digit with
+  match Parseff.parse "a" Parseff.Utf8.digit with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected digit" expected
+      Alcotest.(check string)
+        "error message" "expected digit, found 'a'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_alphanum_letter () =
-  match Legacy.parse "\xC3\xA9" Parseff.Utf8.alphanum with
+  match Parseff.parse "\xC3\xA9" Parseff.Utf8.alphanum with
   | Ok u ->
       Alcotest.(check uchar_testable) "accented letter" (Uchar.of_int 0xE9) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_alphanum_digit () =
-  match Legacy.parse "5" Parseff.Utf8.alphanum with
+  match Parseff.parse "5" Parseff.Utf8.alphanum with
   | Ok u ->
       Alcotest.(check uchar_testable) "digit" (Uchar.of_int 0x35) u
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_alphanum_failure () =
-  match Legacy.parse "!" Parseff.Utf8.alphanum with
+  match Parseff.parse "!" Parseff.Utf8.alphanum with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected alphanumeric" expected
+      Alcotest.(check string)
+        "error message" "expected alphanumeric, found '!'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_whitespace_ascii () =
-  match Legacy.parse "  \t\nX" (fun () -> Parseff.Utf8.whitespace ()) with
+  match Parseff.parse "  \t\nX" (fun () -> Parseff.Utf8.whitespace ()) with
   | Ok s ->
       Alcotest.(check string) "whitespace" "  \t\n" s
   | Error _ ->
@@ -486,14 +527,14 @@ let test_whitespace_ascii () =
 let test_whitespace_unicode () =
   (* NBSP (U+00A0) + EM SPACE (U+2003) + ASCII space *)
   let input = "\xC2\xA0\xE2\x80\x83 X" in
-  match Legacy.parse input (fun () -> Parseff.Utf8.whitespace ()) with
+  match Parseff.parse input (fun () -> Parseff.Utf8.whitespace ()) with
   | Ok s ->
       Alcotest.(check string) "unicode whitespace" "\xC2\xA0\xE2\x80\x83 " s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace_empty () =
-  match Legacy.parse "abc" (fun () -> Parseff.Utf8.whitespace ()) with
+  match Parseff.parse "abc" (fun () -> Parseff.Utf8.whitespace ()) with
   | Ok s ->
       Alcotest.(check string) "no whitespace" "" s
   | Error _ ->
@@ -501,13 +542,16 @@ let test_whitespace_empty () =
 
 let test_whitespace_at_least_failure () =
   match
-    Legacy.parse "abc" (fun () -> Parseff.Utf8.whitespace ~at_least:1 ())
+    Parseff.parse "abc" (fun () -> Parseff.Utf8.whitespace ~at_least:1 ())
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = Parseff.Error.pos e in
+      let expected = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "expected whitespace" expected
+      Alcotest.(check string)
+        "error message" "expected whitespace, found 'abc'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -563,7 +607,7 @@ let test_streaming_satisfy () =
     )
   in
   match
-    Legacy.parse_source source (fun () ->
+    Parseff.parse_source source (fun () ->
         Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
     )
   with
@@ -589,7 +633,7 @@ let test_streaming_take_while () =
     )
   in
   match
-    Legacy.parse_source source (fun () ->
+    Parseff.parse_source source (fun () ->
         Parseff.Utf8.take_while Uucp.Alpha.is_alphabetic
     )
   with
