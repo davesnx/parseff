@@ -2440,7 +2440,7 @@ module Error = struct
         (fun ((f : frame), loc) ->
           match loc with
           | Some (l, c) when f.delimited && l < line ->
-              Some (l, c)
+              Some (l, c, f.start)
           | _ ->
               None
         )
@@ -2495,7 +2495,7 @@ module Error = struct
         None
     in
     let opener_view =
-      match opener with Some (l, c) -> get l (c - 1) | None -> None
+      match opener with Some (l, c, _) -> get l (c - 1) | None -> None
     in
     let shown =
       List.fold_left
@@ -2523,10 +2523,12 @@ module Error = struct
       done;
       Buffer.add_string b " | "
     in
+    let bar = ref "" in
     let line_row (v : view) =
       Buffer.add_char b '\n';
       add_padded b w v.number;
       Buffer.add_string b " | ";
+      Buffer.add_string b !bar;
       if v.left_cut then Buffer.add_string b "...";
       add_display b v.text;
       if v.right_cut then Buffer.add_string b "..."
@@ -2550,6 +2552,7 @@ module Error = struct
         (fun ((n : note), (r : range), (nv : view), _) ->
           if nv.number = v.number then begin
             gutter ();
+            Buffer.add_string b !bar;
             prefix_pad v r.start;
             for _ = 1 to marks v r.start r.stop do
               Buffer.add_char b '-'
@@ -2560,54 +2563,129 @@ module Error = struct
         )
         placed
     in
-    let opener_row (v : view) =
-      gutter ();
+    let framed =
+      match (opener, opener_view, error_view) with
+      | Some _, Some _, Some _ ->
+          true
+      | _ ->
+          false
+    in
+    let cols (v : view) upto =
+      let text = v.text in
+      let n = imax 0 (imin (upto - v.first) (String.length text)) in
+      let col =
+        ref
+          (w + 5
+          +
+          if v.left_cut then
+            3
+          else
+            0
+          )
+      in
       let i = ref 0 in
-      while
-        !i < String.length v.text && (v.text.[!i] = ' ' || v.text.[!i] = '\t')
-      do
+      while !i < n do
+        if String.unsafe_get text !i = '\t' then
+          col := ((!col / 8) + 1) * 8
+        else begin
+          incr col;
+          i := !i + char_len text !i - 1
+        end;
         incr i
       done;
-      prefix_pad v (v.first + !i);
-      Buffer.add_string b "- opened here"
+      if upto - v.first > String.length text then incr col;
+      !col - (w + 3)
     in
-    let caret_row (v : view) =
+    let rule first last upto (v : view) =
       gutter ();
-      let text_len = String.length v.text in
-      prefix_pad v e.span.start;
-      let carets =
-        if e.span.start - v.first >= text_len then
-          1
-        else
-          marks v e.span.start e.span.stop
-      in
-      for _ = 1 to carets do
+      Buffer.add_string b first;
+      for _ = 1 to cols v upto - 1 do
+        Buffer.add_string b "\xe2\x94\x80"
+      done;
+      Buffer.add_string b last
+    in
+    let carets (v : view) =
+      if e.span.start - v.first >= String.length v.text then
+        1
+      else
+        marks v e.span.start e.span.stop
+    in
+    let add_carets v =
+      for _ = 1 to carets v do
         Buffer.add_char b '^'
       done
     in
-    let is_opener (v : view) =
-      match opener with Some (l, _) -> l = v.number | None -> false
+    let opener_row (v : view) =
+      match opener with
+      | Some (_, _, start) ->
+          rule "\xe2\x95\xad" "\xe2\x95\xaf" start v
+      | None ->
+          ()
     in
+    let caret_row (v : view) =
+      if framed && !bar <> "" then begin
+        rule "\xe2\x95\xb0" "" e.span.start v;
+        add_carets v
+      end else begin
+        gutter ();
+        prefix_pad v e.span.start;
+        add_carets v
+      end
+    in
+    let is_opener (v : view) =
+      match opener with Some (l, _, _) -> l = v.number | None -> false
+    in
+    let opener_number =
+      match opener with Some (l, _, _) -> l | None -> max_int
+    in
+    let in_block number = framed && number >= opener_number && number < line in
     let rec emit = function
       | [] ->
           ()
       | (v : view) :: rest ->
+          bar :=
+            if (not framed) || v.number < opener_number || v.number > line then
+              ""
+            else if v.number = opener_number then
+              "  "
+            else
+              "\xe2\x94\x82 ";
           line_row v;
-          if is_opener v then opener_row v;
-          if v.number = line then caret_row v;
+          if is_opener v && framed then opener_row v;
+          if v.number = line then begin
+            caret_row v;
+            if framed then
+              bar :=
+                if !bar = "" then
+                  ""
+                else
+                  "  "
+          end;
           note_rows v;
           ( match rest with
           | (nxt : view) :: _ ->
               let hidden = nxt.number - v.number - 1 in
+              let elide () =
+                if in_block v.number then begin
+                  gutter ();
+                  Buffer.add_string b "\xe2\x94\x82 ..."
+                end else
+                  Buffer.add_string b "\n..."
+              in
               if hidden = 1 then
                 begin match get (v.number + 1) 0 with
                 | Some m ->
+                    bar :=
+                      if in_block v.number then
+                        "\xe2\x94\x82 "
+                      else
+                        "";
                     line_row m
                 | None ->
-                    Buffer.add_string b "\n..."
+                    elide ()
               end
               else if hidden > 1 then
-                Buffer.add_string b "\n..."
+                elide ()
           | [] ->
               ()
           );

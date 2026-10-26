@@ -236,18 +236,19 @@ match Parseff.parse input parser with
 `Parseff.Error.render` prints an error with its source line, a caret under the failure and what the parser was doing:
 
 ```
-input.json:3:3: error: expected ',' or '}', found '"'
-1 | {
-  | - opened here
-2 |   "a": 1
-3 |   "b": 2
-  |   ^
+input.json:4:5: error: expected ',' or '}', found '"'
+2 |     "config": {
+  | ╭─────────────╯
+3 | │     "a": 1
+4 | │     "b": 2
+  | ╰─────^
+  * while parsing object, from 2:13
   * while parsing object, from 1:1
 ```
 - The header is `name:line:col: error: message`. Without `~name` it starts at `line:col`.
 - The message is `expected A, B, or C, found X`. `found X` is a quoted identifier-like run (up to 32 bytes) or one code point, with control bytes escaped, or `end of input`.
 - Carets cover the span, one per code point. Tabs in the line are kept, so the caret lines up for any tab width. Control characters in the line print as `?`.
-- `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five. A construct made with `~delimited:true` that started on an earlier line is shown with a `-` under its opening token and the text `opened here`. A single hidden line between the opener and the failure is shown, longer gaps become `...`.
+- `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five. A construct made with `~delimited:true` that started on an earlier line is shown as a bar that joins its opening token to the caret: `╭─╯` under the opener, `│` on the lines in between and `╰──^` at the failure. A single hidden line between the opener and the failure is shown, longer gaps become `...`.
 - Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.Error.pp` prints through a formatter, and `Parseff.Error.message` returns only the one-line message.
 

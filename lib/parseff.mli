@@ -138,12 +138,13 @@ module Error : sig
   (** [render e] prints the error with a source excerpt:
 
       {v
-      input.json:3:3: error: expected ',' or '}', found '"'
-      1 | {
-        | - opened here
-      2 |   "a": 1
-      3 |   "b": 2
-        |   ^
+      input.json:4:5: error: expected ',' or '}', found '"'
+      2 |     "config": {
+        | ╭─────────────╯
+      3 | │     "a": 1
+      4 | │     "b": 2
+        | ╰─────^
+        * while parsing object, from 2:13
         * while parsing object, from 1:1
       v}
 

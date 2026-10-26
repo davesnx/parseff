@@ -103,9 +103,9 @@ Rendered errors show the source line, what was expected and where the constructs
   >   "b": 2
   > }'
   input.json:3:3: error: expected ',' or '}', found '"'
-  1 | {
-    | - opened here
-  2 |   "a": 1
-  3 |   "b": 2
-    |   ^
+  1 |   {
+    | ╭─╯
+  2 | │   "a": 1
+  3 | │   "b": 2
+    | ╰───^
     * while parsing object, from 1:1

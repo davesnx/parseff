@@ -938,15 +938,63 @@ let test_render_missing_comma_opened_here () =
     (lines
        [
          "input.json:3:3: error: expected ',' or '}', found '\"'";
-         "1 | {";
-         "  | - opened here";
-         "2 |   \"a\": 1";
-         "3 |   \"b\": 2";
-         "  |   ^";
+         "1 |   {";
+         "  | ╭─╯";
+         "2 | │   \"a\": 1";
+         "3 | │   \"b\": 2";
+         "  | ╰───^";
          "  * while parsing object, from 1:1";
        ]
     )
     (render "{\n  \"a\": 1\n  \"b\": 2\n}" ctx_json_parser)
+
+let test_render_opener_mid_line () =
+  check_render "mid-line opener"
+    (lines
+       [
+         "input.json:4:5: error: expected ',' or '}', found '\"'";
+         "2 |     \"config\": {";
+         "  | ╭─────────────╯";
+         "3 | │     \"a\": 1";
+         "4 | │     \"b\": 2";
+         "  | ╰─────^";
+         "  * while parsing object, from 2:13";
+         "  * while parsing object, from 1:1";
+       ]
+    )
+    (render "{\n  \"config\": {\n    \"a\": 1\n    \"b\": 2\n  }\n}"
+       ctx_json_parser
+    )
+
+let test_render_opener_tab () =
+  check_render "tab before the opener"
+    (lines
+       [
+         "input.json:3:4: error: expected ',' or ']', found '3'";
+         "2 |   \t[1,";
+         "  | ╭───╯";
+         "3 | │ \t2 3]";
+         "  | ╰─────^";
+         "  * while parsing array, from 2:2";
+         "  * while parsing array, from 1:1";
+       ]
+    )
+    (render "[\n\t[1,\n\t2 3]\n]" ctx_json_parser)
+
+let test_render_opener_utf8 () =
+  check_render "multi-byte char before the opener"
+    (lines
+       [
+         "input.json:2:3: error: expected ',' or ']', found '3'";
+         "1 |   [\"é\", [1,";
+         "  | ╭───────╯";
+         "2 | │ 2 3]]";
+         "  | ╰───^";
+         "  * while parsing array, from 1:8";
+         "  * while parsing array, from 1:1";
+       ]
+    )
+    (render "[\"é\", [1,\n2 3]]" ctx_json_parser)
 
 let test_render_loop_exit_literal () =
   let parser () =
@@ -1144,11 +1192,11 @@ let test_render_crlf () =
     (lines
        [
          "input.json:3:3: error: expected ',' or '}', found '\"'";
-         "1 | {";
-         "  | - opened here";
-         "2 |   \"a\": 1";
-         "3 |   \"b\": 2";
-         "  |   ^";
+         "1 |   {";
+         "  | ╭─╯";
+         "2 | │   \"a\": 1";
+         "3 | │   \"b\": 2";
+         "  | ╰───^";
          "  * while parsing object, from 1:1";
        ]
     )
@@ -1159,11 +1207,11 @@ let test_render_empty_line () =
     (lines
        [
          "input.json:3:3: error: expected ',' or ']', found '2'";
-         "1 | [";
-         "  | - opened here";
-         "2 | ";
-         "3 | 1 2]";
-         "  |   ^";
+         "1 |   [";
+         "  | ╭─╯";
+         "2 | │ ";
+         "3 | │ 1 2]";
+         "  | ╰───^";
          "  * while parsing array, from 1:1";
        ]
     )
@@ -1174,10 +1222,10 @@ let test_render_eof_at_line_end () =
     (lines
        [
          "input.json:2:1: error: expected value, found end of input";
-         "1 | [1,";
-         "  | - opened here";
-         "2 | ";
-         "  | ^";
+         "1 |   [1,";
+         "  | ╭─╯";
+         "2 | │ ";
+         "  | ╰─^";
          "  * while parsing array, from 1:1";
        ]
     )
@@ -1198,12 +1246,12 @@ let test_render_gap () =
     (lines
        [
          "input.json:42:1: error: expected value, found 'x'";
-         " 1 | [";
-         "   | - opened here";
-         "...";
-         "41 | 1,";
-         "42 | x]";
-         "   | ^";
+         " 1 |   [";
+         "   | ╭─╯";
+         "   | │ ...";
+         "41 | │ 1,";
+         "42 | │ x]";
+         "   | ╰─^";
          "   * while parsing array, from 1:1";
        ]
     )
@@ -1212,12 +1260,12 @@ let test_render_gap () =
     (lines
        [
          "input.json:4:2: error: expected value, found 'x'";
-         "1 | [";
-         "  | - opened here";
-         "2 | 1,";
-         "3 | 2,";
-         "4 |  x]";
-         "  |  ^";
+         "1 |   [";
+         "  | ╭─╯";
+         "2 | │ 1,";
+         "3 | │ 2,";
+         "4 | │  x]";
+         "  | ╰──^";
          "  * while parsing array, from 1:1";
        ]
     )
@@ -1388,7 +1436,9 @@ let test_render_streaming_opener_dropped () =
       Alcotest.(check bool)
         "frame start is a byte offset" true
         (has "* while parsing list, from byte 0");
-      Alcotest.(check bool) "no opener row" false (has "opened here");
+      Alcotest.(check bool) "no opener corner" false (has "╭");
+      Alcotest.(check bool) "no gutter bar" false (has "│");
+      Alcotest.(check bool) "plain caret row" true (has "501 | x\n    | ^");
       let full = E.render ~name:"stream" ~source:input e in
       let has_full sub =
         let n = String.length sub in
@@ -1398,8 +1448,7 @@ let test_render_streaming_opener_dropped () =
         in
         go 0
       in
-      Alcotest.(check bool)
-        "source restores the opener" true (has_full "opened here");
+      Alcotest.(check bool) "source restores the opener" true (has_full "╭─╯");
       Alcotest.(check bool)
         "source restores the frame position" true
         (has_full "* while parsing list, from 1:1")
@@ -2478,6 +2527,10 @@ let () =
           test_case "A trailing comma" `Quick test_render_trailing_comma;
           test_case "B missing colon" `Quick test_render_missing_colon;
           test_case "C opened here" `Quick test_render_missing_comma_opened_here;
+          test_case "C opener mid-line" `Quick test_render_opener_mid_line;
+          test_case "C opener after a tab" `Quick test_render_opener_tab;
+          test_case "C opener after a multi-byte char" `Quick
+            test_render_opener_utf8;
           test_case "D literal after a loop" `Quick
             test_render_loop_exit_literal;
           test_case "E duplicates and sorting" `Quick
