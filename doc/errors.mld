@@ -245,8 +245,9 @@ type 'e Error.t = {
   [Char], [Literal], [Label] or [End_of_input]. [found] is the text at that
   position, or [End] at the end of the input. Characters print as ['x'],
   literals as ["abc"] and labels as written.
-- [Message msg]: a failure with a message: {!val:Parseff.fail}, an invalid UTF-8
-  byte, or a {!val:Parseff.match_regex} without a label. Unlike [Expected],
+- [Message msg]: a failure raised with {!val:Parseff.fail}. Failures of
+  primitives are always [Expected], so they merge with the other alternatives
+  that were expected at the same position. Unlike [Expected],
   [fail] is not caught by backtracking combinators ({!val:Parseff.or_},
   {!val:Parseff.many}, etc.) or relabeling combinators
   ({!val:Parseff.expect}, {!val:Parseff.one_of_labeled}).
@@ -329,7 +330,9 @@ a record. The common migration is one line:
 
 User errors move from the variant row into [kind]:
 [Error { error = `Too_large n; _ }] becomes
-[Error { kind = User (`Too_large n); _ }]. [`Failure msg] becomes [Message msg], and the messages of
-[`Expected] errors that were not expectations (invalid UTF-8, failed regex) become [Message].
+[Error { kind = User (`Too_large n); _ }]. [`Failure msg] becomes [Message msg].
+The 0.4 messages of primitives that were not expectations (invalid UTF-8, failed
+regex, mismatched [BE.int16]) are now [Expected] items: [valid UTF-8],
+[regex match] and [int16 0xFFFE].
 [`Unexpected_end_of_input] is an [Expected] error whose [found] is [End], so it
 now says what was expected. The position is [Parseff.Error.pos e].

@@ -91,4 +91,4 @@ Non-ASCII in key (café — parser matches 'caf' then expects ':' but finds 'é'
 Invalid UTF-8 (0xC3 where whitespace is expected, hits skip_whitespace directly):
 
   $ ./main.exe "$(printf 'key:\303 hello')"
-  Error at byte 4: invalid UTF-8
+  Error at byte 4: expected valid UTF-8, found '\xC3'

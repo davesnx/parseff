@@ -88,9 +88,9 @@ let test_int16_eof () =
   match Parseff.parse "\x01" (fun () -> Parseff.BE.any_int16 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 2 bytes, found end of input"
+        "expected items" "expected 2 bytes, found '\\x01'"
         (Parseff.Error.message e);
       ()
   | Error _ ->
@@ -118,9 +118,9 @@ let test_int32_eof () =
   match Parseff.parse "\x01\x02\x03" (fun () -> Parseff.BE.any_int32 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 4 bytes, found end of input"
+        "expected items" "expected 4 bytes, found '\\x01'"
         (Parseff.Error.message e);
       ()
   | Error _ ->
@@ -156,9 +156,9 @@ let test_int64_eof () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 8 bytes, found end of input"
+        "expected items" "expected 8 bytes, found '\\x01'"
         (Parseff.Error.message e);
       ()
   | Error _ ->
@@ -238,10 +238,12 @@ let test_be_int16_mismatch () =
   match Parseff.parse "\x02\x01" (fun () -> Parseff.BE.int16 0x0102) with
   | Ok () ->
       Alcotest.fail "Expected failure"
-  | Error { kind = Message _; _ } ->
-      ()
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "message" "expected int16 0x0102, found '\\x02'"
+        (Parseff.Error.message e)
   | Error _ ->
-      Alcotest.fail "Expected Message error"
+      Alcotest.fail "Expected an Expected error"
 
 let test_be_int32_match () =
   match
@@ -274,14 +276,14 @@ let test_le_int32_match () =
 
 let expect_error_at pos msg (result : (_, unit) Parseff.result) =
   match result with
-  | Error ({ kind = Message m; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let p = Parseff.Error.pos e in
       Alcotest.(check int) "error position" pos p;
-      Alcotest.(check string) "error message" msg m
+      Alcotest.(check string) "error message" msg (Parseff.Error.message e)
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error _ ->
-      Alcotest.fail "Expected Message error"
+      Alcotest.fail "Expected an Expected error"
 
 let expect_ok result =
   match result with Ok () -> () | Error _ -> Alcotest.fail "Expected success"
@@ -296,9 +298,9 @@ let test_le_int16_high_bit () =
   expect_ok (Parseff.parse "\xFE\xFF" (fun () -> Parseff.LE.int16 0xFFFE))
 
 let test_int16_mismatch_message () =
-  expect_error_at 0 "expected int16 0xFFFE, got 0x0102"
+  expect_error_at 0 "expected int16 0xFFFE, found '\\x01'"
     (Parseff.parse "\x01\x02" (fun () -> Parseff.BE.int16 0xFFFE));
-  expect_error_at 0 "expected int16 0xFFFE, got 0xFFFF"
+  expect_error_at 0 "expected int16 0xFFFE, found '\\xFF'"
     (Parseff.parse "\xFF\xFF" (fun () -> Parseff.BE.int16 0xFFFE))
 
 let test_int16_out_of_range () =
@@ -313,7 +315,7 @@ let test_int16_out_of_range () =
     [ -32769; 65536 ]
 
 let test_int16_mismatch_position_after_prefix () =
-  expect_error_at 1 "expected int16 0x0102, got 0x0201"
+  expect_error_at 1 "expected int16 0x0102, found '\\x02'"
     (Parseff.parse "\x00\x02\x01" (fun () ->
          ignore (Parseff.any_char ());
          Parseff.BE.int16 0x0102
@@ -321,18 +323,18 @@ let test_int16_mismatch_position_after_prefix () =
     )
 
 let test_be_int32_mismatch () =
-  expect_error_at 0 "expected int32 0x01020304, got 0x04030201"
+  expect_error_at 0 "expected int32 0x01020304, found '\\x04'"
     (Parseff.parse "\x04\x03\x02\x01" (fun () -> Parseff.BE.int32 0x01020304l))
 
 let test_be_int64_mismatch () =
-  expect_error_at 0 "expected int64 0x0102030405060708, got 0x0807060504030201"
+  expect_error_at 0 "expected int64 0x0102030405060708, found '\\x08'"
     (Parseff.parse "\x08\x07\x06\x05\x04\x03\x02\x01" (fun () ->
          Parseff.BE.int64 0x0102030405060708L
      )
     )
 
 let test_le_int32_mismatch_position () =
-  expect_error_at 1 "expected int32 0x01020304, got 0x04030201"
+  expect_error_at 1 "expected int32 0x01020304, found '\\x01'"
     (Parseff.parse "\x00\x01\x02\x03\x04" (fun () ->
          ignore (Parseff.any_char ());
          Parseff.LE.int32 0x01020304l
@@ -340,7 +342,7 @@ let test_le_int32_mismatch_position () =
     )
 
 let test_int64_mismatch_position () =
-  expect_error_at 1 "expected int64 0x0000000000000001, got 0x0100000000000000"
+  expect_error_at 1 "expected int64 0x0000000000000001, found '\\x01'"
     (Parseff.parse "\x00\x01\x00\x00\x00\x00\x00\x00\x00" (fun () ->
          ignore (Parseff.any_char ());
          Parseff.BE.int64 1L
@@ -416,9 +418,9 @@ let test_take_eof () =
   match Parseff.parse "abc" (fun () -> Parseff.take 10) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 10 bytes, found end of input"
+        "expected items" "expected 10 bytes, found 'abc'"
         (Parseff.Error.message e);
       ()
   | Error _ ->
@@ -525,9 +527,9 @@ let test_streaming_eof () =
   match Parseff.parse_source src (fun () -> Parseff.BE.any_int16 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 2 bytes, found end of input"
+        "expected items" "expected 2 bytes, found '\\x01'"
         (Parseff.Error.message e);
       ()
   | Error _ ->

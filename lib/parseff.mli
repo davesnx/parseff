@@ -93,8 +93,8 @@ module Error : sig
         (** A primitive failed. [items] is everything that was expected at the
             furthest failure position, sorted and without duplicates. *)
     | Message of string
-        (** A failure with a message: {!val:Parseff.fail}, an invalid UTF-8
-            byte, or a failed {!val:Parseff.match_regex} without a label. *)
+        (** A failure raised with {!val:Parseff.fail}. Failures of primitives
+            are always [Expected]. *)
     | User of 'e  (** A value given to {!val:Parseff.error}. *)
     | Depth_limit_exceeded of { limit : int }
         (** {!val:Parseff.rec_} nested deeper than [max_depth]. *)
@@ -278,7 +278,7 @@ val match_regex : ?label:string -> Re.re -> string
     When the regex does not match, the parse fails with [expected <label>] if
     [~label] is given, so the failure merges with the other alternatives
     expected at the same position like any other primitive. Without [~label] the
-    message is ["regex match failed"].
+    label is ["regex match"].
 
     In streaming mode, the parser keeps at least half of the backtrack window
     buffered ahead of the current position, unless the source has ended. A match
@@ -368,7 +368,9 @@ val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
     position instead of a single position, and [~notes] attaches {!Error.note}s.
     {!Error.render} underlines the span and prints the notes. This is intended
     for user-initiated validation failures (e.g. a parsed value is out of
-    range).
+    range). In streaming, a [~from] older than the buffered input is moved to
+    the start of the oldest buffered line, so that the location of the error and
+    its position agree.
 
     {@ocaml[
     let byte () =
@@ -708,7 +710,7 @@ val catch : (unit -> 'a) -> (string -> 'a) -> 'a
 val one_of : (unit -> 'a) list -> unit -> 'a
 (** [one_of parsers] tries each parser in order until one succeeds. When every
     parser fails, the error lists what the parsers expected at the furthest
-    position, as for {!or_}. [one_of []] fails with ["no alternative matched"].
+    position, as for {!or_}. [one_of []] expects ["an alternative"].
 
     Example:
     {@ocaml[

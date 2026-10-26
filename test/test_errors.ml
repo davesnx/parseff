@@ -455,6 +455,11 @@ let test_behind_failure_ignored () =
     (fun s -> s)
     "abq" parser {|Error@2 Expected "expected \"c\", found 'q'"|}
 
+let overflow_message n_items n_more =
+  let shown = List.init n_items (fun i -> Printf.sprintf "\"item%03d\"" i) in
+  "expected " ^ String.concat ", " shown
+  ^ Printf.sprintf ", or %d more alternatives, found 'zzz'" n_more
+
 let test_item_buffer_overflow () =
   let alternatives =
     List.init 100 (fun i () ->
@@ -462,17 +467,27 @@ let test_item_buffer_overflow () =
     )
   in
   match Parseff.parse "zzz" (Parseff.one_of alternatives) with
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
+  | Error ({ kind = Expected { items = _, rest; _ }; _ } as e)
     when Parseff.Error.pos e = 0 ->
-      let msg = Parseff.Error.message e in
-      Alcotest.(check bool)
-        "found text" true
-        (String.ends_with ~suffix:", found 'zzz'" msg);
-      let items = List.length (String.split_on_char ',' msg) - 1 in
-      Alcotest.(check bool) "at most 64 items" true (items <= 64);
-      Alcotest.(check bool) "at least 60 items" true (items >= 60)
+      Alcotest.(check int) "items kept plus the marker" 65 (List.length rest + 1);
+      Alcotest.(check string)
+        "message" (overflow_message 64 36) (Parseff.Error.message e)
   | _ ->
       Alcotest.fail "Expected an Expected error at 0"
+
+let test_item_buffer_overflow_counts_distinct () =
+  let alternatives =
+    List.init 300 (fun i () ->
+        ignore (Parseff.consume (Printf.sprintf "item%03d" (i mod 100)))
+    )
+  in
+  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  | Error e ->
+      Alcotest.(check string)
+        "duplicates are not counted twice" (overflow_message 64 36)
+        (Parseff.Error.message e)
+  | Ok _ ->
+      Alcotest.fail "expected an error"
 
 let test_item_buffer_dedupes_on_overflow () =
   let alternatives =
@@ -1660,7 +1675,7 @@ let test_match_regex_label () =
     (render_error "!" both);
   both_runners show_unit "!"
     (fun () -> ignore (Parseff.match_regex id_re))
-    {|Error@0 Message "regex match failed"|}
+    {|Error@0 Expected "expected regex match, found '!'"|}
 
 let test_note_on_dropped_line () =
   let input = String.make 2000 'a' ^ "!" in
@@ -1878,6 +1893,468 @@ let test_diagnostics_carry_the_error () =
   | _ ->
       Alcotest.fail "expected an error with its diagnostics"
 
+let chunk_source ?(chunk = 100) input =
+  let pos = ref 0 in
+  Parseff.Source.of_chunks (fun () ->
+      if !pos >= String.length input then
+        None
+      else begin
+        let k = min chunk (String.length input - !pos) in
+        let c = String.sub input !pos k in
+        pos := !pos + k;
+        Some c
+      end
+  )
+
+let render_all e input =
+  ignore (E.render e);
+  ignore (E.render ~source:input e);
+  ignore (E.render ~columns:`Code_points e)
+
+let test_backtrack_window_error_builds () =
+  let long = String.make 5000 'a' in
+  let check label input =
+    match
+      Parseff.parse_source ~backtrack_window:1000 (chunk_source input)
+        (fun () -> ignore (Parseff.take 5000)
+      )
+    with
+    | Error ({ kind = Backtrack_window_exceeded _; _ } as e) ->
+        render_all e input
+    | _ ->
+        Alcotest.failf "%s: expected the window error" label
+  in
+  check "one long line" long;
+  check "long second line" (String.make 100 'a' ^ "\n" ^ String.make 5000 'b');
+  match
+    Parseff.parse_source ~backtrack_window:1000 (chunk_source long) (fun () ->
+        ignore (Parseff.take 5000);
+        Parseff.fail
+          ~notes:
+            [
+              {
+                Parseff.Error.at = Some { Parseff.start = 9000; stop = 9001 };
+                text = "far";
+              };
+            ]
+          "x"
+    )
+  with
+  | Error e ->
+      render_all e long
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_notes_past_the_line_end () =
+  let input = String.make 600 'a' in
+  match
+    Parseff.parse input (fun () ->
+        ignore (Parseff.take 600);
+        Parseff.fail
+          ~notes:
+            [
+              {
+                Parseff.Error.at = Some { Parseff.start = 5000; stop = 5001 };
+                text = "far";
+              };
+            ]
+          "x"
+    )
+  with
+  | Error e ->
+      render_all e input
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let lines_text =
+  String.concat "" (List.init 400 (fun i -> Printf.sprintf "line %d\n" i))
+
+let from_before_the_buffer_parser kind () =
+  ignore (Parseff.consume "line 0\n");
+  let from = Parseff.position () in
+  Parseff.skip_while (fun _ -> true);
+  match kind with
+  | `Fail ->
+      Parseff.fail ~from "unterminated"
+  | `Error ->
+      Parseff.error ~from `Unterminated
+
+let check_location_agrees label input (e : _ E.t) =
+  let at = Parseff.location_of_position input (E.pos e) in
+  Alcotest.(check (pair int int))
+    (label ^ " line and column")
+    (at.line, at.col)
+    (e.location.line, e.location.col);
+  Alcotest.(check int) (label ^ " offset") (E.pos e) e.location.offset
+
+let test_from_older_than_the_buffer () =
+  ( match Parseff.parse lines_text (from_before_the_buffer_parser `Fail) with
+  | Error e ->
+      Alcotest.(check int) "string mode keeps the offset" 7 (E.pos e);
+      check_location_agrees "string" lines_text e
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  ( match
+      Parseff.parse_source ~backtrack_window:200
+        (chunk_source ~chunk:64 lines_text)
+        (from_before_the_buffer_parser `Fail)
+    with
+  | Error e ->
+      check_location_agrees "streaming fail" lines_text e;
+      Alcotest.(check bool) "offset is inside the input" true (E.pos e >= 7)
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  match
+    Parseff.parse_source ~backtrack_window:200
+      (chunk_source ~chunk:64 lines_text)
+      (from_before_the_buffer_parser `Error)
+  with
+  | Error e ->
+      check_location_agrees "streaming error" lines_text e
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_look_ahead_probe_does_not_leak () =
+  let parser () =
+    ignore
+      (Parseff.look_ahead (fun () ->
+           Parseff.many (fun () -> Parseff.char 'a') ()
+       )
+      );
+    ignore (Parseff.char 'b')
+  in
+  check_render "probe failures are forgotten"
+    (lines
+       [
+         "input.json:1:1: error: expected 'b', found 'aac'";
+         "1 | aac";
+         "  | ^^^";
+       ]
+    )
+    (render_error "aac" parser);
+  let guarded () =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.look_ahead (fun () -> Parseff.char 'a'));
+        ignore (Parseff.char 'b')
+      )
+      (fun () -> ignore (Parseff.char 'c'))
+      ()
+  in
+  check_render "a successful guard adds nothing"
+    (lines
+       [
+         "input.json:1:1: error: expected 'b' or 'c', found 'ad'";
+         "1 | ad";
+         "  | ^^";
+       ]
+    )
+    (render_error "ad" guarded);
+  check_render "a failing look_ahead is a failure"
+    (lines
+       [
+         "input.json:1:2: error: expected \"b\", found 'x'"; "1 | ax"; "  |  ^";
+       ]
+    )
+    (render_error "ax" (fun () ->
+         ignore (Parseff.look_ahead (fun () -> Parseff.consume "ab"))
+     )
+    );
+  check_render "a failing look_ahead merges with the earlier group"
+    (lines
+       [
+         "input.json:1:1: error: expected 'q' or 'r', found 'z'";
+         "1 | z";
+         "  | ^";
+       ]
+    )
+    (render_error "z" (fun () ->
+         Parseff.or_
+           (fun () -> ignore (Parseff.char 'q'))
+           (fun () -> ignore (Parseff.look_ahead (fun () -> Parseff.char 'r')))
+           ()
+     )
+    )
+
+let test_multibyte_literal_mismatch () =
+  check_render "two byte character"
+    (lines
+       [
+         "input.json:1:1: error: expected \"\xC3\xA9\", found '\xC3\xA8'";
+         "1 | \xC3\xA8";
+         "  | ^";
+       ]
+    )
+    (render_error "\xC3\xA8" (fun () -> ignore (Parseff.consume "\xC3\xA9")));
+  check_render "three byte character after a prefix"
+    (lines
+       [
+         "input.json:1:2: error: expected \"\xE2\x82\xAC\", found \
+          '\xE2\x82\xAD'";
+         "1 | x\xE2\x82\xAD";
+         "  |  ^";
+       ]
+    )
+    (render_error "x\xE2\x82\xAD" (fun () ->
+         ignore (Parseff.consume "x\xE2\x82\xAC")
+     )
+    );
+  check_render "input ends inside the character"
+    (lines
+       [
+         "input.json:1:1: error: expected \"\xC3\xA9\", found '\\xC3'";
+         "1 | ?";
+         "  | ^";
+       ]
+    )
+    (render_error "\xC3" (fun () -> ignore (Parseff.consume "\xC3\xA9")))
+
+let test_expect_with_commit_inside () =
+  let with_commit body () =
+    Parseff.or_
+      (fun () -> ignore (Parseff.char 'a'))
+      (fun () ->
+        Parseff.expect "thing" (fun () ->
+            Parseff.commit ();
+            body ()
+        )
+      )
+      ()
+  in
+  check_render "items before the commit are forgotten, the rest is relabeled"
+    (lines
+       [ "input.json:1:1: error: expected thing, found 'z'"; "1 | z"; "  | ^" ]
+    )
+    (render_error "z"
+       (with_commit (fun () ->
+            ignore
+              (Parseff.or_
+                 (fun () -> Parseff.char 'x')
+                 (fun () -> Parseff.char 'y')
+                 ()
+              )
+        )
+       )
+    );
+  check_render "a single failure is relabeled too"
+    (lines
+       [ "input.json:1:1: error: expected thing, found 'z'"; "1 | z"; "  | ^" ]
+    )
+    (render_error "z" (with_commit (fun () -> ignore (Parseff.char 'x'))));
+  check_render "without commit the earlier alternative stays"
+    (lines
+       [
+         "input.json:1:1: error: expected thing or 'a', found 'z'";
+         "1 | z";
+         "  | ^";
+       ]
+    )
+    (render_error "z" (fun () ->
+         Parseff.or_
+           (fun () -> ignore (Parseff.char 'a'))
+           (fun () ->
+             Parseff.expect "thing" (fun () -> ignore (Parseff.char 'x'))
+           )
+           ()
+     )
+    )
+
+let test_commit_without_frame_keeps_the_group () =
+  check_render "nothing sealed, nothing forgotten"
+    (lines
+       [
+         "input.json:1:3: error: expected \"cd\", found 'XY'";
+         "1 | abXY";
+         "  |   ^^";
+       ]
+    )
+    (render_error "abXY" (fun () ->
+         ignore (Parseff.optional (fun () -> Parseff.consume "abcd") ());
+         Parseff.commit ();
+         ignore (Parseff.consume "q")
+     )
+    )
+
+let test_expect_after_far_buffer_overflow () =
+  let originals =
+    List.init 50 (fun i () -> ignore (Parseff.char (Char.chr (77 + i))))
+  in
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.one_of originals ())
+      (fun () ->
+        Parseff.expect "thing" (fun () ->
+            for _ = 1 to 20 do
+              ignore (Parseff.optional (fun () -> Parseff.char 'A') ())
+            done;
+            ignore (Parseff.char 'A')
+        )
+      )
+      ()
+  in
+  match Parseff.parse "0" parser with
+  | Error e ->
+      let chars =
+        List.init 50 (fun i -> Printf.sprintf "'%c'" (Char.chr (77 + i)))
+      in
+      let all = List.filteri (fun i _ -> i < 49) chars in
+      Alcotest.(check string)
+        "originals kept, inner items replaced"
+        ("expected thing, " ^ String.concat ", " all ^ ", or "
+       ^ List.nth chars 49 ^ ", found '0'"
+        )
+        (E.message e)
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_window_markers_agree () =
+  let digits n =
+    String.init n (fun i -> Char.chr (Char.code '0' + (i mod 10)))
+  in
+  let check label input pos =
+    match
+      Parseff.parse input (fun () ->
+          ignore (Parseff.take pos);
+          ignore (Parseff.char '!')
+      )
+    with
+    | Error e ->
+        Alcotest.(check string) label (E.render ~source:input e) (E.render e)
+    | Ok _ ->
+        Alcotest.failf "%s: expected an error" label
+  in
+  check "long line" (digits 400) 279;
+  check "line of 241 bytes" (digits 241 ^ "\nb") 0;
+  check "line of 241 bytes, error late" (digits 241 ^ "\nb") 200;
+  check "multi-byte characters at the cut"
+    (String.concat "" (List.init 150 (fun _ -> "\xE2\x82\xAC")))
+    3;
+  check "multi-byte characters, error late"
+    (String.concat "" (List.init 150 (fun _ -> "\xE2\x82\xAC")))
+    300
+
+let test_window_end_marker () =
+  let input =
+    String.init 400 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  match
+    Parseff.parse input (fun () ->
+        ignore (Parseff.take 279);
+        ignore (Parseff.char '!')
+    )
+  with
+  | Error e ->
+      let row = List.nth (String.split_on_char '\n' (E.render e)) 1 in
+      Alcotest.(check bool)
+        "row ends with a marker" true
+        (String.ends_with ~suffix:"..." row)
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_lone_carriage_return () =
+  match
+    Parseff.parse "ab\r" (fun () ->
+        ignore (Parseff.consume "ab\r");
+        ignore (Parseff.char 'c')
+    )
+  with
+  | Error e ->
+      Alcotest.(check string)
+        "same with and without the source"
+        (E.render ~source:"ab\r" e)
+        (E.render e)
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_found_with_data_left () =
+  let parser () =
+    ignore
+      (Parseff.or_
+         (fun () -> Parseff.take 5)
+         (fun () -> String.make 1 (Parseff.char 'x'))
+         ()
+      )
+  in
+  check_render "bytes remain"
+    (lines
+       [
+         "input.json:1:1: error: expected 5 bytes or 'x', found 'abc'";
+         "1 | abc";
+         "  | ^^^";
+       ]
+    )
+    (render_error "abc" parser);
+  check_render "nothing remains"
+    (lines
+       [
+         "input.json:1:1: error: expected 5 bytes or 'x', found end of input";
+         "1 | ";
+         "  | ^";
+       ]
+    )
+    (render_error "" parser)
+
+let test_c1_controls_are_escaped () =
+  match Parseff.parse "\xC2\x85" (fun () -> ignore (Parseff.char 'a')) with
+  | Error e ->
+      Alcotest.(check string)
+        "message" "expected 'a', found '\\u{0085}'" (E.message e)
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_built_in_failures_are_expected_items () =
+  let message input parser =
+    match Parseff.parse input parser with
+    | Error e ->
+        E.message e
+    | Ok _ ->
+        "ok"
+  in
+  Alcotest.(check string)
+    "regex without label" "expected regex match or \"x\", found '?'"
+    (message "?" (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () -> Parseff.match_regex (Re.compile (Re.rep1 Re.digit)))
+              (fun () -> Parseff.consume "x")
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "int16 mismatch" "expected int16 0x0203 or \"x\", found '\\x00'"
+    (message "\x00\x01" (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () ->
+                Parseff.BE.int16 0x0203;
+                ""
+              )
+              (fun () -> Parseff.consume "x")
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "invalid UTF-8" "expected valid UTF-8 or 'x', found '\\xFF'"
+    (message "\xFF" (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () ->
+                ignore (Parseff.Utf8.satisfy (fun _ -> true) ~label:"letter");
+                'a'
+              )
+              (fun () -> Parseff.char 'x')
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "empty one_of" "expected an alternative, found 'z'"
+    (message "z" (Parseff.one_of []))
+
 let () =
   let open Alcotest in
   run "Errors"
@@ -1929,6 +2406,8 @@ let () =
             test_user_error_beats_expected_at_tie;
           test_case "behind failure ignored" `Quick test_behind_failure_ignored;
           test_case "item buffer overflow" `Quick test_item_buffer_overflow;
+          test_case "item buffer overflow counts distinct" `Quick
+            test_item_buffer_overflow_counts_distinct;
           test_case "item buffer dedupes on overflow" `Quick
             test_item_buffer_dedupes_on_overflow;
           test_case "Utf8.char does not format labels" `Quick
@@ -2032,6 +2511,33 @@ let () =
           test_case "migration pattern" `Quick test_migration_pattern;
           test_case "diagnostics carry the error" `Quick
             test_diagnostics_carry_the_error;
+        ]
+      );
+      ( "review fixes",
+        [
+          test_case "window error builds" `Quick
+            test_backtrack_window_error_builds;
+          test_case "notes past the line end" `Quick
+            test_notes_past_the_line_end;
+          test_case "from older than the buffer" `Quick
+            test_from_older_than_the_buffer;
+          test_case "look_ahead probes are forgotten" `Quick
+            test_look_ahead_probe_does_not_leak;
+          test_case "multi-byte literal mismatch" `Quick
+            test_multibyte_literal_mismatch;
+          test_case "expect with commit inside" `Quick
+            test_expect_with_commit_inside;
+          test_case "commit without a frame" `Quick
+            test_commit_without_frame_keeps_the_group;
+          test_case "expect after far buffer overflow" `Quick
+            test_expect_after_far_buffer_overflow;
+          test_case "window markers agree" `Quick test_window_markers_agree;
+          test_case "window end marker" `Quick test_window_end_marker;
+          test_case "lone carriage return" `Quick test_lone_carriage_return;
+          test_case "found with data left" `Quick test_found_with_data_left;
+          test_case "C1 controls" `Quick test_c1_controls_are_escaped;
+          test_case "built-in failures are expected items" `Quick
+            test_built_in_failures_are_expected_items;
         ]
       );
       ( "fold exceptions",

@@ -159,7 +159,8 @@ let test_utf8_invalid_after_compaction_skip_while () =
   let text = valid_lines ^ "\xFF" in
   let parser () = Parseff.Utf8.skip_while (fun _ -> true) in
   let expected =
-    Printf.sprintf "Error@%d Message invalid UTF-8" (String.length valid_lines)
+    Printf.sprintf "Error@%d Expected expected valid UTF-8, found '\\xFF'"
+      (String.length valid_lines)
   in
   check_all ~chunk_sizes:[ 1; 7; 1000 ] "skip_while"
     (fun () -> "()")
@@ -177,7 +178,8 @@ let test_utf8_invalid_after_compaction_take_while () =
     !n
   in
   let expected =
-    Printf.sprintf "Error@%d Message invalid UTF-8" (String.length valid_lines)
+    Printf.sprintf "Error@%d Expected expected valid UTF-8, found '\\xFF'"
+      (String.length valid_lines)
   in
   check_all ~chunk_sizes:[ 1; 7; 1000 ] "take_while" string_of_int text parser
     expected

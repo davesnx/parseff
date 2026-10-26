@@ -218,7 +218,7 @@ type 'e Error.t = {
 `kind` says what happened:
 
 - `Expected { items; found }`: a primitive failed. `items` is everything that was expected at the furthest failure position, sorted and without duplicates: `Char`, `Literal`, `Label` or `End_of_input`. `found` is the text at that position, or `End` at the end of the input. Characters print as `'x'`, literals as `"abc"` and labels as written.
-- `Message msg`: a failure with a message: `Parseff.fail`, an invalid UTF-8 byte, or a `Parseff.match_regex` without a label. Unlike `Expected`, `fail` is not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
+- `Message msg`: a failure raised with `Parseff.fail`. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. Unlike `Expected`, `fail` is not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
 - `User e`: a value given to `Parseff.error`.
 - `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
 - `Backtrack_window_exceeded info`: a streaming parser needed more rewind history than `~backtrack_window` allows.
@@ -270,4 +270,4 @@ input.json:1:6: error: expected ',' or ']', found '"'   (code points)
 (* after *)
 | Error e -> prerr_endline (Parseff.Error.render ~name:"input" e)
 ```
-User errors move from the variant row into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (`Too_large n); _ }`. ``Failure msg` becomes `Message msg`, and the messages of ``Expected` errors that were not expectations (invalid UTF-8, failed regex) become `Message`. ``Unexpected_end_of_input` is an `Expected` error whose `found` is `End`, so it now says what was expected. The position is `Parseff.Error.pos e`.
+User errors move from the variant row into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (`Too_large n); _ }`. ``Failure msg` becomes `Message msg`. The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `regex match` and `int16 0xFFFE`. ``Unexpected_end_of_input` is an `Expected` error whose `found` is `End`, so it now says what was expected. The position is `Parseff.Error.pos e`.

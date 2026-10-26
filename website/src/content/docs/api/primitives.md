@@ -182,7 +182,7 @@ val match_regex : ?label:string -> Re.re -> string
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number_from_re () = Parseff.match_regex number_re
 ```
-Without `~label`, a failed match reports `"regex match failed"`. With `~label`, it reports `expected <label>` and merges with what the other alternatives expected at the same position, like `satisfy` and `take_while ~label`:
+Without `~label`, a failed match expects `"regex match"`. With `~label`, it reports `expected <label>` and merges with what the other alternatives expected at the same position, like `satisfy` and `take_while ~label`:
 
 ```ocaml
 let identifier_re = Re.compile (Re.Posix.re "[a-z]+")

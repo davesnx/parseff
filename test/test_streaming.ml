@@ -936,15 +936,15 @@ let test_regex_lookbehind_after_peek () =
     [
       ( "bol",
         Re.(compile (seq [ bol; str "ab" ])),
-        Error (2, "Message regex match failed")
+        Error (2, "Expected expected regex match, found 'ab'")
       );
       ( "bow",
         Re.(compile (seq [ bow; str "ab" ])),
-        Error (2, "Message regex match failed")
+        Error (2, "Expected expected regex match, found 'ab'")
       );
       ( "bos",
         Re.(compile (seq [ bos; str "ab" ])),
-        Error (2, "Message regex match failed")
+        Error (2, "Expected expected regex match, found 'ab'")
       );
       ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
     ]
@@ -1115,8 +1115,11 @@ let test_utf8_truncated_at_eof () =
 let test_utf8_scan_after_ascii () =
   let all () = Parseff.Utf8.take_while (fun _ -> true) in
   ( match Parseff.parse "ab\xFFc" all with
-  | Error ({ kind = Message "invalid UTF-8"; _ } as e) ->
-      Alcotest.(check int) "invalid byte position" 2 (Parseff.Error.pos e)
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      Alcotest.(check int) "invalid byte position" 2 (Parseff.Error.pos e);
+      Alcotest.(check string)
+        "invalid byte message" "expected valid UTF-8, found '\\xFF'"
+        (Parseff.Error.message e)
   | Error _ ->
       Alcotest.fail "expected an invalid UTF-8 message"
   | Ok s ->
@@ -1245,9 +1248,9 @@ let test_take_beyond_end_of_input () =
     )
   in
   match result with
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 10 bytes, found end of input"
+        "expected items" "expected 10 bytes, found 'abc'"
         (Parseff.Error.message e);
       ()
   | _ ->

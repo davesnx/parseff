@@ -77,6 +77,8 @@ type far = {
   mutable chain : (string * int * bool) list;
 }
 
+type over = { opos : int; mutable oitems : (int * string) list }
+
 let far_none =
   {
     pos = min_int;
@@ -318,11 +320,14 @@ module State = struct
 
   let commit_nearest (t : t) =
     let top = t.frames_top in
-    if top > 0 then begin
-      let slot = ((top - 1) * frame_stride) + 1 in
-      let flags = Array.unsafe_get t.frames slot in
-      if flags land frame_kind_mask <> frame_barrier then
-        Array.unsafe_set t.frames slot (flags lor frame_committed_bit)
+    top > 0
+    &&
+    let slot = ((top - 1) * frame_stride) + 1 in
+    let flags = Array.unsafe_get t.frames slot in
+    flags land frame_kind_mask <> frame_barrier
+    && begin
+      Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+      true
     end
 
   let seal_frames (t : t) ~floor =
@@ -688,67 +693,76 @@ let far_item_str f i =
   else
     Array.unsafe_get f.strs (i - 2)
 
-let far_set_item f i k s =
-  if i = 0 then begin
-    f.k0 <- k;
-    f.s0 <- s
-  end else if i = 1 then begin
-    f.k1 <- k;
-    f.s1 <- s
-  end else begin
-    f.kinds.(i - 2) <- k;
-    f.strs.(i - 2) <- s
-  end
+let far_total_capacity = far_max_capacity + 2
+let far_max_over = 1000
 
-let far_compact f =
-  let items = ref [] in
-  for i = f.n - 1 downto 0 do
-    let k = far_item_kind f i in
-    let tag = k land 7 in
+let far_carries_string k =
+  let tag = k land 7 in
+  tag = tag_literal || tag = tag_label || tag = tag_big
+
+let far_over f =
+  if f.special = 0 && not (Obj.is_int f.obj) then begin
+    let o : over = Obj.obj f.obj in
+    if o.opos = f.pos then
+      Some o
+    else
+      None
+  end else
+    None
+
+let[@inline never] far_overflow f k s =
+  if f.special = 0 then begin
     let s =
-      if tag = tag_literal || tag = tag_label || tag = tag_big then
-        far_item_str f i
+      if far_carries_string k then
+        s
       else
         ""
     in
-    items := (k, s) :: !items
-  done;
-  let items = List.sort_uniq compare !items in
-  f.n <- 0;
-  List.iteri
-    (fun i (k, s) ->
-      far_set_item f i k s;
-      f.n <- i + 1
-    )
-    items
+    let present = ref false in
+    for j = 0 to f.n - 1 do
+      if
+        far_item_kind f j = k
+        && ((not (far_carries_string k)) || far_item_str f j = s)
+      then
+        present := true
+    done;
+    if not !present then begin
+      let o =
+        match far_over f with
+        | Some o ->
+            o
+        | None ->
+            let o = { opos = f.pos; oitems = [] } in
+            f.obj <- Obj.repr o;
+            o
+      in
+      if (not (List.mem (k, s) o.oitems)) && List.length o.oitems < far_max_over
+      then
+        o.oitems <- (k, s) :: o.oitems
+    end
+  end
 
 let[@inline never] far_push_slow f k s =
   let cap = Array.length f.kinds in
-  if cap = 0 then begin
-    f.kinds <- [| 0; 0; 0; 0; 0; 0 |];
-    f.strs <- [| ""; ""; ""; ""; ""; "" |]
-  end else if cap < far_max_capacity then begin
-    let ncap = imin ((2 * cap) + 2) far_max_capacity in
-    let kinds = Array.make ncap 0 in
-    let strs = Array.make ncap "" in
-    Array.blit f.kinds 0 kinds 0 cap;
-    Array.blit f.strs 0 strs 0 cap;
-    f.kinds <- kinds;
-    f.strs <- strs
-  end else
-    far_compact f;
-  let i = f.n - 2 in
-  if i >= 0 then
-    begin if i < Array.length f.kinds then begin
-      f.kinds.(i) <- k;
-      if f.strs.(i) != s then f.strs.(i) <- s;
-      f.n <- f.n + 1
-    end
-  end
-  else begin
-    far_set_item f f.n k s;
+  if cap < far_max_capacity then begin
+    if cap = 0 then begin
+      f.kinds <- [| 0; 0; 0; 0; 0; 0 |];
+      f.strs <- [| ""; ""; ""; ""; ""; "" |]
+    end else begin
+      let ncap = imin ((2 * cap) + 2) far_max_capacity in
+      let kinds = Array.make ncap 0 in
+      let strs = Array.make ncap "" in
+      Array.blit f.kinds 0 kinds 0 cap;
+      Array.blit f.strs 0 strs 0 cap;
+      f.kinds <- kinds;
+      f.strs <- strs
+    end;
+    let i = f.n - 2 in
+    f.kinds.(i) <- k;
+    if f.strs.(i) != s then f.strs.(i) <- s;
     f.n <- f.n + 1
-  end
+  end else
+    far_overflow f k s
 
 let[@inline always] far_push_int f k =
   let n = f.n in
@@ -782,6 +796,7 @@ let[@inline always] far_push_str f k s =
 
 let far_relabel f n0 label =
   f.n <- n0;
+  if n0 < far_total_capacity && far_over f <> None then f.obj <- Obj.repr 0;
   if n0 = 0 then begin
     f.k0 <- tag_label;
     f.s0 <- label;
@@ -812,7 +827,6 @@ let[@inline always] fail_str st p k s =
 let[@inline never] fail_int_cold st p k = fail_int st p k
 let[@inline never] fail_str_cold st p k s = fail_str st p k s
 
-let special_message = 1
 let special_user = 2
 let special_user_ext = 3
 
@@ -852,14 +866,26 @@ let[@inline never] fail_at_least st n =
 let label_value = "value"
 let label_regex = "regex match"
 
-let[@inline never] far_commit_reset st =
-  let f = st.far in
-  if f != far_none then begin
-    f.pos <- -1;
-    f.n <- 0;
-    f.special <- 0;
-    f.chain_pos <- min_int
-  end
+let[@inline never] far_commit_reset st = st.far <- far_none
+
+let char_start s i =
+  let j = ref i in
+  while !j > 0 && Char.code (String.unsafe_get s !j) land 0xC0 = 0x80 do
+    decr j
+  done;
+  if Char.code (String.unsafe_get s !j) >= 0xC0 then
+    !j
+  else
+    i
+
+let[@inline never] fail_literal st pos matched s =
+  let start =
+    if Char.code (String.unsafe_get s matched) land 0xC0 = 0x80 then
+      char_start s matched
+    else
+      matched
+  in
+  fail_str st (pos + start) ((start lsl 3) lor tag_literal) s
 
 let[@inline never] handle_consume st s =
   let len = String.length s in
@@ -892,7 +918,11 @@ let[@inline never] handle_consume st s =
     in
     let matched = check 0 in
     if matched < avail || not complete then
-      fail_str st (pos + matched) ((matched lsl 3) lor tag_literal) s
+      begin if matched = 0 then
+        fail_str st pos tag_literal s
+      else
+        fail_literal st pos matched s
+    end
     else begin
       st.pos <- pos + len;
       s
@@ -1050,8 +1080,7 @@ let[@inline always] handle_sep_by_take_span st ws_pred sep_char take_pred =
     List.rev !acc
   end
 
-let regex_failed = "regex match failed"
-let invalid_utf8_msg = "invalid UTF-8"
+let label_utf8 = "valid UTF-8"
 
 let[@inline never] buffer_for_regex st =
   match st.source with
@@ -1082,10 +1111,7 @@ let regex_failure st label =
   | Some l ->
       fail_str st st.pos tag_label l
   | None ->
-      if st.pos >= st.input_len then
-        fail_str st st.pos tag_label label_regex
-      else
-        fail_special st st.pos special_message (Obj.repr regex_failed)
+      fail_str st st.pos tag_label label_regex
 
 let[@inline never] handle_match_regex st re label =
   let pinned = buffer_for_regex st in
@@ -1329,9 +1355,7 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
   end
 
 let[@inline] turn_invalid_utf8_to_parse_error st f =
-  try f ()
-  with Invalid_utf8 pos ->
-    fail_special st pos special_message (Obj.repr invalid_utf8_msg)
+  try f () with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
 
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
@@ -1432,8 +1456,7 @@ let[@inline] warn_at ~pos diagnostic =
 
 let[@inline] commit () =
   let st = get_state () in
-  State.commit_nearest st;
-  if st.far.pos >= st.pos then far_commit_reset st
+  if State.commit_nearest st && st.far.pos >= st.pos then far_commit_reset st
 
 let take n =
   if n < 0 then fail "Parseff.take: count must be non-negative";
@@ -1473,17 +1496,47 @@ let or_ left right () =
       State.pop_rewind_frame st frame;
       raise exn
 
+let[@inline never] far_merge st saved =
+  let t = st.far in
+  if t == far_none then
+    st.far <- saved
+  else if saved == far_none || saved.pos < t.pos then
+    ()
+  else if saved.pos > t.pos then
+    st.far <- saved
+  else begin
+    if t.special <> 0 && saved.special = 0 then begin
+      saved.special <- t.special;
+      saved.obj <- t.obj
+    end;
+    if t.special = 0 && saved.special = 0 then begin
+      for i = 0 to t.n - 1 do
+        far_push_str saved (far_item_kind t i) (far_item_str t i)
+      done;
+      match far_over t with
+      | Some o ->
+          List.iter (fun (k, s) -> far_overflow saved k s) o.oitems
+      | None ->
+          ()
+    end;
+    st.far <- saved
+  end
+
 let look_ahead p =
   let st = get_state () in
   let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
   match p () with
   | v ->
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
+      if st.far != saved then st.far <- saved;
       v
   | exception exn ->
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
+      far_merge st saved;
       raise exn
 
 let ctx_stride = 2
@@ -1780,9 +1833,10 @@ let count n (p : unit -> 'a) () : 'a list =
 let expect label p =
   let st = get_state () in
   let start = st.pos in
+  let f0 = st.far in
   let n0 =
-    if st.far.pos = start then
-      st.far.n
+    if f0.pos = start then
+      f0.n
     else
       0
   in
@@ -1791,7 +1845,12 @@ let expect label p =
       v
   | exception Fail ->
       let f = st.far in
-      if f.pos = start && f.n > n0 then far_relabel f n0 label;
+      if f.pos = start then
+        begin if f != f0 then
+          far_relabel f 0 label
+        else if f.n > n0 then
+          far_relabel f n0 label
+      end;
       raise_notrace Fail
 
 let catch p handler = try p () with User_failure (_pos, msg, _) -> handler msg
@@ -1800,8 +1859,7 @@ let one_of parsers () =
   let rec try_all = function
     | [] ->
         let st = get_state () in
-        fail_special st st.pos special_message
-          (Obj.repr "no alternative matched")
+        fail_str st st.pos tag_label "an alternative"
     | [ p ] ->
         p ()
     | p :: rest ->
@@ -1865,30 +1923,21 @@ let expect_int16 any_fn expected =
   let actual = any_fn () land 0xFFFF in
   let expected = expected land 0xFFFF in
   if actual <> expected then
-    fail_special st start special_message
-      (Obj.repr
-         (Printf.sprintf "expected int16 0x%04X, got 0x%04X" expected actual)
-      )
+    fail_str st start tag_label (Printf.sprintf "int16 0x%04X" expected)
 
 let expect_int32 any_fn expected =
   let st = get_state () in
   let start = st.pos in
   let actual = any_fn () in
   if actual <> expected then
-    fail_special st start special_message
-      (Obj.repr
-         (Printf.sprintf "expected int32 0x%08lX, got 0x%08lX" expected actual)
-      )
+    fail_str st start tag_label (Printf.sprintf "int32 0x%08lX" expected)
 
 let expect_int64 any_fn expected =
   let st = get_state () in
   let start = st.pos in
   let actual = any_fn () in
   if actual <> expected then
-    fail_special st start special_message
-      (Obj.repr
-         (Printf.sprintf "expected int64 0x%016LX, got 0x%016LX" expected actual)
-      )
+    fail_str st start tag_label (Printf.sprintf "int64 0x%016LX" expected)
 
 module BE = struct
   let any_uint8 = binary_any_uint8
@@ -2016,14 +2065,6 @@ module Utf8 = struct
   let skip_whitespace () = skip_while Uucp.White.is_white_space
 end
 
-let truncated_read f =
-  let found = ref false in
-  for i = 0 to f.n - 1 do
-    let k = far_item_kind f i in
-    if k land 7 = tag_bytes || k = tag_big then found := true
-  done;
-  !found
-
 let far_chain st =
   let f = st.far in
   if f.chain_pos = f.pos then
@@ -2132,6 +2173,8 @@ module Error = struct
         let c = Uchar.to_int (Uchar.utf_decode_uchar d) in
         if c < 0x20 || c = 0x7F then
           Buffer.add_string b (escape_code c)
+        else if c >= 0x80 && c < 0xA0 then
+          Buffer.add_string b (Printf.sprintf "\\u{%04X}" c)
         else if c = Char.code quote && quote = '"' then
           Buffer.add_string b "\\\""
         else if c = Char.code '\\' && quote = '"' then
@@ -2205,7 +2248,12 @@ module Error = struct
     i < String.length s && Char.code (String.unsafe_get s i) land 0xC0 = 0x80
 
   let window_start s line_start focus =
-    let start = ref (line_start + imax 0 (focus - (window_size / 2))) in
+    let start =
+      ref
+        (imin (String.length s)
+           (line_start + imax 0 (focus - (window_size / 2)))
+        )
+    in
     while is_continuation s !start do
       incr start
     done;
@@ -2644,7 +2692,15 @@ let expected_of_far f =
         (3, "")
   in
   let items = List.init f.n describe in
-  List.sort_uniq (fun a b -> compare (key a) (key b)) items
+  let items = List.sort_uniq (fun a b -> compare (key a) (key b)) items in
+  match far_over f with
+  | Some { oitems = _ :: _ as more; _ } ->
+      items
+      @ [
+          Error.Label (Printf.sprintf "%d more alternatives" (List.length more));
+        ]
+  | _ ->
+      items
 
 let is_ident_byte c =
   (c >= 'a' && c <= 'z')
@@ -2693,6 +2749,14 @@ let build st ~pos ?(notes = []) kind span frames =
         idx
   in
   extend_line_index idx ~base_offset:st.base st.input (imin pos st.input_len);
+  let floor = idx.starts.(0) in
+  let pos = imax pos floor in
+  let span =
+    if span.start < floor then
+      { start = floor; stop = imax span.stop floor }
+    else
+      span
+  in
   let li = find_line idx pos in
   let line_start = idx.starts.(li) in
   let line = idx.line_base + li + 1 in
@@ -2713,6 +2777,7 @@ let build st ~pos ?(notes = []) kind span frames =
     if start < st.base || start > st.input_len then
       None
     else begin
+      let focus = imax 0 (imin focus (st.input_len - start)) in
       let input = st.input in
       let len = String.length input in
       let rel = start - st.base in
@@ -2727,7 +2792,7 @@ let build st ~pos ?(notes = []) kind span frames =
       in
       if line_end - rel <= Error.window_size && (ended || line_end = len) then begin
         let stop =
-          if ended then
+          if ended || (line_end = len && not source_open) then
             strip_cr line_end
           else
             line_end
@@ -2745,21 +2810,21 @@ let build st ~pos ?(notes = []) kind span frames =
         let limit = imin len (ws + Error.window_size + 1) in
         let nl = scan_end ws limit in
         let ended = nl < len && String.unsafe_get input nl = '\n' in
-        let stop = Error.window_stop input ws nl in
-        let stop =
-          if ended && stop = nl then
-            strip_cr stop
+        let line_stop =
+          if ended || (nl = len && not source_open) then
+            strip_cr nl
           else
-            stop
+            nl
         in
-        let stop = imax ws stop in
+        let stop = imax ws (Error.window_stop input ws line_stop) in
         Some
           {
             Error.number;
             text = String.sub input ws (stop - ws);
             first = ws + st.base;
             left_cut = ws > rel;
-            right_cut = (not ended) && (nl < len || source_open);
+            right_cut =
+              stop < line_stop || ((not ended) && nl = len && source_open);
           }
       end
     end
@@ -2901,22 +2966,12 @@ let error_of_far st =
     let e, x = (Obj.obj f.obj : _ * fail_extra) in
     let span = extras_span pos x in
     build st ~pos:span.start ~notes:x.notes (Error.User e) span frames
-  end else if f.special = special_message then
-    build st ~pos
-      (Error.Message (Obj.obj f.obj : string))
-      { start = pos; stop = pos }
-      frames
-  else
+  end else
     begin match expected_of_far f with
     | [] ->
         failwith "Parseff: internal error: failure without expected items"
     | x :: xs ->
-        let found, span =
-          if truncated_read f then
-            (Error.End, { start = pos; stop = pos })
-          else
-            found_of st pos
-        in
+        let found, span = found_of st pos in
         build st ~pos (Error.Expected { items = (x, xs); found }) span frames
   end
 

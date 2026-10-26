@@ -1471,10 +1471,12 @@ let test_match_regex_failure () =
   match Parseff.parse "abc" (fun () -> Parseff.match_regex re) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Message expected; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "regex match failed" expected
+      Alcotest.(check string)
+        "error message" "expected regex match, found 'abc'"
+        (Parseff.Error.message e)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 

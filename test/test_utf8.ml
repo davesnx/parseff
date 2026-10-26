@@ -102,10 +102,12 @@ let test_satisfy_invalid_utf8 () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Message expected; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string) "error message" "invalid UTF-8" expected
+      Alcotest.(check string)
+        "error message" "expected valid UTF-8, found '\\xFF'"
+        (Parseff.Error.message e)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -310,10 +312,12 @@ let test_take_while_invalid_utf8 () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = Message expected; _ } as e) ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error at invalid byte" 1 pos;
-      Alcotest.(check string) "error message" "invalid UTF-8" expected
+      Alcotest.(check string)
+        "error message" "expected valid UTF-8, found '\\xFF'"
+        (Parseff.Error.message e)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 

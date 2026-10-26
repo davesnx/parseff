@@ -188,13 +188,16 @@ let version_field () =
 
 {1 Error handling}
 
-All binary parsers fail with an unexpected-end-of-input error when there are not
-enough bytes remaining. The position in the error points to the byte where the
-read was attempted, not the end of input.
+All binary parsers fail with [expected N bytes] when there are not enough bytes
+remaining. The position in the error points to the byte where the read was
+attempted, not the end of input, and the found text is what is left there (or
+[end of input] when nothing is left).
 
 Exact-match parsers ({!val:Parseff.BE.int16}, {!val:Parseff.BE.int32},
-{!val:Parseff.BE.int64}) fail with an error showing the expected and actual
-values in hexadecimal, e.g. ["expected int32 0x01020304, got 0xDEADBEEF"].
+{!val:Parseff.BE.int64}) fail with the expected value in hexadecimal as an
+expected item, e.g. [expected int32 0x01020304, found '\xDE']. Like any other
+expected item it merges with what the alternatives expected at the same
+position.
 
 {1 Position tracking}
 
