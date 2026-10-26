@@ -902,8 +902,8 @@ let norm : (_, unit) Parseff.result -> _ = function
         match e.kind with
         | Expected _ ->
             "Expected " ^ Parseff.Error.message e
-        | Message m ->
-            "Message " ^ m
+        | Failure m ->
+            "Failure " ^ m
         | User () ->
             "User"
         | Depth_limit_exceeded _ ->

@@ -2110,7 +2110,7 @@ module Error = struct
 
   type 'e kind =
     | Expected of { items : expected * expected list; found : found }
-    | Message of string
+    | Failure of string
     | User of 'e
     | Depth_limit_exceeded of { limit : int }
     | Backtrack_window_exceeded of backtrack_window_error
@@ -2238,7 +2238,7 @@ module Error = struct
         "expected "
         ^ join_items (List.map expected_text (x :: xs))
         ^ ", found " ^ found
-    | Message m ->
+    | Failure m ->
         m
     | User v -> (
         match user with Some f -> f v | None -> "error"
@@ -3013,7 +3013,7 @@ let error_plain st pos kind = build st ~pos kind { start = pos; stop = pos } []
 
 let error_failure st pos msg (x : fail_extra) =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes (Error.Message msg) span x.chain
+  build st ~pos:span.start ~notes:x.notes (Error.Failure msg) span x.chain
 
 type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result
 

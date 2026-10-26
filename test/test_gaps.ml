@@ -11,8 +11,8 @@ let kind (e : unit Parseff.Error.t) =
   match e.kind with
   | Expected _ ->
       "Expected " ^ Parseff.Error.message e
-  | Message m ->
-      "Message " ^ m
+  | Failure m ->
+      "Failure " ^ m
   | User () ->
       "User"
   | Depth_limit_exceeded _ ->

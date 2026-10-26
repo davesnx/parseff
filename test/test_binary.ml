@@ -428,7 +428,7 @@ let test_take_eof () =
 
 let test_take_negative () =
   match Parseff.parse "abc" (fun () -> Parseff.take (-1)) with
-  | Error { kind = Message _; _ } ->
+  | Error { kind = Failure _; _ } ->
       ()
   | _ ->
       Alcotest.fail "Expected failure for negative take"

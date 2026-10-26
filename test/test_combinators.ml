@@ -4,8 +4,8 @@ let show_error (e : [> `E ] Parseff.Error.t) =
       "E"
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.Error.message e)
-  | Message s ->
-      Printf.sprintf "Message %S" s
+  | Failure s ->
+      Printf.sprintf "Failure %S" s
   | _ ->
       "other"
 

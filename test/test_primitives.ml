@@ -1022,10 +1022,10 @@ let test_error_distinct_from_fail () =
     Parseff.parse "" (fun () -> Parseff.error (`Boom "boom"))
   in
   ( match fail_result with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "fail message" "boom" msg
   | _ ->
-      Alcotest.fail "Expected `Message from fail"
+      Alcotest.fail "Expected Failure from fail"
   );
   match error_result with
   | Error { kind = User (`Boom msg); _ } ->
@@ -1035,15 +1035,15 @@ let test_error_distinct_from_fail () =
 
 (* --- fail / Failure semantics --- *)
 
-(* fail produces `Message, not `Expected *)
+(* fail produces `Failure, not `Expected *)
 let test_fail_produces_failure () =
   match Parseff.parse "abc" (fun () -> Parseff.fail "bad value") with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "bad value" msg
   | Error { kind = Expected { found = Text _; _ }; _ } ->
       Alcotest.fail "fail should not produce `Expected"
   | _ ->
-      Alcotest.fail "Expected `Message error"
+      Alcotest.fail "Expected Failure error"
 
 (* Failure punches through or_ *)
 let test_failure_punches_through_or () =
@@ -1058,7 +1058,7 @@ let test_failure_punches_through_or () =
           ()
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "validation failed" msg
   | Ok v ->
       Alcotest.fail
@@ -1066,7 +1066,7 @@ let test_failure_punches_through_or () =
            "Expected Failure but got Ok %S — or_ should not catch Failure" v
         )
   | Error _ ->
-      Alcotest.fail "Expected `Message error"
+      Alcotest.fail "Expected Failure error"
 
 (* Expected IS caught by or_ (backtracking still works for Expected) *)
 let test_expected_caught_by_or () =
@@ -1099,13 +1099,13 @@ let test_failure_punches_through_many () =
           ()
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "too many" msg
   | Ok _ ->
       Alcotest.fail
         "Expected Failure but got Ok — many should not catch Failure"
   | Error _ ->
-      Alcotest.fail "Expected `Message error"
+      Alcotest.fail "Expected Failure error"
 
 (* Failure punches through optional *)
 let test_failure_punches_through_optional () =
@@ -1119,13 +1119,13 @@ let test_failure_punches_through_optional () =
           ()
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "nope" msg
   | Ok _ ->
       Alcotest.fail
         "Expected Failure but got Ok — optional should not catch Failure"
   | Error _ ->
-      Alcotest.fail "Expected `Message error"
+      Alcotest.fail "Expected Failure error"
 
 (* Failure punches through look_ahead *)
 let test_failure_punches_through_look_ahead () =
@@ -1137,13 +1137,13 @@ let test_failure_punches_through_look_ahead () =
         )
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "look_ahead fail" msg
   | Ok _ ->
       Alcotest.fail
         "Expected Failure but got Ok — look_ahead should not catch Failure"
   | Error _ ->
-      Alcotest.fail "Expected `Message error"
+      Alcotest.fail "Expected Failure error"
 
 (* Failure punches through expect *)
 let test_failure_punches_through_expect () =
@@ -1155,7 +1155,7 @@ let test_failure_punches_through_expect () =
         )
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "not a valid number" msg
   | Error { kind = Expected { found = Text _; _ }; _ } ->
       Alcotest.fail "expect should not catch Failure"
@@ -1180,7 +1180,7 @@ let test_failure_punches_through_one_of_labeled () =
           ()
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "bad value" msg
   | Error { kind = Expected { found = Text _; _ }; _ } ->
       Alcotest.fail "one_of_labeled should not catch Failure"
@@ -1246,7 +1246,7 @@ let test_failure_with_streaming () =
         Parseff.fail "stream fail"
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "stream fail" msg
   | Ok _ ->
       Alcotest.fail "Expected Failure error"
@@ -1267,7 +1267,7 @@ let test_failure_punches_through_or_streaming () =
           ()
     )
   with
-  | Error { kind = Message msg; _ } ->
+  | Error { kind = Failure msg; _ } ->
       Alcotest.(check string) "failure message" "stream validation failed" msg
   | Ok _ ->
       Alcotest.fail

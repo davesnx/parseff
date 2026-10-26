@@ -223,8 +223,8 @@ let show_error (e : [> `E | `Other ] Parseff.Error.t) =
   match e.kind with
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.Error.message e)
-  | Message s ->
-      Printf.sprintf "Message %S" s
+  | Failure s ->
+      Printf.sprintf "Failure %S" s
   | User `E ->
       "E"
   | User `Other ->
@@ -399,16 +399,16 @@ let test_fail_escapes_or_many_expect () =
   let boom () = Parseff.fail "boom" in
   both_runners show_unit "x"
     (fun () -> Parseff.or_ boom (fun () -> ()) ())
-    {|Error@0 Message "boom"|};
+    {|Error@0 Failure "boom"|};
   both_runners show_unit "x"
     (fun () -> ignore (Parseff.many boom ()))
-    {|Error@0 Message "boom"|};
+    {|Error@0 Failure "boom"|};
   both_runners show_unit "x"
     (fun () -> Parseff.expect "thing" boom)
-    {|Error@0 Message "boom"|};
+    {|Error@0 Failure "boom"|};
   both_runners show_unit "x"
     (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ] ()))
-    {|Error@0 Message "boom"|}
+    {|Error@0 Failure "boom"|}
 
 let test_user_error_absorbed_by_or () =
   both_runners
@@ -1437,11 +1437,11 @@ let test_fail_from_span () =
     )
     (render_error "x = 300;" parser);
   match Parseff.parse "x = 300;" parser with
-  | Error ({ kind = Message "number is too large"; _ } as e)
+  | Error ({ kind = Failure "number is too large"; _ } as e)
     when Parseff.Error.pos e = 4 ->
       ()
   | _ ->
-      Alcotest.fail "expected a Message error positioned at the span start"
+      Alcotest.fail "expected a Failure error positioned at the span start"
 
 let test_fail_from_after_position_is_normalized () =
   let parser () = Parseff.fail ~from:5 "backwards" in
@@ -1711,7 +1711,7 @@ let describe_kind (e : unit Parseff.Error.t) =
         | Parseff.Error.End ->
             "end"
         )
-  | Parseff.Error.Message m ->
+  | Parseff.Error.Failure m ->
       "message " ^ m
   | Parseff.Error.User () ->
       "user"
@@ -1837,7 +1837,7 @@ let test_user_errors_by_pattern () =
           Parseff.or_ number_checked (fun () -> Parseff.fail "second") ()
       )
     with
-  | Stdlib.Error { kind = Parseff.Error.Message "second"; _ } ->
+  | Stdlib.Error { kind = Parseff.Error.Failure "second"; _ } ->
       ()
   | _ ->
       Alcotest.fail "fail in the second branch must win"
@@ -1858,7 +1858,7 @@ let test_user_errors_by_pattern () =
       Alcotest.fail "the furthest user error is reported"
   );
   match Parseff.parse "x" (fun () -> Parseff.fail "boom") with
-  | Stdlib.Error { kind = Parseff.Error.Message "boom"; _ } ->
+  | Stdlib.Error { kind = Parseff.Error.Failure "boom"; _ } ->
       ()
   | _ ->
       Alcotest.fail "fail gives a message"

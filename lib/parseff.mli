@@ -92,7 +92,7 @@ module Error : sig
     | Expected of { items : expected * expected list; found : found }
         (** A primitive failed. [items] is everything that was expected at the
             furthest failure position, sorted and without duplicates. *)
-    | Message of string
+    | Failure of string
         (** A failure raised with {!val:Parseff.fail}. Failures of primitives
             are always [Expected]. *)
     | User of 'e  (** A value given to {!val:Parseff.error}. *)
@@ -212,7 +212,7 @@ val parse : ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e) result
     {!end_of_input} in your parser when you want full-consumption behavior.
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
-    {!Error.t}. [e.kind] is [Expected] for a mismatch, [Message] for
+    {!Error.t}. [e.kind] is [Expected] for a mismatch, [Failure] for
     {!val:fail}, [User] for {!val-error}, [Depth_limit_exceeded] when recursion
     nested deeper than [max_depth], and [Backtrack_window_exceeded] for
     streaming.
@@ -222,7 +222,7 @@ val parse : ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e) result
     match parse "hello" (fun () -> consume "hello") with
     | Ok s ->
         Printf.printf "Matched %S\n" s
-    | Error { kind = Message msg; _ } ->
+    | Error { kind = Failure msg; _ } ->
         Printf.printf "Failed: %s\n" msg
     | Error e ->
         prerr_endline (Error.render ~name:"input" e)
@@ -365,7 +365,7 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     step separately when parsing separated values. *)
 
 val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
-(** [fail ?from ?notes msg] aborts parsing with a [Message msg] error.
+(** [fail ?from ?notes msg] aborts parsing with a [Failure msg] error.
 
     [~from] makes the error cover the bytes from [from] up to the current
     position instead of a single position, and [~notes] attaches {!Error.note}s.
