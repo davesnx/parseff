@@ -916,7 +916,7 @@ let test_render_trailing_comma () =
          "input.json:1:10: error: expected value, found ']'";
          "1 | [1, 2, 3,]";
          "  |          ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1, 2, 3,]" ctx_json_parser)
@@ -928,7 +928,7 @@ let test_render_missing_colon () =
          "input.json:1:6: error: expected ':', found '1'";
          "1 | {\"a\" 1}";
          "  |      ^";
-         "  = while parsing object, from 1:1";
+         "  * while parsing object, from 1:1";
        ]
     )
     (render {|{"a" 1}|} ctx_json_parser)
@@ -943,7 +943,7 @@ let test_render_missing_comma_opened_here () =
          "2 |   \"a\": 1";
          "3 |   \"b\": 2";
          "  |   ^";
-         "  = while parsing object, from 1:1";
+         "  * while parsing object, from 1:1";
        ]
     )
     (render "{\n  \"a\": 1\n  \"b\": 2\n}" ctx_json_parser)
@@ -1061,7 +1061,7 @@ let test_render_end_of_input () =
          "input.json:1:6: error: expected ',' or ']', found end of input";
          "1 | [1, 2";
          "  |      ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1, 2" ctx_json_parser);
@@ -1082,7 +1082,7 @@ let test_render_spans_and_columns () =
          "input.json:1:7: error: expected ',' or ']', found 'foo'";
          "1 | [1, 2 foo]";
          "  |       ^^^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1, 2 foo]" ctx_json_parser);
@@ -1091,7 +1091,7 @@ let test_render_spans_and_columns () =
     [
       "1 | [\"\xC3\xA9\" \"b\"]";
       "  |      ^";
-      "  = while parsing array, from 1:1";
+      "  * while parsing array, from 1:1";
     ]
   in
   check_render "H bytes"
@@ -1110,7 +1110,7 @@ let test_render_cut_statement () =
          "input.json:1:9: error: expected expression, found ';'";
          "1 | let x = ;";
          "  |         ^";
-         "  = while parsing statement, from 1:1";
+         "  * while parsing statement, from 1:1";
        ]
     )
     (render "let x = ;" let_stmt_parser)
@@ -1134,7 +1134,7 @@ let test_render_tabs () =
          "input.json:1:7: error: expected ',' or ']', found '3'";
          "1 | [1,\t2\t3]";
          "  |    \t \t^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1,\t2\t3]" ctx_json_parser)
@@ -1149,7 +1149,7 @@ let test_render_crlf () =
          "2 |   \"a\": 1";
          "3 |   \"b\": 2";
          "  |   ^";
-         "  = while parsing object, from 1:1";
+         "  * while parsing object, from 1:1";
        ]
     )
     (render "{\r\n  \"a\": 1\r\n  \"b\": 2\r\n}" ctx_json_parser)
@@ -1164,7 +1164,7 @@ let test_render_empty_line () =
          "2 | ";
          "3 | 1 2]";
          "  |   ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[\n\n1 2]" ctx_json_parser)
@@ -1178,7 +1178,7 @@ let test_render_eof_at_line_end () =
          "  | - opened here";
          "2 | ";
          "  | ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1,\n" ctx_json_parser);
@@ -1204,7 +1204,7 @@ let test_render_gap () =
          "41 | 1,";
          "42 | x]";
          "   | ^";
-         "   = while parsing array, from 1:1";
+         "   * while parsing array, from 1:1";
        ]
     )
     (render ("[\n" ^ many_lines ^ "x]") ctx_json_parser);
@@ -1218,7 +1218,7 @@ let test_render_gap () =
          "3 | 2,";
          "4 |  x]";
          "  |  ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[\n1,\n2,\n x]" ctx_json_parser)
@@ -1237,12 +1237,12 @@ let test_render_frame_cap () =
          "input.json:1:8: error: expected 'x', found end of input";
          "1 | aaaaaaa";
          "  |        ^";
-         "  = while parsing level1, from 1:7";
-         "  = while parsing level2, from 1:6";
-         "  = while parsing level3, from 1:5";
-         "  = while parsing level4, from 1:4";
-         "  = while parsing level5, from 1:3";
-         "  = ... and 1 more";
+         "  * while parsing level1, from 1:7";
+         "  * while parsing level2, from 1:6";
+         "  * while parsing level3, from 1:5";
+         "  * while parsing level4, from 1:4";
+         "  * while parsing level5, from 1:3";
+         "  * ... and 1 more";
        ]
     )
     (render (String.make 7 'a') (nest 6))
@@ -1254,7 +1254,7 @@ let test_render_invalid_utf8_and_controls () =
          "input.json:1:5: error: expected value, found '\\xFF'";
          "1 | [1, ? 2]";
          "  |     ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1, \xFF 2]" ctx_json_parser);
@@ -1264,7 +1264,7 @@ let test_render_invalid_utf8_and_controls () =
          "input.json:1:3: error: expected ',' or ']', found '\\x01'";
          "1 | [1?]";
          "  |   ^";
-         "  = while parsing array, from 1:1";
+         "  * while parsing array, from 1:1";
        ]
     )
     (render "[1\x01]" ctx_json_parser)
@@ -1387,7 +1387,7 @@ let test_render_streaming_opener_dropped () =
       Alcotest.(check bool) "error line" true (has "501 | x");
       Alcotest.(check bool)
         "frame start is a byte offset" true
-        (has "= while parsing list, from byte 0");
+        (has "* while parsing list, from byte 0");
       Alcotest.(check bool) "no opener row" false (has "opened here");
       let full = E.render ~name:"stream" ~source:input e in
       let has_full sub =
@@ -1402,7 +1402,7 @@ let test_render_streaming_opener_dropped () =
         "source restores the opener" true (has_full "opened here");
       Alcotest.(check bool)
         "source restores the frame position" true
-        (has_full "= while parsing list, from 1:1")
+        (has_full "* while parsing list, from 1:1")
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
@@ -1468,7 +1468,7 @@ let test_loose_note () =
          "input.json:1:1: error: duplicate key";
          "1 | abc";
          "  | ^";
-         "  = note: keys must be unique";
+         "  * note: keys must be unique";
        ]
     )
     (render_error "abc" parser)
@@ -1548,7 +1548,7 @@ let test_error_from_and_notes () =
              "1:1: error: boom!";
              "1 | abcd";
              "  | ^^";
-             "  = note: see the manual";
+             "  * note: see the manual";
            ]
         )
         (E.render ~user:(fun `Boom -> "boom!") e)
@@ -1612,8 +1612,8 @@ let test_fail_frames () =
          "input.json:1:3: error: boom";
          "1 | abc";
          "  |   ^";
-         "  = while parsing inner, from 1:2";
-         "  = while parsing outer, from 1:1";
+         "  * while parsing inner, from 1:2";
+         "  * while parsing outer, from 1:1";
        ]
     )
     (render_error "abc" parser);
@@ -1697,7 +1697,7 @@ let test_note_on_dropped_line () =
       let out = E.render e in
       Alcotest.(check bool)
         "falls back to a note line" true
-        (List.mem "  = note: to match this" (String.split_on_char '\n' out))
+        (List.mem "  * note: to match this" (String.split_on_char '\n' out))
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 

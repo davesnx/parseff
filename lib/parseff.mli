@@ -82,7 +82,7 @@ module Error : sig
   (** An annotation added with [~notes] in {!val:Parseff.fail} or
       {!val:Parseff.error}. [at = Some r] underlines the bytes [r] in the source
       excerpt with the text next to the underline. [at = None] adds a
-      ["= note:"] line under the excerpt. *)
+      ["* note:"] line under the excerpt. *)
 
   type excerpt
   (** Source lines kept with the error so that {!render} does not need the
@@ -144,7 +144,7 @@ module Error : sig
       2 |   "a": 1
       3 |   "b": 2
         |   ^
-        = while parsing object, from 1:1
+        * while parsing object, from 1:1
       v}
 
       [name] is printed at the start of the header. [source] is the parsed

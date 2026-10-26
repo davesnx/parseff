@@ -44,7 +44,7 @@ let () =
 ```
 Use this when a human-readable string is enough.
 
-`~from` makes the error cover the bytes from `from` to the current position instead of a single position, so the rendered error underlines the whole value. `~notes` attaches annotations: a note with a range is underlined in the source excerpt with its text, a note without one is printed as a `= note:` line.
+`~from` makes the error cover the bytes from `from` to the current position instead of a single position, so the rendered error underlines the whole value. `~notes` attaches annotations: a note with a range is underlined in the source excerpt with its text, a note without one is printed as a `* note:` line.
 
 ```ocaml
 let octet () =
@@ -75,7 +75,7 @@ which prints:
 address:1:4: error: octet out of range
 1 | 10.300
   |    ^^^
-  = note: octets go from 0 to 255
+  * note: octets go from 0 to 255
 ```
 
 ## `error`
@@ -242,13 +242,13 @@ input.json:3:3: error: expected ',' or '}', found '"'
 2 |   "a": 1
 3 |   "b": 2
   |   ^
-  = while parsing object, from 1:1
+  * while parsing object, from 1:1
 ```
 - The header is `name:line:col: error: message`. Without `~name` it starts at `line:col`.
 - The message is `expected A, B, or C, found X`. `found X` is a quoted identifier-like run (up to 32 bytes) or one code point, with control bytes escaped, or `end of input`.
 - Carets cover the span, one per code point. Tabs in the line are kept, so the caret lines up for any tab width. Control characters in the line print as `?`.
-- `= while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five. A construct made with `~delimited:true` that started on an earlier line is shown with a `-` under its opening token and the text `opened here`. A single hidden line between the opener and the failure is shown, longer gaps become `...`.
-- Notes print as `= note:` lines, or as a `-` underline on their line when they have a range.
+- `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five. A construct made with `~delimited:true` that started on an earlier line is shown with a `-` under its opening token and the text `opened here`. A single hidden line between the opener and the failure is shown, longer gaps become `...`.
+- Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.Error.pp` prints through a formatter, and `Parseff.Error.message` returns only the one-line message.
 
 `~columns` chooses the unit of the column in the header: bytes by default, or code points with ``Code_points` (see [`utf8`](./utf8.md)). Carets always count code points.

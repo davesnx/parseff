@@ -82,22 +82,22 @@ Rendered errors show the source line, what was expected and where the constructs
   input.json:1:10: error: expected value, found ']'
   1 | [1, 2, 3,]
     |          ^
-    = while parsing array, from 1:1
+    * while parsing array, from 1:1
   $ ./main.exe json '{"a" 1}'
   input.json:1:6: error: expected ':', found '1'
   1 | {"a" 1}
     |      ^
-    = while parsing object, from 1:1
+    * while parsing object, from 1:1
   $ ./main.exe json '[1, 2'
   input.json:1:6: error: expected ',' or ']', found end of input
   1 | [1, 2
     |      ^
-    = while parsing array, from 1:1
+    * while parsing array, from 1:1
   $ ./main.exe json '[1, 2 foo]'
   input.json:1:7: error: expected ',' or ']', found 'foo'
   1 | [1, 2 foo]
     |       ^^^
-    = while parsing array, from 1:1
+    * while parsing array, from 1:1
   $ ./main.exe json '{
   >   "a": 1
   >   "b": 2
@@ -108,4 +108,4 @@ Rendered errors show the source line, what was expected and where the constructs
   2 |   "a": 1
   3 |   "b": 2
     |   ^
-    = while parsing object, from 1:1
+    * while parsing object, from 1:1

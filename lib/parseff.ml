@@ -2615,18 +2615,18 @@ module Error = struct
     in
     if error_view <> None then emit shown;
     let n_frames = List.length frames in
-    let gutter_eq () =
+    let gutter_star () =
       Buffer.add_char b '\n';
       for _ = 1 to w do
         Buffer.add_char b ' '
       done;
-      Buffer.add_string b " = "
+      Buffer.add_string b " * "
     in
     let innermost_first = List.rev frames in
     List.iteri
       (fun i ((f : frame), loc) ->
         if i < max_frames then begin
-          gutter_eq ();
+          gutter_star ();
           Buffer.add_string b "while parsing ";
           Buffer.add_string b f.name;
           Buffer.add_string b ", from ";
@@ -2639,7 +2639,7 @@ module Error = struct
               Buffer.add_string b "byte ";
               Buffer.add_string b (string_of_int f.start)
         end else if i = max_frames then begin
-          gutter_eq ();
+          gutter_star ();
           Buffer.add_string b "... and ";
           Buffer.add_string b (string_of_int (n_frames - max_frames));
           Buffer.add_string b " more"
@@ -2648,7 +2648,7 @@ module Error = struct
       innermost_first;
     List.iter
       (fun (n : note) ->
-        gutter_eq ();
+        gutter_star ();
         Buffer.add_string b "note: ";
         Buffer.add_string b n.text
       )
