@@ -2102,7 +2102,11 @@ module Error = struct
     right_cut : bool;
   }
 
-  type excerpt = { views : view list; frame_locs : (int * int) option list }
+  type excerpt = {
+    views : view list;
+    frame_locs : (int * int) option list;
+    located : bool;
+  }
 
   type 'e kind =
     | Expected of { items : expected * expected list; found : found }
@@ -2373,7 +2377,15 @@ module Error = struct
       | None ->
           None
     in
-    let line = e.location.line in
+    let loc =
+      match source with
+      | Some s ->
+          location_of_position s e.span.start
+      | None ->
+          e.location
+    in
+    let located = source <> None || e.excerpt.located in
+    let line = loc.line in
     let frame_loc i (f : frame) =
       match src with
       | Some (s, _) ->
@@ -2392,7 +2404,7 @@ module Error = struct
     let col =
       match columns with
       | `Bytes ->
-          e.location.col
+          loc.col
       | `Code_points -> (
           match (e.code_point_col, src) with
           | Some c, _ ->
@@ -2401,7 +2413,7 @@ module Error = struct
               let a = starts.(line - 1) in
               1 + count_code_points s a (imin e.span.start (String.length s))
           | None, None ->
-              e.location.col
+              loc.col
         )
     in
     let b = Buffer.create 256 in
@@ -2412,9 +2424,14 @@ module Error = struct
     | None ->
         ()
     );
-    Buffer.add_string b (string_of_int line);
-    Buffer.add_char b ':';
-    Buffer.add_string b (string_of_int col);
+    if located then begin
+      Buffer.add_string b (string_of_int line);
+      Buffer.add_char b ':';
+      Buffer.add_string b (string_of_int col)
+    end else begin
+      Buffer.add_string b "byte ";
+      Buffer.add_string b (string_of_int e.span.start)
+    end;
     Buffer.add_string b ": error: ";
     Buffer.add_string b (message ?user e);
     let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.frames in
@@ -2465,7 +2482,12 @@ module Error = struct
         (fun (n : note) -> not (List.exists (fun (m, _, _, _) -> m == n) placed))
         e.notes
     in
-    let error_view = get line (e.location.col - 1) in
+    let error_view =
+      if located then
+        get line (loc.col - 1)
+      else
+        None
+    in
     let prev_view =
       if line > 1 then
         get (line - 1) 0
@@ -2514,7 +2536,8 @@ module Error = struct
       add_padding b
         (String.sub v.text 0
            (imax 0 (imin (upto - v.first) (String.length v.text)))
-        )
+        );
+      if upto - v.first > String.length v.text then Buffer.add_char b ' '
     in
     let marks (v : view) a z =
       let len = String.length v.text in
@@ -2750,19 +2773,27 @@ let build st ~pos ?(notes = []) kind span frames =
   in
   extend_line_index idx ~base_offset:st.base st.input (imin pos st.input_len);
   let floor = idx.starts.(0) in
-  let pos = imax pos floor in
-  let span =
-    if span.start < floor then
-      { start = floor; stop = imax span.stop floor }
-    else
-      span
-  in
-  let li = find_line idx pos in
+  let located = pos >= floor in
+  let li = find_line idx (imax pos floor) in
   let line_start = idx.starts.(li) in
   let line = idx.line_base + li + 1 in
-  let location = { offset = pos; line; col = imax 1 (pos - line_start + 1) } in
+  let location =
+    {
+      offset = pos;
+      line;
+      col =
+        ( if located then
+            imax 1 (pos - line_start + 1)
+          else
+            1
+        );
+    }
+  in
   let code_point_col =
-    if line_start >= st.base && pos >= line_start && pos <= st.input_len then
+    if
+      located && line_start >= st.base && pos >= line_start
+      && pos <= st.input_len
+    then
       Some
         (1
         + Error.count_code_points st.input (line_start - st.base) (pos - st.base)
@@ -2840,14 +2871,17 @@ let build st ~pos ?(notes = []) kind span frames =
   let frame_locs = List.map (fun (_, s, _) -> locate s) frames in
   let error_start = imax line_start st.base in
   let error_view =
-    Option.map
-      (fun (v : Error.view) ->
-        { v with Error.left_cut = v.Error.left_cut || line_start < st.base }
-      )
-      (view ~number:line ~start:error_start ~focus:(pos - error_start))
+    if located then
+      Option.map
+        (fun (v : Error.view) ->
+          { v with Error.left_cut = v.Error.left_cut || line_start < st.base }
+        )
+        (view ~number:line ~start:error_start ~focus:(pos - error_start))
+    else
+      None
   in
   let prev_view =
-    if li >= 1 then
+    if located && li >= 1 then
       view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
     else
       None
@@ -2856,7 +2890,7 @@ let build st ~pos ?(notes = []) kind span frames =
     List.fold_left2
       (fun acc (_, s, delimited) loc ->
         match loc with
-        | Some (l, c) when delimited && l < line ->
+        | Some (l, c) when located && delimited && l < line ->
             Some (s, l, c)
         | _ ->
             acc
@@ -2942,7 +2976,7 @@ let build st ~pos ?(notes = []) kind span frames =
         (fun (name, start, delimited) -> { Error.name; start; delimited })
         frames;
     notes;
-    excerpt = { Error.views; frame_locs };
+    excerpt = { Error.views; frame_locs; located };
   }
 
 let extras_span pos (x : fail_extra) =

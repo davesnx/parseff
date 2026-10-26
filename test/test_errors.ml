@@ -1995,26 +1995,42 @@ let test_from_older_than_the_buffer () =
   | Ok _ ->
       Alcotest.fail "expected an error"
   );
-  ( match
-      Parseff.parse_source ~backtrack_window:200
-        (chunk_source ~chunk:64 lines_text)
-        (from_before_the_buffer_parser `Fail)
-    with
-  | Error e ->
-      check_location_agrees "streaming fail" lines_text e;
-      Alcotest.(check bool) "offset is inside the input" true (E.pos e >= 7)
-  | Ok _ ->
-      Alcotest.fail "expected an error"
-  );
-  match
+  let streaming kind =
     Parseff.parse_source ~backtrack_window:200
       (chunk_source ~chunk:64 lines_text)
-      (from_before_the_buffer_parser `Error)
-  with
-  | Error e ->
-      check_location_agrees "streaming error" lines_text e
-  | Ok _ ->
-      Alcotest.fail "expected an error"
+      (from_before_the_buffer_parser kind)
+  in
+  let check label = function
+    | Error (e : _ E.t) -> (
+        Alcotest.(check int) (label ^ " keeps the span start") 7 e.span.start;
+        Alcotest.(check int) (label ^ " keeps the position") 7 (E.pos e);
+        Alcotest.(check int) (label ^ " offset") 7 e.location.offset;
+        let header = List.hd (String.split_on_char '\n' (E.render e)) in
+        Alcotest.(check bool)
+          (label ^ " says byte, not a line")
+          true
+          (String.starts_with ~prefix:"byte 7: error: " header);
+        Alcotest.(check bool)
+          (label ^ " shows no excerpt")
+          true
+          (not (String.contains (E.render e) '|'));
+        let exact =
+          Parseff.parse lines_text (from_before_the_buffer_parser `Fail)
+        in
+        match exact with
+        | Error (x : _ E.t) when label = "fail" ->
+            Alcotest.(check string)
+              (label ^ " with the source gives the exact line")
+              (E.render ~source:lines_text x)
+              (E.render ~source:lines_text e)
+        | _ ->
+            ()
+      )
+    | Ok _ ->
+        Alcotest.fail "expected an error"
+  in
+  check "fail" (streaming `Fail);
+  check "error" (streaming `Error)
 
 let test_look_ahead_probe_does_not_leak () =
   let parser () =
@@ -2261,10 +2277,17 @@ let test_lone_carriage_return () =
     )
   with
   | Error e ->
+      let expected =
+        lines
+          [
+            "1:4: error: expected 'c', found end of input"; "1 | ab"; "  |    ^";
+          ]
+      in
       Alcotest.(check string)
-        "same with and without the source"
+        "caret under the header column" expected (E.render e);
+      Alcotest.(check string)
+        "same with the source" expected
         (E.render ~source:"ab\r" e)
-        (E.render e)
   | Ok _ ->
       Alcotest.fail "expected an error"
 

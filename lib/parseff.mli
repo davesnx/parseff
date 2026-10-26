@@ -106,7 +106,10 @@ module Error : sig
     span : range;
         (** The bytes the error is about, never reversed, empty at the end of
             the input. *)
-    location : location;  (** Line and column of [span.start], in bytes. *)
+    location : location;
+        (** Line and column of [span.start], in bytes. When streaming and the
+            position is older than the buffered input, the line is the oldest
+            buffered one and {!render} prints the byte offset instead. *)
     code_point_col : int option;
         (** Column in code points, [None] if the start of the line is no longer
             buffered (streaming). *)
@@ -368,9 +371,10 @@ val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
     position instead of a single position, and [~notes] attaches {!Error.note}s.
     {!Error.render} underlines the span and prints the notes. This is intended
     for user-initiated validation failures (e.g. a parsed value is out of
-    range). In streaming, a [~from] older than the buffered input is moved to
-    the start of the oldest buffered line, so that the location of the error and
-    its position agree.
+    range). In streaming, a [~from] older than the buffered input is kept as the
+    position of the error. Its line cannot be known, so {!Error.render} prints
+    [byte N] instead of a line and column and shows no excerpt, unless [~source]
+    is given.
 
     {@ocaml[
     let byte () =
