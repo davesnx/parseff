@@ -62,12 +62,10 @@ To run it:
 ```ocaml
 match Parseff.parse "host = localhost" entry with
 | Ok (k, v) -> Printf.printf "%s -> %s\n" k v  (* "host" -> "localhost" *)
-| Error { pos; error = `Expected msg } ->
-    Printf.printf "Error at %d: %s\n" pos msg
-| Error _ -> print_endline "Parse error"
+| Error e -> prerr_endline (Parseff.Error.render ~name:"entry" e)
 ```
 
-`Parseff.parse` returns `Ok value` on success, or `Error { pos; error }` on failure.
+`Parseff.parse` returns `Ok value` on success, or `Error e` on failure, where `e` says what was expected and where.
 
 ## Step 2: comments and blank lines
 
@@ -128,9 +126,7 @@ let () =
       List.iter (fun (k, v) ->
         Printf.printf "%s = %s\n" k v
       ) entries
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error _ -> print_endline "Parse error"
+  | Error e -> prerr_endline (Parseff.Error.render ~name:"config" e)
 ```
 
 Output:
@@ -213,10 +209,10 @@ The error flows through to the result type:
 ```ocaml
 match Parseff.parse "port = 99999" typed_entry with
 | Ok _ -> ()
-| Error { error = `Port_out_of_range n; _ } ->
+| Error { kind = User (`Port_out_of_range n); _ } ->
     Printf.printf "%d is not a valid port\n" n
-| Error { error = `Expected msg; _ } ->
-    Printf.printf "Parse error: %s\n" msg
+| Error e ->
+    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
 ```
 
-`Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (wrapped as `` `Expected ``). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.
+`Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (reported as `Message`). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.

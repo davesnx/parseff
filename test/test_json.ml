@@ -113,7 +113,7 @@ and key_value () =
   (key, value)
 
 let test_null () =
-  match Parseff.parse "null" json with
+  match Legacy.parse "null" json with
   | Ok Null ->
       ()
   | Ok _ ->
@@ -122,7 +122,7 @@ let test_null () =
       Alcotest.fail "Parse failed"
 
 let test_bool_true () =
-  match Parseff.parse "true" json with
+  match Legacy.parse "true" json with
   | Ok (Bool true) ->
       ()
   | Ok _ ->
@@ -131,7 +131,7 @@ let test_bool_true () =
       Alcotest.fail "Parse failed"
 
 let test_bool_false () =
-  match Parseff.parse "false" json with
+  match Legacy.parse "false" json with
   | Ok (Bool false) ->
       ()
   | Ok _ ->
@@ -140,7 +140,7 @@ let test_bool_false () =
       Alcotest.fail "Parse failed"
 
 let test_number () =
-  match Parseff.parse "42" json with
+  match Legacy.parse "42" json with
   | Ok (Number n) ->
       Alcotest.(check (float 0.1)) "number" 42.0 n
   | Ok _ ->
@@ -149,7 +149,7 @@ let test_number () =
       Alcotest.fail "Parse failed"
 
 let test_number_float () =
-  match Parseff.parse "3.14" json with
+  match Legacy.parse "3.14" json with
   | Ok (Number n) ->
       Alcotest.(check (float 0.01)) "float" 3.14 n
   | Ok _ ->
@@ -158,7 +158,7 @@ let test_number_float () =
       Alcotest.fail "Parse failed"
 
 let test_string () =
-  match Parseff.parse "\"hello\"" json with
+  match Legacy.parse "\"hello\"" json with
   | Ok (String s) ->
       Alcotest.(check string) "string" "hello" s
   | Ok _ ->
@@ -167,7 +167,7 @@ let test_string () =
       Alcotest.fail "Parse failed"
 
 let test_empty_array () =
-  match Parseff.parse "[]" json with
+  match Legacy.parse "[]" json with
   | Ok (Array lst) ->
       Alcotest.(check int) "empty array" 0 (List.length lst)
   | Ok _ ->
@@ -176,7 +176,7 @@ let test_empty_array () =
       Alcotest.fail "Parse failed"
 
 let test_simple_array () =
-  match Parseff.parse "[1, 2, 3]" json with
+  match Legacy.parse "[1, 2, 3]" json with
   | Ok (Array lst) ->
       Alcotest.(check int) "three elements" 3 (List.length lst)
   | Ok v ->
@@ -200,7 +200,7 @@ let test_simple_array () =
       Alcotest.fail "Parse failed"
 
 let test_empty_object () =
-  match Parseff.parse "{}" json with
+  match Legacy.parse "{}" json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "empty object" 0 (List.length pairs)
   | Ok _ ->
@@ -209,7 +209,7 @@ let test_empty_object () =
       Alcotest.fail "Parse failed"
 
 let test_simple_object () =
-  match Parseff.parse "{\"key\": \"value\"}" json with
+  match Legacy.parse "{\"key\": \"value\"}" json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "one pair" 1 (List.length pairs);
       let key, _ = List.hd pairs in
@@ -220,7 +220,7 @@ let test_simple_object () =
       Alcotest.fail "Parse failed"
 
 let test_nested () =
-  match Parseff.parse "{\"a\": {\"b\": null}}" json with
+  match Legacy.parse "{\"a\": {\"b\": null}}" json with
   | Ok (Object _) ->
       ()
   | Ok v ->
@@ -256,7 +256,7 @@ let make_deeply_nested_arrays depth =
 
 let test_deep_nesting_within_limit () =
   let input = make_deeply_nested_arrays 50 in
-  match Parseff.parse input json with
+  match Legacy.parse input json with
   | Ok (Array _) ->
       ()
   | Ok _ ->
@@ -268,7 +268,7 @@ let test_deep_nesting_within_limit () =
 
 let test_deep_nesting_exceeds_limit () =
   let input = make_deeply_nested_arrays 256 in
-  match Parseff.parse ~max_depth:128 input json with
+  match Legacy.parse ~max_depth:128 input json with
   | Ok _ ->
       Alcotest.fail "Expected depth limit error, got success"
   | Error { error = `Depth_limit_exceeded msg; _ } ->

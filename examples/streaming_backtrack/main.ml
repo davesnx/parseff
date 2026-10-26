@@ -20,19 +20,6 @@ let () =
   match Parseff.parse_source_until_end source parser with
   | Ok (branch, _diagnostics) ->
       Printf.printf "matched %s branch\n" branch
-  | Error { pos; error; diagnostics = _ } ->
-      let message =
-        match error with
-        | `Expected msg ->
-            msg
-        | `Unexpected_end_of_input ->
-            "unexpected end of input"
-        | `Failure msg ->
-            msg
-        | `Backtrack_window_exceeded { limit; oldest } ->
-            Printf.sprintf "backtrack window exceeded (limit=%d oldest=%d)"
-              limit oldest
-        | `Depth_limit_exceeded msg ->
-            msg
-      in
-      Printf.printf "error at %d: %s\n" pos message
+  | Error { error; diagnostics = _ } ->
+      Printf.printf "error at %d: %s\n" (Parseff.Error.pos error)
+        (Parseff.Error.message error)

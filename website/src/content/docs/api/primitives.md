@@ -28,7 +28,7 @@ let parser () =
 
 (* Matches "helloworld" *)
 ```
-When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error is ``Unexpected_end_of_input` at the end of the input.
+When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input.
 
 **Performance:** `consume` is optimized for literal string matching. It's much faster than using regex for exact matches.
 
@@ -141,7 +141,7 @@ let identifier1 () =
 
 (* Matches "foo123" -> "foo123" *)
 (* Fails on "!" -> Error: expected identifier character *)
-(* Fails on ""  -> Error: Unexpected_end_of_input *)
+(* Fails on ""  -> Error: expected identifier character, found end of input *)
 ```
 
 ### `skip_while`
@@ -252,9 +252,9 @@ let validated_number () =
 let () =
   match Parseff.parse "300" validated_number with
   | Ok n -> Printf.printf "Got %d\n" n
-  | Error { error = `Out_of_range n; _ } ->
+  | Error { kind = User (`Out_of_range n); _ } ->
       Printf.printf "%d is too large (max 255)\n" n
-  | Error { error = `Negative n; _ } ->
+  | Error { kind = User (`Negative n); _ } ->
       Printf.printf "%d is negative\n" n
   | Error _ -> Printf.printf "Parse error\n"
 ```
@@ -332,9 +332,10 @@ let number () =
 (* Convert error positions after parsing *)
 let report_error input result =
   match result with
-  | Parseff.Error { pos; error = `Expected msg } ->
-      let loc = Parseff.location_of_position input pos in
-      Printf.printf "line %d, col %d: %s\n" loc.line loc.col msg
-  | _ -> ()
+  | Error e ->
+      let loc = Parseff.location_of_position input (Parseff.Error.pos e) in
+      Printf.printf "line %d, col %d: %s\n" loc.line loc.col
+        (Parseff.Error.message e)
+  | Ok _ -> ()
 ```
 **Tip:** Use `location` during parsing to attach source positions to AST nodes or other parsed structures. Use `location_of_position` after parsing to convert byte offsets from error results into line and column numbers for diagnostics.

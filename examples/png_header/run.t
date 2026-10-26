@@ -14,4 +14,4 @@ Error on non-PNG input:
 Error on truncated file (only the 8-byte signature, no chunks):
 
   $ ./main.exe truncated.bin
-  truncated.bin: unexpected end of input at byte 8
+  truncated.bin: error at byte 8: expected 4 bytes, found end of input

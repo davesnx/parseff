@@ -18,7 +18,7 @@ let ip_address () =
   (a, b, c, d)
 
 let test_valid_ip1 () =
-  match Parseff.parse "1.2.3.4" ip_address with
+  match Legacy.parse "1.2.3.4" ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 1 a;
       Alcotest.(check int) "b" 2 b;
@@ -28,7 +28,7 @@ let test_valid_ip1 () =
       Alcotest.fail "Expected success"
 
 let test_valid_ip2 () =
-  match Parseff.parse "255.255.255.255" ip_address with
+  match Legacy.parse "255.255.255.255" ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 255 a;
       Alcotest.(check int) "b" 255 b;
@@ -38,7 +38,7 @@ let test_valid_ip2 () =
       Alcotest.fail "Expected success"
 
 let test_valid_ip3 () =
-  match Parseff.parse "192.168.1.100" ip_address with
+  match Legacy.parse "192.168.1.100" ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
@@ -48,17 +48,17 @@ let test_valid_ip3 () =
       Alcotest.fail "Expected success"
 
 let test_invalid_out_of_range () =
-  match Parseff.parse "1.2.3.256" ip_address with
+  match Legacy.parse "1.2.3.256" ip_address with
   | Ok _ ->
       Alcotest.fail "Expected failure for out of range"
-  | Error { pos; error = `Failure msg } ->
+  | Error { pos; error = `Message msg } ->
       Alcotest.(check int) "error position" 9 pos;
       Alcotest.(check string) "error message" "number out of range: 256" msg
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_invalid_incomplete () =
-  match Parseff.parse "1.2.3" ip_address with
+  match Legacy.parse "1.2.3" ip_address with
   | Ok _ ->
       Alcotest.fail "Expected failure for incomplete IP"
   | Error { pos; error = `Unexpected_end_of_input } ->
@@ -67,7 +67,7 @@ let test_invalid_incomplete () =
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_invalid_trailing () =
-  match Parseff.parse "1.2.3.4 extra" ip_address with
+  match Legacy.parse "1.2.3.4 extra" ip_address with
   | Ok _ ->
       Alcotest.fail "Expected failure for trailing data"
   | Error { pos; error = `Expected expected } ->

@@ -9,7 +9,7 @@ let chunked_source ?(chunk_size = 1) input =
   )
 
 let parse_source_with_pos src parser =
-  Parseff.parse_source src (fun () ->
+  Legacy.parse_source src (fun () ->
       let value = parser () in
       (value, Parseff.position ())
   )
@@ -160,7 +160,7 @@ let test_of_string_consume () =
 let test_of_string_satisfy () =
   let src = Parseff.Source.of_string "7" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
     )
   with
@@ -177,7 +177,7 @@ let test_of_string_alternation () =
       ()
   in
   let src = Parseff.Source.of_string "bar" in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok s ->
       Alcotest.(check string) "matched" "bar" s
   | Error _ ->
@@ -194,7 +194,7 @@ let test_of_string_many () =
 
 let test_of_string_ip () =
   let src = Parseff.Source.of_string "192.168.1.100" in
-  match Parseff.parse_source src ip_address with
+  match Legacy.parse_source src ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
@@ -206,7 +206,7 @@ let test_of_string_ip () =
 let test_of_string_json () =
   let input = "{\"a\": [1, 2, null]}" in
   let src = Parseff.Source.of_string input in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "pairs" 1 (List.length pairs)
   | Ok _ ->
@@ -230,7 +230,7 @@ let test_of_string_take_while () =
 let test_of_string_skip_while () =
   let src = Parseff.Source.of_string "   hello" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         Parseff.skip_whitespace ();
         Parseff.consume "hello"
     )
@@ -243,7 +243,7 @@ let test_of_string_skip_while () =
 let test_of_string_look_ahead () =
   let src = Parseff.Source.of_string "hello" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
         Parseff.consume "hello"
     )
@@ -255,7 +255,7 @@ let test_of_string_look_ahead () =
 
 let test_of_string_end_of_input () =
   let src = Parseff.Source.of_string "" in
-  match Parseff.parse_source src Parseff.end_of_input with
+  match Legacy.parse_source src Parseff.end_of_input with
   | Ok () ->
       ()
   | Error _ ->
@@ -264,7 +264,7 @@ let test_of_string_end_of_input () =
 let test_of_string_regex () =
   let re = Re.compile (Re.Posix.re "[a-z]+") in
   let src = Parseff.Source.of_string "hello" in
-  match Parseff.parse_source src (fun () -> Parseff.match_regex re) with
+  match Legacy.parse_source src (fun () -> Parseff.match_regex re) with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error _ ->
@@ -273,7 +273,7 @@ let test_of_string_regex () =
 let test_of_string_sep_by () =
   let src = Parseff.Source.of_string "1,2,3" in
   match
-    Parseff.parse_source src
+    Legacy.parse_source src
       (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
@@ -292,7 +292,7 @@ let test_chunked_consume () =
 
 let test_chunked_ip () =
   let src = chunked_source ~chunk_size:1 "192.168.1.100" in
-  match Parseff.parse_source src ip_address with
+  match Legacy.parse_source src ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
@@ -303,7 +303,7 @@ let test_chunked_ip () =
 
 let test_chunked_ip_2byte () =
   let src = chunked_source ~chunk_size:2 "192.168.1.100" in
-  match Parseff.parse_source src ip_address with
+  match Legacy.parse_source src ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
@@ -315,7 +315,7 @@ let test_chunked_ip_2byte () =
 let test_chunked_json () =
   let input = "[1, 2, 3]" in
   let src = chunked_source ~chunk_size:1 input in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Array lst) ->
       Alcotest.(check int) "length" 3 (List.length lst)
   | Ok _ ->
@@ -326,7 +326,7 @@ let test_chunked_json () =
 let test_chunked_json_2byte () =
   let input = "{\"key\": \"value\"}" in
   let src = chunked_source ~chunk_size:2 input in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "pairs" 1 (List.length pairs);
       let key, _ = List.hd pairs in
@@ -339,7 +339,7 @@ let test_chunked_json_2byte () =
 let test_chunked_json_nested () =
   let input = "{\"a\": {\"b\": null}}" in
   let src = chunked_source ~chunk_size:3 input in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Object _) ->
       ()
   | Ok _ ->
@@ -371,7 +371,7 @@ let test_chunked_alternation () =
       ()
   in
   let src = chunked_source ~chunk_size:2 "foobaz" in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok s ->
       Alcotest.(check string) "matched" "foobaz" s
   | Error _ ->
@@ -381,7 +381,7 @@ let test_chunked_regex () =
   let re = Re.compile (Re.Posix.re "[a-z]+") in
   let src = chunked_source ~chunk_size:2 "hello world" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         let a = Parseff.match_regex re in
         Parseff.skip_whitespace ();
         let b = Parseff.match_regex re in
@@ -408,7 +408,7 @@ let test_chunked_skip_while_then_char () =
 
 let test_empty_source () =
   let src = Parseff.Source.of_function (fun _ _ _ -> 0) in
-  match Parseff.parse_source src Parseff.end_of_input with
+  match Legacy.parse_source src Parseff.end_of_input with
   | Ok () ->
       ()
   | Error _ ->
@@ -416,7 +416,7 @@ let test_empty_source () =
 
 let test_end_of_input_with_data () =
   let src = Parseff.Source.of_string "x" in
-  match Parseff.parse_source src Parseff.end_of_input with
+  match Legacy.parse_source src Parseff.end_of_input with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error _ ->
@@ -425,7 +425,7 @@ let test_end_of_input_with_data () =
 let test_end_of_input_after_consume () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         let _ = Parseff.consume "hello" in
         Parseff.end_of_input ()
     )
@@ -451,7 +451,7 @@ let test_backtrack_across_chunk () =
       ()
   in
   let src = chunked_source ~chunk_size:2 "abcxyz" in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok s ->
       Alcotest.(check string) "matched" "abcxyz" s
   | Error _ ->
@@ -470,7 +470,7 @@ let test_streaming_commit_blocks_backtrack () =
       ()
   in
   let src = chunked_source ~chunk_size:2 "abcd" in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok _ ->
       Alcotest.fail "Expected committed branch failure"
   | Error { pos; error = `Expected msg } ->
@@ -487,7 +487,7 @@ let test_backtrack_window_exceeded () =
       ()
   in
   let src = chunked_source ~chunk_size:2 "abcd" in
-  match Parseff.parse_source ~backtrack_window:2 src parser with
+  match Legacy.parse_source ~backtrack_window:2 src parser with
   | Ok _ ->
       Alcotest.fail "Expected backtrack window failure"
   | Error { pos; error = `Backtrack_window_exceeded { limit; oldest } } ->
@@ -514,7 +514,7 @@ let test_commit_releases_backtrack_window () =
       ()
   in
   let src = chunked_source ~chunk_size:1 "abcccc" in
-  match Parseff.parse_source ~backtrack_window:2 src parser with
+  match Legacy.parse_source ~backtrack_window:2 src parser with
   | Ok n ->
       Alcotest.(check int) "committed tail parsed" 4 n
   | Error _ ->
@@ -528,7 +528,7 @@ let test_or_right_branch_releases_window () =
       (fun () -> [ Parseff.char 'x' ])
       (Parseff.many (fun () -> Parseff.char 'a'))
   in
-  match Parseff.parse_source ~backtrack_window:100 src parser with
+  match Legacy.parse_source ~backtrack_window:100 src parser with
   | Ok l ->
       Alcotest.(check int) "elements" 5000 (List.length l)
   | Error _ ->
@@ -537,7 +537,7 @@ let test_or_right_branch_releases_window () =
 let test_look_ahead_across_chunk () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
         Parseff.consume "hello"
     )
@@ -549,7 +549,7 @@ let test_look_ahead_across_chunk () =
 
 let test_many_across_chunks () =
   let src = chunked_source ~chunk_size:1 "12345" in
-  match Parseff.parse_source src (Parseff.many Parseff.digit) with
+  match Legacy.parse_source src (Parseff.many Parseff.digit) with
   | Ok lst ->
       Alcotest.(check (list int)) "digits" [ 1; 2; 3; 4; 5 ] lst
   | Error _ ->
@@ -559,7 +559,7 @@ let test_regex_across_chunks () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
   let src = chunked_source ~chunk_size:2 "12345abc" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         let n = Parseff.match_regex re in
         let rest = Parseff.take_while (fun c -> c >= 'a' && c <= 'z') in
         (n, rest)
@@ -584,7 +584,7 @@ let test_deep_nesting_streaming () =
   in
   let input = make_nested 50 in
   let src = chunked_source ~chunk_size:3 input in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Array _) ->
       ()
   | Ok _ ->
@@ -594,7 +594,7 @@ let test_deep_nesting_streaming () =
 
 let test_consume_failure_streaming () =
   let src = chunked_source ~chunk_size:2 "hello" in
-  match Parseff.parse_source src (fun () -> Parseff.consume "world") with
+  match Legacy.parse_source src (fun () -> Parseff.consume "world") with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { error = `Expected _; _ } ->
@@ -619,7 +619,7 @@ let test_take_while_span_streaming () =
 let test_parse_source_until_end_requires_eof () =
   let src = Parseff.Source.of_string "abcXYZ" in
   let outcome =
-    Parseff.parse_source_until_end src (fun () -> Parseff.consume "abc")
+    Legacy.parse_source_until_end src (fun () -> Parseff.consume "abc")
   in
   match outcome with
   | Ok _ ->
@@ -633,7 +633,7 @@ let test_parse_source_until_end_requires_eof () =
 let test_parse_source_until_end_error_has_diagnostics () =
   let src = chunked_source ~chunk_size:1 "x" in
   let outcome =
-    Parseff.parse_source_until_end src (fun () ->
+    Legacy.parse_source_until_end src (fun () ->
         Parseff.warn "streaming-warning";
         Parseff.consume "y"
     )
@@ -655,7 +655,7 @@ let test_parse_source_until_end_error_has_diagnostics () =
 let test_parse_source_until_end_preserves_end_of_input_semantics () =
   let ok_src = Parseff.Source.of_string "a" in
   let ok_outcome =
-    Parseff.parse_source_until_end ok_src (fun () ->
+    Legacy.parse_source_until_end ok_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "ok"
@@ -669,7 +669,7 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
   );
   let fail_src = Parseff.Source.of_string "ab" in
   let fail_outcome =
-    Parseff.parse_source_until_end fail_src (fun () ->
+    Legacy.parse_source_until_end fail_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "unreachable"
@@ -696,7 +696,7 @@ let test_streaming_location_basic () =
     let _ = Parseff.consume "aaa\nbbb\nc" in
     Parseff.location ()
   in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok loc ->
       check_location "streamed" { offset = 9; line = 3; col = 2 } loc
   | Error _ ->
@@ -710,7 +710,7 @@ let test_streaming_location_across_chunks () =
     let _ = Parseff.consume "ab\ncd\ne" in
     Parseff.location ()
   in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok loc ->
       check_location "across chunks" { offset = 7; line = 3; col = 2 } loc
   | Error _ ->
@@ -726,7 +726,7 @@ let test_streaming_location_multiple_calls () =
     let loc2 = Parseff.location () in
     (loc1, loc2)
   in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok (loc1, loc2) ->
       check_location "first" { offset = 2; line = 1; col = 3 } loc1;
       check_location "second" { offset = 7; line = 3; col = 2 } loc2
@@ -749,7 +749,7 @@ let chunked_source_chunks ?(chunk_size = 1) input =
 
 let test_of_chunks_ip () =
   let src = chunked_source_chunks ~chunk_size:2 "192.168.1.100" in
-  match Parseff.parse_source src ip_address with
+  match Legacy.parse_source src ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
@@ -761,7 +761,7 @@ let test_of_chunks_ip () =
 let test_of_chunks_json () =
   let input = "{\"a\": [1, 2, null]}" in
   let src = chunked_source_chunks ~chunk_size:3 input in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "pairs" 1 (List.length pairs)
   | Ok _ ->
@@ -782,7 +782,7 @@ let test_of_chunks_single_shot () =
         end
     )
   in
-  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  match Legacy.parse_source src (fun () -> Parseff.consume "hello") with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error _ ->
@@ -805,7 +805,7 @@ let test_of_chunks_empty_skipped () =
             None
     )
   in
-  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  match Legacy.parse_source src (fun () -> Parseff.consume "hello") with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error _ ->
@@ -819,7 +819,7 @@ let test_of_chunks_backtrack () =
       (fun () -> Parseff.consume "foobaz")
       ()
   in
-  match Parseff.parse_source src parser with
+  match Legacy.parse_source src parser with
   | Ok s ->
       Alcotest.(check string) "matched" "foobaz" s
   | Error _ ->
@@ -828,7 +828,7 @@ let test_of_chunks_backtrack () =
 let test_of_seq_basic () =
   let seq = List.to_seq [ "192."; "168."; "1.1"; "00" ] in
   let src = Parseff.Source.of_seq seq in
-  match Parseff.parse_source src ip_address with
+  match Legacy.parse_source src ip_address with
   | Ok (a, b, c, d) ->
       Alcotest.(check int) "a" 192 a;
       Alcotest.(check int) "b" 168 b;
@@ -849,7 +849,7 @@ let test_of_seq_json () =
       Seq.Cons (String.sub input pos n, chunks (pos + n))
   in
   let src = Parseff.Source.of_seq (chunks 0) in
-  match Parseff.parse_source src json with
+  match Legacy.parse_source src json with
   | Ok (Object pairs) ->
       Alcotest.(check int) "pairs" 1 (List.length pairs);
       let key, _ = List.hd pairs in
@@ -861,7 +861,7 @@ let test_of_seq_json () =
 
 let test_of_seq_empty () =
   let src = Parseff.Source.of_seq Seq.empty in
-  match Parseff.parse_source src Parseff.end_of_input with
+  match Legacy.parse_source src Parseff.end_of_input with
   | Ok () ->
       ()
   | Error _ ->
@@ -885,17 +885,17 @@ let test_of_seq_take_while () =
       Alcotest.fail "Expected success"
 
 let norm = function
-  | Parseff.Ok v ->
+  | Legacy.Ok v ->
       Ok v
-  | Parseff.Error { pos; error } ->
+  | Legacy.Error { pos; error } ->
       let kind =
         match error with
         | `Expected m ->
             "Expected " ^ m
         | `Unexpected_end_of_input ->
             "Unexpected_end_of_input"
-        | `Failure m ->
-            "Failure " ^ m
+        | `Message m ->
+            "Message " ^ m
         | `Depth_limit_exceeded m ->
             "Depth_limit_exceeded " ^ m
         | `Backtrack_window_exceeded _ ->
@@ -904,11 +904,11 @@ let norm = function
       Error (pos, kind)
 
 let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
-  let expected = norm (Parseff.parse input parser) in
+  let expected = norm (Legacy.parse input parser) in
   List.iter
     (fun chunk_size ->
       let actual =
-        norm (Parseff.parse_source (chunked_source ~chunk_size input) parser)
+        norm (Legacy.parse_source (chunked_source ~chunk_size input) parser)
       in
       if actual <> expected then
         Alcotest.failf "%s: chunk_size %d differs from parse" name chunk_size
@@ -926,15 +926,15 @@ let test_regex_lookbehind_after_peek () =
     [
       ( "bol",
         Re.(compile (seq [ bol; str "ab" ])),
-        Error (2, "Expected regex match failed")
+        Error (2, "Message regex match failed")
       );
       ( "bow",
         Re.(compile (seq [ bow; str "ab" ])),
-        Error (2, "Expected regex match failed")
+        Error (2, "Message regex match failed")
       );
       ( "bos",
         Re.(compile (seq [ bos; str "ab" ])),
-        Error (2, "Expected regex match failed")
+        Error (2, "Message regex match failed")
       );
       ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
     ]
@@ -944,7 +944,7 @@ let test_regex_lookbehind_after_peek () =
       let parser = lookbehind_parser re in
       Alcotest.(check (result string (pair int string)))
         (name ^ " parse") expected
-        (norm (Parseff.parse input parser));
+        (norm (Legacy.parse input parser));
       check_matches_parse name input parser
     )
     cases
@@ -957,13 +957,13 @@ let test_regex_lookbehind_window_accounting () =
     Parseff.match_regex Re.(compile (str "ab"))
   in
   match
-    Parseff.parse_source ~backtrack_window:8
+    Legacy.parse_source ~backtrack_window:8
       (chunked_source ~chunk_size:1 input)
       parser
   with
-  | Parseff.Ok s ->
+  | Legacy.Ok s ->
       Alcotest.(check string) "match" "ab" s
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       Alcotest.fail "unexpected error"
 
 let test_regex_readahead_half_window () =
@@ -979,7 +979,7 @@ let test_regex_readahead_half_window () =
   in
   let seen = ref (-1) in
   let _ =
-    Parseff.parse_source ~backtrack_window:1000 src (fun () ->
+    Legacy.parse_source ~backtrack_window:1000 src (fun () ->
         ignore (Parseff.match_regex Re.(compile (str "aa")));
         seen := !total
     )
@@ -1006,20 +1006,20 @@ let test_location_after_backtrack () =
       )
       ()
   in
-  ( match Parseff.parse input parser with
-  | Parseff.Ok s ->
+  ( match Legacy.parse input parser with
+  | Legacy.Ok s ->
       Alcotest.(check string) "parse" "1:1 3:2" s
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       Alcotest.fail "parse failed"
   );
   List.iter
     (fun chunk_size ->
-      match Parseff.parse_source (chunked_source ~chunk_size input) parser with
-      | Parseff.Ok s ->
+      match Legacy.parse_source (chunked_source ~chunk_size input) parser with
+      | Legacy.Ok s ->
           Alcotest.(check string)
             (Printf.sprintf "parse_source %d" chunk_size)
             "1:1 3:2" s
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail "parse_source failed"
     )
     [ 1; 3; 4096 ]
@@ -1056,7 +1056,7 @@ let test_sep_by_take_leading_whitespace () =
       )
   in
   let expect name input expected parser =
-    ( match Parseff.parse input parser with
+    ( match Legacy.parse input parser with
     | Ok (l, pos) ->
         Alcotest.(check (list string)) (name ^ " elements") (fst expected) l;
         Alcotest.(check int) (name ^ " position") (snd expected) pos
@@ -1073,10 +1073,10 @@ let test_sep_by_take_leading_whitespace () =
 let test_utf8_truncated_at_eof () =
   let rejects name parser =
     check_matches_parse name "a\xE2" parser;
-    match Parseff.parse "a\xE2" parser with
-    | Parseff.Error _ ->
+    match Legacy.parse "a\xE2" parser with
+    | Legacy.Error _ ->
         ()
-    | Parseff.Ok _ ->
+    | Legacy.Ok _ ->
         Alcotest.failf "%s: parse accepted truncated UTF-8" name
   in
   rejects "Utf8.take_while" (fun () ->
@@ -1090,13 +1090,13 @@ let test_utf8_truncated_at_eof () =
   List.iter
     (fun chunk_size ->
       match
-        Parseff.parse_source (chunked_source ~chunk_size "a\xE2") (fun () ->
+        Legacy.parse_source (chunked_source ~chunk_size "a\xE2") (fun () ->
             ignore (Parseff.Utf8.take_while (fun _ -> true))
         )
       with
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           ()
-      | Parseff.Ok _ ->
+      | Legacy.Ok _ ->
           Alcotest.failf "chunk_size %d: streaming accepted truncated UTF-8"
             chunk_size
     )
@@ -1104,7 +1104,7 @@ let test_utf8_truncated_at_eof () =
 
 let test_utf8_scan_after_ascii () =
   let all () = Parseff.Utf8.take_while (fun _ -> true) in
-  ( match Parseff.parse "ab\xFFc" all with
+  ( match Legacy.parse "ab\xFFc" all with
   | Error { pos; _ } ->
       Alcotest.(check int) "invalid byte position" 2 pos
   | Ok s ->
@@ -1114,7 +1114,7 @@ let test_utf8_scan_after_ascii () =
   let not_c () =
     Parseff.Utf8.take_while (fun u -> not (Uchar.equal u (Uchar.of_char 'c')))
   in
-  ( match Parseff.parse "ab\xCE\xBBc" not_c with
+  ( match Legacy.parse "ab\xCE\xBBc" not_c with
   | Ok s ->
       Alcotest.(check string) "ascii then lambda" "ab\xCE\xBB" s
   | Error _ ->
@@ -1228,42 +1228,42 @@ let test_regex_lookbehind () =
 let test_take_beyond_end_of_input () =
   check_matches_parse "take 100000" "abc" (fun () -> Parseff.take 100000);
   let result =
-    Parseff.parse_source ~backtrack_window:4 (chunked_source "abc") (fun () ->
+    Legacy.parse_source ~backtrack_window:4 (chunked_source "abc") (fun () ->
         Parseff.take 10
     )
   in
   match result with
-  | Parseff.Error { error = `Unexpected_end_of_input; _ } ->
+  | Legacy.Error { error = `Unexpected_end_of_input; _ } ->
       ()
   | _ ->
       Alcotest.fail "Expected Unexpected_end_of_input"
 
 let test_take_beyond_window () =
   match
-    Parseff.parse_source ~backtrack_window:4
+    Legacy.parse_source ~backtrack_window:4
       (chunked_source (String.make 100 'a'))
       (fun () -> Parseff.take 10)
   with
-  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+  | Legacy.Error { error = `Backtrack_window_exceeded _; _ } ->
       ()
   | _ ->
       Alcotest.fail "Expected Backtrack_window_exceeded"
 
 let show_failure = function
-  | Parseff.Ok _ ->
+  | Legacy.Ok _ ->
       "ok"
-  | Parseff.Error { pos; error = `Expected msg } ->
+  | Legacy.Error { pos; error = `Expected msg } ->
       Printf.sprintf "%d %s" pos msg
-  | Parseff.Error { pos; error = `Unexpected_end_of_input } ->
+  | Legacy.Error { pos; error = `Unexpected_end_of_input } ->
       Printf.sprintf "%d end of input" pos
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       "other"
 
 let test_error_position_across_chunk_boundary () =
   List.iter
     (fun chunk_size ->
       let r =
-        Parseff.parse_source (chunked_source ~chunk_size "help") (fun () ->
+        Legacy.parse_source (chunked_source ~chunk_size "help") (fun () ->
             ignore (Parseff.consume "hello")
         )
       in
@@ -1280,7 +1280,7 @@ let test_error_position_after_compaction () =
   List.iter
     (fun chunk_size ->
       let r =
-        Parseff.parse_source ~backtrack_window:64
+        Legacy.parse_source ~backtrack_window:64
           (chunked_source ~chunk_size input) (fun () ->
             ignore (Parseff.many (fun () -> Parseff.consume item) ());
             Parseff.end_of_input ()
@@ -1296,7 +1296,7 @@ let test_error_position_after_compaction () =
 let test_error_at_end_of_input_after_compaction () =
   let input = String.make 10_000 'a' in
   let r =
-    Parseff.parse_source ~backtrack_window:64
+    Legacy.parse_source ~backtrack_window:64
       (chunked_source ~chunk_size:100 input) (fun () ->
         ignore (Parseff.many (fun () -> Parseff.char 'a') ());
         ignore (Parseff.char 'b')
@@ -1317,23 +1317,23 @@ let cut_window_parser ~cut () =
 let test_cut_releases_buffer () =
   let input = "x" ^ String.make 2000 'a' in
   ( match
-      Parseff.parse_source ~backtrack_window:64
+      Legacy.parse_source ~backtrack_window:64
         (chunked_source ~chunk_size:16 input)
         (cut_window_parser ~cut:false)
     with
-  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+  | Legacy.Error { error = `Backtrack_window_exceeded _; _ } ->
       ()
   | _ ->
       Alcotest.fail "expected the window to be exceeded without cut"
   );
   match
-    Parseff.parse_source ~backtrack_window:64
+    Legacy.parse_source ~backtrack_window:64
       (chunked_source ~chunk_size:16 input)
       (cut_window_parser ~cut:true)
   with
-  | Parseff.Ok n ->
+  | Legacy.Ok n ->
       Alcotest.(check int) "count" 2000 n
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       Alcotest.fail "cut should release the buffer"
 
 let test_context_in_streaming () =
@@ -1345,11 +1345,11 @@ let test_context_in_streaming () =
     )
   in
   match
-    Parseff.parse_source ~backtrack_window:64
+    Legacy.parse_source ~backtrack_window:64
       (chunked_source ~chunk_size:7 input)
       parser
   with
-  | Parseff.Error { pos; error = `Expected msg } ->
+  | Legacy.Error { pos; error = `Expected msg } ->
       Alcotest.(check int) "position" 6001 pos;
       Alcotest.(check string) "message" "expected \"b\"" msg
   | _ ->

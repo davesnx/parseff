@@ -36,42 +36,42 @@ Mixed scripts in one record:
 Empty input:
 
   $ ./main.exe ""
-  Unexpected end of input at byte 0
+  Error at byte 0: expected key, found end of input
 
 Missing value:
 
   $ ./main.exe "key:"
-  Unexpected end of input at byte 4
+  Error at byte 4: expected a value after 'key:', found end of input
 
 Missing colon:
 
   $ ./main.exe "no_colon"
-  Unexpected end of input at byte 8
+  Error at byte 8: expected ':' after 'no_colon', found end of input
 
 Non-ASCII key (keys must be ASCII letters):
 
   $ ./main.exe "123: numeric"
-  Error at byte 0: expected key
+  Error at byte 0: expected key, found '123'
 
 Incomplete second field (the field fails at the end of the input, which is further than the trailing input):
 
   $ ./main.exe "a: ok
   > b:"
-  Unexpected end of input at byte 8
+  Error at byte 8: expected a value after 'b:', found end of input
 
 Trailing newline (the next field fails at the end of the input):
 
   $ ./main.exe "a: hello
   > b: world
   > "
-  Unexpected end of input at byte 18
+  Error at byte 18: expected key, found end of input
 
 Third field missing colon (the field fails at the end of the input):
 
   $ ./main.exe "first: 1
   > second: 2
   > third"
-  Unexpected end of input at byte 24
+  Error at byte 24: expected ':' after 'third', found end of input
 
 Emoji (4-byte UTF-8):
 
@@ -86,7 +86,7 @@ Mixed ASCII and multibyte value:
 Non-ASCII in key (café — parser matches 'caf' then expects ':' but finds 'é'):
 
   $ ./main.exe "café: latte"
-  Error at byte 3: expected ':' after 'caf'
+  Error at byte 3: expected ':' after 'caf', found 'é'
 
 Invalid UTF-8 (0xC3 where whitespace is expected, hits skip_whitespace directly):
 

@@ -38,11 +38,8 @@ let run input =
   match Parseff.parse input record with
   | Ok fields ->
       List.iter (fun (k, v) -> Printf.printf "%s = %s\n" k v) fields
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at byte %d: %s\n" pos msg
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "Unexpected end of input at byte %d\n" pos
-  | Error _ ->
-      Printf.printf "Unknown error\n"
+  | Error e ->
+      Printf.printf "Error at byte %d: %s\n" (Parseff.Error.pos e)
+        (Parseff.Error.message e)
 
 let () = run Sys.argv.(1)

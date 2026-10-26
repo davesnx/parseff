@@ -16,7 +16,7 @@ let test_fold_left_user_exception () =
       else
         a + b
   in
-  ( match Parseff.parse "1+1+1" (Parseff.fold_left Parseff.digit op) with
+  ( match Legacy.parse "1+1+1" (Parseff.fold_left Parseff.digit op) with
   | _ ->
       Alcotest.fail "expected Exit"
   | exception Exit ->
@@ -97,7 +97,7 @@ let check_outside_parse () =
 
 let test_escaping_exception_leaves_context () =
   ( match
-      Parseff.parse "abc" (fun () ->
+      Legacy.parse "abc" (fun () ->
           ignore (Parseff.char 'a');
           failwith "boom"
       )
@@ -112,7 +112,7 @@ let test_escaping_exception_leaves_context () =
 let test_escaping_exception_leaves_context_source () =
   let src = Parseff.Source.of_string "abc" in
   ( match
-      Parseff.parse_source src (fun () ->
+      Legacy.parse_source src (fun () ->
           ignore (Parseff.char 'a');
           failwith "boom"
       )
@@ -126,11 +126,11 @@ let test_escaping_exception_leaves_context_source () =
 
 let test_nested_parse_exception_keeps_outer_state () =
   match
-    Parseff.parse "abcdef" (fun () ->
+    Legacy.parse "abcdef" (fun () ->
         ignore (Parseff.char 'a');
         ( try
             ignore
-              (Parseff.parse "zzzzzz" (fun () ->
+              (Legacy.parse "zzzzzz" (fun () ->
                    ignore (Parseff.take 4);
                    failwith "x"
                )
@@ -147,11 +147,11 @@ let test_nested_parse_exception_keeps_outer_state () =
 
 let test_nested_parse_source_exception_keeps_outer_state () =
   match
-    Parseff.parse "abcdef" (fun () ->
+    Legacy.parse "abcdef" (fun () ->
         ignore (Parseff.char 'a');
         ( try
             ignore
-              (Parseff.parse_source (Parseff.Source.of_string "zzzzzz")
+              (Legacy.parse_source (Parseff.Source.of_string "zzzzzz")
                  (fun () ->
                    ignore (Parseff.take 4);
                    failwith "x"
@@ -169,7 +169,7 @@ let test_nested_parse_source_exception_keeps_outer_state () =
 
 let test_or_right_commit_stops_at_or () =
   match
-    Parseff.parse "z" (fun () ->
+    Legacy.parse "z" (fun () ->
         Parseff.or_
           (fun () ->
             ignore (Parseff.consume "x");
@@ -193,7 +193,7 @@ let test_or_right_commit_stops_at_or () =
 
 let test_or_right_commit_does_not_seal_many () =
   match
-    Parseff.parse "abd" (fun () ->
+    Legacy.parse "abd" (fun () ->
         let items =
           Parseff.many
             (fun () ->
@@ -222,8 +222,8 @@ let show_error = function
       Printf.sprintf "Expected %S" s
   | `Unexpected_end_of_input ->
       "Unexpected_end_of_input"
-  | `Failure s ->
-      Printf.sprintf "Failure %S" s
+  | `Message s ->
+      Printf.sprintf "Message %S" s
   | `E ->
       "E"
   | `Other ->
@@ -232,9 +232,9 @@ let show_error = function
       "other"
 
 let show_result show_v = function
-  | Parseff.Ok v ->
+  | Legacy.Ok v ->
       "Ok " ^ show_v v
-  | Parseff.Error { pos; error } ->
+  | Legacy.Error { pos; error } ->
       Printf.sprintf "Error@%d %s" pos (show_error error)
 
 let show_unit () = "()"
@@ -290,11 +290,11 @@ and json_member () =
 let both_runners show_v input parser expected =
   Alcotest.(check string)
     "parse" expected
-    (show_result show_v (Parseff.parse input parser));
+    (show_result show_v (Legacy.parse input parser));
   Alcotest.(check string)
     "parse_source" expected
     (show_result show_v
-       (Parseff.parse_source (Parseff.Source.of_string input) parser)
+       (Legacy.parse_source (Parseff.Source.of_string input) parser)
     )
 
 let test_trailing_comma_reports_value () =
@@ -391,16 +391,16 @@ let test_fail_escapes_or_many_expect () =
   let boom () = Parseff.fail "boom" in
   both_runners show_unit "x"
     (fun () -> Parseff.or_ boom (fun () -> ()) ())
-    {|Error@0 Failure "boom"|};
+    {|Error@0 Message "boom"|};
   both_runners show_unit "x"
     (fun () -> ignore (Parseff.many boom ()))
-    {|Error@0 Failure "boom"|};
+    {|Error@0 Message "boom"|};
   both_runners show_unit "x"
     (fun () -> Parseff.expect "thing" boom)
-    {|Error@0 Failure "boom"|};
+    {|Error@0 Message "boom"|};
   both_runners show_unit "x"
     (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ] ()))
-    {|Error@0 Failure "boom"|}
+    {|Error@0 Message "boom"|}
 
 let test_user_error_absorbed_by_or () =
   both_runners
@@ -451,8 +451,8 @@ let test_item_buffer_overflow () =
         ignore (Parseff.consume (Printf.sprintf "item%03d" i))
     )
   in
-  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
-  | Parseff.Error { pos = 0; error = `Expected msg } ->
+  match Legacy.parse "zzz" (Parseff.one_of alternatives) with
+  | Legacy.Error { pos = 0; error = `Expected msg } ->
       let items = List.length (String.split_on_char ',' msg) in
       Alcotest.(check bool) "at most 64 items" true (items <= 64);
       Alcotest.(check bool) "at least 60 items" true (items >= 60)
@@ -465,8 +465,8 @@ let test_item_buffer_dedupes_on_overflow () =
         ignore (Parseff.consume (Printf.sprintf "item%d" (i mod 3)))
     )
   in
-  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
-  | Parseff.Error { pos = 0; error = `Expected msg } ->
+  match Legacy.parse "zzz" (Parseff.one_of alternatives) with
+  | Legacy.Error { pos = 0; error = `Expected msg } ->
       Alcotest.(check string)
         "three items" {|expected "item0", "item1", or "item2"|} msg
   | _ ->
@@ -476,7 +476,7 @@ let test_utf8_char_does_not_format_labels () =
   let u = Uchar.of_int 0x61 in
   let words = ref 0. in
   match
-    Parseff.parse (String.make 1000 'a') (fun () ->
+    Legacy.parse (String.make 1000 'a') (fun () ->
         let before = Gc.minor_words () in
         for _ = 1 to 1000 do
           ignore (Parseff.Utf8.char u)
@@ -484,9 +484,9 @@ let test_utf8_char_does_not_format_labels () =
         words := Gc.minor_words () -. before
     )
   with
-  | Parseff.Ok () ->
+  | Legacy.Ok () ->
       Alcotest.(check bool) "no formatting per call" true (!words /. 1000. < 20.)
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       Alcotest.fail "Expected success"
 
 let test_utf8_char_error_text () =
@@ -508,10 +508,10 @@ let test_recorded_failures_do_not_fail_success () =
   in
   both_runners show_unit "ax" parser "Ok ()"
 
-module E = Parseff.Internal.Error
+module E = Parseff.Error
 
 let frames_of input parser =
-  match Parseff.Internal.parse input parser with
+  match Parseff.parse input parser with
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : unit E.t) ->
@@ -589,8 +589,8 @@ let test_context_chain_after_frame_closes () =
   in
   Alcotest.(check string)
     "chain copied when inner closed" "outer@0; inner@0" (frames_of "abx" parser);
-  match Parseff.parse "abx" parser with
-  | Parseff.Error { pos = 2; error = `Expected "expected \"c\"" } ->
+  match Legacy.parse "abx" parser with
+  | Legacy.Error { pos = 2; error = `Expected "expected \"c\"" } ->
       ()
   | _ ->
       Alcotest.fail "unexpected error"
@@ -801,7 +801,13 @@ let test_cut_inside_nested_context_keeps_outer_open () =
 let lines l = String.concat "\n" l
 
 let render ?(name = "input.json") ?source ?columns input parser =
-  match Parseff.Internal.parse_until_end input parser with
+  match
+    Parseff.parse input (fun () ->
+        let v = parser () in
+        Parseff.end_of_input ();
+        v
+    )
+  with
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : unit E.t) ->
@@ -1073,7 +1079,7 @@ let test_render_cut_statement () =
     (render "let x = ;" let_stmt_parser)
 
 let test_render_without_name () =
-  match Parseff.Internal.parse "x" (fun () -> ignore (Parseff.digit ())) with
+  match Parseff.parse "x" (fun () -> ignore (Parseff.digit ())) with
   | Stdlib.Error (e : unit E.t) ->
       Alcotest.(check string)
         "no name"
@@ -1244,7 +1250,7 @@ let test_render_window_cut () =
 
 let test_render_source_and_pp () =
   let input = "{\n  \"a\": 1\n  \"b\": 2\n}" in
-  match Parseff.Internal.parse input ctx_json_parser with
+  match Parseff.parse input ctx_json_parser with
   | Stdlib.Error (e : unit E.t) ->
       Alcotest.(check string)
         "source gives the same text"
@@ -1261,7 +1267,7 @@ let test_render_source_and_pp () =
       Alcotest.fail "expected an error"
 
 let test_render_other_kinds () =
-  ( match Parseff.Internal.parse "abc" (fun () -> Parseff.fail "boom") with
+  ( match Parseff.parse "abc" (fun () -> Parseff.fail "boom") with
   | Stdlib.Error (e : unit E.t) ->
       Alcotest.(check string)
         "fail"
@@ -1271,7 +1277,7 @@ let test_render_other_kinds () =
       Alcotest.fail "expected an error"
   );
   ( match
-      Parseff.Internal.parse ~max_depth:2 "[[[" (fun () ->
+      Parseff.parse ~max_depth:2 "[[[" (fun () ->
           let rec f () =
             Parseff.rec_ (fun () ->
                 ignore (Parseff.char '[');
@@ -1295,7 +1301,7 @@ let test_render_other_kinds () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
-  match Parseff.Internal.parse "z" (fun () -> Parseff.error `Boom) with
+  match Parseff.parse "z" (fun () -> Parseff.error `Boom) with
   | Stdlib.Error e ->
       Alcotest.(check string)
         "user"
@@ -1327,8 +1333,7 @@ let test_render_streaming_opener_dropped () =
     )
   in
   match
-    Parseff.Internal.parse_source ~backtrack_window:64 chunked
-      streaming_list_parser
+    Parseff.parse_source ~backtrack_window:64 chunked streaming_list_parser
   with
   | Stdlib.Error (e : unit E.t) ->
       let out = E.render ~name:"stream" e in
@@ -1365,7 +1370,7 @@ let test_render_streaming_opener_dropped () =
       Alcotest.fail "expected an error"
 
 let render_error ?(name = "input.json") input parser =
-  match Parseff.Internal.parse input parser with
+  match Parseff.parse input parser with
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : unit E.t) ->
@@ -1394,8 +1399,8 @@ let test_fail_from_span () =
        ]
     )
     (render_error "x = 300;" parser);
-  match Parseff.parse "x = 300;" parser with
-  | Parseff.Error { pos = 7; error = `Failure "number is too large" } ->
+  match Legacy.parse "x = 300;" parser with
+  | Legacy.Error { pos = 4; error = `Message "number is too large" } ->
       ()
   | _ ->
       Alcotest.fail "legacy result must not change"
@@ -1416,7 +1421,7 @@ let test_fail_from_after_position_is_normalized () =
 let test_loose_note () =
   let parser () =
     Parseff.fail
-      ~notes:[ { Parseff.at = None; text = "keys must be unique" } ]
+      ~notes:[ { Parseff.Error.at = None; text = "keys must be unique" } ]
       "duplicate key"
   in
   check_render "note line"
@@ -1432,7 +1437,7 @@ let test_loose_note () =
 
 let paren_note start =
   {
-    Parseff.at = Some { Parseff.start; stop = start + 1 };
+    Parseff.Error.at = Some { Parseff.start; stop = start + 1 };
     text = "to match this";
   }
 
@@ -1493,10 +1498,10 @@ let test_error_from_and_notes () =
   let parser () =
     ignore (Parseff.consume "ab");
     Parseff.error ~from:0
-      ~notes:[ { Parseff.at = None; text = "see the manual" } ]
+      ~notes:[ { Parseff.Error.at = None; text = "see the manual" } ]
       `Boom
   in
-  ( match Parseff.Internal.parse "abcd" parser with
+  ( match Parseff.parse "abcd" parser with
   | Stdlib.Error e ->
       Alcotest.(check string)
         "user error"
@@ -1512,8 +1517,8 @@ let test_error_from_and_notes () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
-  match Parseff.parse "abcd" parser with
-  | Parseff.Error { pos = 2; error = `Boom } ->
+  match Legacy.parse "abcd" parser with
+  | Legacy.Error { pos = 0; error = `Boom } ->
       ()
   | _ ->
       Alcotest.fail "legacy result must not change"
@@ -1523,7 +1528,7 @@ let test_catch_with_extras () =
     Parseff.catch
       (fun () ->
         Parseff.fail ~from:0
-          ~notes:[ { Parseff.at = None; text = "n" } ]
+          ~notes:[ { Parseff.Error.at = None; text = "n" } ]
           "inner"
       )
       (fun msg -> msg ^ "!")
@@ -1630,7 +1635,7 @@ let test_match_regex_label () =
     (render_error "!" both);
   both_runners show_unit "!"
     (fun () -> ignore (Parseff.match_regex id_re))
-    {|Error@0 Expected "regex match failed"|}
+    {|Error@0 Message "regex match failed"|}
 
 let test_note_on_dropped_line () =
   let input = String.make 2000 'a' ^ "!" in
@@ -1647,7 +1652,7 @@ let test_note_on_dropped_line () =
     ignore (Parseff.many (fun () -> Parseff.char 'a') ());
     Parseff.fail ~notes:[ paren_note 0 ] "stray"
   in
-  match Parseff.Internal.parse_source ~backtrack_window:64 chunked parser with
+  match Parseff.parse_source ~backtrack_window:64 chunked parser with
   | Stdlib.Error (e : unit E.t) ->
       let out = E.render e in
       Alcotest.(check bool)
@@ -1655,6 +1660,198 @@ let test_note_on_dropped_line () =
         (List.mem "  = note: to match this" (String.split_on_char '\n' out))
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
+
+let describe_kind (e : unit Parseff.Error.t) =
+  match e.kind with
+  | Parseff.Error.Expected { items = _, rest; found } ->
+      Printf.sprintf "expected %d more, found %s" (List.length rest)
+        ( match found with
+        | Parseff.Error.Text t ->
+            t
+        | Parseff.Error.End ->
+            "end"
+        )
+  | Parseff.Error.Message m ->
+      "message " ^ m
+  | Parseff.Error.User () ->
+      "user"
+  | Parseff.Error.Depth_limit_exceeded { limit } ->
+      Printf.sprintf "depth %d" limit
+  | Parseff.Error.Backtrack_window_exceeded { limit; _ } ->
+      Printf.sprintf "window %d" limit
+
+let kind_of ?max_depth input parser =
+  match Parseff.parse ?max_depth input parser with
+  | Stdlib.Ok _ ->
+      "ok"
+  | Stdlib.Error e ->
+      describe_kind e
+
+let test_exhaustive_kind_match () =
+  Alcotest.(check string)
+    "expected" "expected 1 more, found x"
+    (kind_of "x" (fun () ->
+         ignore
+           (Parseff.or_ Parseff.digit
+              (fun () ->
+                ignore (Parseff.char '1');
+                0
+              )
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "message" "message boom"
+    (kind_of "x" (fun () -> Parseff.fail "boom"));
+  Alcotest.(check string)
+    "user" "user"
+    (kind_of "x" (fun () -> Parseff.error ()));
+  Alcotest.(check string)
+    "depth" "depth 2"
+    (kind_of ~max_depth:2 "[[[" (fun () ->
+         let rec f () =
+           Parseff.rec_ (fun () ->
+               ignore (Parseff.char '[');
+               f ()
+           )
+         in
+         f ()
+     )
+    );
+  let chunked =
+    let pos = ref 0 in
+    let input = String.make 500 'a' in
+    Parseff.Source.of_function (fun buf off len ->
+        let n = min (min 5 len) (String.length input - !pos) in
+        Bytes.blit_string input !pos buf off n;
+        pos := !pos + n;
+        n
+    )
+  in
+  match
+    Parseff.parse_source ~backtrack_window:16 chunked (fun () ->
+        ignore (Parseff.take_while (fun c -> c = 'a'))
+    )
+  with
+  | Stdlib.Error e ->
+      Alcotest.(check string) "window" "window 16" (describe_kind e)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected the window to be exceeded"
+
+let test_end_of_input_keeps_expected_set () =
+  match Parseff.parse "[1, 2" ctx_json_parser with
+  | Stdlib.Error
+      {
+        kind =
+          Parseff.Error.Expected
+            {
+              items = Parseff.Error.Char a, [ Parseff.Error.Char b ];
+              found = Parseff.Error.End;
+            };
+        span = { start = 5; stop = 5 };
+        _;
+      } ->
+      Alcotest.(check (list int))
+        "comma and bracket"
+        [ Char.code ','; Char.code ']' ]
+        [ Uchar.to_int a; Uchar.to_int b ]
+  | _ ->
+      Alcotest.fail "expected the set of the array separator and closer"
+
+type too_large = Too_large of int
+
+let number_checked () =
+  let n =
+    int_of_string
+      (Parseff.take_while ~at_least:1 ~label:"digit" (fun c ->
+           c >= '0' && c <= '9'
+       )
+      )
+  in
+  if n > 255 then
+    Parseff.error (Too_large n)
+  else
+    n
+
+let test_user_errors_by_pattern () =
+  ( match Parseff.parse "300" number_checked with
+  | Stdlib.Error { kind = Parseff.Error.User (Too_large n); span; _ } ->
+      Alcotest.(check int) "payload" 300 n;
+      Alcotest.(check int) "position" 3 span.start
+  | _ ->
+      Alcotest.fail "expected a user error"
+  );
+  ( match
+      Parseff.parse "300" (fun () ->
+          Parseff.expect "octet" (fun () -> number_checked ())
+      )
+    with
+  | Stdlib.Error { kind = Parseff.Error.User (Too_large 300); _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "expect must not relabel a user error"
+  );
+  ( match
+      Parseff.parse "300" (fun () ->
+          Parseff.or_ number_checked (fun () -> Parseff.fail "second") ()
+      )
+    with
+  | Stdlib.Error { kind = Parseff.Error.Message "second"; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "fail in the second branch must win"
+  );
+  ( match
+      Parseff.parse "300" (fun () ->
+          Parseff.or_ number_checked
+            (fun () ->
+              ignore (Parseff.char 'x');
+              0
+            )
+            ()
+      )
+    with
+  | Stdlib.Error { kind = Parseff.Error.User (Too_large 300); _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "the furthest user error is reported"
+  );
+  match Parseff.parse "x" (fun () -> Parseff.fail "boom") with
+  | Stdlib.Error { kind = Parseff.Error.Message "boom"; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "fail gives a message"
+
+let test_migration_pattern () =
+  let migrate input =
+    match Parseff.parse input number_checked with
+    | Stdlib.Ok n ->
+        Printf.sprintf "ok %d" n
+    | Stdlib.Error e ->
+        Parseff.Error.message
+          ~user:(function Too_large n -> Printf.sprintf "%d is too large" n)
+          e
+  in
+  Alcotest.(check string) "ok" "ok 12" (migrate "12");
+  Alcotest.(check string) "user" "300 is too large" (migrate "300");
+  Alcotest.(check string)
+    "expected" "expected digit, found end of input" (migrate "")
+
+let test_diagnostics_carry_the_error () =
+  let parser () =
+    Parseff.warn "careful";
+    ignore (Parseff.consume "ab");
+    Parseff.consume "c"
+  in
+  match Parseff.parse_until_end "abx" parser with
+  | Stdlib.Error
+      { error; diagnostics = [ { diagnostic = "careful"; pos = 0 } ] } ->
+      Alcotest.(check string)
+        "message" "expected \"c\", found 'x'"
+        (Parseff.Error.message error)
+  | _ ->
+      Alcotest.fail "expected an error with its diagnostics"
 
 let () =
   let open Alcotest in
@@ -1799,6 +1996,17 @@ let () =
             test_fail_frames_with_catch_in_between;
           test_case "match_regex label" `Quick test_match_regex_label;
           test_case "note on a dropped line" `Quick test_note_on_dropped_line;
+        ]
+      );
+      ( "public errors",
+        [
+          test_case "exhaustive kind match" `Quick test_exhaustive_kind_match;
+          test_case "end of input keeps the expected set" `Quick
+            test_end_of_input_keeps_expected_set;
+          test_case "user errors by pattern" `Quick test_user_errors_by_pattern;
+          test_case "migration pattern" `Quick test_migration_pattern;
+          test_case "diagnostics carry the error" `Quick
+            test_diagnostics_carry_the_error;
         ]
       );
       ( "fold exceptions",

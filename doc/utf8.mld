@@ -168,8 +168,13 @@ sequence. This includes:
 - Overlong encodings
 - Truncated multi-byte sequences
 
-The error message is ["invalid UTF-8"] and the position points to the first
-invalid byte.
+The error is a [Message] error ["invalid UTF-8"] and the position points to the
+first invalid byte. In an error report the invalid byte prints as [\xFF] in the
+found text and as [?] in the source line.
+
+{!val:Parseff.Utf8.char} reports the expected character itself, for example
+[expected 'é', found 'e'], and the failure of any [Utf8] primitive carries the
+label you gave it.
 
 {1 Position tracking}
 
@@ -177,6 +182,25 @@ Positions remain byte offsets, consistent with the rest of parseff. A single
 {!val:Parseff.Utf8.satisfy} call advances the position by 1--4 bytes depending
 on the UTF-8 encoding of the matched code point. {!val:Parseff.position} always
 returns a byte offset.
+
+{1 Columns in error messages}
+
+The column in an error header counts bytes by default, like [location]. For
+text with multi-byte characters, [Parseff.Error.render ~columns:`Code_points]
+prints the column in code points instead. The carets under the source line
+always count code points, so they line up in both modes:
+
+{v
+input.json:1:7: error: expected ',' or ']', found '"'     (bytes)
+input.json:1:6: error: expected ',' or ']', found '"'     (code points)
+1 | ["é" "b"]
+  |      ^
+v}
+
+[Parseff.Error.t] also carries [code_point_col]. It is [None] when the start of
+the line is no longer buffered, which only happens when streaming; pass
+[~source] to [render] to get exact columns then. Wide characters and combining
+marks count as one column each: Parseff has no width tables.
 
 {1 Streaming support}
 

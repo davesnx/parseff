@@ -22,9 +22,8 @@
         (a, b, c, d)
 
       match Parseff.parse "192.168.1.1" ip_address with
-      | Ok result -> Printf.printf "Parsed: %d.%d.%d.%d\n" (fst (fst (fst result))) ...
-      | Error { pos; error = `Expected msg } -> Printf.printf "Error at %d: %s\n" pos msg
-      | Error _ -> Printf.printf "Other error\n"
+      | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
+      | Error e -> prerr_endline (Parseff.Error.render ~name:"address" e)
     ]} *)
 
 (** {1 Span Type} *)
@@ -48,59 +47,148 @@ type range = { start : int; stop : int }
 (** A range of byte offsets, [start] included and [stop] excluded, with
     [start <= stop]. *)
 
-type note = { at : range option; text : string }
-(** An annotation on an error. [at = Some r] underlines the bytes [r] in the
-    source excerpt with the text next to the underline. [at = None] adds a
-    ["= note:"] line under the excerpt. *)
-
 type backtrack_window_error = { limit : int; oldest : int }
 (** Streaming backtracking exceeded the configured history window.
 
     [oldest] is the earliest position the runtime still needs to rewind to and
-    [limit] is the configured [backtrack_window]. The error position [pos] is
-    the furthest byte position Parseff needed to retain or reach when the
-    overflow happened. *)
+    [limit] is the configured [backtrack_window]. The error position is the
+    furthest byte position Parseff needed to retain or reach when the overflow
+    happened. *)
+
+(** {1 Errors} *)
+
+(** A parse error: what failed, where, and what the parser was doing.
+
+    A failed parse returns one [Error.t]. Match on its [kind] to react to the
+    failure, or print it with {!Error.render}. *)
+module Error : sig
+  type expected =
+    | Char of Uchar.t  (** A specific character, printed as ['x']. *)
+    | Literal of string  (** A literal string, printed as ["abc"]. *)
+    | Label of string
+        (** A name given by {!satisfy}, {!take_while}, {!expect} and others. *)
+    | End_of_input  (** The end of the input. *)
+
+  type found =
+    | Text of string  (** The text at the failure position. *)
+    | End  (** The input ended. *)
+
+  type frame = { name : string; start : int; delimited : bool }
+  (** A construct that was open at the failure, see {!val:Parseff.context}.
+      [start] is the byte offset where it started, [delimited] is true for
+      constructs with an opening token. *)
+
+  type note = { at : range option; text : string }
+  (** An annotation added with [~notes] in {!val:Parseff.fail} or
+      {!val:Parseff.error}. [at = Some r] underlines the bytes [r] in the source
+      excerpt with the text next to the underline. [at = None] adds a
+      ["= note:"] line under the excerpt. *)
+
+  type excerpt
+  (** Source lines kept with the error so that {!render} does not need the
+      input. *)
+
+  type 'e kind =
+    | Expected of { items : expected * expected list; found : found }
+        (** A primitive failed. [items] is everything that was expected at the
+            furthest failure position, sorted and without duplicates. *)
+    | Message of string
+        (** A failure with a message: {!val:Parseff.fail}, an invalid UTF-8
+            byte, or a failed {!val:Parseff.match_regex} without a label. *)
+    | User of 'e  (** A value given to {!val:Parseff.error}. *)
+    | Depth_limit_exceeded of { limit : int }
+        (** {!val:Parseff.rec_} nested deeper than [max_depth]. *)
+    | Backtrack_window_exceeded of backtrack_window_error
+        (** A streaming parser needed more rewind history than the window. *)
+
+  type 'e t = {
+    kind : 'e kind;
+    span : range;
+        (** The bytes the error is about, never reversed, empty at the end of
+            the input. *)
+    location : location;  (** Line and column of [span.start], in bytes. *)
+    code_point_col : int option;
+        (** Column in code points, [None] if the start of the line is no longer
+            buffered (streaming). *)
+    frames : frame list;  (** Open constructs, outermost first. *)
+    notes : note list;
+    excerpt : excerpt;
+  }
+
+  val pos : 'e t -> int
+  (** [pos e] is [e.span.start], the byte offset of the error. *)
+
+  val message : ?user:('e -> string) -> 'e t -> string
+  (** [message e] is the one-line message, for example
+      [expected "else", "if", or "while", found 'xyz']. [user] prints [User]
+      errors, the default is ["error"]. *)
+
+  type columns = [ `Bytes | `Code_points ]
+
+  val render :
+    ?name:string ->
+    ?source:string ->
+    ?columns:columns ->
+    ?user:('e -> string) ->
+    'e t ->
+    string
+  (** [render e] prints the error with a source excerpt:
+
+      {v
+      input.json:3:3: error: expected ',' or '}', found '"'
+      1 | {
+        | - opened here
+      2 |   "a": 1
+      3 |   "b": 2
+        |   ^
+        = while parsing object, from 1:1
+      v}
+
+      [name] is printed at the start of the header. [source] is the parsed
+      input; without it the excerpt kept in the error is used, which is enough
+      for the error line and the lines around it, and may miss old lines in
+      streaming. [columns] chooses the column unit of the header, [`Bytes] by
+      default. Carets always count code points. The result has no trailing
+      newline. *)
+
+  val pp :
+    ?name:string ->
+    ?source:string ->
+    ?columns:columns ->
+    ?user:(Format.formatter -> 'e -> unit) ->
+    Format.formatter ->
+    'e t ->
+    unit
+  (** [pp] prints what {!render} returns. *)
+end
 
 (** {1 Result Types} *)
 
-(** Parse result with support for custom error types.
+type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result
+(** Parse result. ['a] is the parsed value and ['e] is the type of the values
+    given to {!val:error}. A parse that never calls [error] leaves ['e]
+    unconstrained.
 
-    The result type has two type parameters:
-    - ['a] is the type of the parsed value
-    - ['e] is the type of errors
+    When a parse fails, the error is the furthest failure: the failure of any
+    primitive that happened at the highest input position, including primitives
+    in branches that [or_], [many], [sep_by], [optional] or [fold_*] abandoned.
+    The [Expected] kind lists everything that was expected at that position,
+    sorted and without duplicates:
+    [expected "else", "if", or "while", found 'xyz']. A failure at the end of
+    the input says [found end of input] and keeps the expected set.
 
-    Built-in errors are polymorphic variants:
-    - [`Expected of string] — a specific token or pattern was expected but the
-      input contained something else
-    - [`Failure of string] — a user-initiated failure raised via {!val:fail}
-    - [`Unexpected_end_of_input] — input ended before the parser could match
-    - [`Depth_limit_exceeded of string] — recursive nesting exceeded [max_depth]
-      (see {!rec_})
-    - [`Backtrack_window_exceeded of backtrack_window_error] — a streaming
-      parser needed to keep more rewind history than allowed by
-      [backtrack_window]
-
-    User errors raised via {!val-error} are also returned as [Error].
-
-    When a parse fails, [pos] is the furthest position where any primitive
-    failed, including primitives in branches that [or_], [many], [sep_by],
-    [optional] or [fold_*] abandoned. [`Expected] lists everything that was
-    expected at that position, sorted and without duplicates:
-    [expected "else", "if", or "while"]. A failure at the end of the input is
-    reported as [`Unexpected_end_of_input]. *)
-type ('a, 'e) result =
-  | Ok of 'a  (** Success: parsed value *)
-  | Error of {
-      pos : int;  (** Position where error occurred *)
-      error : 'e;  (** Error value *)
-    }  (** Failure: position and error *)
+    {[
+      match Parseff.parse input parser with
+      | Ok value -> ...
+      | Error { kind = User (`Too_large n); _ } -> ...
+      | Error e -> prerr_endline (Parseff.Error.render ~name:"input" e)
+    ]} *)
 
 type 'd diagnostic = { pos : int; diagnostic : 'd }
 (** Non-fatal diagnostic emitted during parsing. *)
 
 type ('e, 'd) error_with_diagnostics = {
-  pos : int;
-  error : 'e;
+  error : 'e Error.t;
   diagnostics : 'd diagnostic list;
 }
 
@@ -110,61 +198,38 @@ type ('a, 'e, 'd) result_with_diagnostics =
 
 (** {1 Runner} *)
 
-val parse :
-  ?max_depth:int ->
-  string ->
-  (unit -> 'a) ->
-  ( 'a,
-    [> `Expected of string
-    | `Failure of string
-    | `Unexpected_end_of_input
-    | `Depth_limit_exceeded of string ]
-  )
-  result
+val parse : ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e) result
 (** [parse ?max_depth input parser] runs [parser] on [input] string.
 
     [max_depth] limits the nesting depth for parsers that use {!rec_} to mark
     recursive entry points. Defaults to [128]. When exceeded, parsing fails with
-    [`Depth_limit_exceeded] instead of risking a stack overflow.
+    [Error.Depth_limit_exceeded] instead of risking a stack overflow.
 
     This function does not require consuming the full input; call
     {!end_of_input} in your parser when you want full-consumption behavior.
 
-    Returns [Ok result] on success, or [Error { pos; error }] on failure. Errors
-    are:
-    - [`Expected msg] — the input contained something unexpected
-    - [`Failure msg] — a user-initiated failure raised via {!val:fail}
-    - [`Unexpected_end_of_input] — the input ended before the parser could match
-    - [`Depth_limit_exceeded msg] — recursive nesting exceeded [max_depth]
-    - Any user error raised via {!val-error}
+    Returns [Ok result] on success, or [Error e] on failure, where [e] is an
+    {!Error.t}. [e.kind] is [Expected] for a mismatch, [Message] for
+    {!val:fail}, [User] for {!val-error}, [Depth_limit_exceeded] when recursion
+    nested deeper than [max_depth], and [Backtrack_window_exceeded] for
+    streaming.
 
     Example:
     {@ocaml[
     match parse "hello" (fun () -> consume "hello") with
     | Ok s ->
         Printf.printf "Matched %S\n" s
-    | Error { pos; error = `Expected msg } ->
-        Printf.printf "Expected at %d: %s\n" pos msg
-    | Error { pos; error = `Failure msg } ->
-        Printf.printf "Failed at %d: %s\n" pos msg
-    | Error { error = `Unexpected_end_of_input; _ } ->
-        Printf.printf "Input ended too early\n"
-    | Error _ ->
-        Printf.printf "Other error\n"
+    | Error { kind = Message msg; _ } ->
+        Printf.printf "Failed: %s\n" msg
+    | Error e ->
+        prerr_endline (Error.render ~name:"input" e)
     ]} *)
 
 val parse_until_end :
   ?max_depth:int ->
   string ->
   (unit -> 'a) ->
-  ( 'a,
-    [> `Expected of string
-    | `Failure of string
-    | `Unexpected_end_of_input
-    | `Depth_limit_exceeded of string ],
-    'd
-  )
-  result_with_diagnostics
+  ('a, 'e, 'd) result_with_diagnostics
 (** [parse_until_end ?max_depth input parser] runs [parser] on [input], requires
     that all input is consumed, and returns diagnostics on both success and
     failure.
@@ -174,11 +239,11 @@ val parse_until_end :
 (** {1 Primitive Combinators} *)
 
 val consume : string -> string
-(** [consume s] matches the exact literal string [s]. Fails with [`Expected] at
-    the first byte that differs from [s], and with [`Unexpected_end_of_input]
-    only when the input ends inside a prefix of [s]. The failure position is the
-    mismatch, not the start of [s]: [consume "ab"] on ["ax"] fails at offset [1]
-    and expects ["b"].
+(** [consume s] matches the exact literal string [s]. Fails at the first byte
+    that differs from [s], expecting the rest of [s]. The failure position is
+    the mismatch, not the start of [s]: [consume "ab"] on ["ax"] fails at offset
+    [1] and expects ["b"]. When the input ends inside [s], the error says
+    [found end of input].
 
     Example:
     {@ocaml[
@@ -224,7 +289,8 @@ val match_regex : ?label:string -> Re.re -> string
     If the window is full of rewind history, the regex runs on the buffered
     input. A match that ends before the end of the buffer is returned. A failed
     match, or one that reaches the end of the buffer, fails with
-    [`Backtrack_window_exceeded], because more input could change the result.
+    [Error.Backtrack_window_exceeded], because more input could change the
+    result.
 
     The match must start at the current position, but [Re] searches forward when
     it does not. A failed match therefore scans the rest of the input, and a
@@ -295,16 +361,28 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     operation. Returns the taken string. Much more efficient than calling each
     step separately when parsing separated values. *)
 
-val fail : ?from:int -> ?notes:note list -> string -> 'a
-(** [fail ?from ?notes msg] aborts parsing with a [`Failure msg] error.
+val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
+(** [fail ?from ?notes msg] aborts parsing with a [Message msg] error.
 
     [~from] makes the error cover the bytes from [from] up to the current
-    position instead of a single position, and [~notes] attaches {!note}s. Both
-    are used by the detailed error report and do not change [`Failure msg]. This
-    is intended for user-initiated validation failures (e.g. a parsed value is
-    out of range).
+    position instead of a single position, and [~notes] attaches {!Error.note}s.
+    {!Error.render} underlines the span and prints the notes. This is intended
+    for user-initiated validation failures (e.g. a parsed value is out of
+    range).
 
-    [`Failure] errors are not caught by backtracking combinators ({!val:or_},
+    {@ocaml[
+    let byte () =
+      let start = position () in
+      let n = int_of_string (take_while ~at_least:1 is_digit ~label:"digit") in
+      if n > 255 then
+        fail ~from:start
+          ~notes:[ { at = None; text = "octets are 0 to 255" } ]
+          "octet out of range"
+      else
+        n
+    ]}
+
+    Failures from [fail] are not caught by backtracking combinators ({!val:or_},
     {!val:many}, {!val:one_of}, {!val:optional}, {!val:look_ahead}) or
     relabeling combinators ({!val:expect}, {!val:one_of_labeled}). Once raised,
     a failure propagates all the way to the runner.
@@ -322,11 +400,11 @@ val fail : ?from:int -> ?notes:note list -> string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : ?from:int -> ?notes:note list -> 'e -> 'a
+val error : ?from:int -> ?notes:Error.note list -> 'e -> 'a
 (** [error ?from ?notes e] aborts parsing with a user-defined typed error value.
     [~from] and [~notes] work as in {!fail}.
 
-    The error is returned as [Error { pos; error = e }]. Use polymorphic
+    The error is returned as [Error { kind = User e; _ }]. Use polymorphic
     variants for rich error reporting:
     {@ocaml[
       let number () =
@@ -337,9 +415,9 @@ val error : ?from:int -> ?notes:note list -> 'e -> 'a
 
       match run input number with
       | Ok n -> Printf.printf "Got %d\n" n
-      | Error { error = `Out_of_range n; _ } ->
+      | Error { kind = User (`Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
-      | Error { error = `Negative n; _ } ->
+      | Error { kind = User (`Negative n); _ } ->
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
     ]}
@@ -350,8 +428,8 @@ val error : ?from:int -> ?notes:note list -> 'e -> 'a
     {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
     like any other parse failure. An absorbed user error is still reported when
     the parse fails and the error is at the furthest failure position. At the
-    same position, a user error wins over [`Expected]. Between two user errors
-    at the same position, the first one wins.
+    same position, a user error wins over [Expected]. Between two user errors at
+    the same position, the first one wins.
 
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
@@ -414,8 +492,8 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
     backtracks and tries the right parser.
 
     When both branches fail, the parse reports the furthest failure. If both
-    branches fail at the same position, the [`Expected] messages are merged into
-    one sorted list without duplicates. A failure that is behind another one is
+    branches fail at the same position, the expected items are merged into one
+    sorted list without duplicates. A failure that is behind another one is
     dropped.
 
     This means [one_of] (which chains [or_]) naturally produces messages like
@@ -573,7 +651,7 @@ val expect : string -> (unit -> 'a) -> 'a
     message, because it says more than [description]:
     [expect "key" (fun () -> consume "id:"; digit ())] on ["id:x"] reports
     [expected digit] at offset [3], and [expected key] on ["foo"]. A failure at
-    the end of the input stays [`Unexpected_end_of_input].
+    the end of the input keeps its expected items and says [found end of input].
 
     Failures from {!val:fail} propagate unchanged (use {!val:catch} to intercept
     those). User errors raised via {!val-error} propagate unchanged — this lets
@@ -600,7 +678,7 @@ val expect : string -> (unit -> 'a) -> 'a
     ]} *)
 
 val catch : (unit -> 'a) -> (string -> 'a) -> 'a
-(** [catch parser handler] runs [parser]. If [parser] raises a [`Failure] (via
+(** [catch parser handler] runs [parser]. If [parser] raises a failure (via
     {!val:fail}), calls [handler msg] instead of propagating the failure.
 
     This is the escape hatch for when you want a {!val:fail} to participate in
@@ -873,14 +951,7 @@ val parse_source :
   ?backtrack_window:int ->
   Source.t ->
   (unit -> 'a) ->
-  ( 'a,
-    [> `Expected of string
-    | `Failure of string
-    | `Unexpected_end_of_input
-    | `Backtrack_window_exceeded of backtrack_window_error
-    | `Depth_limit_exceeded of string ]
-  )
-  result
+  ('a, 'e) result
 (** [parse_source ?max_depth source parser] runs [parser] pulling input from
     [source] on demand. Behaves identically to {!parse} but the input does not
     need to be fully available up front.
@@ -888,7 +959,7 @@ val parse_source :
     The same parsers work with both [parse] and [parse_source] — no changes
     required. Streaming backtracking is bounded by [backtrack_window] (default:
     [65536] bytes). If the parser needs to keep more rewind history than that,
-    parsing fails with [`Backtrack_window_exceeded]. Use {!commit} to seal
+    parsing fails with [Error.Backtrack_window_exceeded]. Use {!commit} to seal
     branches once the grammar has clearly chosen them.
 
     [backtrack_window] must be at least [2], because {!match_regex} reads ahead
@@ -913,15 +984,7 @@ val parse_source_until_end :
   ?backtrack_window:int ->
   Source.t ->
   (unit -> 'a) ->
-  ( 'a,
-    [> `Expected of string
-    | `Failure of string
-    | `Unexpected_end_of_input
-    | `Backtrack_window_exceeded of backtrack_window_error
-    | `Depth_limit_exceeded of string ],
-    'd
-  )
-  result_with_diagnostics
+  ('a, 'e, 'd) result_with_diagnostics
 (** [parse_source_until_end ?max_depth source parser] is the streaming
     equivalent of {!parse_until_end}. It enforces full consumption and returns
     diagnostics on both success and failure.
@@ -1147,86 +1210,3 @@ module Utf8 : sig
       More efficient than {!whitespace} when you don't need the matched string.
   *)
 end
-
-(**/**)
-
-module Internal : sig
-  type range_alias = range = { start : int; stop : int }
-  type note_alias = note = { at : range option; text : string }
-
-  module Error : sig
-    type range = range_alias = { start : int; stop : int }
-
-    type expected =
-      | Char of Uchar.t
-      | Literal of string
-      | Label of string
-      | End_of_input
-
-    type found = Text of string | End
-    type frame = { name : string; start : int; delimited : bool }
-    type note = note_alias = { at : range option; text : string }
-    type excerpt
-
-    type 'e kind =
-      | Expected of { items : expected * expected list; found : found }
-      | Message of string
-      | User of 'e
-      | Depth_limit_exceeded of { limit : int }
-      | Backtrack_window_exceeded of backtrack_window_error
-
-    type 'e t = {
-      kind : 'e kind;
-      span : range;
-      location : location;
-      code_point_col : int option;
-      frames : frame list;
-      notes : note list;
-      excerpt : excerpt;
-    }
-
-    type columns = [ `Bytes | `Code_points ]
-
-    val pos : 'e t -> int
-    val message : ?user:('e -> string) -> 'e t -> string
-
-    val render :
-      ?name:string ->
-      ?source:string ->
-      ?columns:columns ->
-      ?user:('e -> string) ->
-      'e t ->
-      string
-
-    val pp :
-      ?name:string ->
-      ?source:string ->
-      ?columns:columns ->
-      ?user:(Format.formatter -> 'e -> unit) ->
-      Format.formatter ->
-      'e t ->
-      unit
-  end
-
-  val parse :
-    ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e Error.t) Stdlib.result
-
-  val parse_until_end :
-    ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e Error.t) Stdlib.result
-
-  val parse_source :
-    ?max_depth:int ->
-    ?backtrack_window:int ->
-    Source.t ->
-    (unit -> 'a) ->
-    ('a, 'e Error.t) Stdlib.result
-
-  val parse_source_until_end :
-    ?max_depth:int ->
-    ?backtrack_window:int ->
-    Source.t ->
-    (unit -> 'a) ->
-    ('a, 'e Error.t) Stdlib.result
-end
-
-(**/**)

@@ -136,16 +136,16 @@ let test_basic_parallel_parsing () =
   let results =
     parallel num_domains (fun i ->
         let input = inputs.(i mod Array.length inputs) in
-        Parseff.parse input (fun () -> Parseff.consume input)
+        Legacy.parse input (fun () -> Parseff.consume input)
     )
   in
   List.iteri
     (fun i result ->
       let input = inputs.(i mod Array.length inputs) in
       match result with
-      | Parseff.Ok s ->
+      | Legacy.Ok s ->
           Alcotest.(check string) "matched" input s
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success for %S" i input)
     )
@@ -157,17 +157,17 @@ let test_same_parser_many_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = String.init (i + 1) (fun j -> Char.chr (48 + (j mod 10))) in
-        (input, Parseff.parse input digit_list_parser)
+        (input, Legacy.parse input digit_list_parser)
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok lst ->
+      | Legacy.Ok lst ->
           Alcotest.(check int)
             (Printf.sprintf "domain %d length" i)
             (String.length input) (List.length lst)
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: expected success" i)
     )
     results
@@ -188,15 +188,15 @@ let test_alternation_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = choices.(i mod Array.length choices) in
-        (input, Parseff.parse input parser)
+        (input, Legacy.parse input parser)
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s ->
+      | Legacy.Ok s ->
           Alcotest.(check string) "matched choice" input s
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success for %S" i input)
     )
@@ -219,15 +219,15 @@ let test_json_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = docs.(i mod Array.length docs) in
-        (i, input, Parseff.parse input json)
+        (i, input, Legacy.parse input json)
     )
   in
   List.iter
     (fun (i, input, result) ->
       match result with
-      | Parseff.Ok _ ->
+      | Legacy.Ok _ ->
           ()
-      | Parseff.Error { pos; _ } ->
+      | Legacy.Error { pos; _ } ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: JSON parse failed at pos %d for %S" i
                pos input
@@ -241,15 +241,15 @@ let test_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "item%d" i in
         let source = Parseff.Source.of_string input in
-        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
+        (input, Legacy.parse_source source (fun () -> Parseff.consume input))
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s ->
+      | Legacy.Ok s ->
           Alcotest.(check string) "streaming result" input s
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: streaming parse failed for %S" i input)
     )
@@ -265,10 +265,10 @@ let test_high_contention () =
         for iter = 0 to iterations - 1 do
           let input = Printf.sprintf "%d" ((domain_id * iterations) + iter) in
           let parser () = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
-          match Parseff.parse input parser with
-          | Parseff.Ok s ->
+          match Legacy.parse input parser with
+          | Legacy.Ok s ->
               if s <> input then incr failures
-          | Parseff.Error _ ->
+          | Legacy.Error _ ->
               incr failures
         done;
         !failures
@@ -288,24 +288,24 @@ let test_errors_isolated_across_domains () =
         if i mod 2 = 0 then
           (* Valid parse *)
           let input = "hello" in
-          (i, true, Parseff.parse input (fun () -> Parseff.consume "hello"))
+          (i, true, Legacy.parse input (fun () -> Parseff.consume "hello"))
         else
           (* Invalid parse — should fail *)
           let input = "xyz" in
-          (i, false, Parseff.parse input (fun () -> Parseff.consume "hello"))
+          (i, false, Legacy.parse input (fun () -> Parseff.consume "hello"))
     )
   in
   List.iter
     (fun (i, should_succeed, result) ->
       match (should_succeed, result) with
-      | true, Parseff.Ok s ->
+      | true, Legacy.Ok s ->
           Alcotest.(check string) (Printf.sprintf "domain %d ok" i) "hello" s
-      | true, Parseff.Error _ ->
+      | true, Legacy.Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success, got error" i)
-      | false, Parseff.Error _ ->
+      | false, Legacy.Error _ ->
           ()
-      | false, Parseff.Ok _ ->
+      | false, Legacy.Ok _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected error, got success" i)
     )
@@ -320,18 +320,18 @@ let test_complex_combinators_across_domains () =
         let parser =
           Parseff.sep_by Parseff.digit (fun () -> Parseff.char ',')
         in
-        (i, Parseff.parse input parser)
+        (i, Legacy.parse input parser)
     )
   in
   List.iter
     (fun (i, result) ->
       match result with
-      | Parseff.Ok lst ->
+      | Legacy.Ok lst ->
           Alcotest.(check (list int))
             (Printf.sprintf "domain %d sep_by" i)
             [ i; i + 1; i + 2 ]
             lst
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: sep_by parse failed" i)
     )
     results
@@ -354,13 +354,13 @@ let test_streaming_json_across_domains () =
     parallel num_domains (fun i ->
         let input, expected_name = docs.(i mod Array.length docs) in
         let source = Parseff.Source.of_string input in
-        (i, expected_name, Parseff.parse_source source json)
+        (i, expected_name, Legacy.parse_source source json)
     )
   in
   List.iter
     (fun (i, expected_name, result) ->
       match result with
-      | Parseff.Ok (Object pairs) ->
+      | Legacy.Ok (Object pairs) ->
           let name =
             List.assoc_opt "name" pairs
             |> Option.map (function String s -> s | _ -> "<not string>")
@@ -369,9 +369,9 @@ let test_streaming_json_across_domains () =
           Alcotest.(check string)
             (Printf.sprintf "domain %d name" i)
             expected_name name
-      | Parseff.Ok _ ->
+      | Legacy.Ok _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: expected Object" i)
-      | Parseff.Error { pos; _ } ->
+      | Legacy.Error { pos; _ } ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i pos)
     )
@@ -393,15 +393,15 @@ let test_chunked_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "hello%d" i in
         let source = chunked_source 2 input in
-        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
+        (input, Legacy.parse_source source (fun () -> Parseff.consume input))
     )
   in
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s ->
+      | Legacy.Ok s ->
           Alcotest.(check string) "chunked result" input s
-      | Parseff.Error _ ->
+      | Legacy.Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: chunked parse failed for %S" i input)
     )
@@ -419,12 +419,10 @@ let test_context_across_domains () =
             ignore (Parseff.consume "!")
         )
       in
-      match Parseff.Internal.parse "ababx" parser with
-      | Stdlib.Error (e : unit Parseff.Internal.Error.t)
+      match Parseff.parse "ababx" parser with
+      | Stdlib.Error (e : unit Parseff.Error.t)
         when match e.frames with
-             | [
-              { Parseff.Internal.Error.name = n; start = 0; delimited = false };
-             ] ->
+             | [ { Parseff.Error.name = n; start = 0; delimited = false } ] ->
                  n = name
              | _ ->
                  false ->

@@ -33,11 +33,11 @@ let bool_parser () =
     ()
 (* "true"  -> Ok true  *)
 (* "false" -> Ok false *)
-(* "maybe" -> Error { pos = 0; error = `Expected "expected \"false\" or \"true\"" } *)
+(* "maybe" -> Error: expected "false" or "true", found 'maybe' *)
 ```
 On `"maybe"`, both branches fail at the same position (position 0\). Parseff merges what each branch expected into one sorted list: **expected "false" or "true"**. The order of the branches does not change the message.
 
-If the branches fail at *different* positions, the parse reports the failure that reached the furthest position. On `"tr"` the left branch fails at the end of the input, which is further than the mismatch of the right branch, so the error is ``Unexpected_end_of_input` at position 2\.
+If the branches fail at *different* positions, the parse reports the failure that reached the furthest position. On `"tr"` the left branch fails at the end of the input, which is further than the mismatch of the right branch, so the error says `expected "ue", found end of input` at position 2\.
 
 A failure is recorded when it happens, not when the parse gives up. A branch that fails and is abandoned still counts if it went further than anything else, even when a later alternative succeeds.
 

@@ -1,15 +1,19 @@
 ## Unreleased
 
+This is the 0.5.0 release.
+
+- **Breaking: errors are structured values.** `parse`, `parse_until_end`, `parse_source` and `parse_source_until_end` return `Error e` where `e` is a `Parseff.Error.t`: `{ kind; span; location; code_point_col; frames; notes; excerpt }`. `kind` is `Expected { items; found }`, `Message`, `User`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. The result type is `('a, 'e) result = ('a, 'e Error.t) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type parameter `'e` is only the type of the values given to `error`. `error_with_diagnostics` is `{ error : 'e Error.t; diagnostics }`, without `pos`. See "Migrating from 0.4" below.
+- **Add `Error.render`, `Error.pp` and `Error.message`.** `render ?name ?source ?columns ?user e` prints the message, the source line with carets under the failure, `- opened here` for the construct that started on an earlier line, `= while parsing` lines for the open `context`s, and notes. Control bytes and invalid UTF-8 are escaped, tabs keep the carets aligned, long lines are cut to 240 bytes around the failure, and `~columns:`Code_points` prints the column in code points. `Error.pos e` is the byte offset of the error.
+- **Failures at the end of the input keep what was expected.** `[1, 2` reports `expected ',' or ']', found end of input` instead of the old end-of-input error without items, including through `expect` and `one_of_labeled`.
 - **Add `?label` to `match_regex`.** A failed match reports `expected <label>` and merges with the other alternatives expected at the same position. Without `~label` the message stays `regex match failed`.
-- **Add `?from` and `?notes` to `fail` and `error`.** `~from` makes the error cover the bytes from `from` to the current position, and `~notes` attaches annotations: a note with a range is underlined in the error excerpt, a note without one is printed as a `= note:` line. Plain calls behave as before, and `catch` and the runners ignore both arguments. They show up in the detailed error report that the next release exposes.
+- **Add `?from` and `?notes` to `fail` and `error`.** `~from` makes the error cover the bytes from `from` to the current position, and `~notes` attaches annotations: a note with a range is underlined in the error excerpt, a note without one is printed as a `= note:` line. Plain calls behave as before, and `catch` ignores both arguments. The error of a `fail` also lists the `context`s it unwound through.
 - **Add `context`.** `context ?delimited name parser` runs `parser` inside a named construct. A failure inside it remembers the open constructs, outermost first, with their start offsets, for the error report. A parser that never calls `context` pays nothing; a call costs a few dozen instructions.
 - **Add `cut`.** `cut ()` declares the running construct decided. It seals every `or_`, `one_of`, `many`, `sep_by`, `optional` and `fold_*` frame opened since the innermost enclosing `context`, and stops at `look_ahead`. If that `context` then fails, the frames outside it are sealed too, so `many (fun () -> context "statement" (fun () -> consume "let"; cut (); ...))` reports the error of a broken statement instead of stopping the loop and ignoring the rest of the input. `commit ()` still seals the nearest frame only.
 - **Report the furthest failure.** A failed parse now returns the error at the highest position where any primitive failed, also inside branches that `or_`, `many`, `sep_by`, `optional` or `fold_left` abandoned. `[1, 2, 3,]` reports the missing value at the `]`, and `sep_by (consume "ab") (char ',')` followed by `end_of_input` on `ab,ab,ax` reports the `x` at offset 7 instead of the trailing input at offset 5. Code that compares `pos` or the message of an error sees different values.
 - **Merge, sort and deduplicate what was expected.** Failures at the same position give one message: `expected "else", "if", or "while"` instead of `expected "if" or expected "else" or expected "while"`, and `or_ digit digit` says `expected digit` once. The order of the branches does not change the message. Characters print as `'x'`, literals as `"abc"`.
-- **`consume` fails at the first byte that differs.** `consume "ab"` on `ax` fails at offset 1 with `expected "b"`, and `consume "hello"` on `hel` gives <code>`Unexpected_end_of_input</code> at offset 3. Both used to report offset 0.
+- **`consume` fails at the first byte that differs.** `consume "ab"` on `ax` fails at offset 1 with `expected "b"`, and `consume "hello"` on `hel` fails at offset 3 with `expected "lo", found end of input`. Both used to report offset 0.
 - **`expect` and `one_of_labeled` relabel only failures at their start.** A parser that got past its first byte keeps its own, more precise message. `expect "key" (fun () -> consume "id:"; digit ())` on `id:x` reports `expected digit` at offset 3. `expect` and `take_while ~label` messages now start with `expected`, and `one_of_labeled` reports `expected number or string` instead of `expected one of: number, string`.
-- **Failures at the end of the input are <code>`Unexpected_end_of_input</code>.** `expect` no longer turns an end of input into <code>`Expected</code> with its description. The furthest failure decides, so a parser that needed more input at the end of the input reports the end of the input even when an earlier alternative stopped sooner.
-- **Report a user error from an abandoned branch when it is the furthest failure.** `error` still lets `or_`, `many` and `optional` backtrack. At the same position a user error wins over <code>`Expected</code>, and the first of two user errors wins. It used to be the second.
+- **Report a user error from an abandoned branch when it is the furthest failure.** `error` still lets `or_`, `many` and `optional` backtrack. At the same position a user error wins over `Expected`, and the first of two user errors wins. It used to be the second.
 - **`commit` forgets the failures at or beyond its position.** A committed branch reports only what it expected itself, not the failure of the previous branch.
 - **`take_while ~at_least` without `~label` says `expected at least n characters`** instead of `take_while`.
 - **`Utf8.char` no longer formats a label on every call.** Its failure reports the expected character, formatted only when an error is built.
@@ -23,9 +27,37 @@
 - **Fix streaming documentation.** `span` is an owned copy in streaming, `match_regex` reads ahead half a window instead of retrying at chunk boundaries, and a source is for one parse.
 - **Fix `expect` and `one_of_labeled` relabeling user errors.** A user error raised through an `or_` or `one_of` with several branches was replaced by the `expect` or `one_of_labeled` message. It now passes through unchanged, as documented.
 - **Fix `many`, `sep_by`, `end_by` and `fold_left` looping forever on parsers that consume no input.** The loop now stops after an iteration that consumes nothing and drops that iteration's result. `~at_least` still applies to the kept results.
-- **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with <code>`Unexpected_end_of_input</code>.
+- **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with an `Expected` error whose `found` is `End`.
 - **Document the cost of `match_regex` failures.** `Re` searches forward when the regex does not match at the current position, so a failed match scans the rest of the input and a loop of failing matches takes quadratic time.
-- **`consume` reports a mismatch instead of end of input.** When fewer bytes remain than the literal needs but the available bytes already differ, `consume` now fails with <code>`Expected</code>, so `or_` composes the messages of its branches. Only input that ends inside a prefix of the literal gives <code>`Unexpected_end_of_input</code>.
+- **`consume` reports a mismatch instead of end of input.** When fewer bytes remain than the literal needs but the available bytes already differ, `consume` fails at the first differing byte, so `or_` composes the messages of its branches. Only input that ends inside a prefix of the literal has `found` set to `End`.
+
+### Migrating from 0.4
+
+The common case is one pattern. Replace the match on the built-in variants by a match on the error value:
+
+```ocaml
+(* 0.4 *)
+match Parseff.parse input parser with
+| Ok v -> v
+| Error { pos; error = `Expected msg } -> Printf.eprintf "%d: %s\n" pos msg; exit 1
+| Error { pos; error = `Unexpected_end_of_input } -> Printf.eprintf "%d: end of input\n" pos; exit 1
+| Error _ -> exit 1
+
+(* 0.5 *)
+match Parseff.parse input parser with
+| Ok v -> v
+| Error e -> prerr_endline (Parseff.Error.render ~name:"input" e); exit 1
+```
+
+- `Error { pos; error }` becomes `Error e`. The position is `Parseff.Error.pos e`, the message is `Parseff.Error.message e`.
+- User errors move into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (`Too_large n); _ }`.
+- <code>`Failure msg</code> becomes `Message msg`. The messages of <code>`Expected</code> that were not expectations (invalid UTF-8, a failed `match_regex` without a label, a mismatched `BE.int16`) are `Message` too.
+- <code>`Expected msg</code> becomes `Expected { items; found }`. `Parseff.Error.message e` gives `expected A, B, or C, found X` instead of `expected A or expected B`, sorted and without duplicates.
+- <code>`Unexpected_end_of_input</code> becomes `Expected { found = End; _ }` and now has `items`.
+- <code>`Depth_limit_exceeded msg</code> becomes `Depth_limit_exceeded { limit }`, and <code>`Backtrack_window_exceeded info</code> becomes `Backtrack_window_exceeded info`.
+- `Parseff.Ok` and `Parseff.Error` are `Stdlib.Ok` and `Stdlib.Error`. Code that writes `Ok v` and `Error e` keeps compiling.
+- In `parse_until_end` and `parse_source_until_end`, `Error { pos; error; diagnostics }` becomes `Error { error; diagnostics }` where `error` is an `Error.t`.
+- Tests that compared error strings change: messages now name what was expected at the furthest failure, and `consume` fails at the first differing byte.
 
 ## 0.4.0
 

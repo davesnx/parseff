@@ -5,15 +5,15 @@ let show_error = function
       Printf.sprintf "Expected %S" s
   | `Unexpected_end_of_input ->
       "Unexpected_end_of_input"
-  | `Failure s ->
-      Printf.sprintf "Failure %S" s
+  | `Message s ->
+      Printf.sprintf "Message %S" s
   | _ ->
       "other"
 
 let show show_v = function
-  | Parseff.Ok v ->
+  | Legacy.Ok v ->
       "Ok " ^ show_v v
-  | Parseff.Error { pos; error } ->
+  | Legacy.Error { pos; error } ->
       Printf.sprintf "Error@%d %s" pos (show_error error)
 
 let chunked_source input =
@@ -33,17 +33,17 @@ let both show_v input parser expected =
   let show_vp (v, p) = Printf.sprintf "(%s, %d)" (show_v v) p in
   Alcotest.(check string)
     "parse" expected
-    (show show_vp (Parseff.parse input with_pos));
+    (show show_vp (Legacy.parse input with_pos));
   Alcotest.(check string)
     "parse_source" expected
-    (show show_vp (Parseff.parse_source (chunked_source input) with_pos))
+    (show show_vp (Legacy.parse_source (chunked_source input) with_pos))
 
 let show_string s = Printf.sprintf "%S" s
 let show_ints l = "[" ^ String.concat ";" (List.map string_of_int l) ^ "]"
 
 let test_one_of_labeled_user_error () =
   let r =
-    Parseff.parse "x" (fun () ->
+    Legacy.parse "x" (fun () ->
         Parseff.one_of_labeled
           [
             ( "a",
@@ -64,7 +64,7 @@ let test_one_of_labeled_user_error () =
 
 let test_expect_user_error_through_or () =
   let r =
-    Parseff.parse "x" (fun () ->
+    Legacy.parse "x" (fun () ->
         Parseff.expect "thing" (fun () ->
             Parseff.or_
               (fun () ->
@@ -115,7 +115,7 @@ let test_many_stops_after_consuming () =
 
 let test_many_at_least_non_consuming () =
   let r =
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         List.length
           (Parseff.many ~at_least:1 (fun () -> Parseff.peek_char ()) ())
     )
@@ -139,7 +139,7 @@ let test_fold_left_non_consuming () =
 
 let test_take_max_int () =
   let r =
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         ignore (Parseff.any_char ());
         Parseff.take max_int
     )
@@ -149,24 +149,24 @@ let test_take_max_int () =
 
 let test_take_max_int_streaming () =
   let r =
-    Parseff.parse_source (chunked_source "abc") (fun () ->
+    Legacy.parse_source (chunked_source "abc") (fun () ->
         ignore (Parseff.any_char ());
         Parseff.take max_int
     )
   in
   match r with
-  | Parseff.Error { error = `Unexpected_end_of_input; _ } ->
+  | Legacy.Error { error = `Unexpected_end_of_input; _ } ->
       ()
-  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+  | Legacy.Error { error = `Backtrack_window_exceeded _; _ } ->
       ()
   | _ ->
       Alcotest.fail "expected end of input or window error"
 
 let test_consume_prefix_mismatch () =
-  let r = Parseff.parse "x" (fun () -> Parseff.consume "true") in
+  let r = Legacy.parse "x" (fun () -> Parseff.consume "true") in
   Alcotest.(check string)
     "mismatch" {|Error@0 Expected "expected \"true\""|} (show show_string r);
-  let r = Parseff.parse "tr" (fun () -> Parseff.consume "true") in
+  let r = Legacy.parse "tr" (fun () -> Parseff.consume "true") in
   Alcotest.(check string)
     "proper prefix" "Error@2 Unexpected_end_of_input" (show show_string r)
 
@@ -180,14 +180,14 @@ let test_consume_or_mismatch () =
   let expected = {|Error@0 Expected "expected \"false\" or \"true\""|} in
   Alcotest.(check string)
     "parse" expected
-    (show show_string (Parseff.parse "no" p));
+    (show show_string (Legacy.parse "no" p));
   Alcotest.(check string)
     "parse_source" expected
-    (show show_string (Parseff.parse_source (chunked_source "no") p))
+    (show show_string (Legacy.parse_source (chunked_source "no") p))
 
 let test_consume_streaming_slow_source () =
   let r =
-    Parseff.parse_source (chunked_source "true") (fun () ->
+    Legacy.parse_source (chunked_source "true") (fun () ->
         Parseff.consume "true"
     )
   in

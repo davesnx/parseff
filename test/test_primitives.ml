@@ -1,5 +1,5 @@
 let parse_with_pos input parser =
-  Parseff.parse input (fun () ->
+  Legacy.parse input (fun () ->
       let value = parser () in
       (value, Parseff.position ())
   )
@@ -13,7 +13,7 @@ let test_consume_success () =
       Alcotest.fail "Expected success"
 
 let test_consume_failure () =
-  match Parseff.parse "hello" (fun () -> Parseff.consume "world") with
+  match Legacy.parse "hello" (fun () -> Parseff.consume "world") with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -33,7 +33,7 @@ let test_char_success () =
 let test_satisfy () =
   let is_digit c = c >= '0' && c <= '9' in
   match
-    Parseff.parse "7" (fun () -> Parseff.satisfy is_digit ~label:"digit")
+    Legacy.parse "7" (fun () -> Parseff.satisfy is_digit ~label:"digit")
   with
   | Ok c ->
       Alcotest.(check char) "matched digit" '7' c
@@ -41,7 +41,7 @@ let test_satisfy () =
       Alcotest.fail "Expected success"
 
 let test_digit () =
-  match Parseff.parse "9" Parseff.digit with
+  match Legacy.parse "9" Parseff.digit with
   | Ok n ->
       Alcotest.(check int) "parsed digit" 9 n
   | Error _ ->
@@ -69,7 +69,7 @@ let test_alternation_left () =
       (fun () -> Parseff.consume "bar")
       ()
   in
-  match Parseff.parse "foo" parser with
+  match Legacy.parse "foo" parser with
   | Ok s ->
       Alcotest.(check string) "matched left" "foo" s
   | Error _ ->
@@ -82,7 +82,7 @@ let test_alternation_right () =
       (fun () -> Parseff.consume "bar")
       ()
   in
-  match Parseff.parse "bar" parser with
+  match Legacy.parse "bar" parser with
   | Ok s ->
       Alcotest.(check string) "matched right" "bar" s
   | Error _ ->
@@ -95,7 +95,7 @@ let test_alternation_failure () =
       (fun () -> Parseff.consume "bar")
       ()
   in
-  match Parseff.parse "baz" parser with
+  match Legacy.parse "baz" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -113,7 +113,7 @@ let test_one_of_failure () =
         (fun () -> Parseff.consume "while");
       ]
   in
-  match Parseff.parse "xyz" parser with
+  match Legacy.parse "xyz" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -124,7 +124,7 @@ let test_one_of_failure () =
       Alcotest.fail "Expected `Expected"
 
 let test_many_empty () =
-  match Parseff.parse "" (Parseff.many Parseff.digit) with
+  match Legacy.parse "" (Parseff.many Parseff.digit) with
   | Ok lst ->
       Alcotest.(check int) "empty list" 0 (List.length lst)
   | Error _ ->
@@ -139,14 +139,14 @@ let test_many_several () =
       Alcotest.fail "Expected success"
 
 let test_many1_success () =
-  match Parseff.parse "456" (Parseff.many ~at_least:1 Parseff.digit) with
+  match Legacy.parse "456" (Parseff.many ~at_least:1 Parseff.digit) with
   | Ok lst ->
       Alcotest.(check (list int)) "digits" [ 4; 5; 6 ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_many1_failure () =
-  match Parseff.parse "abc" (Parseff.many ~at_least:1 Parseff.digit) with
+  match Legacy.parse "abc" (Parseff.many ~at_least:1 Parseff.digit) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -156,7 +156,7 @@ let test_many1_failure () =
       Alcotest.fail "Unexpected error type"
 
 let test_optional_some () =
-  match Parseff.parse "x" (Parseff.optional Parseff.letter) with
+  match Legacy.parse "x" (Parseff.optional Parseff.letter) with
   | Ok (Some c) ->
       Alcotest.(check char) "letter" 'x' c
   | Ok None ->
@@ -174,14 +174,14 @@ let test_optional_none () =
       Alcotest.fail "Expected success"
 
 let test_end_of_input_success () =
-  match Parseff.parse "" Parseff.end_of_input with
+  match Legacy.parse "" Parseff.end_of_input with
   | Ok () ->
       ()
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_end_of_input_failure () =
-  match Parseff.parse "x" Parseff.end_of_input with
+  match Legacy.parse "x" Parseff.end_of_input with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -196,7 +196,7 @@ let test_look_ahead_success () =
     let d = Parseff.digit () in
     d
   in
-  match Parseff.parse "5" parser with
+  match Legacy.parse "5" parser with
   | Ok n ->
       Alcotest.(check int) "digit" 5 n
   | Error _ ->
@@ -207,7 +207,7 @@ let test_look_ahead_no_consume () =
     let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
     Parseff.consume "hello"
   in
-  match Parseff.parse "hello" parser with
+  match Legacy.parse "hello" parser with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error _ ->
@@ -238,7 +238,7 @@ let test_commit_blocks_or_backtracking () =
       (fun () -> Parseff.consume "abcd")
       ()
   in
-  match Parseff.parse "abcd" parser with
+  match Legacy.parse "abcd" parser with
   | Ok _ ->
       Alcotest.fail "Expected committed branch failure"
   | Error { pos; error = `Expected msg } ->
@@ -254,7 +254,7 @@ let test_commit_stops_many_from_succeeding () =
     Parseff.commit ();
     Parseff.char 'b'
   in
-  match Parseff.parse "a,ba,c" (Parseff.many item) with
+  match Legacy.parse "a,ba,c" (Parseff.many item) with
   | Ok _ ->
       Alcotest.fail "Expected committed repetition failure"
   | Error { pos; error = `Expected msg } ->
@@ -279,7 +279,7 @@ let test_commit_does_not_escape_look_ahead () =
       (fun () -> Parseff.consume "abcd")
       ()
   in
-  match Parseff.parse "abcd" parser with
+  match Legacy.parse "abcd" parser with
   | Ok s ->
       Alcotest.(check string) "fallback branch" "abcd" s
   | Error _ ->
@@ -287,7 +287,7 @@ let test_commit_does_not_escape_look_ahead () =
 
 let test_sep_by_empty () =
   match
-    Parseff.parse "" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
+    Legacy.parse "" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
       Alcotest.(check (list int)) "empty" [] lst
@@ -296,7 +296,7 @@ let test_sep_by_empty () =
 
 let test_sep_by_one () =
   match
-    Parseff.parse "5" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
+    Legacy.parse "5" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
       Alcotest.(check (list int)) "one element" [ 5 ] lst
@@ -305,7 +305,7 @@ let test_sep_by_one () =
 
 let test_sep_by_several () =
   match
-    Parseff.parse "1,2,3"
+    Legacy.parse "1,2,3"
       (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
@@ -334,7 +334,7 @@ let test_between_failure_missing_close () =
       (fun () -> Parseff.char ')')
       Parseff.digit
   in
-  match Parseff.parse "(7" parser with
+  match Legacy.parse "(7" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Unexpected_end_of_input } ->
@@ -364,7 +364,7 @@ let test_end_by1_failure () =
   let parser =
     Parseff.end_by ~at_least:1 Parseff.digit (fun () -> Parseff.char ',')
   in
-  match Parseff.parse "" parser with
+  match Legacy.parse "" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Unexpected_end_of_input } ->
@@ -480,7 +480,7 @@ let test_fold_left_requires_one () =
         ( + )
     )
   in
-  match Parseff.parse "" parser with
+  match Legacy.parse "" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Unexpected_end_of_input } ->
@@ -495,7 +495,7 @@ let test_fold_right_requires_one () =
         ( + )
     )
   in
-  match Parseff.parse "" parser with
+  match Legacy.parse "" parser with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Unexpected_end_of_input } ->
@@ -504,14 +504,14 @@ let test_fold_right_requires_one () =
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_count () =
-  match Parseff.parse "abc" (Parseff.count 3 Parseff.letter) with
+  match Legacy.parse "abc" (Parseff.count 3 Parseff.letter) with
   | Ok lst ->
       Alcotest.(check (list char)) "three letters" [ 'a'; 'b'; 'c' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_count_insufficient () =
-  match Parseff.parse "ab" (Parseff.count 3 Parseff.letter) with
+  match Legacy.parse "ab" (Parseff.count 3 Parseff.letter) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Unexpected_end_of_input } ->
@@ -520,7 +520,7 @@ let test_count_insufficient () =
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_parse_non_enforcing () =
-  match Parseff.parse "abcXYZ" (fun () -> Parseff.consume "abc") with
+  match Legacy.parse "abcXYZ" (fun () -> Parseff.consume "abc") with
   | Ok s ->
       Alcotest.(check string) "parsed prefix" "abc" s
   | Error _ ->
@@ -528,7 +528,7 @@ let test_parse_non_enforcing () =
 
 let test_parse_until_end_requires_eof () =
   let outcome =
-    Parseff.parse_until_end "abcXYZ" (fun () -> Parseff.consume "abc")
+    Legacy.parse_until_end "abcXYZ" (fun () -> Parseff.consume "abc")
   in
   match outcome with
   | Ok _ ->
@@ -546,7 +546,7 @@ let test_parse_until_end_collects_diagnostics () =
     Parseff.warn_at ~pos:0 "forced";
     42
   in
-  let outcome = Parseff.parse_until_end "ok" parser in
+  let outcome = Legacy.parse_until_end "ok" parser in
   match outcome with
   | Ok (n, diagnostics) ->
       Alcotest.(check int) "value" 42 n;
@@ -577,7 +577,7 @@ let test_diagnostics_rollback_on_or () =
       )
       ()
   in
-  let outcome = Parseff.parse_until_end "b" parser in
+  let outcome = Legacy.parse_until_end "b" parser in
   match outcome with
   | Ok (_, diagnostics) ->
       let got =
@@ -599,7 +599,7 @@ let test_diagnostics_rollback_on_look_ahead () =
     in
     Parseff.consume "a"
   in
-  let outcome = Parseff.parse_until_end "a" parser in
+  let outcome = Legacy.parse_until_end "a" parser in
   match outcome with
   | Ok (_, diagnostics) ->
       Alcotest.(check int) "no leaked diagnostics" 0 (List.length diagnostics)
@@ -619,7 +619,7 @@ let test_diagnostics_rollback_on_many_stop () =
     let _ = Parseff.char 'a' in
     ds
   in
-  let outcome = Parseff.parse_until_end "12a" parser in
+  let outcome = Legacy.parse_until_end "12a" parser in
   match outcome with
   | Ok (ds, diagnostics) ->
       Alcotest.(check (list int)) "digits" [ 1; 2 ] ds;
@@ -630,7 +630,7 @@ let test_diagnostics_rollback_on_many_stop () =
 
 let test_error_contains_diagnostics () =
   let outcome =
-    Parseff.parse_until_end "y" (fun () ->
+    Legacy.parse_until_end "y" (fun () ->
         Parseff.warn "before-failure";
         Parseff.consume "x"
     )
@@ -652,7 +652,7 @@ let test_error_contains_diagnostics () =
 
 let test_parse_until_end_preserves_end_of_input_semantics () =
   let ok_outcome =
-    Parseff.parse_until_end "a" (fun () ->
+    Legacy.parse_until_end "a" (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "ok"
@@ -665,7 +665,7 @@ let test_parse_until_end_preserves_end_of_input_semantics () =
       Alcotest.fail "Expected success"
   );
   let fail_outcome =
-    Parseff.parse_until_end "ab" (fun () ->
+    Legacy.parse_until_end "ab" (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "unreachable"
@@ -681,7 +681,7 @@ let test_parse_until_end_preserves_end_of_input_semantics () =
 
 let test_satisfy_failure () =
   match
-    Parseff.parse "a" (fun () ->
+    Legacy.parse "a" (fun () ->
         Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
     )
   with
@@ -695,7 +695,7 @@ let test_satisfy_failure () =
 
 let test_satisfy_eof () =
   match
-    Parseff.parse "" (fun () ->
+    Legacy.parse "" (fun () ->
         Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
     )
   with
@@ -707,7 +707,7 @@ let test_satisfy_eof () =
       Alcotest.fail "Expected `Unexpected_end_of_input"
 
 let test_char_failure () =
-  match Parseff.parse "b" (fun () -> Parseff.char 'a') with
+  match Legacy.parse "b" (fun () -> Parseff.char 'a') with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -718,7 +718,7 @@ let test_char_failure () =
 
 let test_look_ahead_failure () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.look_ahead (fun () -> Parseff.consume "xyz")
     )
   with
@@ -739,7 +739,7 @@ let test_one_of_success () =
         (fun () -> Parseff.consume "while");
       ]
   in
-  match Parseff.parse "else" parser with
+  match Legacy.parse "else" parser with
   | Ok s ->
       Alcotest.(check string) "matched second" "else" s
   | Error _ ->
@@ -747,7 +747,7 @@ let test_one_of_success () =
 
 let test_warn_at_nonzero_pos () =
   let outcome =
-    Parseff.parse_until_end "ab" (fun () ->
+    Legacy.parse_until_end "ab" (fun () ->
         let _ = Parseff.consume "ab" in
         Parseff.warn_at ~pos:5 "at-five";
         42
@@ -771,14 +771,14 @@ let test_warn_at_nonzero_pos () =
       Alcotest.fail "Expected success"
 
 let test_letter_success () =
-  match Parseff.parse "a" Parseff.letter with
+  match Legacy.parse "a" Parseff.letter with
   | Ok c ->
       Alcotest.(check char) "lowercase" 'a' c
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_letter_failure () =
-  match Parseff.parse "1" Parseff.letter with
+  match Legacy.parse "1" Parseff.letter with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -804,7 +804,7 @@ let test_skip_while () =
 
 let test_expect_relabels_parse_error () =
   match
-    Parseff.parse "abc" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
+    Legacy.parse "abc" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
@@ -816,7 +816,7 @@ let test_expect_relabels_parse_error () =
 
 let test_expect_success () =
   match
-    Parseff.parse "5" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
+    Legacy.parse "5" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
   with
   | Ok n ->
       Alcotest.(check int) "digit value" 5 n
@@ -825,7 +825,7 @@ let test_expect_success () =
 
 let test_expect_user_error_passthrough () =
   match
-    Parseff.parse "5" (fun () ->
+    Legacy.parse "5" (fun () ->
         Parseff.expect "a small number" (fun () ->
             let n = Parseff.digit () in
             if n > 3 then
@@ -847,7 +847,7 @@ let test_expect_user_error_passthrough () =
 
 let test_expect_relabels_or_error () =
   match
-    Parseff.parse "xyz" (fun () ->
+    Legacy.parse "xyz" (fun () ->
         Parseff.expect "a keyword"
           (Parseff.one_of
              [
@@ -869,7 +869,7 @@ let test_expect_relabels_or_error () =
 
 let test_one_of_labeled_success () =
   match
-    Parseff.parse "hello"
+    Legacy.parse "hello"
       (Parseff.one_of_labeled
          [
            ("number", fun () -> Parseff.consume "123");
@@ -884,7 +884,7 @@ let test_one_of_labeled_success () =
 
 let test_one_of_labeled_failure () =
   match
-    Parseff.parse "xyz"
+    Legacy.parse "xyz"
       (Parseff.one_of_labeled
          [
            ("number", fun () -> Parseff.consume "123");
@@ -903,7 +903,7 @@ let test_one_of_labeled_failure () =
 
 let test_one_of_labeled_user_error_passthrough () =
   match
-    Parseff.parse "5"
+    Legacy.parse "5"
       (Parseff.one_of_labeled
          [
            ( "validated",
@@ -930,7 +930,7 @@ let test_one_of_labeled_user_error_passthrough () =
 
 let test_error_custom_type () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         let _ = Parseff.consume "abc" in
         Parseff.error (`Custom_error "bad")
     )
@@ -946,15 +946,13 @@ let test_error_custom_type () =
       Alcotest.fail "Unexpected error type"
 
 let test_error_distinct_from_fail () =
-  let fail_result = Parseff.parse "" (fun () -> Parseff.fail "boom") in
-  let error_result =
-    Parseff.parse "" (fun () -> Parseff.error (`Boom "boom"))
-  in
+  let fail_result = Legacy.parse "" (fun () -> Parseff.fail "boom") in
+  let error_result = Legacy.parse "" (fun () -> Parseff.error (`Boom "boom")) in
   ( match fail_result with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "fail message" "boom" msg
   | _ ->
-      Alcotest.fail "Expected `Failure from fail"
+      Alcotest.fail "Expected `Message from fail"
   );
   match error_result with
   | Error { error = `Boom msg; _ } ->
@@ -964,20 +962,20 @@ let test_error_distinct_from_fail () =
 
 (* --- fail / Failure semantics --- *)
 
-(* fail produces `Failure, not `Expected *)
+(* fail produces `Message, not `Expected *)
 let test_fail_produces_failure () =
-  match Parseff.parse "abc" (fun () -> Parseff.fail "bad value") with
-  | Error { error = `Failure msg; _ } ->
+  match Legacy.parse "abc" (fun () -> Parseff.fail "bad value") with
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "bad value" msg
   | Error { error = `Expected _; _ } ->
       Alcotest.fail "fail should not produce `Expected"
   | _ ->
-      Alcotest.fail "Expected `Failure error"
+      Alcotest.fail "Expected `Message error"
 
 (* Failure punches through or_ *)
 let test_failure_punches_through_or () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.or_
           (fun () ->
             let _ = Parseff.consume "abc" in
@@ -987,7 +985,7 @@ let test_failure_punches_through_or () =
           ()
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "validation failed" msg
   | Ok v ->
       Alcotest.fail
@@ -995,12 +993,12 @@ let test_failure_punches_through_or () =
            "Expected Failure but got Ok %S — or_ should not catch Failure" v
         )
   | Error _ ->
-      Alcotest.fail "Expected `Failure error"
+      Alcotest.fail "Expected `Message error"
 
 (* Expected IS caught by or_ (backtracking still works for Expected) *)
 let test_expected_caught_by_or () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.or_
           (fun () -> Parseff.consume "xyz")
           (fun () -> Parseff.consume "abc")
@@ -1016,7 +1014,7 @@ let test_expected_caught_by_or () =
 let test_failure_punches_through_many () =
   let counter = ref 0 in
   match
-    Parseff.parse "aaab" (fun () ->
+    Legacy.parse "aaab" (fun () ->
         Parseff.many
           (fun () ->
             incr counter;
@@ -1028,18 +1026,18 @@ let test_failure_punches_through_many () =
           ()
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "too many" msg
   | Ok _ ->
       Alcotest.fail
         "Expected Failure but got Ok — many should not catch Failure"
   | Error _ ->
-      Alcotest.fail "Expected `Failure error"
+      Alcotest.fail "Expected `Message error"
 
 (* Failure punches through optional *)
 let test_failure_punches_through_optional () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.optional
           (fun () ->
             let _ = Parseff.consume "abc" in
@@ -1048,43 +1046,43 @@ let test_failure_punches_through_optional () =
           ()
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "nope" msg
   | Ok _ ->
       Alcotest.fail
         "Expected Failure but got Ok — optional should not catch Failure"
   | Error _ ->
-      Alcotest.fail "Expected `Failure error"
+      Alcotest.fail "Expected `Message error"
 
 (* Failure punches through look_ahead *)
 let test_failure_punches_through_look_ahead () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.look_ahead (fun () ->
             let _ = Parseff.consume "abc" in
             Parseff.fail "look_ahead fail"
         )
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "look_ahead fail" msg
   | Ok _ ->
       Alcotest.fail
         "Expected Failure but got Ok — look_ahead should not catch Failure"
   | Error _ ->
-      Alcotest.fail "Expected `Failure error"
+      Alcotest.fail "Expected `Message error"
 
 (* Failure punches through expect *)
 let test_failure_punches_through_expect () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.expect "a number" (fun () ->
             let _ = Parseff.consume "abc" in
             Parseff.fail "not a valid number"
         )
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "not a valid number" msg
   | Error { error = `Expected _; _ } ->
       Alcotest.fail "expect should not catch Failure"
@@ -1096,7 +1094,7 @@ let test_failure_punches_through_expect () =
 (* Failure punches through one_of_labeled *)
 let test_failure_punches_through_one_of_labeled () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.one_of_labeled
           [
             ( "first",
@@ -1109,7 +1107,7 @@ let test_failure_punches_through_one_of_labeled () =
           ()
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "bad value" msg
   | Error { error = `Expected _; _ } ->
       Alcotest.fail "one_of_labeled should not catch Failure"
@@ -1120,7 +1118,7 @@ let test_failure_punches_through_one_of_labeled () =
 
 (* Internal combinators still produce Expected *)
 let test_consume_produces_expected () =
-  match Parseff.parse "abc" (fun () -> Parseff.consume "xyz") with
+  match Legacy.parse "abc" (fun () -> Parseff.consume "xyz") with
   | Error { error = `Expected _; _ } ->
       ()
   | _ ->
@@ -1128,7 +1126,7 @@ let test_consume_produces_expected () =
 
 let test_satisfy_produces_expected () =
   match
-    Parseff.parse "a" (fun () ->
+    Legacy.parse "a" (fun () ->
         Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
     )
   with
@@ -1139,7 +1137,7 @@ let test_satisfy_produces_expected () =
 
 let test_one_of_produces_expected () =
   match
-    Parseff.parse "c" (fun () ->
+    Legacy.parse "c" (fun () ->
         Parseff.one_of
           [ (fun () -> Parseff.consume "a"); (fun () -> Parseff.consume "b") ]
           ()
@@ -1152,7 +1150,7 @@ let test_one_of_produces_expected () =
 
 let test_take_while_at_least_produces_expected () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.take_while ~at_least:1
           (fun c -> c >= '0' && c <= '9')
           ~label:"digit"
@@ -1167,12 +1165,12 @@ let test_take_while_at_least_produces_expected () =
 let test_failure_with_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         let _ = Parseff.consume "abc" in
         Parseff.fail "stream fail"
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "stream fail" msg
   | Ok _ ->
       Alcotest.fail "Expected Failure error"
@@ -1183,7 +1181,7 @@ let test_failure_with_streaming () =
 let test_failure_punches_through_or_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         Parseff.or_
           (fun () ->
             let _ = Parseff.consume "abc" in
@@ -1193,7 +1191,7 @@ let test_failure_punches_through_or_streaming () =
           ()
     )
   with
-  | Error { error = `Failure msg; _ } ->
+  | Error { error = `Message msg; _ } ->
       Alcotest.(check string) "failure message" "stream validation failed" msg
   | Ok _ ->
       Alcotest.fail
@@ -1206,7 +1204,7 @@ let test_failure_punches_through_or_streaming () =
 (* catch recovers from Failure *)
 let test_catch_recovers_failure () =
   match
-    Parseff.parse "300" (fun () ->
+    Legacy.parse "300" (fun () ->
         Parseff.catch
           (fun () ->
             let s =
@@ -1231,7 +1229,7 @@ let test_catch_recovers_failure () =
 (* catch passes through on success *)
 let test_catch_passthrough_on_success () =
   match
-    Parseff.parse "42" (fun () ->
+    Legacy.parse "42" (fun () ->
         Parseff.catch
           (fun () ->
             let s =
@@ -1252,7 +1250,7 @@ let test_catch_passthrough_on_success () =
 (* catch does NOT catch Expected errors *)
 let test_catch_does_not_catch_expected () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.catch (fun () -> Parseff.consume "xyz") (fun _msg -> "recovered")
     )
   with
@@ -1266,7 +1264,7 @@ let test_catch_does_not_catch_expected () =
 (* catch makes Failure recoverable inside or_ *)
 let test_catch_enables_backtracking () =
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.or_
           (fun () ->
             Parseff.catch
@@ -1288,7 +1286,7 @@ let test_catch_enables_backtracking () =
 (* catch handler receives the message *)
 let test_catch_receives_message () =
   match
-    Parseff.parse "" (fun () ->
+    Legacy.parse "" (fun () ->
         Parseff.catch
           (fun () -> Parseff.fail "specific message")
           (fun msg -> msg)
@@ -1303,7 +1301,7 @@ let test_catch_receives_message () =
 let test_catch_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
-    Parseff.parse_source src (fun () ->
+    Legacy.parse_source src (fun () ->
         Parseff.catch
           (fun () ->
             let _ = Parseff.consume "abc" in
@@ -1320,28 +1318,28 @@ let test_catch_streaming () =
 (* --- whitespace / whitespace1 --- *)
 
 let test_whitespace () =
-  match Parseff.parse "  \t\nX" (fun () -> Parseff.whitespace ()) with
+  match Legacy.parse "  \t\nX" (fun () -> Parseff.whitespace ()) with
   | Ok s ->
       Alcotest.(check string) "whitespace" "  \t\n" s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace_empty () =
-  match Parseff.parse "abc" (fun () -> Parseff.whitespace ()) with
+  match Legacy.parse "abc" (fun () -> Parseff.whitespace ()) with
   | Ok s ->
       Alcotest.(check string) "no whitespace" "" s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace1_success () =
-  match Parseff.parse "  \tX" (fun () -> Parseff.whitespace ~at_least:1 ()) with
+  match Legacy.parse "  \tX" (fun () -> Parseff.whitespace ~at_least:1 ()) with
   | Ok s ->
       Alcotest.(check string) "whitespace" "  \t" s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace1_failure () =
-  match Parseff.parse "abc" (fun () -> Parseff.whitespace ~at_least:1 ()) with
+  match Legacy.parse "abc" (fun () -> Parseff.whitespace ~at_least:1 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -1353,21 +1351,21 @@ let test_whitespace1_failure () =
 (* --- alphanum --- *)
 
 let test_alphanum_letter () =
-  match Parseff.parse "a" Parseff.alphanum with
+  match Legacy.parse "a" Parseff.alphanum with
   | Ok c ->
       Alcotest.(check char) "letter" 'a' c
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_alphanum_digit () =
-  match Parseff.parse "5" Parseff.alphanum with
+  match Legacy.parse "5" Parseff.alphanum with
   | Ok c ->
       Alcotest.(check char) "digit" '5' c
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_alphanum_failure () =
-  match Parseff.parse "!" Parseff.alphanum with
+  match Legacy.parse "!" Parseff.alphanum with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { pos; error = `Expected expected } ->
@@ -1380,7 +1378,7 @@ let test_alphanum_failure () =
 
 let test_match_regex_success () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
-  match Parseff.parse "12345abc" (fun () -> Parseff.match_regex re) with
+  match Legacy.parse "12345abc" (fun () -> Parseff.match_regex re) with
   | Ok s ->
       Alcotest.(check string) "matched digits" "12345" s
   | Error _ ->
@@ -1388,10 +1386,10 @@ let test_match_regex_success () =
 
 let test_match_regex_failure () =
   let re = Re.compile (Re.Posix.re "[0-9]+") in
-  match Parseff.parse "abc" (fun () -> Parseff.match_regex re) with
+  match Legacy.parse "abc" (fun () -> Parseff.match_regex re) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected expected } ->
+  | Error { pos; error = `Message expected } ->
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string) "error message" "regex match failed" expected
   | Error _ ->
@@ -1416,7 +1414,7 @@ let test_match_regex_anchored () =
 let test_sep_by_take_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse "" (fun () ->
+    Legacy.parse "" (fun () ->
         Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1428,7 +1426,7 @@ let test_sep_by_take_empty () =
 let test_sep_by_take_single () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse "hello" (fun () ->
+    Legacy.parse "hello" (fun () ->
         Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1440,7 +1438,7 @@ let test_sep_by_take_single () =
 let test_sep_by_take_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse "a , b , c" (fun () ->
+    Legacy.parse "a , b , c" (fun () ->
         Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1454,7 +1452,7 @@ let test_sep_by_take_several () =
 let test_sep_by_take_span_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse "" (fun () ->
+    Legacy.parse "" (fun () ->
         Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1466,7 +1464,7 @@ let test_sep_by_take_span_empty () =
 let test_sep_by_take_span_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse "aa , bb , cc" (fun () ->
+    Legacy.parse "aa , bb , cc" (fun () ->
         Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1485,7 +1483,7 @@ let test_sep_by_take_span_several () =
 let test_fused_sep_take_success () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse ", hello" (fun () ->
+    Legacy.parse ", hello" (fun () ->
         Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1497,7 +1495,7 @@ let test_fused_sep_take_success () =
 let test_fused_sep_take_missing_sep () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1512,7 +1510,7 @@ let test_fused_sep_take_missing_sep () =
 let test_fused_sep_take_missing_value () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
-    Parseff.parse ", " (fun () ->
+    Legacy.parse ", " (fun () ->
         Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
     )
   with
@@ -1543,7 +1541,7 @@ let test_take_while_span () =
 
 let test_take_while_span_empty () =
   match
-    Parseff.parse "xyz" (fun () ->
+    Legacy.parse "xyz" (fun () ->
         let sp = Parseff.take_while_span (fun c -> c = 'a') in
         (Parseff.span_to_string sp, sp.len)
     )
@@ -1561,7 +1559,7 @@ let check_location msg expected actual =
   Alcotest.(check int) (msg ^ " col") expected.Parseff.col actual.Parseff.col
 
 let test_location_at_start () =
-  match Parseff.parse "hello" (fun () -> Parseff.location ()) with
+  match Legacy.parse "hello" (fun () -> Parseff.location ()) with
   | Ok loc ->
       check_location "start" { offset = 0; line = 1; col = 1 } loc
   | Error _ ->
@@ -1572,7 +1570,7 @@ let test_location_after_consume () =
     let _ = Parseff.consume "hello" in
     Parseff.location ()
   in
-  match Parseff.parse "hello world" parser with
+  match Legacy.parse "hello world" parser with
   | Ok loc ->
       check_location "after consume" { offset = 5; line = 1; col = 6 } loc
   | Error _ ->
@@ -1584,7 +1582,7 @@ let test_location_multiline () =
     let _ = Parseff.consume "aaa\nbbb\nc" in
     Parseff.location ()
   in
-  match Parseff.parse input parser with
+  match Legacy.parse input parser with
   | Ok loc ->
       check_location "multiline" { offset = 9; line = 3; col = 2 } loc
   | Error _ ->
@@ -1596,7 +1594,7 @@ let test_location_column_resets () =
     let _ = Parseff.consume "abc\nd" in
     Parseff.location ()
   in
-  match Parseff.parse input parser with
+  match Legacy.parse input parser with
   | Ok loc ->
       check_location "col reset" { offset = 5; line = 2; col = 2 } loc
   | Error _ ->
@@ -1611,7 +1609,7 @@ let test_location_multiple_calls () =
     let loc2 = Parseff.location () in
     (loc1, loc2)
   in
-  match Parseff.parse input parser with
+  match Legacy.parse input parser with
   | Ok (loc1, loc2) ->
       check_location "first" { offset = 2; line = 1; col = 3 } loc1;
       check_location "second" { offset = 7; line = 3; col = 2 } loc2
@@ -1627,7 +1625,7 @@ let test_location_at_newline () =
     let loc2 = Parseff.location () in
     (loc1, loc2)
   in
-  match Parseff.parse input parser with
+  match Legacy.parse input parser with
   | Ok (loc1, loc2) ->
       check_location "before newline" { offset = 2; line = 1; col = 3 } loc1;
       check_location "after newline" { offset = 3; line = 2; col = 1 } loc2
@@ -1649,14 +1647,14 @@ let test_location_backtracking () =
       ();
     Parseff.location ()
   in
-  match Parseff.parse input parser with
+  match Legacy.parse input parser with
   | Ok loc ->
       check_location "after backtrack" { offset = 5; line = 2; col = 2 } loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_location_empty_input () =
-  match Parseff.parse "" (fun () -> Parseff.location ()) with
+  match Legacy.parse "" (fun () -> Parseff.location ()) with
   | Ok loc ->
       check_location "empty" { offset = 0; line = 1; col = 1 } loc
   | Error _ ->
@@ -1692,7 +1690,7 @@ let test_location_with_position () =
     let loc = Parseff.location () in
     (pos, loc)
   in
-  match Parseff.parse input parser with
+  match Legacy.parse input parser with
   | Ok (pos, loc) ->
       Alcotest.(check int) "position matches" pos loc.offset;
       check_location "loc" { offset = 4; line = 2; col = 2 } loc
@@ -1719,7 +1717,7 @@ let () =
           test_case "alphanum digit" `Quick test_alphanum_digit;
           test_case "alphanum failure" `Quick test_alphanum_failure;
           test_case "any_char" `Quick (fun () ->
-              match Parseff.parse "x" Parseff.any_char with
+              match Legacy.parse "x" Parseff.any_char with
               | Ok c ->
                   Alcotest.(check char) "any" 'x' c
               | Error _ ->

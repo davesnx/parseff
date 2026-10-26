@@ -53,9 +53,7 @@ The `ip_address` parser reads like the format itself: number, dot, number, dot, 
 match Parseff.parse "192.168.1.1" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-| Error { pos; error = `Expected msg } ->
-    Printf.printf "Error at %d: %s\n" pos msg
-| Error _ -> print_endline "Parse error"
+| Error e -> prerr_endline (Parseff.Error.render ~name:"address" e)
 ```
 
 On valid input, you get an `Ok` with the four octets as a tuple. On invalid input, the error tells you exactly where parsing failed.
@@ -96,7 +94,7 @@ let ip_address () =
   (a, b, c, d)
 ```
 
-Now on `"192.168.1.x"`, instead of `expected digit`, the error says `expected a digit (0-9)`. On `"192.168.1x"`, the parser could take another digit or the dot, so the error lists both: `expected a digit (0-9) or a dot separator`. When the input ends early, as in `"192.168.1"`, the error is `` `Unexpected_end_of_input `` at the end of the input.
+Now on `"192.168.1.x"`, instead of `expected digit`, the error says `expected a digit (0-9)`. On `"192.168.1x"`, the parser could take another digit or the dot, so the error lists both: `expected a digit (0-9) or a dot separator`. When the input ends early, as in `"192.168.1"`, the error keeps what was expected and says `found end of input`.
 
 ## Using typed errors
 
@@ -116,11 +114,10 @@ Now callers can distinguish parsing failures from validation failures:
 match Parseff.parse "192.168.1.300" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "%d.%d.%d.%d\n" a b c d
-| Error { error = `Out_of_range n; _ } ->
+| Error { kind = User (`Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
-| Error { error = `Expected msg; _ } ->
-    Printf.printf "Parse error: %s\n" msg
-| Error _ -> print_endline "Unknown error"
+| Error e ->
+    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
 ```
 
 `fail` is fine for errors shown directly to users. `error` is better when code needs to react differently to different failure modes.

@@ -12,17 +12,17 @@ let kind = function
       "Expected " ^ m
   | `Unexpected_end_of_input ->
       "Unexpected_end_of_input"
-  | `Failure m ->
-      "Failure " ^ m
+  | `Message m ->
+      "Message " ^ m
   | `Depth_limit_exceeded m ->
       "Depth_limit_exceeded " ^ m
   | `Backtrack_window_exceeded _ ->
       "Backtrack_window_exceeded"
 
 let norm = function
-  | Parseff.Ok v ->
+  | Legacy.Ok v ->
       Ok v
-  | Parseff.Error { pos; error } ->
+  | Legacy.Error { pos; error } ->
       Error (pos, kind error)
 
 let show_result show_v = function
@@ -34,16 +34,14 @@ let show_result show_v = function
 let check_all ?(chunk_sizes = [ 1; 2; 3 ]) name show_v input parser expected =
   Alcotest.(check string)
     (name ^ " parse") expected
-    (show_result show_v (norm (Parseff.parse input parser)));
+    (show_result show_v (norm (Legacy.parse input parser)));
   List.iter
     (fun chunk_size ->
       Alcotest.(check string)
         (Printf.sprintf "%s chunk %d" name chunk_size)
         expected
         (show_result show_v
-           (norm
-              (Parseff.parse_source (chunked_source ~chunk_size input) parser)
-           )
+           (norm (Legacy.parse_source (chunked_source ~chunk_size input) parser))
         )
     )
     chunk_sizes
@@ -119,16 +117,16 @@ let test_utf8_skip_while_then_char_split () =
     (fun (text, target, _) ->
       let expected =
         match
-          Parseff.parse text (fun () ->
+          Legacy.parse text (fun () ->
               Parseff.Utf8.skip_while_then_char
                 (fun u -> not (Uchar.equal u target))
                 target;
               Parseff.position ()
           )
         with
-        | Parseff.Ok p ->
+        | Legacy.Ok p ->
             "Ok " ^ string_of_int p
-        | Parseff.Error _ ->
+        | Legacy.Error _ ->
             Alcotest.fail "memory parse failed"
       in
       check_all "skip_while_then_char" string_of_int text
@@ -158,7 +156,7 @@ let test_utf8_invalid_after_compaction_skip_while () =
   let text = valid_lines ^ "\xFF" in
   let parser () = Parseff.Utf8.skip_while (fun _ -> true) in
   let expected =
-    Printf.sprintf "Error@%d Expected invalid UTF-8" (String.length valid_lines)
+    Printf.sprintf "Error@%d Message invalid UTF-8" (String.length valid_lines)
   in
   check_all ~chunk_sizes:[ 1; 7; 1000 ] "skip_while"
     (fun () -> "()")
@@ -176,7 +174,7 @@ let test_utf8_invalid_after_compaction_take_while () =
     !n
   in
   let expected =
-    Printf.sprintf "Error@%d Expected invalid UTF-8" (String.length valid_lines)
+    Printf.sprintf "Error@%d Message invalid UTF-8" (String.length valid_lines)
   in
   check_all ~chunk_sizes:[ 1; 7; 1000 ] "take_while" string_of_int text parser
     expected
@@ -185,8 +183,8 @@ let test_utf8_digit_alphanum_reject_non_ascii_digit () =
   let arabic_indic_three = "\xD9\xA3" in
   List.iter
     (fun (name, parser) ->
-      match Parseff.parse arabic_indic_three parser with
-      | Parseff.Error { pos = 0; _ } ->
+      match Legacy.parse arabic_indic_three parser with
+      | Legacy.Error { pos = 0; _ } ->
           ()
       | _ ->
           Alcotest.failf "%s accepted U+0663" name
@@ -201,10 +199,10 @@ let test_utf8_digit_alphanum_ascii_edges () =
     (fun (c, expected) ->
       let input = String.make 1 c in
       let ok parser =
-        match Parseff.parse input (fun () -> ignore (parser ())) with
-        | Parseff.Ok () ->
+        match Legacy.parse input (fun () -> ignore (parser ())) with
+        | Legacy.Ok () ->
             true
-        | Parseff.Error _ ->
+        | Legacy.Error _ ->
             false
       in
       Alcotest.(check bool)
@@ -240,7 +238,7 @@ let test_depth_limit () =
   in
   let run depth =
     show_result string_of_int
-      (norm (Parseff.parse ~max_depth:3 "" (fun () -> nest depth ())))
+      (norm (Legacy.parse ~max_depth:3 "" (fun () -> nest depth ())))
   in
   Alcotest.(check string) "exactly max_depth" "Ok 3" (run 3);
   Alcotest.(check string)
@@ -249,7 +247,7 @@ let test_depth_limit () =
   let streaming =
     show_result string_of_int
       (norm
-         (Parseff.parse_source ~max_depth:3 (chunked_source ~chunk_size:1 "")
+         (Legacy.parse_source ~max_depth:3 (chunked_source ~chunk_size:1 "")
             (fun () -> nest 4 ()
           )
          )
@@ -272,17 +270,17 @@ let test_depth_restored_after_exception () =
       ()
   in
   match
-    Parseff.parse ~max_depth:2 "" (fun () -> List.init 6 (fun _ -> attempt ()))
+    Legacy.parse ~max_depth:2 "" (fun () -> List.init 6 (fun _ -> attempt ()))
   with
-  | Parseff.Ok l ->
+  | Legacy.Ok l ->
       Alcotest.(check int) "all attempts ran" 6 (List.length l)
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       Alcotest.fail "depth leaked after exception"
 
 let test_count_zero () =
   let calls = ref 0 in
   match
-    Parseff.parse "abc" (fun () ->
+    Legacy.parse "abc" (fun () ->
         Parseff.count 0
           (fun () ->
             incr calls;
@@ -291,17 +289,17 @@ let test_count_zero () =
           ()
     )
   with
-  | Parseff.Ok l ->
+  | Legacy.Ok l ->
       Alcotest.(check int) "no results" 0 (List.length l);
       Alcotest.(check int) "parser not called" 0 !calls
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       Alcotest.fail "count 0 failed"
 
 let accepts parser c =
-  match Parseff.parse (String.make 1 c) (fun () -> ignore (parser ())) with
-  | Parseff.Ok () ->
+  match Legacy.parse (String.make 1 c) (fun () -> ignore (parser ())) with
+  | Legacy.Ok () ->
       true
-  | Parseff.Error _ ->
+  | Legacy.Error _ ->
       false
 
 let test_ascii_class_edges () =

@@ -286,7 +286,5 @@ let () =
   match Parseff.parse "[1, -2, 3]" json_array with
   | Ok nums ->
       Printf.printf "Sum: %d\n" (List.fold_left ( + ) 0 nums)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error _ -> print_endline "Parse error"
+  | Error e -> prerr_endline (Parseff.Error.render ~name:"array" e)
 ]}

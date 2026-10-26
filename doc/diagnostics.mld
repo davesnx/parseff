@@ -15,17 +15,17 @@ A non-fatal diagnostic emitted during parsing.
 
 {@ocaml skip[
 type ('e, 'd) error_with_diagnostics = {
-  pos : int;
-  error : 'e;
+  error : 'e Error.t;
   diagnostics : 'd diagnostic list;
 }
 ]}
 
-An error with collected diagnostics.
+An error with collected diagnostics. [error] is the same {!type:Parseff.Error.t}
+that {!val:Parseff.parse} returns.
 
 {@ocaml skip[
 type ('a, 'e, 'd) result_with_diagnostics =
-  ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) result
+  ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 ]}
 
 Parse outcome with diagnostics in both success and failure cases.
@@ -56,11 +56,10 @@ consumption implicitly, and returns both:
   ?max_depth:int ->
   string ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
-  result_with_diagnostics]}
+  ('a, 'e, 'd) result_with_diagnostics]}
 
 - [Ok (value, diagnostics)] on success
-- [Error { pos; error; diagnostics }] on failure
+- [Error { error; diagnostics }] on failure, where [error] is a {!type:Parseff.Error.t}
 
 Semantically, this is equivalent to running your parser and then calling
 {!val:Parseff.end_of_input} once more at the end. It does not change how
@@ -75,8 +74,7 @@ explicit {!val:Parseff.end_of_input} calls behave inside your parser.
   ?max_depth:int ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input | `Depth_limit_exceeded of string ], 'd)
-  result_with_diagnostics]}
+  ('a, 'e, 'd) result_with_diagnostics]}
 
 In plain terms: [parse_source_until_end] always does one extra
 {!val:Parseff.end_of_input} check after your parser returns.
@@ -119,17 +117,15 @@ let () =
           | `Octet_out_of_range n ->
               Printf.printf "  at %d: octet %d out of range (0-255)\n" pos n)
         diagnostics
-  | Error { pos; error = `Expected msg; diagnostics } ->
-      Printf.printf "Parse error at %d: %s\n" pos msg;
+  | Error { error; diagnostics } ->
+      Printf.printf "Parse error at %d: %s\n" (Parseff.Error.pos error)
+        (Parseff.Error.message error);
       List.iter
         (fun ({ pos; diagnostic } : validation Parseff.diagnostic) ->
           match diagnostic with
           | `Octet_out_of_range n ->
               Printf.printf "  noted at %d: octet %d out of range\n" pos n)
         diagnostics
-  | Error { pos; error = `Unexpected_end_of_input; _ } ->
-      Printf.printf "Unexpected end of input at %d\n" pos
-  | Error _ -> Printf.printf "Parse failed\n"
 ]}
 
 {1 Backtracking semantics}

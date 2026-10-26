@@ -2,7 +2,7 @@
 
 # Parseff
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed via polymorphic variants, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
 
 [Documentation](https://davesnx.github.io/parseff/)
 
@@ -37,23 +37,24 @@ let () =
   match Parseff.parse "192.168.1.1" ip_address with
   | Ok ((a, b, c, d)) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-  | Error { pos; error = `Out_of_range n } ->
-      Printf.printf "Error at %d: %d out of range (0-255)\n" pos n
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "Error at %d: unexpected end of input\n" pos
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error { pos; error = `Failure msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error { pos; error = `Depth_limit_exceeded msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
+  | Error { kind = User (`Out_of_range n); span; _ } ->
+      Printf.printf "Error at %d: %d out of range (0-255)\n" span.start n
+  | Error e ->
+      prerr_endline (Parseff.Error.render ~name:"address" e)
+```
+A failed parse returns one [`Parseff.Error.t`](./Parseff-Error.md#type-t). `Parseff.Error.render` prints the message, the source line and a caret under the failure:
+
+```
+address:1:11: error: expected digit, found end of input
+1 | 192.168.1.
+  |           ^
 ```
 
 ## Features
 
 - Build parsers with **direct-style** and compose with `Parseff` combinators
 - API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
-- [**Typed domain errors via polymorphic variants**](https://davesnx.github.io/parseff/api/errors/)
+- [**Typed domain errors and source excerpts**](https://davesnx.github.io/parseff/api/errors/): every error says what was expected at the furthest failure, with a caret under the source
 - **Automatic backtracking** with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
 - **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
 - [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)

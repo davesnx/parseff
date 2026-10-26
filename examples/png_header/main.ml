@@ -77,11 +77,6 @@ let () =
       Printf.printf "%s:\n" path;
       Printf.printf "  %ldx%ld, %d-bit %s\n" hdr.width hdr.height hdr.bit_depth
         (color_type_to_string hdr.color_type)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%s: error at byte %d: expected %s\n" path pos msg
-  | Error { pos; error = `Failure msg } ->
-      Printf.printf "%s: error at byte %d: %s\n" path pos msg
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%s: unexpected end of input at byte %d\n" path pos
-  | Error _ ->
-      Printf.printf "%s: unknown error\n" path
+  | Error e ->
+      Printf.printf "%s: error at byte %d: %s\n" path (Parseff.Error.pos e)
+        (Parseff.Error.message e)

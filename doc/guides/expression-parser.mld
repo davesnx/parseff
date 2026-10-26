@@ -129,8 +129,8 @@ And on ["(1+2x"], where the [)], a [*] or another [+] could follow:
 {- Without [expect]: [expected ')', '*', or '+']}
 {- With [expect]: [expected a '*' operator, a '+' operator, or a closing parenthesis]}}
 
-When the input ends early, as in ["1+"] or ["(1+2"], the error is
-[`Unexpected_end_of_input] at the end of the input.
+When the input ends early, as in ["1+"] or ["(1+2"], the error keeps the same
+expected set and says [found end of input].
 
 {1 Tracing a parse}
 

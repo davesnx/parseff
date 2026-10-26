@@ -109,12 +109,9 @@ let test title parser cases =
               else
                 Format.asprintf "(expected [%a])" pp expected
             )
-      | Error { pos; error = `Expected exp } ->
-          Printf.printf "✗ %-15s -> Error at %d: %s\n" input pos exp
-      | Error { pos; error = `Unexpected_end_of_input } ->
-          Printf.printf "✗ %-15s -> Unexpected end of input at %d\n" input pos
-      | Error _ ->
-          Printf.printf "✗ Unknown error\n"
+      | Error e ->
+          Printf.printf "✗ %-15s -> Error at %d: %s\n" input
+            (Parseff.Error.pos e) (Parseff.Error.message e)
     )
     cases
 
