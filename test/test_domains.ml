@@ -407,6 +407,29 @@ let test_chunked_streaming_across_domains () =
     )
     results
 
+let test_context_across_domains () =
+  let run i =
+    let name = Printf.sprintf "ctx%d" i in
+    let results = ref [] in
+    for _ = 1 to 200 do
+      let parser () =
+        Parseff.context name (fun () ->
+            ignore (Parseff.many (fun () -> Parseff.consume "ab") ());
+            Parseff.cut ();
+            ignore (Parseff.consume "!")
+        )
+      in
+      match Parseff.parse_failure_frames "ababx" parser with
+      | Stdlib.Error [ (n, 0, false) ] when n = name ->
+          ()
+      | _ ->
+          results := i :: !results
+    done;
+    !results
+  in
+  let bad = List.concat (parallel num_domains run) in
+  Alcotest.(check int) "no cross-domain context leaks" 0 (List.length bad)
+
 let () =
   let open Alcotest in
   run "Parseff Domains"
@@ -440,6 +463,7 @@ let () =
           test_case "errors isolated across domains" `Quick
             test_errors_isolated_across_domains;
           test_case "high contention" `Quick test_high_contention;
+          test_case "context across domains" `Quick test_context_across_domains;
         ]
       );
     ]

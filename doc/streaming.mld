@@ -301,6 +301,13 @@ inside {!val:Parseff.look_ahead}. It does not release outer frames. In
 start of the current iteration. To release that input, call [commit ()] in the
 body of [many], outside the [or_].
 
+{!val:Parseff.cut} seals every frame opened since the innermost enclosing
+{!val:Parseff.context}, not only the nearest one. Use it when a whole construct
+becomes certain: after [cut ()], none of those frames pins buffered input, and
+a failure of the construct is not retried by the frames outside it. With a
+small window, an [or_] whose left branch reads a long run of tokens fails with
+[`Backtrack_window_exceeded] until the branch calls [cut ()].
+
 Before [commit ()], Parseff must keep enough buffered input to rewind and try
 the other branch. After [commit ()], that rewind point stops pinning the old
 prefix.

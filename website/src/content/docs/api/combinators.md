@@ -182,6 +182,73 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 `expect` relabels only failures at the position where the parser started. In `expect "key" (fun () -> consume "id:"; digit ())`, the input `"foo"` reports `expected key`, but `"id:x"` reports `expected digit` at offset 3, because the parser got past `"id:"` and the digit message is more precise.
 
 
+## Naming constructs
+
+
+### `context`
+
+`Parseff.context` runs a parser inside a named construct. The name does not change what the parser accepts. A failure that happens inside it remembers which constructs were open, outermost first, so an error report can say "while parsing array".
+
+```ocaml
+val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
+```
+```ocaml
+let array_parser value () =
+  Parseff.context ~delimited:true "array" (fun () ->
+      let _ = Parseff.char '[' in
+      let xs =
+        Parseff.sep_by value
+          (fun () ->
+            Parseff.skip_whitespace ();
+            Parseff.char ',')
+          ()
+      in
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char ']' in
+      xs)
+```
+Use `~delimited:true` for constructs that have an opening token, such as an array or a block. A parser that never calls `context` pays nothing for it. Each call costs a few dozen instructions, so name constructs, not single tokens.
+
+If two failures tie at the furthest position, the construct list of the first one is kept.
+
+
+### `cut`
+
+`Parseff.cut` declares that the construct that is running is decided. `Parseff.commit` seals the nearest frame only. `cut` seals every `or_`, `one_of`, `many`, `sep_by`, `optional` and `fold_*` frame that was opened since the innermost enclosing `context`. It stops at `Parseff.look_ahead`.
+
+```ocaml
+val cut : unit -> unit
+```
+If the enclosing `context` then fails, the frames outside it are sealed too, so an enclosing `or_`, `many` or `sep_by` cannot swallow the failure:
+
+```ocaml
+let statement () =
+  Parseff.context "statement" (fun () ->
+      Parseff.or_
+        (fun () ->
+          let _ = Parseff.consume "let" in
+          Parseff.cut ();
+          Parseff.skip_whitespace ();
+          let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
+          Parseff.skip_whitespace ();
+          let _ = Parseff.char '=' in
+          Parseff.skip_whitespace ();
+          let _ = Parseff.take_while ~at_least:1 ~label:"expression" (fun c -> c >= '0' && c <= '9') in
+          Parseff.char ';')
+        (fun () ->
+          let _ = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+          Parseff.char ';')
+        ())
+
+let statements () = Parseff.many (fun () -> Parseff.skip_whitespace (); statement ()) ()
+(* "let x = 1; 2;"  -> Ok [';'; ';'] *)
+(* "let x = ;"      -> Error at 8: expected expression *)
+```
+With `commit ()` in place of `cut ()`, only the `or_` is sealed, `many` stops and `statements` returns `[]` without reading the rest of the input. With `cut ()`, the failure of `let x = ;` is the error of the parse.
+
+`cut` also helps streaming: sealed frames no longer pin buffered input. See [`streaming`](./streaming.md).
+
+
 ## Recursion
 
 

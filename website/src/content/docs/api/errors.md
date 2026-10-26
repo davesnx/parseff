@@ -14,6 +14,7 @@ Parseff exposes four main APIs for error handling:
 - `Parseff.error`: fail with a typed custom value
 - `Parseff.catch`: intercept a failure and recover
 - `Parseff.expect`: relabel failures from another parser
+- `Parseff.context` and `Parseff.cut`: name a construct and decide it
 
 ## `fail`
 
@@ -144,6 +145,11 @@ let ip_address () =
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.
 
 `expect` replaces only what the parser expected at the position where it started. If the parser got further before it failed, its own message stays, because it is more precise. See [`combinators`](./combinators.md).
+
+
+## `context` and `cut`
+
+`Parseff.context` names a construct, for example `"array"`. A failure inside it remembers the constructs that were open, outermost first. `Parseff.cut` says that the construct is decided: after `cut`, a failure inside the construct is not retried by an enclosing `or_`, `many` or `sep_by`. Use `cut` after the token that identifies the construct, such as `let` in a `let` statement. See [`combinators`](./combinators.md).
 
 
 ## Which error a parse reports

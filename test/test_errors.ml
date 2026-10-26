@@ -508,6 +508,286 @@ let test_recorded_failures_do_not_fail_success () =
   in
   both_runners show_unit "ax" parser "Ok ()"
 
+let show_frames = function
+  | Stdlib.Ok _ ->
+      "ok"
+  | Stdlib.Error frames ->
+      String.concat "; "
+        (List.map
+           (fun (name, start, delimited) ->
+             Printf.sprintf "%s@%d%s" name start
+               ( if delimited then
+                   "!"
+                 else
+                   ""
+               )
+           )
+           frames
+        )
+
+let frames_of input parser =
+  show_frames (Parseff.parse_failure_frames input parser)
+
+let ctx_array_parser () =
+  let rec value () =
+    Parseff.rec_ (fun () ->
+        ws ();
+        Parseff.expect "value" (fun () ->
+            Parseff.one_of
+              [
+                array;
+                (fun () ->
+                  ignore
+                    (Parseff.take_while ~at_least:1 ~label:"number" (fun c ->
+                         c >= '0' && c <= '9'
+                     )
+                    )
+                );
+              ]
+              ()
+        )
+    )
+  and array () =
+    Parseff.context ~delimited:true "array" (fun () ->
+        ignore (Parseff.char '[');
+        ws ();
+        ignore (Parseff.sep_by value comma ());
+        ws ();
+        ignore (Parseff.char ']')
+    )
+  in
+  value ()
+
+let test_context_chain_at_advance () =
+  Alcotest.(check string)
+    "array attempted at the failure" "array@0!; array@9!"
+    (frames_of "[1, 2, 3,]" ctx_array_parser);
+  Alcotest.(check string)
+    "nested frames" "array@0!; array@1!; array@4!"
+    (frames_of "[[1,]]" ctx_array_parser)
+
+let test_context_chain_without_context () =
+  Alcotest.(check string)
+    "no frames" ""
+    (frames_of "x" (fun () -> ignore (Parseff.char 'a')))
+
+let test_context_chain_after_frame_closes () =
+  let parser () =
+    Parseff.context "outer" (fun () ->
+        ignore
+          (Parseff.optional
+             (fun () ->
+               Parseff.context "inner" (fun () ->
+                   ignore (Parseff.consume "ab");
+                   ignore (Parseff.consume "c")
+               )
+             )
+             ()
+          );
+        ignore (Parseff.consume "ax")
+    )
+  in
+  Alcotest.(check string)
+    "chain copied when inner closed" "outer@0; inner@0" (frames_of "abx" parser);
+  match Parseff.parse "abx" parser with
+  | Parseff.Error { pos = 2; error = `Expected "expected \"c\"" } ->
+      ()
+  | _ ->
+      Alcotest.fail "unexpected error"
+
+let test_context_start_offsets () =
+  let parser () =
+    ignore (Parseff.consume "ab");
+    Parseff.context "second" (fun () ->
+        ignore (Parseff.consume "cd");
+        Parseff.context "third" ~delimited:true (fun () ->
+            ignore (Parseff.consume "!")
+        )
+    )
+  in
+  Alcotest.(check string)
+    "offsets" "second@2; third@4!" (frames_of "abcdx" parser)
+
+let test_context_siblings_do_not_leak () =
+  let parser () =
+    Parseff.context "a" (fun () -> ignore (Parseff.consume "x"));
+    Parseff.context "b" (fun () -> ignore (Parseff.consume "y"))
+  in
+  Alcotest.(check string) "only the open context" "b@1" (frames_of "xz" parser)
+
+let test_context_tie_keeps_first_chain () =
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.context "left" (fun () -> ignore (Parseff.char 'a')))
+      (fun () -> Parseff.context "right" (fun () -> ignore (Parseff.char 'b')))
+      ()
+  in
+  Alcotest.(check string) "first group's chain" "left@0" (frames_of "z" parser)
+
+let test_context_after_user_exception () =
+  let parser () =
+    ( try
+        Parseff.context "broken" (fun () ->
+            ignore (Parseff.char 'a');
+            raise Exit
+        )
+      with Exit -> ()
+    );
+    Parseff.context "fine" (fun () -> ignore (Parseff.char 'z'))
+  in
+  Alcotest.(check string) "stack is consistent" "fine@1" (frames_of "ax" parser)
+
+let test_context_grows_deep () =
+  let rec nest n () =
+    if n = 0 then
+      ignore (Parseff.char 'x')
+    else
+      Parseff.context (string_of_int n) (nest (n - 1))
+  in
+  let frames = frames_of "y" (nest 40) in
+  Alcotest.(check bool)
+    "forty frames" true
+    (String.length frames > 0
+    && List.length (String.split_on_char ';' frames) = 40
+    )
+
+let test_context_does_not_change_result () =
+  both_runners show_unit "[1, 2, 3,]" ctx_array_parser
+    {|Error@9 Expected "expected value"|}
+
+let let_statement_parser () =
+  let ident () =
+    ignore
+      (Parseff.take_while ~at_least:1 ~label:"identifier" (fun c ->
+           c >= 'a' && c <= 'z'
+       )
+      )
+  in
+  let expr () =
+    Parseff.expect "expression" (fun () ->
+        Parseff.one_of
+          [
+            (fun () ->
+              ignore
+                (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
+            );
+            ident;
+          ]
+          ()
+    )
+  in
+  let let_stmt () =
+    ignore (Parseff.consume "let");
+    Parseff.cut ();
+    ws ();
+    ident ();
+    ws ();
+    ignore (Parseff.char '=');
+    ws ();
+    expr ();
+    ignore (Parseff.char ';')
+  in
+  let expr_stmt () =
+    expr ();
+    ignore (Parseff.char ';')
+  in
+  let stmt () =
+    Parseff.context "statement" (fun () -> Parseff.or_ let_stmt expr_stmt ())
+  in
+  let stmts =
+    Parseff.many
+      (fun () ->
+        ws ();
+        stmt ()
+      )
+      ()
+  in
+  List.length stmts
+
+let test_cut_seals_whole_construct () =
+  both_runners string_of_int "let x = ;" let_statement_parser
+    {|Error@8 Expected "expected expression"|};
+  both_runners string_of_int "let x = 1; 2;" let_statement_parser "Ok 2";
+  Alcotest.(check string)
+    "frames" "statement@0"
+    (frames_of "let x = ;" (fun () -> ignore (let_statement_parser ())))
+
+let test_cut_without_context () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.consume "a");
+        Parseff.cut ();
+        Parseff.consume "b"
+      )
+      (fun () -> Parseff.consume "ac")
+      ()
+  in
+  both_runners (fun s -> s) "ac" parser {|Error@1 Expected "expected \"b\""|};
+  both_runners (fun s -> s) "ab" parser "Ok b"
+
+let test_cut_stops_at_look_ahead () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        Parseff.look_ahead (fun () ->
+            ignore (Parseff.consume "a");
+            Parseff.cut ();
+            Parseff.consume "b"
+        )
+      )
+      (fun () -> Parseff.consume "ac")
+      ()
+  in
+  both_runners (fun s -> s) "ac" parser "Ok ac"
+
+let test_cut_does_not_leave_context_on_success () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        Parseff.context "c" (fun () ->
+            ignore (Parseff.consume "a");
+            Parseff.cut ()
+        );
+        Parseff.consume "b"
+      )
+      (fun () -> Parseff.consume "ac")
+      ()
+  in
+  both_runners (fun s -> s) "ac" parser "Ok ac"
+
+let test_cut_seals_outer_frames_only_on_failure () =
+  let item () =
+    Parseff.context "item" (fun () ->
+        ignore (Parseff.consume "k");
+        Parseff.cut ();
+        ignore (Parseff.consume "v")
+    )
+  in
+  let parser () = List.length (Parseff.many item ()) in
+  both_runners string_of_int "kvkv" parser "Ok 2";
+  both_runners string_of_int "kvkx" parser {|Error@3 Expected "expected \"v\""|}
+
+let test_cut_inside_nested_context_keeps_outer_open () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        Parseff.context "outer" (fun () ->
+            ignore (Parseff.consume "a");
+            Parseff.context "inner" (fun () ->
+                ignore (Parseff.consume "b");
+                Parseff.cut ();
+                ignore (Parseff.consume "c")
+            )
+        )
+      )
+      (fun () -> ignore (Parseff.consume "abd"))
+      ()
+  in
+  both_runners
+    (fun _ -> "ok")
+    "abd" parser {|Error@2 Expected "expected \"c\""|}
+
 let () =
   let open Alcotest in
   run "Errors"
@@ -566,6 +846,39 @@ let () =
           test_case "Utf8.char error text" `Quick test_utf8_char_error_text;
           test_case "recorded failures do not fail a success" `Quick
             test_recorded_failures_do_not_fail_success;
+        ]
+      );
+      ( "context",
+        [
+          test_case "chain at advance" `Quick test_context_chain_at_advance;
+          test_case "no context, no frames" `Quick
+            test_context_chain_without_context;
+          test_case "chain after a frame closes" `Quick
+            test_context_chain_after_frame_closes;
+          test_case "start offsets" `Quick test_context_start_offsets;
+          test_case "siblings do not leak" `Quick
+            test_context_siblings_do_not_leak;
+          test_case "tie keeps the first chain" `Quick
+            test_context_tie_keeps_first_chain;
+          test_case "user exception leaves the stack consistent" `Quick
+            test_context_after_user_exception;
+          test_case "deep nesting" `Quick test_context_grows_deep;
+          test_case "does not change the result" `Quick
+            test_context_does_not_change_result;
+        ]
+      );
+      ( "cut",
+        [
+          test_case "seals the whole construct" `Quick
+            test_cut_seals_whole_construct;
+          test_case "without context" `Quick test_cut_without_context;
+          test_case "stops at look_ahead" `Quick test_cut_stops_at_look_ahead;
+          test_case "success leaves outer frames" `Quick
+            test_cut_does_not_leave_context_on_success;
+          test_case "outer frames sealed on failure only" `Quick
+            test_cut_seals_outer_frames_only_on_failure;
+          test_case "nested context" `Quick
+            test_cut_inside_nested_context_keeps_outer_open;
         ]
       );
       ( "fold exceptions",

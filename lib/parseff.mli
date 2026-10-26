@@ -465,6 +465,63 @@ val commit : unit -> unit
         ()
     ]} *)
 
+val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
+(** [context ?delimited name parser] runs [parser] inside a named construct. The
+    name is kept for the error report: a parse that fails inside [parser] can
+    say which constructs were open at the furthest failure, outermost first.
+
+    [~delimited:true] marks a construct that has an opening token, such as an
+    array or a block. An error renderer can then point to where it was opened.
+
+    A parser that never calls [context] pays nothing for it. [context] itself
+    adds a small cost per call: it keeps the name and the start offset on a
+    stack. At the furthest failure only the first group of failures keeps its
+    chain: when two failures tie, the chain of the first one is reported.
+
+    {!cut} inside [parser] makes the whole construct decided: if [parser] then
+    fails, no enclosing {!or_}, {!many}, {!sep_by} or similar combinator
+    backtracks over it.
+
+    Example:
+    {@ocaml[
+    let array_parser () =
+      context ~delimited:true "array" (fun () ->
+          let _ = consume "[" in
+          let xs = sep_by value comma () in
+          let _ = consume "]" in
+          xs
+      )
+    ]} *)
+
+val cut : unit -> unit
+(** [cut ()] declares that the construct that is running is decided. It seals
+    every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
+    opened since the innermost enclosing {!context}, so none of them backtracks
+    after the cut. It stops at a {!look_ahead}.
+
+    When the enclosing {!context} then fails, the frames outside it are sealed
+    too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
+    failure. If the context ends without failing, the outer frames stay as they
+    were. Without an enclosing {!context}, [cut ()] seals every frame down to
+    the first {!look_ahead}.
+
+    Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
+    construct. It also lets streaming sources drop the input that those frames
+    kept alive.
+
+    Example:
+    {@ocaml[
+    let let_statement () =
+      context "statement" (fun () ->
+          let _ = consume "let" in
+          cut ();
+          (* from here on, a failure is an error of this statement *)
+          let name = identifier () in
+          let _ = consume "=" in
+          (name, expression ())
+      )
+    ]} *)
+
 val rec_ : (unit -> 'a) -> 'a
 (** [rec_ parser] marks a recursive entry point for depth tracking. Wrap the
     body of recursive parsers with [rec_] so that {!parse} can enforce
@@ -1065,3 +1122,13 @@ module Utf8 : sig
       More efficient than {!whitespace} when you don't need the matched string.
   *)
 end
+
+(**/**)
+
+val parse_failure_frames :
+  ?max_depth:int ->
+  string ->
+  (unit -> 'a) ->
+  ('a, (string * int * bool) list) Stdlib.result
+
+(**/**)

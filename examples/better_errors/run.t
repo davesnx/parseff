@@ -67,3 +67,11 @@ Errors after a loop report the furthest failure
 
   $ ./main.exe pairs "ab,ab;"
   ab,ab;               -> Error at pos 5: expected ',' or end of input
+
+A cut decides the whole statement, so the loop does not hide its error
+
+  $ ./main.exe statements "let x = 1; 2;"
+  let x = 1; 2;        -> x = 1 | 2
+
+  $ ./main.exe statements "let x = ;"
+  let x = ;            -> Error at pos 8: expected expression

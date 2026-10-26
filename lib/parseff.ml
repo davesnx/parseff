@@ -73,11 +73,14 @@ type far = {
   mutable strs : string array;
   mutable special : int;
   mutable obj : Obj.t;
+  mutable fctx : int;
+  mutable chain_pos : int;
+  mutable chain : (string * int * bool) list;
 }
 
 let far_none =
   {
-    pos = -1;
+    pos = min_int;
     n = 0;
     k0 = 0;
     s0 = "";
@@ -87,6 +90,9 @@ let far_none =
     strs = [||];
     special = 0;
     obj = Obj.repr 0;
+    fctx = 0;
+    chain_pos = min_int;
+    chain = [];
   }
 
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
@@ -103,6 +109,8 @@ type state = {
   mutable diagnostics_rev : (int * Obj.t) list;
   mutable diagnostics_len : int;
   mutable far : far;
+  mutable ctx_top : int;
+  mutable ctx : int array;
   mutable line_index : line_index option;
   source : source option;
   mutable frames : int array;
@@ -200,6 +208,8 @@ module State = struct
       diagnostics_rev = [];
       diagnostics_len = 0;
       far = far_none;
+      ctx_top = 0;
+      ctx = [||];
       line_index = None;
       source;
       frames = [||];
@@ -315,6 +325,21 @@ module State = struct
       if flags land frame_kind_mask <> frame_barrier then
         Array.unsafe_set t.frames slot (flags lor frame_committed_bit)
     end
+
+  let seal_frames (t : t) ~floor =
+    let i = ref (t.frames_top - 1) in
+    let reached = ref true in
+    while !reached && !i >= floor do
+      let slot = (!i * frame_stride) + 1 in
+      let flags = Array.unsafe_get t.frames slot in
+      if flags land frame_kind_mask = frame_barrier then
+        reached := false
+      else begin
+        Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+        decr i
+      end
+    done;
+    !reached
 
   let reclaim_floor (t : t) ~keep_from =
     let frames = t.frames in
@@ -557,9 +582,13 @@ let[@inline never] far_advance_int st p k =
         strs = [||];
         special = 0;
         obj = Obj.repr 0;
+        fctx = st.ctx_top;
+        chain_pos = min_int;
+        chain = [];
       }
   else begin
     f.pos <- p;
+    f.fctx <- st.ctx_top;
     f.special <- 0;
     f.k0 <- k;
     f.n <- 1
@@ -580,9 +609,13 @@ let[@inline never] far_advance_str st p k s =
         strs = [||];
         special = 0;
         obj = Obj.repr 0;
+        fctx = st.ctx_top;
+        chain_pos = min_int;
+        chain = [];
       }
   else begin
     f.pos <- p;
+    f.fctx <- st.ctx_top;
     f.special <- 0;
     f.k0 <- k;
     if f.s0 != s then f.s0 <- s;
@@ -604,9 +637,13 @@ let[@inline never] far_advance_special st p =
         strs = [||];
         special = 0;
         obj = Obj.repr 0;
+        fctx = st.ctx_top;
+        chain_pos = min_int;
+        chain = [];
       }
   else begin
     f.pos <- p;
+    f.fctx <- st.ctx_top;
     f.special <- 0;
     f.n <- 1
   end
@@ -781,9 +818,12 @@ let label_regex = "regex match"
 
 let[@inline never] far_commit_reset st =
   let f = st.far in
-  f.pos <- -1;
-  f.n <- 0;
-  f.special <- 0
+  if f != far_none then begin
+    f.pos <- -1;
+    f.n <- 0;
+    f.special <- 0;
+    f.chain_pos <- min_int
+  end
 
 let[@inline never] handle_consume st s =
   let len = String.length s in
@@ -1398,6 +1438,66 @@ let look_ahead p =
       State.pop_rewind_frame st frame;
       raise exn
 
+let ctx_stride = 2
+let ctx_cut_bit = 1
+
+let[@inline never] ctx_grow st =
+  let old = st.ctx in
+  let meta = Array.make (imax 16 (2 * Array.length old)) 0 in
+  Array.blit old 0 meta 0 (Array.length old);
+  st.ctx <- meta
+
+let[@inline never] far_contribute f d name start delimited =
+  let entry = (name, start, delimited) in
+  if f.chain_pos <> f.pos then begin
+    f.chain <- [ entry ];
+    f.chain_pos <- f.pos
+  end else
+    f.chain <- entry :: f.chain;
+  f.fctx <- d
+
+let[@inline always] context_exit st d name start delimited =
+  let f = st.far in
+  if f.fctx = d + 1 then far_contribute f d name start delimited;
+  st.ctx_top <- d
+
+let[@inline never] context_exit_cut st d =
+  if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
+    ignore (State.seal_frames st ~floor:0)
+
+let context ?(delimited = false) name p =
+  let st = get_state () in
+  let d = st.ctx_top in
+  if (d + 1) * ctx_stride > Array.length st.ctx then ctx_grow st;
+  let start = st.pos in
+  let m = d * ctx_stride in
+  Array.unsafe_set st.ctx m st.frames_top;
+  Array.unsafe_set st.ctx (m + 1) 0;
+  st.ctx_top <- d + 1;
+  match p () with
+  | v ->
+      context_exit st d name start delimited;
+      v
+  | exception Fail ->
+      context_exit st d name start delimited;
+      context_exit_cut st d;
+      raise_notrace Fail
+  | exception exn ->
+      context_exit st d name start delimited;
+      raise exn
+
+let cut () =
+  let st = get_state () in
+  let d = st.ctx_top in
+  if d = 0 then
+    ignore (State.seal_frames st ~floor:0)
+  else begin
+    let m = (d - 1) * ctx_stride in
+    let ctx = st.ctx in
+    if State.seal_frames st ~floor:(Array.unsafe_get ctx m) then
+      Array.unsafe_set ctx (m + 1) (Array.unsafe_get ctx (m + 1) lor ctx_cut_bit)
+  end
+
 let rec_ p =
   let st = get_state () in
   if st.current_depth >= st.max_depth then
@@ -1949,6 +2049,22 @@ let far_error st =
     Error { pos; error = `Unexpected_end_of_input }
   else
     Error { pos; error = `Expected (format_expected f) }
+
+let far_chain st =
+  let f = st.far in
+  if f.chain_pos = f.pos then
+    f.chain
+  else
+    []
+
+let parse_failure_frames ?(max_depth = 128) input (parser : unit -> 'a) =
+  let st = State.for_input ~input ~max_depth in
+  State.run st @@ fun () ->
+  match parser () with
+  | v ->
+      Stdlib.Ok v
+  | exception Fail ->
+      Stdlib.Error (far_chain (State.current ()))
 
 let to_diagnostics diagnostics_rev =
   List.rev_map

@@ -6,6 +6,7 @@ Parseff exposes four main APIs for error handling:
 - {!val:Parseff.error}: fail with a typed custom value
 - {!val:Parseff.catch}: intercept a failure and recover
 - {!val:Parseff.expect}: relabel failures from another parser
+- {!val:Parseff.context} and {!val:Parseff.cut}: name a construct and decide it
 
 {1 [fail]}
 
@@ -146,6 +147,15 @@ reports [expected a dot separator].
 [expect] replaces only what the parser expected at the position where it
 started. If the parser got further before it failed, its own message stays,
 because it is more precise. See {!page:combinators}.
+
+{1 [context] and [cut]}
+
+{!val:Parseff.context} names a construct, for example ["array"]. A failure
+inside it remembers the constructs that were open, outermost first.
+{!val:Parseff.cut} says that the construct is decided: after [cut], a failure
+inside the construct is not retried by an enclosing [or_], [many] or [sep_by].
+Use [cut] after the token that identifies the construct, such as [let] in a
+[let] statement. See {!page:combinators}.
 
 {1 Which error a parse reports}
 

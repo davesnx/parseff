@@ -257,6 +257,8 @@ let http_method () =
 ```
 `commit ()` acts on the innermost frame only: the nearest `Parseff.or_`, `Parseff.one_of`, `Parseff.many`, `Parseff.sep_by`, `Parseff.optional` or `fold_*` frame. It does nothing outside any frame and inside `Parseff.look_ahead`. It does not release outer frames. In `many (fun () -> or_ a b ())`, a `commit ()` inside the `or_` does not let the `many` frame release older buffered input: `many` still keeps the input from the start of the current iteration. To release that input, call `commit ()` in the body of `many`, outside the `or_`.
 
+`Parseff.cut` seals every frame opened since the innermost enclosing `Parseff.context`, not only the nearest one. Use it when a whole construct becomes certain: after `cut ()`, none of those frames pins buffered input, and a failure of the construct is not retried by the frames outside it. With a small window, an `or_` whose left branch reads a long run of tokens fails with ``Backtrack_window_exceeded` until the branch calls `cut ()`.
+
 Before `commit ()`, Parseff must keep enough buffered input to rewind and try the other branch. After `commit ()`, that rewind point stops pinning the old prefix.
 
 If the retained region would exceed `~backtrack_window`, parsing fails with ``Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.

@@ -138,6 +138,47 @@ let pairs () =
   Parseff.end_of_input ();
   List.length items
 
+let ident () =
+  Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
+
+let number () =
+  Parseff.take_while ~at_least:1 ~label:"number" (fun c -> c >= '0' && c <= '9')
+
+let value () =
+  Parseff.expect "expression" (fun () ->
+      Parseff.or_ (fun () -> number ()) (fun () -> ident ()) ()
+  )
+
+let let_statement () =
+  let _ = Parseff.consume "let" in
+  Parseff.cut ();
+  Parseff.skip_whitespace ();
+  let name = ident () in
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char '=' in
+  Parseff.skip_whitespace ();
+  let v = value () in
+  let _ = Parseff.char ';' in
+  Printf.sprintf "%s = %s" name v
+
+let expression_statement () =
+  let v = value () in
+  let _ = Parseff.char ';' in
+  v
+
+let statement () =
+  Parseff.context "statement" (fun () ->
+      Parseff.or_ let_statement expression_statement ()
+  )
+
+let statements () =
+  Parseff.many
+    (fun () ->
+      Parseff.skip_whitespace ();
+      statement ()
+    )
+    ()
+
 let format_error pos error = Printf.sprintf "Error at pos %d: %s" pos error
 
 let run_ip input =
@@ -214,6 +255,17 @@ let run_pairs input =
   | Error _ ->
       Printf.printf "%-20s -> Unknown error\n" input
 
+let run_statements input =
+  match Parseff.parse input statements with
+  | Ok items ->
+      Printf.printf "%-20s -> %s\n" input (String.concat " | " items)
+  | Error { pos; error = `Expected msg } ->
+      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
+  | Error { pos; error = `Unexpected_end_of_input } ->
+      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
+  | Error _ ->
+      Printf.printf "%-20s -> Unknown error\n" input
+
 let () =
   let cmd = Sys.argv.(1) in
   let input = Sys.argv.(2) in
@@ -230,6 +282,8 @@ let () =
       run_literal input
   | "pairs" ->
       run_pairs input
+  | "statements" ->
+      run_statements input
   | _ ->
       Printf.eprintf "Unknown command: %s\n" cmd;
       exit 1

@@ -1304,10 +1304,67 @@ let test_error_at_end_of_input_after_compaction () =
   in
   Alcotest.(check string) "eof" "10000 end of input" (show_failure r)
 
+let cut_window_parser ~cut () =
+  Parseff.or_
+    (fun () ->
+      ignore (Parseff.consume "x");
+      if cut then Parseff.cut ();
+      List.length (Parseff.many (fun () -> Parseff.char 'a') ())
+    )
+    (fun () -> 0)
+    ()
+
+let test_cut_releases_buffer () =
+  let input = "x" ^ String.make 2000 'a' in
+  ( match
+      Parseff.parse_source ~backtrack_window:64
+        (chunked_source ~chunk_size:16 input)
+        (cut_window_parser ~cut:false)
+    with
+  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "expected the window to be exceeded without cut"
+  );
+  match
+    Parseff.parse_source ~backtrack_window:64
+      (chunked_source ~chunk_size:16 input)
+      (cut_window_parser ~cut:true)
+  with
+  | Parseff.Ok n ->
+      Alcotest.(check int) "count" 2000 n
+  | Parseff.Error _ ->
+      Alcotest.fail "cut should release the buffer"
+
+let test_context_in_streaming () =
+  let input = String.concat "" (List.init 3000 (fun _ -> "ab")) ^ "ax" in
+  let parser () =
+    Parseff.context "items" (fun () ->
+        ignore (Parseff.many (fun () -> Parseff.consume "ab") ());
+        Parseff.end_of_input ()
+    )
+  in
+  match
+    Parseff.parse_source ~backtrack_window:64
+      (chunked_source ~chunk_size:7 input)
+      parser
+  with
+  | Parseff.Error { pos; error = `Expected msg } ->
+      Alcotest.(check int) "position" 6001 pos;
+      Alcotest.(check string) "message" "expected \"b\"" msg
+  | _ ->
+      Alcotest.fail "expected a failure"
+
 let () =
   let open Alcotest in
   run "Streaming"
     [
+      ( "context and cut",
+        [
+          test_case "cut releases the buffer" `Quick test_cut_releases_buffer;
+          test_case "context after compaction" `Quick test_context_in_streaming;
+        ]
+      );
       ( "error positions",
         [
           test_case "across chunk boundary" `Quick
