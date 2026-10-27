@@ -57,7 +57,7 @@ This is the 0.5.0 release.
 - **Fix concurrent parses on one domain.** Two `parse_source` calls whose `read` suspends, for example in two Eio fibers, corrupted each other's state and raised `Invalid_argument "Parseff.State.pop_rewind_frame"`. Parseff now installs the parse state again after every `read`, and a finished parse no longer leaves its state behind. Only `read` may suspend; a suspension inside a parser callback is still not supported.
 - **Fix streaming memory growing with the input.** Compaction kept one line index entry per newline for the whole stream. The index now keeps only the retained buffer and a count of dropped lines, so `location` stays correct and memory is bounded by the window.
 - **Fix `match_regex` hiding a full backtrack window.** When the window was full and the source had not ended, the regex ran on the short buffer and failed, so `or_` took another branch. It now returns a match that ends before the buffered end, and otherwise fails with <code>`Backtrack_window_exceeded</code>, as `take` does, because more input could change the result.
-- **Check streaming arguments.** `parse_source` and `parse_source_until_end` raise `Invalid_argument` for `~backtrack_window` below `2`, `Source.of_channel` for `~buf_size` below `1`, and a parse for a `read` result outside `0..len`. A window of `0` or `1` used to report a false end of input.
+- **Check streaming arguments.** `parse_source` raises `Invalid_argument` for `~backtrack_window` below `2`, `Source.of_channel` for `~buf_size` below `1`, and a parse for a `read` result outside `0..len`. A window of `0` or `1` used to report a false end of input.
 - **Fix streaming documentation.** `span` is an owned copy in streaming, `match_regex` reads ahead half a window instead of retrying at chunk boundaries, and a source is for one parse.
 - **Fix `expect` and `one_of_labeled` relabeling user errors.** A user error raised through an `or_` or `one_of` with several branches was replaced by the `expect` or `one_of_labeled` message. It now passes through unchanged, as documented.
 - **Fix `many`, `sep_by`, `end_by` and `fold_left` looping forever on parsers that consume no input.** The loop now stops after an iteration that consumes nothing and drops that iteration's result. `~at_least` still applies to the kept results.
@@ -99,13 +99,13 @@ match Parseff.parse input parser with
 ```
 
 - `Error { pos; error }` becomes `Error e`. The position is `e.span.start`, the message is `Parseff.Error.message e`.
-- User errors move into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (`Too_large n); _ }`.
+- User errors move into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (Too_large n); _ }`, with `type Parseff.Error.user += Too_large of int`.
 - <code>`Failure msg</code> becomes `Failure msg`. The 0.4 messages of primitives that were not expectations (invalid UTF-8, a failed `match_regex` without a label, a mismatched `BE.int16`) are `Expected` items now (`valid UTF-8`, `text matching the pattern`, `int16be 0xFFFE`), so they merge with the alternatives expected at the same position.
 - <code>`Expected msg</code> becomes `Expected { items; found; more }`. `Parseff.Error.message e` gives `expected A, B, or C, found X` instead of `expected A or expected B`, sorted and without duplicates.
 - <code>`Unexpected_end_of_input</code> becomes `Expected { found = End; _ }` and now has `items`.
 - <code>`Depth_limit_exceeded msg</code> becomes `Depth_limit_exceeded { limit }`, and <code>`Backtrack_window_exceeded info</code> becomes `Backtrack_window_exceeded { limit; oldest }`.
 - `Parseff.Ok` and `Parseff.Error` are `Stdlib.Ok` and `Stdlib.Error`. Code that writes `Ok v` and `Error e` keeps compiling.
-- In `parse_until_end` and `parse_source_until_end`, `Error { pos; error; diagnostics }` becomes `Error { error; diagnostics }` where `error` is an `Error.t`.
+- `parse_until_end` and `parse_source_until_end` become `parse ~consume:`All` and `parse_source ~consume:`All`, and their diagnostics are read from a `Diagnostics.t` collector. See the table above.
 - Tests that compared error strings change: messages now name what was expected at the furthest failure, and `consume` fails at the first differing byte.
 
 ## 0.4.0
