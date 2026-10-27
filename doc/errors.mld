@@ -275,7 +275,7 @@ match Parseff.parse input parser with
 
 {1 Rendering errors}
 
-{!val:Parseff.render_error}, also available as {!val:Parseff.Error.render}, prints an error with its source line, a caret under
+{!val:Parseff.render_error} prints an error with its source line, a caret under
 the failure and what the parser was doing:
 
 {v

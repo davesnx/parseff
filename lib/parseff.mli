@@ -23,7 +23,7 @@
 
       match Parseff.parse "192.168.1.1" ip_address with
       | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-      | Error e -> prerr_endline (Parseff.Error.render ~name:"address" e)
+      | Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
     ]} *)
 
 (** {1 Span Type} *)
@@ -59,7 +59,7 @@ type backtrack_window_error = { limit : int; oldest : int }
 (** A parse error: what failed, where, and what the parser was doing.
 
     A failed parse returns one [Error.t]. Match on its [kind] to react to the
-    failure, or print it with {!Error.render}. *)
+    failure, or print it with {!render_error}. *)
 module Error : sig
   type expected =
     | Char of Uchar.t  (** A specific character, printed as ['x']. *)
@@ -99,8 +99,8 @@ module Error : sig
       buffered (streaming). *)
 
   type excerpt
-  (** Source lines kept with the error so that {!render} does not need the
-      input. *)
+  (** Source lines kept with the error so that {!Parseff.render_error} does not
+      need the input. *)
 
   type 'e kind =
     | Expected of {
@@ -131,7 +131,7 @@ module Error : sig
     position : position option;
         (** Line and column of [span.start]. [None] when the line is not known:
             in streaming, when the position is older than the buffered input.
-            {!render} prints the byte offset then. *)
+            {!Parseff.render_error} prints the byte offset then. *)
     frames : frame list;  (** Open constructs, outermost first. *)
     notes : note list;
     excerpt : excerpt;
@@ -149,40 +149,6 @@ module Error : sig
 
   type columns = [ `Bytes | `Code_points ]
 
-  val render :
-    ?name:string ->
-    ?source:string ->
-    ?columns:columns ->
-    ?user:('e -> string) ->
-    'e t ->
-    string
-  (** [render e] prints the error with a source excerpt:
-
-      {v
-      input.json:4:5: error: expected ',' or '}', found '"'
-      2 |     "config": {
-        | ╭─────────────╯
-      3 | │     "a": 1
-      4 | │     "b": 2
-        | ╰─────^
-        * while parsing object, from 2:13
-        * while parsing object, from 1:1
-      v}
-
-      [name] is printed at the start of the header. [source] is the parsed
-      input; without it the excerpt kept in the error is used, which is enough
-      for the error line and the lines around it, and may miss old lines in
-      streaming. When the line of the error is not known, which happens in
-      streaming when the position is older than the buffered input, the header
-      is [input.json: byte N: error: ...] and there is no excerpt. [columns]
-      chooses the column unit of the header, [`Bytes] by default; it applies to
-      the columns of [* while parsing] lines too. Carets count code points, and
-      a control byte, an invalid UTF-8 byte or a C1 control prints in the
-      excerpt as the escape [message] uses, such as [\x1B], with as many carets
-      as the escape has characters. A [Depth_limit_exceeded] or
-      [Backtrack_window_exceeded] error ends with a [* help:] line. Rows have no
-      trailing spaces and the result has no trailing newline. *)
-
   val pp :
     ?name:string ->
     ?source:string ->
@@ -191,10 +157,10 @@ module Error : sig
     Format.formatter ->
     'e t ->
     unit
-  (** [pp] prints what {!render} returns. The [user] printer is run in a
-      horizontal box, so its line breaks do not split the header. The lines of
-      the result are separated by [Format.pp_force_newline], so [pp] works in an
-      open box and the lines keep its indentation. *)
+  (** [pp] prints what {!Parseff.render_error} returns. The [user] printer is
+      run in a horizontal box, so its line breaks do not split the header. The
+      lines of the result are separated by [Format.pp_force_newline], so [pp]
+      works in an open box and the lines keep its indentation. *)
 end
 
 val render_error :
@@ -204,7 +170,32 @@ val render_error :
   ?user:('e -> string) ->
   'e Error.t ->
   string
-(** [render_error] is {!Error.render}. *)
+(** [render_error e] prints the error with a source excerpt:
+
+    {v
+    input.json:4:5: error: expected ',' or '}', found '"'
+    2 |     "config": {
+      | ╭─────────────╯
+    3 | │     "a": 1
+    4 | │     "b": 2
+      | ╰─────^
+      * while parsing object, from 2:13
+      * while parsing object, from 1:1
+    v}
+
+    [name] is printed at the start of the header. [source] is the parsed input;
+    without it the excerpt kept in the error is used, which is enough for the
+    error line and the lines around it, and may miss old lines in streaming.
+    When the line of the error is not known, which happens in streaming when the
+    position is older than the buffered input, the header is
+    [input.json: byte N: error: ...] and there is no excerpt. [columns] chooses
+    the column unit of the header, [`Bytes] by default; it applies to the
+    columns of [* while parsing] lines too. Carets count code points, and a
+    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
+    the escape [message] uses, such as [\x1B], with as many carets as the escape
+    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
+    error ends with a [* help:] line. Rows have no trailing spaces and the
+    result has no trailing newline. *)
 
 (** {1 Result Types} *)
 
@@ -225,7 +216,7 @@ type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result
       match Parseff.parse input parser with
       | Ok value -> ...
       | Error { kind = User (`Too_large n); _ } -> ...
-      | Error e -> prerr_endline (Parseff.Error.render ~name:"input" e)
+      | Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
     ]} *)
 
 type 'd diagnostic = { pos : int; diagnostic : 'd }
@@ -266,7 +257,7 @@ val parse : ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e) result
     | Error { kind = Failure msg; _ } ->
         Printf.printf "Failed: %s\n" msg
     | Error e ->
-        prerr_endline (Error.render ~name:"input" e)
+        prerr_endline (render_error ~name:"input" e)
     ]} *)
 
 val parse_until_end :
@@ -410,10 +401,10 @@ val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
 
     [~from] makes the error cover the bytes from [from] up to the current
     position instead of a single position, and [~notes] attaches {!Error.note}s.
-    {!Error.render} underlines the span and prints the notes. This is intended
+    {!render_error} underlines the span and prints the notes. This is intended
     for user-initiated validation failures (e.g. a parsed value is out of
     range). In streaming, a [~from] older than the buffered input is kept as the
-    position of the error. Its line cannot be known, so {!Error.render} prints
+    position of the error. Its line cannot be known, so {!render_error} prints
     [byte N] instead of a line and column and shows no excerpt, unless [~source]
     is given.
 

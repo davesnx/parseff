@@ -849,7 +849,7 @@ let render ?(name = "input.json") ?source ?columns input parser =
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : unit E.t) ->
-      E.render ~name ?source ?columns e
+      Parseff.render_error ~name ?source ?columns e
 
 let check_render label expected actual =
   Alcotest.(check string) label expected actual
@@ -1170,7 +1170,7 @@ let test_render_without_name () =
       Alcotest.(check string)
         "no name"
         (lines [ "1:1: error: expected digit, found 'x'"; "1 | x"; "  | ^" ])
-        (E.render e);
+        (Parseff.render_error e);
       Alcotest.(check string) "message" "expected digit, found 'x'" (E.message e);
       Alcotest.(check int) "pos" 0 (E.pos e)
   | Stdlib.Ok _ ->
@@ -1355,11 +1355,11 @@ let test_render_source_and_pp () =
   | Stdlib.Error (e : unit E.t) ->
       Alcotest.(check string)
         "source gives the same text"
-        (E.render ~name:"input.json" e)
-        (E.render ~name:"input.json" ~source:input e);
+        (Parseff.render_error ~name:"input.json" e)
+        (Parseff.render_error ~name:"input.json" ~source:input e);
       Alcotest.(check string)
         "pp is render"
-        (E.render ~name:"input.json" e)
+        (Parseff.render_error ~name:"input.json" e)
         (Format.asprintf "%a"
            (E.pp ~name:"input.json" ?source:None ?columns:None ?user:None)
            e
@@ -1373,7 +1373,7 @@ let test_render_other_kinds () =
       Alcotest.(check string)
         "fail"
         (lines [ "1:1: error: boom"; "1 | abc"; "  | ^" ])
-        (E.render e)
+        (Parseff.render_error e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
@@ -1399,7 +1399,7 @@ let test_render_other_kinds () =
              "  * help: raise ~max_depth";
            ]
         )
-        (E.render e)
+        (Parseff.render_error e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
@@ -1408,7 +1408,7 @@ let test_render_other_kinds () =
       Alcotest.(check string)
         "user"
         (lines [ "1:1: error: boom!"; "1 | z"; "  | ^" ])
-        (E.render ~user:(fun `Boom -> "boom!") e);
+        (Parseff.render_error ~user:(fun `Boom -> "boom!") e);
       Alcotest.(check string)
         "user without printer"
         (lines
@@ -1416,7 +1416,7 @@ let test_render_other_kinds () =
              "1:1: error: user error (no ~user printer given)"; "1 | z"; "  | ^";
            ]
         )
-        (E.render e)
+        (Parseff.render_error e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
@@ -1442,7 +1442,7 @@ let test_render_streaming_opener_dropped () =
     Parseff.parse_source ~backtrack_window:64 chunked streaming_list_parser
   with
   | Stdlib.Error (e : unit E.t) ->
-      let out = E.render ~name:"stream" e in
+      let out = Parseff.render_error ~name:"stream" e in
       let has sub =
         let n = String.length sub in
         let rec go i =
@@ -1460,7 +1460,7 @@ let test_render_streaming_opener_dropped () =
       Alcotest.(check bool) "no opener corner" false (has "╭");
       Alcotest.(check bool) "no gutter bar" false (has "│");
       Alcotest.(check bool) "plain caret row" true (has "501 | x\n    | ^");
-      let full = E.render ~name:"stream" ~source:input e in
+      let full = Parseff.render_error ~name:"stream" ~source:input e in
       let has_full sub =
         let n = String.length sub in
         let rec go i =
@@ -1481,7 +1481,7 @@ let render_error ?(name = "input.json") input parser =
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : unit E.t) ->
-      E.render ~name e
+      Parseff.render_error ~name e
 
 let digits_parser () =
   ignore
@@ -1621,7 +1621,7 @@ let test_error_from_and_notes () =
              "  * note: see the manual";
            ]
         )
-        (E.render ~user:(fun `Boom -> "boom!") e)
+        (Parseff.render_error ~user:(fun `Boom -> "boom!") e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
@@ -1764,7 +1764,7 @@ let test_note_on_dropped_line () =
   in
   match Parseff.parse_source ~backtrack_window:64 chunked parser with
   | Stdlib.Error (e : unit E.t) ->
-      let out = E.render e in
+      let out = Parseff.render_error e in
       Alcotest.(check bool)
         "falls back to a note line" true
         (List.mem "  * note: to match this" (String.split_on_char '\n' out))
@@ -1980,9 +1980,9 @@ let chunk_source ?(chunk = 100) input =
   )
 
 let render_all e input =
-  ignore (E.render e);
-  ignore (E.render ~source:input e);
-  ignore (E.render ~columns:`Code_points e)
+  ignore (Parseff.render_error e);
+  ignore (Parseff.render_error ~source:input e);
+  ignore (Parseff.render_error ~columns:`Code_points e)
 
 let test_backtrack_window_error_builds () =
   let long = String.make 5000 'a' in
@@ -2084,7 +2084,9 @@ let test_from_older_than_the_buffer () =
         Alcotest.(check bool)
           (label ^ " has no position")
           true (e.position = None);
-        let header = List.hd (String.split_on_char '\n' (E.render e)) in
+        let header =
+          List.hd (String.split_on_char '\n' (Parseff.render_error e))
+        in
         Alcotest.(check bool)
           (label ^ " says byte, not a line")
           true
@@ -2092,7 +2094,7 @@ let test_from_older_than_the_buffer () =
         Alcotest.(check bool)
           (label ^ " shows no excerpt")
           true
-          (not (String.contains (E.render e) '|'));
+          (not (String.contains (Parseff.render_error e) '|'));
         let exact =
           Parseff.parse lines_text (from_before_the_buffer_parser `Fail)
         in
@@ -2100,8 +2102,8 @@ let test_from_older_than_the_buffer () =
         | Error (x : _ E.t) when label = "fail" ->
             Alcotest.(check string)
               (label ^ " with the source gives the exact line")
-              (E.render ~source:lines_text x)
-              (E.render ~source:lines_text e)
+              (Parseff.render_error ~source:lines_text x)
+              (Parseff.render_error ~source:lines_text e)
         | _ ->
             ()
       )
@@ -2316,7 +2318,10 @@ let test_window_markers_agree () =
       )
     with
     | Error e ->
-        Alcotest.(check string) label (E.render ~source:input e) (E.render e)
+        Alcotest.(check string)
+          label
+          (Parseff.render_error ~source:input e)
+          (Parseff.render_error e)
     | Ok _ ->
         Alcotest.failf "%s: expected an error" label
   in
@@ -2341,7 +2346,9 @@ let test_window_end_marker () =
     )
   with
   | Error e ->
-      let row = List.nth (String.split_on_char '\n' (E.render e)) 1 in
+      let row =
+        List.nth (String.split_on_char '\n' (Parseff.render_error e)) 1
+      in
       Alcotest.(check bool)
         "row ends with a marker" true
         (String.ends_with ~suffix:"..." row)
@@ -2363,10 +2370,10 @@ let test_lone_carriage_return () =
           ]
       in
       Alcotest.(check string)
-        "caret under the header column" expected (E.render e);
+        "caret under the header column" expected (Parseff.render_error e);
       Alcotest.(check string)
         "same with the source" expected
-        (E.render ~source:"ab\r" e)
+        (Parseff.render_error ~source:"ab\r" e)
   | Ok _ ->
       Alcotest.fail "expected an error"
 
@@ -2482,7 +2489,7 @@ let render_stream ?name ?source ?(window = 16) input parser =
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : unit E.t) ->
-      E.render ?name ?source e
+      Parseff.render_error ?name ?source e
 
 let message_of input parser =
   match Parseff.parse input parser with
@@ -2661,7 +2668,7 @@ let test_pp_matches_render () =
   | Stdlib.Error e ->
       Alcotest.(check string)
         "user printer with breaks"
-        (E.render ~name:"input" ~user:(fun () -> words) e)
+        (Parseff.render_error ~name:"input" ~user:(fun () -> words) e)
         (Format.asprintf "%a"
            (fun ppf e -> E.pp ~name:"input" ~user:long_message ppf e)
            e
@@ -2706,7 +2713,8 @@ let test_pp_in_an_open_box () =
         )
         (Buffer.contents b);
       Alcotest.(check string)
-        "outside a box it is the render" (E.render ~name:"input" e)
+        "outside a box it is the render"
+        (Parseff.render_error ~name:"input" e)
         (Format.asprintf "%a" (fun ppf e -> E.pp ~name:"input" ppf e) e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
@@ -2741,7 +2749,7 @@ let test_user_error_without_printer () =
              "  | ^";
            ]
         )
-        (E.render ~name:"input" e)
+        (Parseff.render_error ~name:"input" e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
@@ -3001,7 +3009,7 @@ let test_limits_keep_frames_and_give_help () =
              "  * help: raise ~max_depth";
            ]
         )
-        (E.render e)
+        (Parseff.render_error e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
@@ -3356,7 +3364,7 @@ let test_window_error_points_at_the_parser () =
       Alcotest.(check bool) "the line is known" true (e.position <> None);
       Alcotest.(check bool)
         "no byte header" false
-        (String.starts_with ~prefix:"byte" (E.render e))
+        (String.starts_with ~prefix:"byte" (Parseff.render_error e))
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 

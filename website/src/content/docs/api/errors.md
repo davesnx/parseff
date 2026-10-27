@@ -233,7 +233,7 @@ match Parseff.parse input parser with
 
 ## Rendering errors
 
-`Parseff.render_error`, also available as `Parseff.Error.render`, prints an error with its source line, a caret under the failure and what the parser was doing:
+`Parseff.render_error` prints an error with its source line, a caret under the failure and what the parser was doing:
 
 ```
 input.json:4:5: error: expected ',' or '}', found '"'
