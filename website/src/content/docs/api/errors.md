@@ -172,7 +172,7 @@ When a parse fails, Parseff reports the *furthest* failure: the failure of any p
 ```
 This also explains errors after a loop. With `sep_by (fun () -> consume "ab") (fun () -> char ',')` followed by `end_of_input`, the input `"ab,ab,ax"` reports `expected "b"` at offset 7\. The loop stopped because `"ax"` is not `"ab"`, and that is further than the `end_of_input` failure at offset 5\.
 
-A failure at the end of the input keeps what was expected. On `"[1, 2"] the error says [expected ',' or ']', found end of input`.
+A failure at the end of the input keeps what was expected. On `"[1, 2"` the error says `expected ',' or ']', found end of input`.
 
 `consume` fails at the first byte that differs from the literal and expects the rest of it. `Parseff.commit` forgets the failures at or beyond its position, so a committed branch reports only what it expected itself.
 

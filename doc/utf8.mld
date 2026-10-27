@@ -165,8 +165,9 @@ byte: [expected valid UTF-8, found '\xFF']. In an error report the invalid byte
 prints as [\xFF] in the found text and in the source line.
 
 {!val:Parseff.Utf8.char} reports the expected character itself, for example
-[expected 'é', found 'e'], and the failure of any [Utf8] primitive carries the
-label you gave it.
+[expected 'é', found 'e']. A [Utf8] primitive that takes a label reports it when
+the predicate does not match or too few code points match. Invalid UTF-8 always
+reports [valid UTF-8].
 
 {1 Position tracking}
 

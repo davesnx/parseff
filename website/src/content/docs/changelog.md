@@ -7,7 +7,7 @@ All notable changes to Parseff. See [all releases on GitHub](https://github.com/
 
 ## [0.4.0](https://github.com/davesnx/parseff/releases/tag/0.4.0)
 
-- **Breaking: streaming now uses a bounded sliding buffer.** `parse_source` and `parse_source_until_end` accept `~backtrack_window` (default `65536`) and fail with <code>`Backtrack_window_exceeded of backtrack_window_error</code> when a parser needs to keep more input than that for backtracking. This includes a single `take_while` or `take_while_span` token longer than the window. Exhaustive matches on the error type must handle the new case. Raise `~backtrack_window` if a parser needs more.
+- **Breaking: streaming now uses a bounded sliding buffer.** `parse_source` and `parse_source_until_end` accept `~backtrack_window` (default `65536`) and fail with `` `Backtrack_window_exceeded of backtrack_window_error `` when a parser needs to keep more input than that for backtracking. This includes a single `take_while` or `take_while_span` token longer than the window. Exhaustive matches on the error type must handle the new case. Raise `~backtrack_window` if a parser needs more.
 - **Add `commit`.** `commit ()` seals the innermost choice or repetition frame, improving error locality and allowing streaming sources to drop older buffered input earlier. It does not release outer frames: a `commit` inside the `or_` of `many (fun () -> or_ a b ())` leaves the `many` frame in place.
 - **Breaking: streaming spans may be owned copies.** `take_while_span` and `sep_by_take_span` keep zero-copy behavior for `parse`, but `parse_source` may materialize owned spans so bounded streaming can reclaim old prefixes.
 - **Improve runtime performance and reduce allocation.** Parseff now uses a lower-overhead runtime internally, making generic parsers and backtracking-heavy workloads faster while keeping the API largely unchanged.
@@ -20,14 +20,14 @@ All notable changes to Parseff. See [all releases on GitHub](https://github.com/
 
 - **Add `Source.of_seq`.** Creates a source from a `string Seq.t`.
 - **Add `Source.of_chunks`.** Creates a source from a `(unit -> string option)` pull function.
-- **`fail` now produces <code>`Failure of string</code> instead of <code>`Expected</code>.**
-- **Add `catch` combinator.** `catch parser handler` intercepts <code>`Failure</code> errors, allowing recovery within backtracking contexts.
+- **`fail` now produces `` `Failure of string `` instead of `` `Expected ``.**
+- **Add `catch` combinator.** `catch parser handler` intercepts `` `Failure `` errors, allowing recovery within backtracking contexts.
 - **Add `Parseff.Utf8` module for Unicode-aware parsing.** `satisfy`, `char`, `any_char`, `take_while`, `skip_while`, `letter`, `digit`, `alphanum`, `whitespace` and `take_while_span`.
 - **Add `Parseff.BE` and `Parseff.LE` binary parsing primitives.** Big-endian and little-endian readers for `any_uint8`, `any_int8`, `any_int16`, `any_uint16`, `any_int32`, `any_int64`, `any_float`, `any_double`, and validators `int16`, `int32`, `int64`.
 - **Add `location` and `location_of_position` for line/column tracking.** `location ()` returns `{ offset; line; col }` during parsing (lazy, incremental, zero cost if unused). `location_of_position input pos` converts a byte offset after parsing — useful for error reporting.
-- **BE/LE exact-match validators produce <code>`Expected</code> instead of <code>`Failure</code>.** `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser expectations, not user validation failures.
+- **BE/LE exact-match validators produce `` `Expected `` instead of `` `Failure ``.** `BE.int16`, `BE.int32`, `BE.int64` (and LE equivalents) are parser expectations, not user validation failures.
 - **`or_` now composes errors from both branches.** When both branches fail at the same position, `Expected` messages are joined with `" or "` (e.g., `expected "foo" or expected "bar"`). When branches fail at different positions, the error from the branch that consumed more input is kept. This also improves `one_of`, which chains `or_` and now naturally produces composed messages across all alternatives.
-- Register a printer for `Unhandled effects`, warning the user about bad organitzation of the parser function
+- Register a printer for `Unhandled effects`, warning the user about a badly organized parser function
 
 ## [0.2.0](https://github.com/davesnx/parseff/releases/tag/0.2.0)
 
