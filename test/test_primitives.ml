@@ -965,12 +965,12 @@ let test_user_error_extensible () =
         (Parseff.Error.message ~user e);
       Alcotest.(check bool)
         "render with a printer" true
-        (String.starts_with ~prefix:"1:3: error: bad value ab"
+        (String.starts_with ~prefix:"1:3: [error] bad value ab"
            (Parseff.render_error ~user e)
         );
       Alcotest.(check bool)
         "render without a printer" true
-        (String.starts_with ~prefix:"1:3: error: user error (no ~user printer"
+        (String.starts_with ~prefix:"1:3: [error] user error (no ~user printer"
            (Parseff.render_error e)
         )
   | _ ->

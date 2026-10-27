@@ -158,7 +158,7 @@ val render_error :
 (** [render_error e] prints the error with a source excerpt:
 
     {v
-    input.json:4:5: error: expected ',' or '}', found '"'
+    input.json:4:5: [error] expected ',' or '}', found '"'
     2 |     "config": {
       | ╭─────────────╯
     3 | │     "a": 1
@@ -173,7 +173,7 @@ val render_error :
     error line and the lines around it, and may miss old lines in streaming.
     When the line of the error is not known, which happens in streaming when the
     position is older than the buffered input, the header is
-    [input.json: byte N: error: ...] and there is no excerpt. [columns] chooses
+    [input.json: byte N: [error] ...] and there is no excerpt. [columns] chooses
     the column unit of the header, [`Bytes] by default; it applies to the
     columns of [* while parsing] lines too. Carets count code points, and a
     control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as

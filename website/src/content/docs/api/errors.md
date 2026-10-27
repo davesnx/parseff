@@ -71,7 +71,7 @@ let () =
 which prints:
 
 ```
-address:1:4: error: octet out of range
+address:1:4: [error] octet out of range
 1 | 10.300
   |    ^^^
   * note: octets go from 0 to 255
@@ -215,7 +215,7 @@ match Parseff.parse input parser with
 `Parseff.render_error` prints an error with its source line, a caret under the failure and what the parser was doing:
 
 ```
-input.json:4:5: error: expected ',' or '}', found '"'
+input.json:4:5: [error] expected ',' or '}', found '"'
 2 |     "config": {
   | ╭─────────────╯
 3 | │     "a": 1
@@ -224,9 +224,9 @@ input.json:4:5: error: expected ',' or '}', found '"'
   * while parsing object, from 2:13
   * while parsing object, from 1:1
 ```
-- The header is `name:line:col: error: message`. Without `~name` it starts at `line:col`.
+- The header is `name:line:col: [error] message`. Without `~name` it starts at `line:col`.
 - The message is `expected A, B, or C, found X`. A message lists at most 8 expected items, then `, or N more alternatives`. `found X` is a quoted identifier-like run (up to 32 bytes, `found 'abc'...` when it is cut) or one code point, with control bytes, non-breaking spaces and other invisible code points escaped as `\x1B` or `\u{00A0}`, or `end of input`. A `take` that finds too few bytes says `found only 3 (end of input)`, and a binary integer that differs says `expected int16be 0x0001, found 0x0002`.
-- When the line of the error is not known, which happens in streaming when the position is older than the buffered input, the header is `input.json: byte N: error: message` and there is no excerpt. The `*` lines are then indented by two spaces.
+- When the line of the error is not known, which happens in streaming when the position is older than the buffered input, the header is `input.json: byte N: [error] message` and there is no excerpt. The `*` lines are then indented by two spaces.
 - Carets cover the span, one per code point. Tabs in the line are kept, so the caret lines up for any tab width. Control bytes, invalid UTF-8 bytes and C1 control characters in the line print as the escapes of the message, such as `\x1B`, and the carets cover the whole escape.
 - `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five; when only one more is hidden it is printed too. A construct made with `~delimited:true` that started on an earlier line is shown as a bar that joins its opening token to the caret: `╭─╯` under the opener, `│` on the lines in between and `╰──^` at the failure. A single hidden line between the opener and the failure is shown, longer gaps become a `...` row in the gutter.
 - Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
@@ -238,8 +238,8 @@ input.json:4:5: error: expected ',' or '}', found '"'
 `~columns` chooses the unit of the column in the header: bytes by default, or code points (see the UTF-8 page of the API documentation), also in the columns of the `* while parsing` lines. Carets always count code points.
 
 ```
-input.json:1:7: error: expected ',' or ']', found '"'   (bytes)
-input.json:1:6: error: expected ',' or ']', found '"'   (code points)
+input.json:1:7: [error] expected ',' or ']', found '"'   (bytes)
+input.json:1:6: [error] expected ',' or ']', found '"'   (code points)
 1 | ["é" "b"]
   |      ^
 ```

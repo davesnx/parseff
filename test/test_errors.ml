@@ -919,7 +919,7 @@ let test_render_trailing_comma () =
   check_render "A"
     (lines
        [
-         "input.json:1:10: error: expected value, found ']'";
+         "input.json:1:10: [error] expected value, found ']'";
          "1 | [1, 2, 3,]";
          "  |          ^";
          "  * while parsing array, from 1:1";
@@ -931,7 +931,7 @@ let test_render_missing_colon () =
   check_render "B"
     (lines
        [
-         "input.json:1:6: error: expected ':', found '1'";
+         "input.json:1:6: [error] expected ':', found '1'";
          "1 | {\"a\" 1}";
          "  |      ^";
          "  * while parsing object, from 1:1";
@@ -943,7 +943,7 @@ let test_render_missing_comma_opened_here () =
   check_render "C"
     (lines
        [
-         "input.json:3:3: error: expected ',' or '}', found '\"'";
+         "input.json:3:3: [error] expected ',' or '}', found '\"'";
          "1 |   {";
          "  | ╭─╯";
          "2 | │   \"a\": 1";
@@ -958,7 +958,7 @@ let test_render_opener_mid_line () =
   check_render "mid-line opener"
     (lines
        [
-         "input.json:4:5: error: expected ',' or '}', found '\"'";
+         "input.json:4:5: [error] expected ',' or '}', found '\"'";
          "2 |     \"config\": {";
          "  | ╭─────────────╯";
          "3 | │     \"a\": 1";
@@ -976,7 +976,7 @@ let test_render_opener_tab () =
   check_render "tab before the opener"
     (lines
        [
-         "input.json:3:4: error: expected ',' or ']', found '3'";
+         "input.json:3:4: [error] expected ',' or ']', found '3'";
          "2 |   \t[1,";
          "  | ╭───╯";
          "3 | │ \t2 3]";
@@ -991,7 +991,7 @@ let test_render_opener_utf8 () =
   check_render "multi-byte char before the opener"
     (lines
        [
-         "input.json:2:3: error: expected ',' or ']', found '3'";
+         "input.json:2:3: [error] expected ',' or ']', found '3'";
          "1 |   [\"é\", [1,";
          "  | ╭───────╯";
          "2 | │ 2 3]]";
@@ -1009,7 +1009,7 @@ let test_render_loop_exit_literal () =
   check_render "D"
     (lines
        [
-         "input.json:1:8: error: expected \"b\", found 'x'";
+         "input.json:1:8: [error] expected \"b\", found 'x'";
          "1 | ab,ab,ax";
          "  |        ^";
        ]
@@ -1023,15 +1023,15 @@ let test_render_loop_exit_literal () =
 let test_render_duplicates_and_sorting () =
   check_render "E digit"
     (lines
-       [ "input.json:1:1: error: expected digit, found 'x'"; "1 | x"; "  | ^" ]
+       [ "input.json:1:1: [error] expected digit, found 'x'"; "1 | x"; "  | ^" ]
     )
     (render "x" (fun () -> ignore (Parseff.or_ Parseff.digit Parseff.digit ())));
   let keyword k () = ignore (Parseff.consume k) in
   let expected =
     lines
       [
-        "input.json:1:1: error: expected \"else\", \"if\", or \"while\", found \
-         'xyz'";
+        "input.json:1:1: [error] expected \"else\", \"if\", or \"while\", \
+         found 'xyz'";
         "1 | xyz";
         "  | ^^^";
       ]
@@ -1055,7 +1055,7 @@ let test_render_relabel_at_start_only () =
   check_render "F start"
     (lines
        [
-         "input.json:1:1: error: expected key, found 'foo'";
+         "input.json:1:1: [error] expected key, found 'foo'";
          "1 | foo";
          "  | ^^^";
        ]
@@ -1064,7 +1064,7 @@ let test_render_relabel_at_start_only () =
   check_render "F deeper"
     (lines
        [
-         "input.json:1:4: error: expected digit, found 'x'";
+         "input.json:1:4: [error] expected digit, found 'x'";
          "1 | id:x";
          "  |    ^";
        ]
@@ -1092,7 +1092,7 @@ let test_render_relabel_at_start_only () =
   check_render "F labeled"
     (lines
        [
-         "input.json:1:1: error: expected number or string, found '?'";
+         "input.json:1:1: [error] expected number or string, found '?'";
          "1 | ?";
          "  | ^";
        ]
@@ -1101,7 +1101,7 @@ let test_render_relabel_at_start_only () =
   check_render "F unterminated string"
     (lines
        [
-         "input.json:1:5: error: expected '\"', found end of input";
+         "input.json:1:5: [error] expected '\"', found end of input";
          "1 | \"abc";
          "  |     ^";
        ]
@@ -1112,7 +1112,7 @@ let test_render_end_of_input () =
   check_render "G array"
     (lines
        [
-         "input.json:1:6: error: expected ',' or ']', found end of input";
+         "input.json:1:6: [error] expected ',' or ']', found end of input";
          "1 | [1, 2";
          "  |      ^";
          "  * while parsing array, from 1:1";
@@ -1122,7 +1122,7 @@ let test_render_end_of_input () =
   check_render "G literal"
     (lines
        [
-         "input.json:1:4: error: expected \"lo\", found end of input";
+         "input.json:1:4: [error] expected \"lo\", found end of input";
          "1 | hel";
          "  |    ^";
        ]
@@ -1133,7 +1133,7 @@ let test_render_spans_and_columns () =
   check_render "H identifier run"
     (lines
        [
-         "input.json:1:7: error: expected ',' or ']', found 'foo'";
+         "input.json:1:7: [error] expected ',' or ']', found 'foo'";
          "1 | [1, 2 foo]";
          "  |       ^^^";
          "  * while parsing array, from 1:1";
@@ -1149,10 +1149,10 @@ let test_render_spans_and_columns () =
     ]
   in
   check_render "H bytes"
-    (lines ("input.json:1:7: error: expected ',' or ']', found '\"'" :: body))
+    (lines ("input.json:1:7: [error] expected ',' or ']', found '\"'" :: body))
     (render input ctx_json_parser);
   check_render "H code points"
-    (lines ("input.json:1:6: error: expected ',' or ']', found '\"'" :: body))
+    (lines ("input.json:1:6: [error] expected ',' or ']', found '\"'" :: body))
     (render ~columns:`Code_points input ctx_json_parser)
 
 let let_stmt_parser () = ignore (let_statement_parser ())
@@ -1161,7 +1161,7 @@ let test_render_cut_statement () =
   check_render "I"
     (lines
        [
-         "input.json:1:9: error: expected expression, found ';'";
+         "input.json:1:9: [error] expected expression, found ';'";
          "1 | let x = ;";
          "  |         ^";
          "  * while parsing statement, from 1:1";
@@ -1174,7 +1174,7 @@ let test_render_without_name () =
   | Stdlib.Error (e : E.t) ->
       Alcotest.(check string)
         "no name"
-        (lines [ "1:1: error: expected digit, found 'x'"; "1 | x"; "  | ^" ])
+        (lines [ "1:1: [error] expected digit, found 'x'"; "1 | x"; "  | ^" ])
         (Parseff.render_error e);
       Alcotest.(check string) "message" "expected digit, found 'x'" (E.message e);
       Alcotest.(check int) "pos" 0 e.E.span.start
@@ -1185,7 +1185,7 @@ let test_render_tabs () =
   check_render "tabs"
     (lines
        [
-         "input.json:1:7: error: expected ',' or ']', found '3'";
+         "input.json:1:7: [error] expected ',' or ']', found '3'";
          "1 | [1,\t2\t3]";
          "  |    \t \t^";
          "  * while parsing array, from 1:1";
@@ -1197,7 +1197,7 @@ let test_render_crlf () =
   check_render "crlf"
     (lines
        [
-         "input.json:3:3: error: expected ',' or '}', found '\"'";
+         "input.json:3:3: [error] expected ',' or '}', found '\"'";
          "1 |   {";
          "  | ╭─╯";
          "2 | │   \"a\": 1";
@@ -1212,7 +1212,7 @@ let test_render_empty_line () =
   check_render "empty line before"
     (lines
        [
-         "input.json:3:3: error: expected ',' or ']', found '2'";
+         "input.json:3:3: [error] expected ',' or ']', found '2'";
          "1 |   [";
          "  | ╭─╯";
          "2 | │";
@@ -1227,7 +1227,7 @@ let test_render_eof_at_line_end () =
   check_render "eof after newline"
     (lines
        [
-         "input.json:2:1: error: expected value, found end of input";
+         "input.json:2:1: [error] expected value, found end of input";
          "1 |   [1,";
          "  | ╭─╯";
          "2 | │";
@@ -1239,7 +1239,7 @@ let test_render_eof_at_line_end () =
   check_render "empty input"
     (lines
        [
-         "input.json:1:1: error: expected value, found end of input";
+         "input.json:1:1: [error] expected value, found end of input";
          "1 |";
          "  | ^";
        ]
@@ -1251,7 +1251,7 @@ let test_render_gap () =
   check_render "many hidden lines"
     (lines
        [
-         "input.json:42:1: error: expected value, found 'x'";
+         "input.json:42:1: [error] expected value, found 'x'";
          " 1 |   [";
          "   | ╭─╯";
          "   | │ ...";
@@ -1265,7 +1265,7 @@ let test_render_gap () =
   check_render "exactly one hidden line"
     (lines
        [
-         "input.json:4:2: error: expected value, found 'x'";
+         "input.json:4:2: [error] expected value, found 'x'";
          "1 |   [";
          "  | ╭─╯";
          "2 | │ 1,";
@@ -1288,7 +1288,7 @@ let test_render_frame_cap () =
   check_render "six frames are all printed"
     (lines
        [
-         "input.json:1:8: error: expected 'x', found end of input";
+         "input.json:1:8: [error] expected 'x', found end of input";
          "1 | aaaaaaa";
          "  |        ^";
          "  * while parsing level1, from 1:7";
@@ -1303,7 +1303,7 @@ let test_render_frame_cap () =
   check_render "seven frames hide two"
     (lines
        [
-         "input.json:1:9: error: expected 'x', found end of input";
+         "input.json:1:9: [error] expected 'x', found end of input";
          "1 | aaaaaaaa";
          "  |         ^";
          "  * while parsing level1, from 1:8";
@@ -1320,7 +1320,7 @@ let test_render_invalid_utf8_and_controls () =
   check_render "invalid byte"
     (lines
        [
-         "input.json:1:5: error: expected value, found '\\xFF'";
+         "input.json:1:5: [error] expected value, found '\\xFF'";
          "1 | [1, \\xFF 2]";
          "  |     ^^^^";
          "  * while parsing array, from 1:1";
@@ -1330,7 +1330,7 @@ let test_render_invalid_utf8_and_controls () =
   check_render "control byte"
     (lines
        [
-         "input.json:1:3: error: expected ',' or ']', found '\\x01'";
+         "input.json:1:3: [error] expected ',' or ']', found '\\x01'";
          "1 | [1\\x01]";
          "  |   ^^^^";
          "  * while parsing array, from 1:1";
@@ -1370,7 +1370,7 @@ let test_render_other_kinds () =
   | Stdlib.Error (e : E.t) ->
       Alcotest.(check string)
         "fail"
-        (lines [ "1:1: error: boom"; "1 | abc"; "  | ^" ])
+        (lines [ "1:1: [error] boom"; "1 | abc"; "  | ^" ])
         (Parseff.render_error e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
@@ -1391,7 +1391,7 @@ let test_render_other_kinds () =
         "depth"
         (lines
            [
-             "1:3: error: maximum nesting depth 2 exceeded";
+             "1:3: [error] maximum nesting depth 2 exceeded";
              "1 | [[[";
              "  |   ^";
              "  * help: raise ~max_depth";
@@ -1405,13 +1405,15 @@ let test_render_other_kinds () =
   | Stdlib.Error e ->
       Alcotest.(check string)
         "user"
-        (lines [ "1:1: error: boom!"; "1 | z"; "  | ^" ])
+        (lines [ "1:1: [error] boom!"; "1 | z"; "  | ^" ])
         (Parseff.render_error ~user:(function Boom -> "boom!" | _ -> "?") e);
       Alcotest.(check string)
         "user without printer"
         (lines
            [
-             "1:1: error: user error (no ~user printer given)"; "1 | z"; "  | ^";
+             "1:1: [error] user error (no ~user printer given)";
+             "1 | z";
+             "  | ^";
            ]
         )
         (Parseff.render_error e)
@@ -1450,7 +1452,7 @@ let test_render_streaming_opener_dropped () =
       in
       Alcotest.(check bool)
         "header" true
-        (has "stream:501:1: error: expected \"]\" or \"ab\\n\", found 'x'");
+        (has "stream:501:1: [error] expected \"]\" or \"ab\\n\", found 'x'");
       Alcotest.(check bool) "error line" true (has "501 | x");
       Alcotest.(check bool)
         "frame start is a byte offset" true
@@ -1498,7 +1500,7 @@ let test_fail_from_span () =
   check_render "span from"
     (lines
        [
-         "input.json:1:5: error: number is too large";
+         "input.json:1:5: [error] number is too large";
          "1 | x = 300;";
          "  |     ^^^";
        ]
@@ -1514,14 +1516,14 @@ let test_fail_from_span () =
 let test_fail_from_after_position_is_normalized () =
   let parser () = Parseff.fail ~from:5 "backwards" in
   check_render "span is never reversed"
-    (lines [ "input.json:1:1: error: backwards"; "1 | abcdef"; "  | ^^^^^" ])
+    (lines [ "input.json:1:1: [error] backwards"; "1 | abcdef"; "  | ^^^^^" ])
     (render_error "abcdef" parser);
   let parser () =
     ignore (Parseff.consume "abc");
     Parseff.fail ~from:1 "short"
   in
   check_render "span covers from to position"
-    (lines [ "input.json:1:2: error: short"; "1 | abcdef"; "  |  ^^" ])
+    (lines [ "input.json:1:2: [error] short"; "1 | abcdef"; "  |  ^^" ])
     (render_error "abcdef" parser)
 
 let test_loose_note () =
@@ -1533,7 +1535,7 @@ let test_loose_note () =
   check_render "note line"
     (lines
        [
-         "input.json:1:1: error: duplicate key";
+         "input.json:1:1: [error] duplicate key";
          "1 | abc";
          "  | ^";
          "  * note: keys must be unique";
@@ -1555,7 +1557,7 @@ let test_secondary_underline_same_line () =
   check_render "underline under the error line"
     (lines
        [
-         "input.json:1:9: error: missing )";
+         "input.json:1:9: [error] missing )";
          "1 | foo(1, 2";
          "  |         ^";
          "  |    - to match this";
@@ -1572,7 +1574,7 @@ let test_secondary_underline_earlier_lines () =
   check_render "far line gets its own row and a gap"
     (lines
        [
-         "input.json:5:2: error: missing )";
+         "input.json:5:2: [error] missing )";
          "1 | foo(";
          "  |    - to match this";
          "  | ...";
@@ -1590,7 +1592,7 @@ let test_secondary_underline_earlier_lines () =
   check_render "one hidden line is shown"
     (lines
        [
-         "input.json:3:2: error: missing )";
+         "input.json:3:2: [error] missing )";
          "1 | foo(";
          "  |    - to match this";
          "2 | a,";
@@ -1613,7 +1615,7 @@ let test_error_from_and_notes () =
         "user error"
         (lines
            [
-             "1:1: error: boom!";
+             "1:1: [error] boom!";
              "1 | abcd";
              "  | ^^";
              "  * note: see the manual";
@@ -1642,7 +1644,7 @@ let test_fail_frames () =
   check_render "fail goes through the contexts it unwinds"
     (lines
        [
-         "input.json:1:3: error: boom";
+         "input.json:1:3: [error] boom";
          "1 | abc";
          "  |   ^";
          "  * while parsing inner, from 1:2";
@@ -1679,7 +1681,7 @@ let test_match_regex_label () =
   check_render "label is rendered"
     (lines
        [
-         "input.json:1:1: error: expected identifier or number, found '!'";
+         "input.json:1:1: [error] expected identifier or number, found '!'";
          "1 | !";
          "  | ^";
        ]
@@ -2042,7 +2044,7 @@ let test_from_older_than_the_buffer () =
         Alcotest.(check bool)
           (label ^ " says byte, not a line")
           true
-          (String.starts_with ~prefix:"byte 7: error: " header);
+          (String.starts_with ~prefix:"byte 7: [error] " header);
         Alcotest.(check bool)
           (label ^ " shows no excerpt")
           true
@@ -2077,7 +2079,7 @@ let test_look_ahead_probe_does_not_leak () =
   check_render "probe failures are forgotten"
     (lines
        [
-         "input.json:1:1: error: expected 'b', found 'aac'";
+         "input.json:1:1: [error] expected 'b', found 'aac'";
          "1 | aac";
          "  | ^^^";
        ]
@@ -2095,7 +2097,7 @@ let test_look_ahead_probe_does_not_leak () =
   check_render "a successful guard adds nothing"
     (lines
        [
-         "input.json:1:1: error: expected 'b' or 'c', found 'ad'";
+         "input.json:1:1: [error] expected 'b' or 'c', found 'ad'";
          "1 | ad";
          "  | ^^";
        ]
@@ -2104,7 +2106,7 @@ let test_look_ahead_probe_does_not_leak () =
   check_render "a failing look_ahead is a failure"
     (lines
        [
-         "input.json:1:2: error: expected \"b\", found 'x'"; "1 | ax"; "  |  ^";
+         "input.json:1:2: [error] expected \"b\", found 'x'"; "1 | ax"; "  |  ^";
        ]
     )
     (render_error "ax" (fun () ->
@@ -2114,7 +2116,7 @@ let test_look_ahead_probe_does_not_leak () =
   check_render "a failing look_ahead merges with the earlier group"
     (lines
        [
-         "input.json:1:1: error: expected 'q' or 'r', found 'z'";
+         "input.json:1:1: [error] expected 'q' or 'r', found 'z'";
          "1 | z";
          "  | ^";
        ]
@@ -2131,7 +2133,7 @@ let test_multibyte_literal_mismatch () =
   check_render "two byte character"
     (lines
        [
-         "input.json:1:1: error: expected \"\xC3\xA9\", found '\xC3\xA8'";
+         "input.json:1:1: [error] expected \"\xC3\xA9\", found '\xC3\xA8'";
          "1 | \xC3\xA8";
          "  | ^";
        ]
@@ -2140,7 +2142,7 @@ let test_multibyte_literal_mismatch () =
   check_render "three byte character after a prefix"
     (lines
        [
-         "input.json:1:2: error: expected \"\xE2\x82\xAC\", found \
+         "input.json:1:2: [error] expected \"\xE2\x82\xAC\", found \
           '\xE2\x82\xAD'";
          "1 | x\xE2\x82\xAD";
          "  |  ^";
@@ -2153,7 +2155,7 @@ let test_multibyte_literal_mismatch () =
   check_render "input ends inside the character"
     (lines
        [
-         "input.json:1:1: error: expected \"\xC3\xA9\", found '\\xC3'";
+         "input.json:1:1: [error] expected \"\xC3\xA9\", found '\\xC3'";
          "1 | \\xC3";
          "  | ^^^^";
        ]
@@ -2174,7 +2176,7 @@ let test_expect_with_commit_inside () =
   in
   check_render "items before the commit are forgotten, the rest is relabeled"
     (lines
-       [ "input.json:1:1: error: expected thing, found 'z'"; "1 | z"; "  | ^" ]
+       [ "input.json:1:1: [error] expected thing, found 'z'"; "1 | z"; "  | ^" ]
     )
     (render_error "z"
        (with_commit (fun () ->
@@ -2189,13 +2191,13 @@ let test_expect_with_commit_inside () =
     );
   check_render "a single failure is relabeled too"
     (lines
-       [ "input.json:1:1: error: expected thing, found 'z'"; "1 | z"; "  | ^" ]
+       [ "input.json:1:1: [error] expected thing, found 'z'"; "1 | z"; "  | ^" ]
     )
     (render_error "z" (with_commit (fun () -> ignore (Parseff.char 'x'))));
   check_render "without commit the earlier alternative stays"
     (lines
        [
-         "input.json:1:1: error: expected thing or 'a', found 'z'";
+         "input.json:1:1: [error] expected thing or 'a', found 'z'";
          "1 | z";
          "  | ^";
        ]
@@ -2214,7 +2216,7 @@ let test_commit_without_frame_keeps_the_group () =
   check_render "nothing sealed, nothing forgotten"
     (lines
        [
-         "input.json:1:3: error: expected \"cd\", found 'XY'";
+         "input.json:1:3: [error] expected \"cd\", found 'XY'";
          "1 | abXY";
          "  |   ^^";
        ]
@@ -2318,7 +2320,9 @@ let test_lone_carriage_return () =
       let expected =
         lines
           [
-            "1:4: error: expected 'c', found end of input"; "1 | ab"; "  |    ^";
+            "1:4: [error] expected 'c', found end of input";
+            "1 | ab";
+            "  |    ^";
           ]
       in
       Alcotest.(check string)
@@ -2341,7 +2345,7 @@ let test_found_with_data_left () =
   check_render "bytes remain"
     (lines
        [
-         "input.json:1:1: error: expected 5 bytes or 'x', found 'abc'";
+         "input.json:1:1: [error] expected 5 bytes or 'x', found 'abc'";
          "1 | abc";
          "  | ^^^";
        ]
@@ -2350,7 +2354,7 @@ let test_found_with_data_left () =
   check_render "nothing remains"
     (lines
        [
-         "input.json:1:1: error: expected 5 bytes or 'x', found end of input";
+         "input.json:1:1: [error] expected 5 bytes or 'x', found end of input";
          "1 |";
          "  | ^";
        ]
@@ -2468,13 +2472,13 @@ let test_unknown_line_has_byte_header () =
     Parseff.fail ~from:3 "span starts long ago"
   in
   check_render "name and byte offset"
-    "input: byte 3: error: span starts long ago"
+    "input: byte 3: [error] span starts long ago"
     (render_stream ~name:"input" input parser);
-  check_render "no name" "byte 3: error: span starts long ago"
+  check_render "no name" "byte 3: [error] span starts long ago"
     (render_stream input parser);
   check_render "~source gives the real line"
     (lines
-       [ "input:1:4: error: span starts long ago"; "1 | line 1"; "  |    ^^^" ]
+       [ "input:1:4: [error] span starts long ago"; "1 | line 1"; "  |    ^^^" ]
     )
     (render_stream ~name:"input" ~source:input input parser)
   |> ignore;
@@ -2484,7 +2488,7 @@ let test_unknown_line_has_byte_header () =
     ignore (Parseff.char 'q')
   in
   check_render "a known line is correct"
-    "input:3:1: error: expected 'q', found 'ef'"
+    "input:3:1: [error] expected 'q', found 'ef'"
     (List.hd
        (String.split_on_char '\n'
           (render_stream ~name:"input" ~window:4096 small small_parser)
@@ -2503,7 +2507,7 @@ let test_frame_column_in_code_points () =
   check_render "bytes"
     (lines
        [
-         "input.json:1:8: error: expected 'q', found 'x'";
+         "input.json:1:8: [error] expected 'q', found 'x'";
          "1 | \xCE\xBB\xCE\xBB\xCE\xBB[x";
          "  |     ^";
          "  * while parsing arr, from 1:7";
@@ -2513,7 +2517,7 @@ let test_frame_column_in_code_points () =
   let expected =
     lines
       [
-        "input.json:1:5: error: expected 'q', found 'x'";
+        "input.json:1:5: [error] expected 'q', found 'x'";
         "1 | \xCE\xBB\xCE\xBB\xCE\xBB[x";
         "  |     ^";
         "  * while parsing arr, from 1:4";
@@ -2548,7 +2552,7 @@ let test_take_reports_what_is_left () =
   check_render "rendered"
     (lines
        [
-         "input.json:1:1: error: expected 5 bytes, found only 3 (end of input)";
+         "input.json:1:1: [error] expected 5 bytes, found only 3 (end of input)";
          "1 | abc";
          "  | ^^^";
        ]
@@ -2600,7 +2604,7 @@ let test_int_mismatch_shows_the_value () =
   check_render "rendered"
     (lines
        [
-         "input.json:1:1: error: expected int16be 0x0001, found 0x0002";
+         "input.json:1:1: [error] expected int16be 0x0001, found 0x0002";
          "1 | \\x00\\x02";
          "  | ^^^^^^^^";
        ]
@@ -2632,7 +2636,7 @@ let test_user_error_without_printer () =
       check_render "render"
         (lines
            [
-             "input:1:1: error: user error (no ~user printer given)";
+             "input:1:1: [error] user error (no ~user printer given)";
              "1 | x";
              "  | ^";
            ]
@@ -2666,7 +2670,7 @@ let test_expected_list_is_capped () =
   check_render "the header follows"
     (lines
        [
-         "input.json:1:1: error: expected " ^ shown 8
+         "input.json:1:1: [error] expected " ^ shown 8
          ^ ", or 1 more alternative, found 'zzz'";
          "1 | zzz";
          "  | ^^^";
@@ -2679,7 +2683,7 @@ let test_excerpt_escapes () =
   check_render "escape byte"
     (lines
        [
-         "input.json:1:1: error: expected 'a', found '\\x1B'";
+         "input.json:1:1: [error] expected 'a', found '\\x1B'";
          "1 | \\x1B[0m";
          "  | ^^^^";
        ]
@@ -2688,7 +2692,7 @@ let test_excerpt_escapes () =
   check_render "invalid byte before the error"
     (lines
        [
-         "input.json:1:4: error: expected 'q', found 'cd'";
+         "input.json:1:4: [error] expected 'q', found 'cd'";
          "1 | ab\\xFFcd";
          "  |       ^^";
        ]
@@ -2701,7 +2705,7 @@ let test_excerpt_escapes () =
   check_render "invalid byte under the caret"
     (lines
        [
-         "input.json:1:3: error: expected 'q', found '\\xFF'";
+         "input.json:1:3: [error] expected 'q', found '\\xFF'";
          "1 | ab\\xFFcd";
          "  |   ^^^^";
        ]
@@ -2714,7 +2718,7 @@ let test_excerpt_escapes () =
   check_render "C1 control"
     (lines
        [
-         "input.json:1:1: error: expected 'a', found '\\u{0085}'";
+         "input.json:1:1: [error] expected 'a', found '\\u{0085}'";
          "1 | \\u{0085}";
          "  | ^^^^^^^^";
        ]
@@ -2723,7 +2727,7 @@ let test_excerpt_escapes () =
   check_render "lone carriage return"
     (lines
        [
-         "input.json:1:5: error: expected 'q', found 'd'";
+         "input.json:1:5: [error] expected 'q', found 'd'";
          "1 | ab\\rcd";
          "  |      ^";
        ]
@@ -2736,7 +2740,7 @@ let test_excerpt_escapes () =
   check_render "corner bar after an escape"
     (lines
        [
-         "input.json:3:3: error: expected ']', found 'x'";
+         "input.json:3:3: [error] expected ']', found 'x'";
          "1 |   \\x01[";
          "  | ╭─────╯";
          "2 | │   1,";
@@ -2812,7 +2816,7 @@ let test_no_row_has_trailing_spaces () =
   check_render "empty source row"
     (lines
        [
-         "input.json:3:1: error: expected 'q', found 'x'";
+         "input.json:3:1: [error] expected 'q', found 'x'";
          "2 |";
          "3 | x";
          "  | ^";
@@ -2824,7 +2828,7 @@ let test_no_row_has_trailing_spaces () =
      )
     );
   check_render "empty message"
-    (lines [ "input.json:1:2: error:"; "1 | abc"; "  |  ^" ])
+    (lines [ "input.json:1:2: [error]"; "1 | abc"; "  |  ^" ])
     (render_error "abc" (fun () ->
          ignore (Parseff.take 1);
          Parseff.fail ""
@@ -2851,7 +2855,7 @@ let test_no_excerpt_rows_are_indented_by_two () =
     ignore (Parseff.take_while (fun _ -> true) ~label:"x")
   in
   check_render "note"
-    (lines [ "input: byte 3: error: span starts long ago"; "  * note: hint" ])
+    (lines [ "input: byte 3: [error] span starts long ago"; "  * note: hint" ])
     (render_stream ~name:"input" input (fun () ->
          line_loop ();
          Parseff.fail ~from:3
@@ -2862,7 +2866,7 @@ let test_no_excerpt_rows_are_indented_by_two () =
   check_render "frame"
     (lines
        [
-         "input: byte 3: error: span starts long ago";
+         "input: byte 3: [error] span starts long ago";
          "  * while parsing block, from byte 0";
        ]
     )
@@ -2888,7 +2892,7 @@ let test_limits_keep_frames_and_give_help () =
       check_render "depth"
         (lines
            [
-             "1:4: error: maximum nesting depth 3 exceeded";
+             "1:4: [error] maximum nesting depth 3 exceeded";
              "1 | [[[[[[";
              "  |    ^";
              "  * while parsing nest, from 1:3";
@@ -2912,7 +2916,7 @@ let test_limits_keep_frames_and_give_help () =
   check_render "backtrack window"
     (lines
        [
-         "input:3:1: error: backtrack window of 16 bytes exceeded";
+         "input:3:1: [error] backtrack window of 16 bytes exceeded";
          "3 | line 3";
          "  | ^";
          "  * while parsing block, from 2:1";
@@ -2977,7 +2981,7 @@ let test_gap_row_is_in_the_gutter () =
   check_render "gap outside a bar"
     (lines
        [
-         "input.json:12:2: error: missing )";
+         "input.json:12:2: [error] missing )";
          " 1 | foo(";
          "   |    - to match this";
          "   | ...";
@@ -2993,7 +2997,9 @@ let test_empty_one_of_adds_no_item () =
     "alone" "no alternative matched"
     (message_of "x" (Parseff.one_of []));
   check_render "alone, rendered"
-    (lines [ "input.json:1:1: error: no alternative matched"; "1 | x"; "  | ^" ])
+    (lines
+       [ "input.json:1:1: [error] no alternative matched"; "1 | x"; "  | ^" ]
+    )
     (render_error "x" (Parseff.one_of []));
   ( match Parseff.parse "x" (Parseff.one_of []) with
   | Stdlib.Error { kind = Failure m; _ } ->
@@ -3158,7 +3164,7 @@ let test_source_and_user_text_keep_trailing_spaces () =
   check_render "source line ending in spaces"
     (lines
        [
-         "input.json:1:6: error: expected 'q', found end of input";
+         "input.json:1:6: [error] expected 'q', found end of input";
          "1 | ab   ";
          "  |      ^";
        ]
@@ -3171,7 +3177,7 @@ let test_source_and_user_text_keep_trailing_spaces () =
   check_render "found spaces"
     (lines
        [
-         "input.json:1:3: error: expected 'q', found ' '";
+         "input.json:1:3: [error] expected 'q', found ' '";
          "1 | ab   ";
          "  |   ^";
        ]
@@ -3182,7 +3188,7 @@ let test_source_and_user_text_keep_trailing_spaces () =
      )
     );
   check_render "user text"
-    (lines [ "input.json:1:1: error: msg "; "1 | x"; "  | ^"; "  * note: n " ])
+    (lines [ "input.json:1:1: [error] msg "; "1 | x"; "  | ^"; "  * note: n " ])
     (render_error "x" (fun () ->
          Parseff.fail ~notes:[ { E.at = None; text = "n " } ] "msg "
      )
@@ -3193,7 +3199,7 @@ let test_excerpt_escapes_invisible_code_points () =
   check_render "no-break space"
     (lines
        [
-         "input.json:1:1: error: expected 'a', found '\\u{00A0}'";
+         "input.json:1:1: [error] expected 'a', found '\\u{00A0}'";
          "1 | \\u{00A0}x";
          "  | ^^^^^^^^";
        ]
@@ -3202,7 +3208,7 @@ let test_excerpt_escapes_invisible_code_points () =
   check_render "zero width space before the error"
     (lines
        [
-         "input.json:1:4: error: expected 'q', found 'x'";
+         "input.json:1:4: [error] expected 'q', found 'x'";
          "1 | \\u{200B}x";
          "  |         ^";
        ]
@@ -3215,7 +3221,7 @@ let test_excerpt_escapes_invisible_code_points () =
   check_render "combining mark at the start of the row"
     (lines
        [
-         "input.json:1:1: error: expected 'a', found '\\u{0301}'";
+         "input.json:1:1: [error] expected 'a', found '\\u{0301}'";
          "1 | \\u{0301}x";
          "  | ^^^^^^^^";
        ]
@@ -3224,7 +3230,7 @@ let test_excerpt_escapes_invisible_code_points () =
   check_render "combining mark after a base character stays"
     (lines
        [
-         "input.json:1:4: error: expected 'q', found 'x'";
+         "input.json:1:4: [error] expected 'q', found 'x'";
          "1 | e\xCC\x81x";
          "  |   ^";
        ]

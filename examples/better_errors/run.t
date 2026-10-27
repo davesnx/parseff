@@ -79,22 +79,22 @@ A cut decides the whole statement, so the loop does not hide its error
 Rendered errors show the source line, what was expected and where the constructs opened
 
   $ ./main.exe json '[1, 2, 3,]'
-  input.json:1:10: error: expected value, found ']'
+  input.json:1:10: [error] expected value, found ']'
   1 | [1, 2, 3,]
     |          ^
     * while parsing array, from 1:1
   $ ./main.exe json '{"a" 1}'
-  input.json:1:6: error: expected ':', found '1'
+  input.json:1:6: [error] expected ':', found '1'
   1 | {"a" 1}
     |      ^
     * while parsing object, from 1:1
   $ ./main.exe json '[1, 2'
-  input.json:1:6: error: expected ',' or ']', found end of input
+  input.json:1:6: [error] expected ',' or ']', found end of input
   1 | [1, 2
     |      ^
     * while parsing array, from 1:1
   $ ./main.exe json '[1, 2 foo]'
-  input.json:1:7: error: expected ',' or ']', found 'foo'
+  input.json:1:7: [error] expected ',' or ']', found 'foo'
   1 | [1, 2 foo]
     |       ^^^
     * while parsing array, from 1:1
@@ -102,7 +102,7 @@ Rendered errors show the source line, what was expected and where the constructs
   >   "a": 1
   >   "b": 2
   > }'
-  input.json:3:3: error: expected ',' or '}', found '"'
+  input.json:3:3: [error] expected ',' or '}', found '"'
   1 |   {
     | ╭─╯
   2 | │   "a": 1

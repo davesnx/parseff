@@ -2647,7 +2647,7 @@ module Error = struct
         Buffer.add_string b "byte ";
         Buffer.add_string b (string_of_int e.span.start)
     );
-    Buffer.add_string b ": error:";
+    Buffer.add_string b ": [error]";
     add_text b (message ?user e);
     let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.frames in
     let note_line (n : note) =

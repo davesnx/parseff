@@ -183,8 +183,8 @@ prints the column in code points instead. The carets under the source line
 always count code points, so they line up in both modes:
 
 {v
-input.json:1:7: error: expected ',' or ']', found '"'     (bytes)
-input.json:1:6: error: expected ',' or ']', found '"'     (code points)
+input.json:1:7: [error] expected ',' or ']', found '"'     (bytes)
+input.json:1:6: [error] expected ',' or ']', found '"'     (code points)
 1 | ["é" "b"]
   |      ^
 v}

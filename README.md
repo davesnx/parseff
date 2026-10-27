@@ -47,7 +47,7 @@ let () =
 A failed parse returns one `Parseff.Error.t`. `Parseff.render_error` prints the message, the source line and a caret under the failure:
 
 ```
-address:1:11: error: expected digit, found end of input
+address:1:11: [error] expected digit, found end of input
 1 | 192.168.1.
   |           ^
 ```

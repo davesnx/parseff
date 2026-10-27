@@ -68,7 +68,7 @@ let () =
 which prints:
 
 {v
-address:1:4: error: octet out of range
+address:1:4: [error] octet out of range
 1 | 10.300
   |    ^^^
   * note: octets go from 0 to 255
@@ -259,7 +259,7 @@ match Parseff.parse input parser with
 the failure and what the parser was doing:
 
 {v
-input.json:4:5: error: expected ',' or '}', found '"'
+input.json:4:5: [error] expected ',' or '}', found '"'
 2 |     "config": {
   | ╭─────────────╯
 3 | │     "a": 1
@@ -269,7 +269,7 @@ input.json:4:5: error: expected ',' or '}', found '"'
   * while parsing object, from 1:1
 v}
 
-- The header is [name:line:col: error: message]. Without [~name] it starts at
+- The header is [name:line:col: [error] message]. Without [~name] it starts at
   [line:col].
 - The message is [expected A, B, or C, found X]. A message lists at most 8
   expected items, then [, or N more alternatives]. [found X] is a quoted
@@ -280,7 +280,7 @@ v}
   that differs says [expected int16be 0x0001, found 0x0002].
 - When the line of the error is not known, which happens in streaming when the
   position is older than the buffered input, the header is
-  [input.json: byte N: error: message] and there is no excerpt. The [*] lines
+  [input.json: byte N: [error] message] and there is no excerpt. The [*] lines
   are then indented by two spaces.
 - Carets cover the span, one per code point. Tabs in the line are kept, so the
   caret lines up for any tab width. Control bytes, invalid UTF-8 bytes and C1
@@ -315,8 +315,8 @@ code points (see the UTF-8 page of the API documentation), also in the columns o
 [* while parsing] lines. Carets always count code points.
 
 {v
-input.json:1:7: error: expected ',' or ']', found '"'   (bytes)
-input.json:1:6: error: expected ',' or ']', found '"'   (code points)
+input.json:1:7: [error] expected ',' or ']', found '"'   (bytes)
+input.json:1:6: [error] expected ',' or ']', found '"'   (code points)
 1 | ["é" "b"]
   |      ^
 v}
