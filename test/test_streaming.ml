@@ -621,7 +621,7 @@ let test_take_while_span_streaming () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_parse_source_until_end_requires_eof () =
+let test_parse_source_consume_all_requires_eof () =
   let src = Parseff.Source.of_string "abcXYZ" in
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
@@ -641,7 +641,7 @@ let test_parse_source_until_end_requires_eof () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let test_parse_source_until_end_error_has_diagnostics () =
+let test_parse_source_consume_all_error_has_diagnostics () =
   let src = chunked_source ~chunk_size:1 "x" in
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
@@ -664,7 +664,7 @@ let test_parse_source_until_end_error_has_diagnostics () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let test_parse_source_until_end_preserves_end_of_input_semantics () =
+let test_parse_source_consume_all_preserves_end_of_input_semantics () =
   let ok_src = Parseff.Source.of_string "a" in
   let ok_outcome =
     Parseff.parse_source ~consume:`All ok_src (fun () ->
@@ -1375,6 +1375,23 @@ let test_context_in_streaming () =
   | _ ->
       Alcotest.fail "expected a failure"
 
+let test_excerpt_does_not_start_inside_a_code_point () =
+  let input = "\xc3\xa9\xc3\xa9\xc3\xa9x" in
+  let parser () =
+    ignore (Parseff.many (fun () -> Parseff.Utf8.char (Uchar.of_int 0xe9)) ());
+    Parseff.char 'y'
+  in
+  match
+    Parseff.parse_source ~backtrack_window:4 (chunked_source input) parser
+  with
+  | Error e ->
+      Alcotest.(check string)
+        "excerpt"
+        "1:7: error: expected 'y' or '\xc3\xa9', found 'x'\n1 | ...x\n  |    ^"
+        (Parseff.render_error e)
+  | Ok _ ->
+      Alcotest.fail "Expected an error"
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -1458,12 +1475,12 @@ let () =
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
           test_case "consume failure" `Quick test_consume_failure_streaming;
           test_case "take_while_span" `Quick test_take_while_span_streaming;
-          test_case "parse_source_until_end requires eof" `Quick
-            test_parse_source_until_end_requires_eof;
-          test_case "parse_source_until_end error diagnostics" `Quick
-            test_parse_source_until_end_error_has_diagnostics;
-          test_case "parse_source_until_end preserves end_of_input" `Quick
-            test_parse_source_until_end_preserves_end_of_input_semantics;
+          test_case "parse_source_consume_all requires eof" `Quick
+            test_parse_source_consume_all_requires_eof;
+          test_case "parse_source_consume_all error diagnostics" `Quick
+            test_parse_source_consume_all_error_has_diagnostics;
+          test_case "parse_source_consume_all preserves end_of_input" `Quick
+            test_parse_source_consume_all_preserves_end_of_input_semantics;
         ]
       );
       ( "location",
@@ -1500,6 +1517,12 @@ let () =
           test_case "single shot" `Quick test_of_chunks_single_shot;
           test_case "empty chunks skipped" `Quick test_of_chunks_empty_skipped;
           test_case "backtrack 2-byte" `Quick test_of_chunks_backtrack;
+        ]
+      );
+      ( "excerpt",
+        [
+          test_case "does not start inside a code point" `Quick
+            test_excerpt_does_not_start_inside_a_code_point;
         ]
       );
       ( "Source.of_seq",

@@ -3256,6 +3256,55 @@ let test_window_error_points_at_the_parser () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
+let test_duplicates_do_not_hide_alternatives () =
+  let parser () =
+    for _ = 1 to 70 do
+      ignore (Parseff.optional (fun () -> Parseff.char 'a') ())
+    done;
+    Parseff.one_of
+      [
+        (fun () -> Parseff.char 'x');
+        (fun () -> Parseff.char 'y');
+        (fun () -> Parseff.char 'z');
+      ]
+      ()
+  in
+  Alcotest.(check string)
+    "every distinct alternative is listed"
+    "expected 'a', 'x', 'y', or 'z', found '!'" (message_of "!" parser)
+
+let test_expect_relabels_after_duplicates () =
+  let parser () =
+    for _ = 1 to 70 do
+      ignore (Parseff.optional (fun () -> Parseff.char 'a') ())
+    done;
+    Parseff.expect "thing" (fun () ->
+        Parseff.one_of
+          [
+            (fun () -> Parseff.char 'x');
+            (fun () -> Parseff.char 'y');
+            (fun () -> Parseff.char 'z');
+          ]
+          ()
+    )
+  in
+  Alcotest.(check string)
+    "expect still relabels" "expected thing or 'a', found '!'"
+    (message_of "!" parser)
+
+let test_char_and_one_byte_literal_print_once () =
+  Alcotest.(check string)
+    "one item" "expected ',', found '!'"
+    (message_of "!" (fun () ->
+         Parseff.one_of
+           [
+             (fun () -> ignore (Parseff.char ','));
+             (fun () -> ignore (Parseff.consume ","));
+           ]
+           ()
+     )
+    )
+
 let () =
   let open Alcotest in
   run "Errors"
@@ -3484,6 +3533,12 @@ let () =
             test_excerpt_escapes_invisible_code_points;
           test_case "window error points at the parser" `Quick
             test_window_error_points_at_the_parser;
+          test_case "duplicates do not hide alternatives" `Quick
+            test_duplicates_do_not_hide_alternatives;
+          test_case "expect relabels after duplicates" `Quick
+            test_expect_relabels_after_duplicates;
+          test_case "char and one-byte literal print once" `Quick
+            test_char_and_one_byte_literal_print_once;
         ]
       );
       ( "fold exceptions",

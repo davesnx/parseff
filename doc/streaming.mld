@@ -39,9 +39,12 @@ for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 {1 Requiring the whole input}
 
-[~consume:`All] makes {!val:Parseff.parse_source} fail when input remains after
-the parser returns, as {!val:Parseff.end_of_input} does. [~diagnostics] collects
-the diagnostics of the parse. See {!page:diagnostics}.
+Pass [~consume] as below to make {!val:Parseff.parse_source} fail when input
+remains after the parser returns, as {!val:Parseff.end_of_input} does:
+
+{@ocaml skip[Parseff.parse_source ~consume:`All source parser]}
+
+[~diagnostics] collects the diagnostics of the parse. See {!page:diagnostics}.
 
 {@ocaml skip[
   let ic = open_in "data.json" in
@@ -233,9 +236,9 @@ The parser doesn't know which one it's running under. The code is identical:
     Parseff.parse_source (Parseff.Source.of_string "42") number
 ]}
 
-In Parseff, streaming is still transparent at the parser-function level: the
-same parser works against a fixed string or a streaming source. The runtime,
-however, now uses a bounded sliding buffer instead of an append-forever buffer.
+In Parseff, streaming is transparent at the parser-function level: the
+same parser works against a fixed string or a streaming source. The runtime
+uses a bounded sliding buffer, not an append-forever buffer.
 
 {1 How backtracking works across chunks}
 

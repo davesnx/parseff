@@ -55,7 +55,10 @@ val parse :
   (unit -> 'a) ->
   ('a, Error.t) Stdlib.result
 ```
-`~consume:`All` requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. The default is ``Prefix`. `Parseff.parse_source` takes the same arguments.
+```ocaml
+Parseff.parse ~consume:`All input parser
+```
+This requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Without `~consume`, the parse may stop before the end of the input. `Parseff.parse_source` takes the same arguments.
 
 
 ## Example

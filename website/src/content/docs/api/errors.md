@@ -232,10 +232,10 @@ input.json:4:5: error: expected ',' or '}', found '"'
 - Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
 - A `Parseff.rec_` nested deeper than `~max_depth` and a streaming parse that exceeds `~backtrack_window` keep the `* while parsing` lines that were open, and end with `* help: raise ~max_depth` or `* help: call commit or cut earlier, or raise ~backtrack_window`.
 - `~user` is a printer `Error.user -> string` for `User` errors. Without it, a user error prints `user error (no ~user printer given)`.
-- No row has trailing spaces.
+- The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.Error.message` returns only the one-line message.
 
-`~columns` chooses the unit of the column in the header: bytes by default, or code points with ``Code_points` (see [`utf8`](./utf8.md)), also in the columns of the `* while parsing` lines. Carets always count code points.
+`~columns` chooses the unit of the column in the header: bytes by default, or code points (see the UTF-8 page of the API documentation), also in the columns of the `* while parsing` lines. Carets always count code points.
 
 ```
 input.json:1:7: error: expected ',' or ']', found '"'   (bytes)
@@ -254,4 +254,16 @@ input.json:1:6: error: expected ',' or ']', found '"'   (code points)
 (* after *)
 | Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
 ```
-User errors move from the variant row into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (Too_large n); _ }`, with `type Parseff.Error.user += Too_large of int`. ``Failure msg` becomes `Failure msg`. The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. ``Unexpected_end_of_input` is an `Expected` error whose `found` is `End`, so it now says what was expected. The position is `e.span.start`.
+User errors move from the variant row into `kind`, with `type Parseff.Error.user += Too_large of int`. The built-in cases become cases of `kind` too:
+
+```ocaml
+(* before *)
+| Error { error = `Too_large n; _ } -> ...
+| Error { error = `Failure msg; _ } -> ...
+| Error { error = `Unexpected_end_of_input; _ } -> ...
+(* after *)
+| Error { kind = User (Too_large n); _ } -> ...
+| Error { kind = Failure msg; _ } -> ...
+| Error { kind = Expected { found = End; _ }; _ } -> ...
+```
+The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. An error at the end of the input now says what was expected. The position is `e.span.start`.

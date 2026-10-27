@@ -1,7 +1,7 @@
 (** Parser combinator library with an imperative-style API.
 
     Parseff is a parser combinator library that uses algebraic effects to allow
-    an imperative-style API for parsers and ensures
+    an imperative-style API for parsers.
 
     {1 Quick Start}
 
@@ -179,8 +179,9 @@ val render_error :
     control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
     the escape [message] uses, such as [\x1B], with as many carets as the escape
     has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error ends with a [* help:] line. Rows have no trailing spaces and the
-    result has no trailing newline. *)
+    error ends with a [* help:] line. The rows the renderer adds never end with
+    a space, and source text is printed byte for byte. The result has no
+    trailing newline. *)
 
 (** {1 Diagnostics} *)
 
@@ -261,7 +262,8 @@ val consume : string -> string
     that differs from [s], expecting the rest of [s]. The failure position is
     the mismatch, not the start of [s]: [consume "ab"] on ["ax"] fails at offset
     [1] and expects ["b"]. When the input ends inside [s], the error says
-    [found end of input].
+    [found end of input]. The one exception is a mismatch inside a multi-byte
+    character: it is reported at the start of that character.
 
     Example:
     {@ocaml[
@@ -300,9 +302,9 @@ val match_regex : ?label:string -> Re.re -> string
 
     In streaming mode, the parser keeps at least half of the backtrack window
     buffered ahead of the current position, unless the source has ended. A match
-    is limited to the buffered input, so it cannot extend past the window. The
-    byte before the current position stays visible to [Re.bol] and word
-    boundaries.
+    is cut at the end of the buffered input, so it can be shorter than the match
+    that [parse] finds on the same input. The byte before the current position
+    stays visible to [Re.bol] and word boundaries.
 
     If the window is full of rewind history, the regex runs on the buffered
     input. A match that ends before the end of the buffer is returned. A failed
@@ -461,7 +463,9 @@ val warn : 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
     parsing. [diagnostics] must be the collector given to the runner as
     [~diagnostics]; for any other collector [warn] does nothing. A diagnostic
-    recorded in a branch that backtracks is removed with the branch. *)
+    recorded in a branch that backtracks is removed with the branch. This
+    includes a successful {!look_ahead}, and a repetition iteration that
+    succeeds without consuming input. *)
 
 val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
 (** [warn_at diagnostics ~pos d] is {!warn} at the byte offset [pos]. *)
@@ -542,7 +546,8 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 val look_ahead : (unit -> 'a) -> 'a
 (** [look_ahead parser] runs [parser] without consuming any input. If [parser]
     succeeds, the position stays where it was before — useful for peeking at
-    what comes next. Fails if [parser] fails.
+    what comes next. Fails if [parser] fails. Diagnostics recorded by [parser]
+    with {!warn} are removed when it succeeds, as the position is.
 
     Example:
     {@ocaml[
@@ -683,16 +688,18 @@ val expect : string -> (unit -> 'a) -> 'a
     structured error:
 
     {@ocaml[
+    type Error.user += Out_of_range of int
+
     let octet () =
       expect "an octet (0-255)" (fun () ->
           let n = number () in
           if n > 255 then
-            error (`Out_of_range n)
+            error (Out_of_range n)
           else
             n
       )
     (* A non-digit input gives: "expected an octet (0-255)" *)
-    (* Input "300" gives: `Out_of_range 300 — not swallowed *)
+    (* Input "300" gives: User (Out_of_range 300), not swallowed *)
     ]}
 
     Example:
@@ -1104,8 +1111,9 @@ module Utf8 : sig
   val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t
   (** [satisfy pred ~label] decodes the next UTF-8 code point and checks it
       against [pred]. Advances by the number of bytes in the UTF-8 encoding
-      (1--4). Fails with [label] if the predicate returns [false], the input
-      ends, or the bytes are not valid UTF-8.
+      (1--4). Fails with [label] if the predicate returns [false] or the input
+      ends. Invalid UTF-8 fails with [expected valid UTF-8], whatever [label]
+      is.
 
       Example:
       {@ocaml skip[

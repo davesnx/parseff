@@ -51,11 +51,13 @@ diagnostics from the collector after the parse. They are there for [Ok] and for
   (unit -> 'a) ->
   ('a, Error.t) Stdlib.result]}
 
-[~consume:`All] requires that all input is consumed. It is the same as calling
+{@ocaml skip[Parseff.parse ~consume:`All input parser]}
+
+This requires that all input is consumed. It is the same as calling
 {!val:Parseff.end_of_input} once more at the end of your parser. It does not
 change how explicit {!val:Parseff.end_of_input} calls behave inside your
-parser. The default is [`Prefix]. {!val:Parseff.parse_source} takes the same
-arguments.
+parser. Without [~consume], the parse may stop before the end of the input.
+{!val:Parseff.parse_source} takes the same arguments.
 
 {1 Example}
 

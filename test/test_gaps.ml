@@ -83,7 +83,7 @@ let test_utf8_satisfy_split () =
             (fun () -> Parseff.Utf8.satisfy (fun _ -> true) ~label:"any")
             ()
         )
-        ("Ok " ^ expected_code_points text |> fun s -> s)
+        ("Ok " ^ expected_code_points text)
     )
     texts
 
@@ -209,10 +209,9 @@ let test_utf8_alphanum_ascii_edges () =
       in
       Alcotest.(check bool)
         (Printf.sprintf "Utf8.alphanum %C" c)
-        (expected || c = 'a')
-        (ok Parseff.Utf8.alphanum)
+        expected (ok Parseff.Utf8.alphanum)
     )
-    [ ('0', true); ('9', true); ('/', false); (':', false); ('a', false) ]
+    [ ('0', true); ('9', true); ('/', false); (':', false); ('a', true) ]
 
 let test_utf8_is_whitespace () =
   let check cp expected =
@@ -361,10 +360,9 @@ let () =
       );
       ( "utf8 classes",
         [
-          test_case "digit alphanum non-ASCII digit" `Quick
+          test_case "alphanum rejects non-ASCII digit" `Quick
             test_utf8_alphanum_rejects_non_ascii_digit;
-          test_case "digit alphanum ASCII edges" `Quick
-            test_utf8_alphanum_ascii_edges;
+          test_case "alphanum ASCII edges" `Quick test_utf8_alphanum_ascii_edges;
           test_case "is_whitespace" `Quick test_utf8_is_whitespace;
         ]
       );

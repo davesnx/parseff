@@ -28,7 +28,7 @@ let parser () =
 
 (* Matches "helloworld" *)
 ```
-When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input.
+When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input. A mismatch inside a multi-byte character is reported at the start of that character.
 
 **Performance:** `consume` is optimized for literal string matching. It's much faster than using regex for exact matches.
 
@@ -95,10 +95,10 @@ These operations scan multiple characters efficiently.
 
 ### `take_while`
 
-`Parseff.take_while` consumes characters while the predicate holds. Returns the matched string (may be empty). Always succeeds.
+`Parseff.take_while` consumes characters while the predicate holds. Returns the matched string (may be empty). It only fails when `~at_least` asks for more characters than match.
 
 ```ocaml
-val take_while : (char -> bool) -> string
+val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
 ```
 ```ocaml
 (* Parse digits *)
@@ -214,7 +214,7 @@ let number () =
 `Parseff.fail` aborts parsing with an error message.
 
 ```ocaml
-val fail : string -> 'a
+val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
 ```
 ```ocaml
 (* Validate range *)

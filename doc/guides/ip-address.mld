@@ -9,7 +9,7 @@ ensuring complete input consumption.
 Source:
 {{:https://github.com/davesnx/parseff/blob/main/test/test_ip.ml} [test/test_ip.ml]}
 and
-{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml} [examples/better_errors.ml]}
+{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml} [examples/better_errors/main.ml]}
 
 {1 What we're building}
 
@@ -74,7 +74,7 @@ Let's look at what happens with bad input:
 
 {b Out of range}: ["1.2.3.256"] parses [1], [.], [2], [.], [3], [.], then reads
 [256]. The [number] parser validates and fails with
-["number out of range: 256"] at position 6 (the start of [256]).
+["number out of range: 256"] at position 9 (just after [256]).
 
 {b Incomplete}: ["1.2.3"] parses [1], [.], [2], [.], [3], then tries to match
 ['.'] and fails because the input is exhausted.

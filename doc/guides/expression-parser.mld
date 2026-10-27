@@ -8,7 +8,7 @@ precedence, [expect] for clear error messages, and the
 chains.
 
 Source:
-{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml} [examples/better_errors.ml]}
+{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml} [examples/better_errors/main.ml]}
 
 {1 What we're building}
 
@@ -116,8 +116,15 @@ Without [expect], the errors name raw tokens. With [expect], they use the
 words of the grammar. This matters when users see the error.
 
 Parseff reports everything that was expected at the furthest position, so the
-message lists each alternative that could have continued the input. Compare the
-error messages on ["1+x"]:
+message lists each alternative that could have continued the input. The
+messages below come from running the parser so that all input must be
+consumed:
+
+{v
+Parseff.parse ~consume:`All input expr
+v}
+
+Compare the error messages on ["1+x"]:
 
 {ul
 {- Without [expect]: [expected digit or '(']}

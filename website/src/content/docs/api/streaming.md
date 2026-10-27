@@ -39,7 +39,12 @@ The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack
 
 ## Requiring the whole input
 
-`~consume:`All` makes `Parseff.parse_source` fail when input remains after the parser returns, as `Parseff.end_of_input` does. `~diagnostics` collects the diagnostics of the parse. See [`diagnostics`](./diagnostics.md).
+Pass `~consume` as below to make `Parseff.parse_source` fail when input remains after the parser returns, as `Parseff.end_of_input` does:
+
+```ocaml
+Parseff.parse_source ~consume:`All source parser
+```
+`~diagnostics` collects the diagnostics of the parse. See [`diagnostics`](./diagnostics.md).
 
 ```ocaml
   let ic = open_in "data.json" in
@@ -209,7 +214,7 @@ The parser doesn't know which one it's running under. The code is identical:
   let _ =
     Parseff.parse_source (Parseff.Source.of_string "42") number
 ```
-In Parseff, streaming is still transparent at the parser-function level: the same parser works against a fixed string or a streaming source. The runtime, however, now uses a bounded sliding buffer instead of an append-forever buffer.
+In Parseff, streaming is transparent at the parser-function level: the same parser works against a fixed string or a streaming source. The runtime uses a bounded sliding buffer, not an append-forever buffer.
 
 
 ## How backtracking works across chunks

@@ -9,7 +9,7 @@ This walkthrough builds an arithmetic expression parser that handles expressions
 
 Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `fold_left` combinator as a shortcut for left-associative operator chains.
 
-Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
+Source: [`examples/better_errors/main.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml)
 
 ## What we're building
 
@@ -102,7 +102,13 @@ Each precedence level calls the next one for its operands. `expr` parses `term (
 
 Without `expect`, the errors name raw tokens. With `expect`, they use the words of the grammar. This matters when users see the error.
 
-Parseff reports everything that was expected at the furthest position, so the message lists each alternative that could have continued the input. Compare the error messages on `"1+x"`:
+Parseff reports everything that was expected at the furthest position, so the message lists each alternative that could have continued the input. The messages below come from running the parser so that all input must be consumed:
+
+```ocaml
+Parseff.parse ~consume:`All input expr
+```
+
+Compare the error messages on `"1+x"`:
 
 - Without `expect`: `expected digit or '('`
 - With `expect`: `expected a number or an opening parenthesis`

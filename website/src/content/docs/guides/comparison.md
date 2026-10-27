@@ -208,7 +208,7 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
 | Zero-copy | `span` type + fused ops | Limited via `Unsafe` / bigstring slices |
 | Recursion safety | `rec_` with `~max_depth` | Manual (no built-in depth limit) |
-| Custom errors | `error` with polymorphic variants | Limited (string-based) |
+| Custom errors | `error` with an extensible variant (`Error.user`) | Limited (string-based) |
 | Error labels | `expect`, `one_of_labeled` | `<?>` operator |
 | Async support | Not built-in (wrap in Domain) | Incremental API with Partial |
 | Maturity | New | Battle-tested, widely used |

@@ -842,9 +842,21 @@ let[@inline always] far_push_str f k s =
       far_push_slow f k s
   end
 
-let far_relabel f n0 label =
+let far_over_len f =
+  match far_over f with Some o -> List.length o.oitems | None -> 0
+
+let far_relabel f n0 o0 label =
   f.n <- n0;
-  if n0 < far_total_capacity && far_over f <> None then f.extra <- No_extra;
+  begin match far_over f with
+  | Some o ->
+      if n0 < far_total_capacity then
+        f.extra <- No_extra
+      else
+        o.oitems <-
+          List.filteri (fun i _ -> i >= List.length o.oitems - o0) o.oitems
+  | None ->
+      ()
+  end;
   if n0 = 0 then begin
     f.k0 <- tag_label;
     f.s0 <- label;
@@ -1683,9 +1695,10 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
       match p () with
       | v ->
           State.pop_rewind_frame st frame;
-          if st.pos = start then
+          if st.pos = start then begin
+            restore_rewind_frame st frame;
             continue_ref := false
-          else
+          end else
             acc := v :: !acc
       | exception Fail ->
           State.pop_rewind_frame st frame;
@@ -1717,9 +1730,10 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
       match p () with
       | v ->
           State.pop_rewind_frame st frame;
-          if st.pos = start then
+          if st.pos = start then begin
+            restore_rewind_frame st frame;
             continue_ref := false
-          else
+          end else
             acc := v :: !acc
       | exception Fail ->
           State.pop_rewind_frame st frame;
@@ -1752,9 +1766,10 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
             let _ = sep () in
             let v = p () in
             State.pop_rewind_frame st frame;
-            if st.pos = start then
+            if st.pos = start then begin
+              restore_rewind_frame st frame;
               continue_ref := false
-            else
+            end else
               acc := v :: !acc
           with
           | Fail ->
@@ -1821,9 +1836,10 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
       (f, rhs)
     with
     | f, rhs ->
-        if st.pos = start then
+        if st.pos = start then begin
+          restore_rewind_frame st frame;
           continue_ref := false
-        else
+        end else
           acc := f !acc rhs
     | exception Fail ->
         State.pop_rewind_frame st frame;
@@ -1889,6 +1905,12 @@ let expect label p =
     else
       0
   in
+  let o0 =
+    if n0 = far_total_capacity then
+      far_over_len f0
+    else
+      0
+  in
   match p () with
   | v ->
       v
@@ -1896,9 +1918,10 @@ let expect label p =
       let f = st.far in
       if f.pos = start then
         begin if f != f0 then
-          far_relabel f 0 label
-        else if f.n > n0 then
-          far_relabel f n0 label
+          far_relabel f 0 0 label
+        else if f.n > n0 || (n0 = far_total_capacity && far_over_len f > o0)
+        then
+          far_relabel f n0 o0 label
       end;
       raise_notrace Fail
 
@@ -2959,9 +2982,7 @@ end
 let render_error = Error.render
 
 let expected_of_far f =
-  let describe i =
-    let kind = far_item_kind f i in
-    let s = far_item_str f i in
+  let describe (kind, s) =
     let payload = kind lsr 3 in
     let tag = kind land 7 in
     if tag = tag_char then
@@ -3009,22 +3030,53 @@ let expected_of_far f =
     | Error.End_of_input ->
         (3, "")
   in
+  let raw =
+    List.init f.n (fun i -> (far_item_kind f i, far_item_str f i))
+    @ match far_over f with Some o -> List.rev o.oitems | None -> []
+  in
   let items =
     List.filter_map
-      (fun i ->
-        if far_item_kind f i = none_kind then
+      (fun (k, s) ->
+        if k = none_kind then
           None
         else
-          Some (describe i)
+          Some (describe (k, s))
       )
-      (List.init f.n Fun.id)
+      raw
   in
-  let items = List.sort_uniq (fun a b -> compare (key a) (key b)) items in
-  match far_over f with
-  | Some { oitems = _ :: _ as more; _ } ->
-      (items, List.length more)
-  | _ ->
-      (items, 0)
+  let items =
+    List.filter
+      (function
+        | Error.Literal l when String.length l = 1 ->
+            not
+              (List.exists
+                 (function
+                   | Error.Char u -> Error.utf8_of_uchar u = l | _ -> false
+                   )
+                 items
+              )
+        | _ ->
+            true
+        )
+      items
+  in
+  let seen = Hashtbl.create 16 in
+  let items =
+    List.filter
+      (fun e ->
+        let k = key e in
+        (not (Hashtbl.mem seen k))
+        &&
+        ( Hashtbl.add seen k ();
+          true
+        )
+      )
+      items
+  in
+  let kept = List.filteri (fun i _ -> i < far_total_capacity) items in
+  ( List.sort (fun a b -> compare (key a) (key b)) kept,
+    List.length items - List.length kept
+  )
 
 let is_ident_byte c =
   (c >= 'a' && c <= 'z')
@@ -3226,7 +3278,21 @@ let build st ~pos ?(notes = []) kind span frames =
   in
   let error_view =
     Option.bind here (fun (_, line_start, line) ->
-        let error_start = imax line_start st.base in
+        let error_start =
+          if line_start >= st.base then
+            line_start
+          else begin
+            let e = ref st.base in
+            while
+              !e < pos && !e < st.input_len
+              && Char.code (String.unsafe_get st.input (!e - st.base)) land 0xC0
+                 = 0x80
+            do
+              incr e
+            done;
+            !e
+          end
+        in
         Option.map
           (fun (v : Error.view) ->
             { v with Error.left_cut = v.Error.left_cut || line_start < st.base }

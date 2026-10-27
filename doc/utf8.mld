@@ -193,7 +193,7 @@ v}
 [code_point_col]. [position] is [None] when the line is not known, and
 [code_point_col] is [None] when the start of the line is no longer buffered,
 which only happens when streaming; pass
-[~source] to [render] to get exact columns then. Wide characters and combining
+[~source] to [render_error] to get exact columns then. Wide characters and combining
 marks count as one column each: Parseff has no width tables.
 
 {1 Streaming support}

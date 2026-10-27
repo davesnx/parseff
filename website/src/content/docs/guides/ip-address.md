@@ -9,7 +9,7 @@ Build a validated IPv4 address parser step by step.
 
 This walkthrough builds an IPv4 address parser from scratch. It covers digit matching, multi-character numbers, range validation, error reporting, and ensuring complete input consumption.
 
-Source: [`test/test_ip.ml`](https://github.com/davesnx/parseff/blob/main/test/test_ip.ml) and [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
+Source: [`test/test_ip.ml`](https://github.com/davesnx/parseff/blob/main/test/test_ip.ml) and [`examples/better_errors/main.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml)
 
 ## What we're building
 
@@ -62,7 +62,7 @@ On valid input, you get an `Ok` with the four octets as a tuple. On invalid inpu
 
 Let's look at what happens with bad input:
 
-**Out of range**: `"1.2.3.256"` parses `1`, `.`, `2`, `.`, `3`, `.`, then reads `256`. The `number` parser validates and fails with `"number out of range: 256"` at position 6 (the start of `256`).
+**Out of range**: `"1.2.3.256"` parses `1`, `.`, `2`, `.`, `3`, `.`, then reads `256`. The `number` parser validates and fails with `"number out of range: 256"` at position 9 (just after `256`).
 
 **Incomplete**: `"1.2.3"` parses `1`, `.`, `2`, `.`, `3`, then tries to match `'.'` and fails because the input is exhausted.
 

@@ -1,21 +1,21 @@
 ---
 title: Quick start
-description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
 ---
 
 # Quick start
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors are typed via polymorphic variants, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
 
 ## Features
 
 - Build parsers with **direct-style** and compose with `Parseff` combinators
 - API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
-- [**Typed domain errors via polymorphic variants**](/parseff/api/errors/)
+- [**Typed domain errors and source excerpts**](/parseff/api/errors/): every error says what was expected at the furthest failure, with a caret under the source
 - **Automatic backtracking** with [`Parseff.or_`](/parseff/api/combinators/#or_)
-- **Minimal dependency footprint** only `re` for regex support
+- **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
 - [**Streaming support**](/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](/parseff/api/overview/#parse) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
 - [**Zero-copy span APIs**](/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](/parseff/api/zero-copy/) for hot paths
 
@@ -74,7 +74,7 @@ dune install
 
 ## Example
 
-Here's a small parser that validates IPv4 addresses `192.168.1.1` or `0.0.0.0`. A detailed explanation of the [IPv4 addresses parser](/parseff/examples/ip-address):
+Here's a small parser that validates IPv4 addresses `192.168.1.1` or `0.0.0.0`. A detailed explanation of the [IPv4 addresses parser](/parseff/guides/ip-address):
 
 ```ocaml
 type Parseff.Error.user += Out_of_range of int
@@ -111,10 +111,10 @@ let () =
 | Section | Combinators |
 |---------|------------|
 | [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
-| [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `rec_` |
+| [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `commit`, `cut`, `rec_` |
 | [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace` |
-| [Errors](/parseff/api/errors) | `fail`, `error`, `expect` |
+| [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `render_error` |
 | [Diagnostics](/parseff/api/diagnostics) | `warn`, `warn_at`, `Diagnostics`, `parse ~consume ~diagnostics` |
 | [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char` |
 | [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source` |

@@ -18,7 +18,7 @@ Using 'expect' for clear error messages on an IP parser
   $ ./main.exe ip "192.168.1x"
   192.168.1x           -> Error at pos 9: expected a digit (0-9) or a dot separator, found 'x'
 
-Custom error types with polymorphic variants
+Custom error types with an extensible variant
 
   $ ./main.exe ip-custom "192.168.1.300"
   192.168.1.300        -> Custom error at pos 13: octet 300 out of range (0-255)

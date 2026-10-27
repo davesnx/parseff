@@ -565,7 +565,7 @@ let test_parse_non_enforcing () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_parse_until_end_requires_eof () =
+let test_parse_consume_all_requires_eof () =
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
     Parseff.parse ~consume:`All ~diagnostics "abcXYZ" (fun () ->
@@ -589,7 +589,7 @@ let diag_list d =
     (fun ({ pos; value } : string Parseff.Diagnostics.entry) -> (pos, value))
     (Parseff.Diagnostics.to_list d)
 
-let test_parse_until_end_collects_diagnostics () =
+let test_parse_consume_all_collects_diagnostics () =
   let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
     Parseff.warn diagnostics "start";
@@ -675,6 +675,25 @@ let test_diagnostics_rollback_on_many_stop () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_diagnostics_rollback_on_zero_width_stop () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  let parser () =
+    Parseff.many
+      (fun () ->
+        Parseff.warn diagnostics "iter";
+        Parseff.optional (fun () -> Parseff.char 'x') ()
+      )
+      ()
+  in
+  match Parseff.parse ~consume:`All ~diagnostics "xx" parser with
+  | Ok items ->
+      Alcotest.(check int) "items" 2 (List.length items);
+      Alcotest.(check int)
+        "the stopping iteration leaves no diagnostic" 2
+        (Parseff.Diagnostics.length diagnostics)
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
 let test_error_contains_diagnostics () =
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
@@ -695,7 +714,7 @@ let test_error_contains_diagnostics () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let test_parse_until_end_preserves_end_of_input_semantics () =
+let test_parse_consume_all_preserves_end_of_input_semantics () =
   let ok_outcome =
     Parseff.parse ~consume:`All "a" (fun () ->
         let _ = Parseff.char 'a' in
@@ -2044,19 +2063,21 @@ let () =
       ( "diagnostics",
         [
           test_case "parse non-enforcing" `Quick test_parse_non_enforcing;
-          test_case "parse_until_end requires eof" `Quick
-            test_parse_until_end_requires_eof;
+          test_case "parse_consume_all requires eof" `Quick
+            test_parse_consume_all_requires_eof;
           test_case "collect diagnostics" `Quick
-            test_parse_until_end_collects_diagnostics;
+            test_parse_consume_all_collects_diagnostics;
           test_case "rollback on or" `Quick test_diagnostics_rollback_on_or;
           test_case "rollback on look_ahead" `Quick
             test_diagnostics_rollback_on_look_ahead;
           test_case "rollback on many stop" `Quick
             test_diagnostics_rollback_on_many_stop;
+          test_case "rollback on zero-width stop" `Quick
+            test_diagnostics_rollback_on_zero_width_stop;
           test_case "error includes diagnostics" `Quick
             test_error_contains_diagnostics;
           test_case "preserves end_of_input semantics" `Quick
-            test_parse_until_end_preserves_end_of_input_semantics;
+            test_parse_consume_all_preserves_end_of_input_semantics;
           test_case "warn_at nonzero pos" `Quick test_warn_at_nonzero_pos;
           test_case "warn into another collector is a no-op" `Quick
             test_warn_into_other_collector_is_a_noop;

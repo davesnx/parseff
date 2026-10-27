@@ -201,7 +201,8 @@ and object_parser () =
 [Parseff.context ~delimited:true "array" (fun () -> ...)] and
 [Parseff.context ~delimited:true "object" (fun () -> ...)]. A failure inside a
 nested value then remembers which array or object it was in, so an error report
-can say "while parsing array". See {!page:combinators}.
+can say "while parsing array". See
+{{:https://davesnx.github.io/parseff/api/combinators/}the Combinators page}.
 
 The structure mirrors the array parser exactly. The only difference is that
 elements are key-value pairs instead of bare values.

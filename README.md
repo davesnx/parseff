@@ -44,7 +44,7 @@ let () =
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
 ```
-A failed parse returns one [`Parseff.Error.t`](./Parseff-Error.md#type-t). `Parseff.render_error` prints the message, the source line and a caret under the failure:
+A failed parse returns one `Parseff.Error.t`. `Parseff.render_error` prints the message, the source line and a caret under the failure:
 
 ```
 address:1:11: error: expected digit, found end of input
@@ -60,7 +60,7 @@ address:1:11: error: expected digit, found end of input
 - **Automatic backtracking** with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
 - **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
 - [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/overview/#parse) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
 - [**Zero-copy span APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](https://davesnx.github.io/parseff/api/zero-copy/) for hot paths
 
@@ -76,13 +76,13 @@ See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) 
 ## Documentation
 
 - [Quick start](https://davesnx.github.io/parseff/)
-- [API overview](https://davesnx.github.io/parseff/api/overview/)
+- [API reference](https://davesnx.github.io/parseff/api/primitives/)
 - [Your first parser](https://davesnx.github.io/parseff/guides/first-parser/)
-- [Error handling](https://davesnx.github.io/parseff/guides/errors/)
+- [Error handling](https://davesnx.github.io/parseff/api/errors/)
 - [Making parsers fast](https://davesnx.github.io/parseff/guides/optimization/)
 - [Comparison with Angstrom](https://davesnx.github.io/parseff/guides/comparison/)
-- [A JSON parser](https://davesnx.github.io/parseff/examples/json-parser/)
-- [Expressions with precedence](https://davesnx.github.io/parseff/examples/expression-parser/)
+- [A JSON parser](https://davesnx.github.io/parseff/guides/json-parser/)
+- [Expressions with precedence](https://davesnx.github.io/parseff/guides/expression-parser/)
 
 ## Contributing
 

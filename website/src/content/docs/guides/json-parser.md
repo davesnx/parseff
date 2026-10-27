@@ -174,7 +174,7 @@ and object_parser () =
   Object pairs
 ```
 
-**Tip:** Wrap `array_parser` and `object_parser` in `Parseff.context ~delimited:true "array" (fun () -> ...)` and `Parseff.context ~delimited:true "object" (fun () -> ...)`. A failure inside a nested value then remembers which array or object it was in, so an error report can say "while parsing array". See [`combinators`](./combinators.md).
+**Tip:** Wrap `array_parser` and `object_parser` in `Parseff.context ~delimited:true "array" (fun () -> ...)` and `Parseff.context ~delimited:true "object" (fun () -> ...)`. A failure inside a nested value then remembers which array or object it was in, so an error report can say "while parsing array". See [the Combinators page](https://davesnx.github.io/parseff/api/combinators/).
 
 The structure mirrors the array parser exactly. The only difference is that elements are key-value pairs instead of bare values.
 
