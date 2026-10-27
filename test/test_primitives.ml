@@ -566,39 +566,42 @@ let test_parse_non_enforcing () =
       Alcotest.fail "Expected success"
 
 let test_parse_until_end_requires_eof () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_until_end "abcXYZ" (fun () -> Parseff.consume "abc")
+    Parseff.parse ~consume:`All ~diagnostics "abcXYZ" (fun () ->
+        Parseff.consume "abc"
+    )
   in
   match outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error
-      { error = { kind = Expected { found = Text _; _ }; _ } as e; diagnostics }
-    ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 3 pos;
-      Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
+      Alcotest.(check int)
+        "no diagnostics" 0
+        (Parseff.Diagnostics.length diagnostics)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
+let diag_list d =
+  List.map
+    (fun ({ pos; value } : string Parseff.Diagnostics.entry) -> (pos, value))
+    (Parseff.Diagnostics.to_list d)
+
 let test_parse_until_end_collects_diagnostics () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
-    Parseff.warn "start";
+    Parseff.warn diagnostics "start";
     let _ = Parseff.consume "ok" in
-    Parseff.warn_at ~pos:0 "forced";
+    Parseff.warn_at diagnostics ~pos:0 "forced";
     42
   in
-  let outcome = Parseff.parse_until_end "ok" parser in
+  let outcome = Parseff.parse ~consume:`All ~diagnostics "ok" parser in
   match outcome with
-  | Ok (n, diagnostics) ->
+  | Ok n ->
       Alcotest.(check int) "value" 42 n;
-      let got =
-        List.map
-          (fun ({ pos; diagnostic } : string Parseff.diagnostic) ->
-            (pos, diagnostic)
-          )
-          diagnostics
-      in
+      let got = diag_list diagnostics in
       Alcotest.(check (list (pair int string)))
         "diagnostics"
         [ (0, "start"); (0, "forced") ]
@@ -607,53 +610,54 @@ let test_parse_until_end_collects_diagnostics () =
       Alcotest.fail "Expected success"
 
 let test_diagnostics_rollback_on_or () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
     Parseff.or_
       (fun () ->
-        Parseff.warn "left";
+        Parseff.warn diagnostics "left";
         Parseff.consume "x"
       )
       (fun () ->
-        Parseff.warn "right";
+        Parseff.warn diagnostics "right";
         Parseff.consume "b"
       )
       ()
   in
-  let outcome = Parseff.parse_until_end "b" parser in
+  let outcome = Parseff.parse ~consume:`All ~diagnostics "b" parser in
   match outcome with
-  | Ok (_, diagnostics) ->
-      let got =
-        List.map
-          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
-          diagnostics
-      in
+  | Ok _ ->
+      let got = List.map snd (diag_list diagnostics) in
       Alcotest.(check (list string)) "only right diagnostic" [ "right" ] got
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_diagnostics_rollback_on_look_ahead () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
     let _ =
       Parseff.look_ahead (fun () ->
-          Parseff.warn "peek";
+          Parseff.warn diagnostics "peek";
           Parseff.consume "a"
       )
     in
     Parseff.consume "a"
   in
-  let outcome = Parseff.parse_until_end "a" parser in
+  let outcome = Parseff.parse ~consume:`All ~diagnostics "a" parser in
   match outcome with
-  | Ok (_, diagnostics) ->
-      Alcotest.(check int) "no leaked diagnostics" 0 (List.length diagnostics)
+  | Ok _ ->
+      Alcotest.(check int)
+        "no leaked diagnostics" 0
+        (Parseff.Diagnostics.length diagnostics)
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_diagnostics_rollback_on_many_stop () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
     let ds =
       Parseff.many
         (fun () ->
-          Parseff.warn "iter";
+          Parseff.warn diagnostics "iter";
           Parseff.digit ()
         )
         ()
@@ -661,35 +665,31 @@ let test_diagnostics_rollback_on_many_stop () =
     let _ = Parseff.char 'a' in
     ds
   in
-  let outcome = Parseff.parse_until_end "12a" parser in
+  let outcome = Parseff.parse ~consume:`All ~diagnostics "12a" parser in
   match outcome with
-  | Ok (ds, diagnostics) ->
+  | Ok ds ->
       Alcotest.(check (list int)) "digits" [ 1; 2 ] ds;
       Alcotest.(check int)
-        "only successful iterations" 2 (List.length diagnostics)
+        "only successful iterations" 2
+        (Parseff.Diagnostics.length diagnostics)
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_error_contains_diagnostics () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_until_end "y" (fun () ->
-        Parseff.warn "before-failure";
+    Parseff.parse ~consume:`All ~diagnostics "y" (fun () ->
+        Parseff.warn diagnostics "before-failure";
         Parseff.consume "x"
     )
   in
   match outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error
-      { error = { kind = Expected { found = Text _; _ }; _ } as e; diagnostics }
-    ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 0 pos;
-      let got =
-        List.map
-          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
-          diagnostics
-      in
+      let got = List.map snd (diag_list diagnostics) in
       Alcotest.(check (list string))
         "diagnostics preserved" [ "before-failure" ] got
   | Error _ ->
@@ -697,20 +697,20 @@ let test_error_contains_diagnostics () =
 
 let test_parse_until_end_preserves_end_of_input_semantics () =
   let ok_outcome =
-    Parseff.parse_until_end "a" (fun () ->
+    Parseff.parse ~consume:`All "a" (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "ok"
     )
   in
   ( match ok_outcome with
-  | Ok (s, _) ->
+  | Ok s ->
       Alcotest.(check string) "explicit eof still works" "ok" s
   | Error _ ->
       Alcotest.fail "Expected success"
   );
   let fail_outcome =
-    Parseff.parse_until_end "ab" (fun () ->
+    Parseff.parse ~consume:`All "ab" (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "unreachable"
@@ -719,7 +719,7 @@ let test_parse_until_end_preserves_end_of_input_semantics () =
   match fail_outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = { kind = Expected { found = Text _; _ }; _ } as e; _ } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "fails at explicit eof position" 1 pos
   | Error _ ->
@@ -803,24 +803,209 @@ let test_one_of_success () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let raises_invalid_argument f =
+  match f () with _ -> false | exception Invalid_argument _ -> true
+
+let test_warn_into_other_collector_is_a_noop () =
+  let given = Parseff.Diagnostics.create () in
+  let other = Parseff.Diagnostics.create () in
+  ( match
+      Parseff.parse ~diagnostics:given "" (fun () ->
+          Parseff.warn other "x";
+          Parseff.warn_at other ~pos:3 "y";
+          Parseff.warn given "z";
+          1
+      )
+    with
+  | Ok n ->
+      Alcotest.(check int) "value" 1 n
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  Alcotest.(check int) "other is empty" 0 (Parseff.Diagnostics.length other);
+  Alcotest.(check int) "given has one" 1 (Parseff.Diagnostics.length given);
+  ( match
+      Parseff.parse "" (fun () ->
+          Parseff.warn other "x";
+          2
+      )
+    with
+  | Ok n ->
+      Alcotest.(check int) "plain parse value" 2 n
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  Alcotest.(check int)
+    "still empty after a plain parse" 0
+    (Parseff.Diagnostics.length other)
+
+let test_collector_is_reset_by_each_parse () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  let run () =
+    ignore
+      (Parseff.parse ~diagnostics "" (fun () -> Parseff.warn diagnostics "w"))
+  in
+  run ();
+  run ();
+  Alcotest.(check int) "one per parse" 1 (Parseff.Diagnostics.length diagnostics)
+
+let test_collector_in_use_by_a_nested_parse () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  Alcotest.(check bool)
+    "nested parse" true
+    (raises_invalid_argument (fun () ->
+         Parseff.parse ~diagnostics "" (fun () ->
+             Parseff.parse ~diagnostics "" (fun () -> ())
+         )
+     )
+    );
+  Alcotest.(check bool)
+    "clear while in use" true
+    (raises_invalid_argument (fun () ->
+         Parseff.parse ~diagnostics "" (fun () ->
+             Parseff.Diagnostics.clear diagnostics
+         )
+     )
+    );
+  Parseff.Diagnostics.clear diagnostics;
+  ignore (Parseff.parse ~diagnostics "" (fun () -> ()));
+  Alcotest.(check bool)
+    "usable again" true
+    (Parseff.Diagnostics.is_empty diagnostics)
+
+type duplicate_key = Duplicate_key of string
+
+let key_value diagnostics () =
+  let seen = ref [] in
+  let pair () =
+    let k = Parseff.take_while ~at_least:1 ~label:"key" (fun c -> c <> '=') in
+    ignore (Parseff.char '=');
+    let v = Parseff.take_while ~at_least:1 ~label:"value" (fun c -> c <> ';') in
+    if List.mem k !seen then Parseff.warn diagnostics (Duplicate_key k);
+    seen := k :: !seen;
+    (k, v)
+  in
+  Parseff.sep_by pair (fun () -> ignore (Parseff.char ';')) ()
+
+let duplicates diagnostics =
+  List.map
+    (fun ({ pos; value = Duplicate_key k } :
+           duplicate_key Parseff.Diagnostics.entry
+           ) -> (pos, k)
+    )
+    (Parseff.Diagnostics.to_list diagnostics)
+
+let test_key_value_duplicates_on_ok () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  match
+    Parseff.parse ~consume:`All ~diagnostics "a=1;b=2;a=3"
+      (key_value diagnostics)
+  with
+  | Ok pairs ->
+      Alcotest.(check (list (pair string string)))
+        "pairs"
+        [ ("a", "1"); ("b", "2"); ("a", "3") ]
+        pairs;
+      Alcotest.(check (list (pair int string)))
+        "warnings"
+        [ (11, "a") ]
+        (duplicates diagnostics)
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_key_value_duplicates_on_error () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  match
+    Parseff.parse ~consume:`All ~diagnostics "a=1;a=2;b" (key_value diagnostics)
+  with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error e ->
+      Alcotest.(check int) "error position" 9 e.span.start;
+      Alcotest.(check (list (pair int string)))
+        "warnings survive the failure"
+        [ (7, "a") ]
+        (duplicates diagnostics)
+
+type Parseff.Error.user += Bad_value of string
+
+let test_user_error_extensible () =
+  let parser () =
+    ignore (Parseff.consume "ab");
+    Parseff.error (Bad_value "ab")
+  in
+  match Parseff.parse "abc" parser with
+  | Error ({ kind = User (Bad_value v); _ } as e) ->
+      Alcotest.(check string) "payload" "ab" v;
+      Alcotest.(check string)
+        "message without a printer" "user error (no ~user printer given)"
+        (Parseff.Error.message e);
+      let user = function Bad_value v -> "bad value " ^ v | _ -> "unknown" in
+      Alcotest.(check string)
+        "message with a printer" "bad value ab"
+        (Parseff.Error.message ~user e);
+      Alcotest.(check bool)
+        "render with a printer" true
+        (String.starts_with ~prefix:"1:3: error: bad value ab"
+           (Parseff.render_error ~user e)
+        );
+      Alcotest.(check bool)
+        "render without a printer" true
+        (String.starts_with ~prefix:"1:3: error: user error (no ~user printer"
+           (Parseff.render_error e)
+        )
+  | _ ->
+      Alcotest.fail "Expected a Bad_value user error"
+
+let test_consume_all_against_prefix () =
+  let parser () = Parseff.consume "abc" in
+  ( match Parseff.parse "abcXYZ" parser with
+  | Ok s ->
+      Alcotest.(check string) "prefix by default" "abc" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  ( match Parseff.parse ~consume:`Prefix "abcXYZ" parser with
+  | Ok s ->
+      Alcotest.(check string) "explicit prefix" "abc" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  ( match Parseff.parse ~consume:`All "abcXYZ" parser with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error e ->
+      Alcotest.(check int) "stops at the rest" 3 e.span.start
+  );
+  ( match Parseff.parse ~consume:`All "abc" parser with
+  | Ok s ->
+      Alcotest.(check string) "all consumed" "abc" s
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  match
+    Parseff.parse_source ~consume:`All
+      (Parseff.Source.of_string "abcXYZ")
+      parser
+  with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error e ->
+      Alcotest.(check int) "streaming stops at the rest" 3 e.span.start
+
 let test_warn_at_nonzero_pos () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_until_end "ab" (fun () ->
+    Parseff.parse ~consume:`All ~diagnostics "ab" (fun () ->
         let _ = Parseff.consume "ab" in
-        Parseff.warn_at ~pos:5 "at-five";
+        Parseff.warn_at diagnostics ~pos:5 "at-five";
         42
     )
   in
   match outcome with
-  | Ok (n, diagnostics) ->
+  | Ok n ->
       Alcotest.(check int) "value" 42 n;
-      let got =
-        List.map
-          (fun ({ pos; diagnostic } : string Parseff.diagnostic) ->
-            (pos, diagnostic)
-          )
-          diagnostics
-      in
+      let got = diag_list diagnostics in
       Alcotest.(check (list (pair int string)))
         "diagnostics"
         [ (5, "at-five") ]
@@ -887,13 +1072,18 @@ let test_expect_success () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+type Parseff.Error.user +=
+  | Too_big of int
+  | Custom_error of string
+  | Boom_msg of string
+
 let test_expect_user_error_passthrough () =
   match
     Parseff.parse "5" (fun () ->
         Parseff.expect "a small number" (fun () ->
             let n = Parseff.digit () in
             if n > 3 then
-              Parseff.error (`Too_big n)
+              Parseff.error (Too_big n)
             else
               n
         )
@@ -901,7 +1091,7 @@ let test_expect_user_error_passthrough () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = User (`Too_big n); _ } as e) ->
+  | Error ({ kind = User (Too_big n); _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 1 pos;
       Alcotest.(check int) "user error value" 5 n
@@ -980,7 +1170,7 @@ let test_one_of_labeled_user_error_passthrough () =
              fun () ->
                let n = Parseff.digit () in
                if n > 3 then
-                 Parseff.error (`Too_big n)
+                 Parseff.error (Too_big n)
                else
                  n
            );
@@ -989,7 +1179,7 @@ let test_one_of_labeled_user_error_passthrough () =
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { kind = User (`Too_big n); _ } ->
+  | Error { kind = User (Too_big n); _ } ->
       Alcotest.(check int) "user error value" 5 n
   | Error { kind = Expected { found = Text _; _ }; _ } ->
       Alcotest.fail "User error was swallowed by one_of_labeled"
@@ -1002,12 +1192,12 @@ let test_error_custom_type () =
   match
     Parseff.parse "abc" (fun () ->
         let _ = Parseff.consume "abc" in
-        Parseff.error (`Custom_error "bad")
+        Parseff.error (Custom_error "bad")
     )
   with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error ({ kind = User (`Custom_error msg); _ } as e) ->
+  | Error ({ kind = User (Custom_error msg); _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 3 pos;
       Alcotest.(check string) "error message" "bad" msg
@@ -1019,7 +1209,7 @@ let test_error_custom_type () =
 let test_error_distinct_from_fail () =
   let fail_result = Parseff.parse "" (fun () -> Parseff.fail "boom") in
   let error_result =
-    Parseff.parse "" (fun () -> Parseff.error (`Boom "boom"))
+    Parseff.parse "" (fun () -> Parseff.error (Boom_msg "boom"))
   in
   ( match fail_result with
   | Error { kind = Failure msg; _ } ->
@@ -1028,7 +1218,7 @@ let test_error_distinct_from_fail () =
       Alcotest.fail "Expected Failure from fail"
   );
   match error_result with
-  | Error { kind = User (`Boom msg); _ } ->
+  | Error { kind = User (Boom_msg msg); _ } ->
       Alcotest.(check string) "error message" "boom" msg
   | _ ->
       Alcotest.fail "Expected `Boom from error"
@@ -1868,6 +2058,20 @@ let () =
           test_case "preserves end_of_input semantics" `Quick
             test_parse_until_end_preserves_end_of_input_semantics;
           test_case "warn_at nonzero pos" `Quick test_warn_at_nonzero_pos;
+          test_case "warn into another collector is a no-op" `Quick
+            test_warn_into_other_collector_is_a_noop;
+          test_case "collector reset by each parse" `Quick
+            test_collector_is_reset_by_each_parse;
+          test_case "collector in use by a nested parse" `Quick
+            test_collector_in_use_by_a_nested_parse;
+          test_case "key=value duplicates on Ok" `Quick
+            test_key_value_duplicates_on_ok;
+          test_case "key=value duplicates on Error" `Quick
+            test_key_value_duplicates_on_error;
+          test_case "user error through an extensible variant" `Quick
+            test_user_error_extensible;
+          test_case "consume All against Prefix" `Quick
+            test_consume_all_against_prefix;
         ]
       );
       ( "location",

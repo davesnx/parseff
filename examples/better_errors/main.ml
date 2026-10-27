@@ -22,12 +22,14 @@ let ip_address_simple () =
   Parseff.end_of_input ();
   (a, b, c, d)
 
+type Parseff.Error.user += Out_of_range of int
+
 let number_0_255_with_error () =
   let n = accumulate_digits () in
   if n >= 0 && n <= 255 then
     n
   else
-    Parseff.error (`Out_of_range n)
+    Parseff.error (Out_of_range n)
 
 let ip_address_with_custom_errors () =
   let a = number_0_255_with_error () in
@@ -257,7 +259,7 @@ let run_ip_custom input =
   match Parseff.parse input ip_address_with_custom_errors with
   | Ok (a, b, c, d) ->
       Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
-  | Error { kind = User (`Out_of_range n); span; _ } ->
+  | Error { kind = User (Out_of_range n); span; _ } ->
       Printf.printf
         "%-20s -> Custom error at pos %d: octet %d out of range (0-255)\n" input
         span.start n

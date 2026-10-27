@@ -422,7 +422,7 @@ let test_context_across_domains () =
         )
       in
       match Parseff.parse "ababx" parser with
-      | Stdlib.Error (e : unit Parseff.Error.t)
+      | Stdlib.Error (e : Parseff.Error.t)
         when match e.frames with
              | [ { Parseff.Error.name = n; start = 0; delimited = false } ] ->
                  n = name

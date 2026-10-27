@@ -223,7 +223,6 @@ extra indirection while remaining allocation-free.
 
 {1 Streaming support}
 
-All binary parsers work with streaming input ({!val:Parseff.parse_source} and
-{!val:Parseff.parse_source_until_end}). Multi-byte reads that span chunk
+All binary parsers work with streaming input ({!val:Parseff.parse_source}). Multi-byte reads that span chunk
 boundaries are handled correctly — the streaming runtime ensures enough bytes are
 buffered before each read.

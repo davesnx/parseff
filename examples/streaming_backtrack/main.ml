@@ -17,9 +17,9 @@ let parser () =
 
 let () =
   let source = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in
-  match Parseff.parse_source_until_end source parser with
-  | Ok (branch, _diagnostics) ->
+  match Parseff.parse_source ~consume:`All source parser with
+  | Ok branch ->
       Printf.printf "matched %s branch\n" branch
-  | Error { error; diagnostics = _ } ->
+  | Error error ->
       Printf.printf "error at %d: %s\n" error.Parseff.Error.span.start
         (Parseff.Error.message error)

@@ -267,7 +267,7 @@ let test_le_int32_match () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let expect_error_at pos msg (result : (_, unit) Parseff.result) =
+let expect_error_at pos msg (result : (_, Parseff.Error.t) Stdlib.result) =
   match result with
   | Error ({ kind = Expected { found = Value _; _ }; _ } as e) ->
       let p = e.Parseff.Error.span.start in

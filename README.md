@@ -16,11 +16,13 @@ $ opam install parseff -y
 ## Example
 
 ```ocaml
+type Parseff.Error.user += Out_of_range of int
+
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then n
-  else Parseff.error (`Out_of_range n)
+  else Parseff.error (Out_of_range n)
 
 let ip_address () =
   let a = number () in
@@ -37,7 +39,7 @@ let () =
   match Parseff.parse "192.168.1.1" ip_address with
   | Ok ((a, b, c, d)) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-  | Error { kind = User (`Out_of_range n); span; _ } ->
+  | Error { kind = User (Out_of_range n); span; _ } ->
       Printf.printf "Error at %d: %d out of range (0-255)\n" span.start n
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)

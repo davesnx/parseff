@@ -120,15 +120,17 @@ what was expected and says [found end of input].
 
 {1 Using typed errors}
 
-For programmatic error handling, polymorphic variants give you structured errors
-you can pattern match on:
+For programmatic error handling, extend [Parseff.Error.user] with your own
+cases and pattern match on them:
 
 {@ocaml skip[
+type Parseff.Error.user += Out_of_range of int
+
 let number_0_255_typed () =
   let digits = Parseff.many ~at_least:1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then n
-  else Parseff.error (`Out_of_range n)
+  else Parseff.error (Out_of_range n)
 ]}
 
 Now callers can distinguish parsing failures from validation failures:
@@ -137,7 +139,7 @@ Now callers can distinguish parsing failures from validation failures:
 match Parseff.parse "192.168.1.300" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "%d.%d.%d.%d\n" a b c d
-| Error { kind = User (`Out_of_range n); _ } ->
+| Error { kind = User (Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
 | Error e ->
     Printf.printf "Parse error: %s\n" (Parseff.Error.message e)

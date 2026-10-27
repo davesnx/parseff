@@ -2,7 +2,10 @@
 
 This is the 0.5.0 release.
 
-- **Breaking: errors are structured values.** `parse`, `parse_until_end`, `parse_source` and `parse_source_until_end` return `Error e` where `e` is a `Parseff.Error.t`: `{ kind; span; position; frames; notes; excerpt }`, where `position` is `Some { location; code_point_col }` or `None` when the line is not known (streaming, older than the buffered input). `kind` is `Expected { items; found; more }`, `Failure`, `User`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. The result type is `('a, 'e) result = ('a, 'e Error.t) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type parameter `'e` is only the type of the values given to `error`. `error_with_diagnostics` is `{ error : 'e Error.t; diagnostics }`, without `pos`. See "Migrating from 0.4" below.
+- **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.Error.t`: `{ kind; span; position; frames; notes; excerpt }`, where `position` is `Some { location; code_point_col }` or `None` when the line is not known (streaming, older than the buffered input). `kind` is `Expected { items; found; more }`, `Failure`, `User`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. The result type is `('a, Error.t) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. `Error.t` has no type parameter. See "Migrating from 0.4" below.
+- **Breaking: `error` takes an extensible variant.** `error` was `'e -> 'a` and the result carried a free `'e`, so a parser could raise an `int` and the caller could read a `string`: a segfault. `Error.user` is now an extensible variant, `error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a`, `kind` has `User of Error.user`, and `Error.t`, `Error.kind`, `render_error ?user` and `Error.message ?user` lose the `'e` parameter. `?user` is a printer `Error.user -> string`. Declare your cases with `type Parseff.Error.user += Too_large of int` and match `User (Too_large n)`. A `User` match needs a final `_` case.
+- **Breaking: diagnostics are typed by a collector.** `warn : 'd -> unit` had the same hole. `Diagnostics.create ()` makes a `'d Diagnostics.t`; `warn d x` and `warn_at d ~pos x` record into it; pass it to the runner with `~diagnostics:d` and read `Diagnostics.to_list d` after the parse, on `Ok` and on `Error`. The runner empties the collector first. `warn` into a collector the runner did not get does nothing. Diagnostics are still rolled back with a branch that backtracks. A collector in use by one parse raises `Invalid_argument` if another parse gets it, or if `Diagnostics.clear` is called on it.
+- **Breaking: two runners.** `parse` and `parse_source` take `?consume:[ `All | `Prefix ]` (default `` `Prefix ``) and `?diagnostics`. `parse_until_end s p` is `parse ~consume:`All s p`, and `parse_source_until_end` is `parse_source ~consume:`All`. Removed: `parse_until_end`, `parse_source_until_end`, the `result` alias (it shadowed `Stdlib.result` under `open Parseff`), `diagnostic`, `error_with_diagnostics` and `result_with_diagnostics`.
 - **Add `render_error` and `Error.message`.** `render_error ?name ?source ?columns ?user e` prints the message, the source line with carets under the failure, a `╭─╯` and `╰──^` bar that joins the opening token to the caret for the construct that started on an earlier line, `* while parsing` lines for the open `context`s, and notes. Control bytes, invalid UTF-8 and C1 controls are escaped in the excerpt as in the message, tabs keep the carets aligned, long lines are cut to 240 bytes around the failure, and `~columns:`Code_points` prints the column in code points.
 - **Failures at the end of the input keep what was expected.** `[1, 2` reports `expected ',' or ']', found end of input` instead of the old end-of-input error without items, including through `expect` and `one_of_labeled`.
 - **A successful `look_ahead` forgets the failures of its probe.** `look_ahead (many (char 'a')); char 'b'` on `aac` reports `expected 'b'` at offset 0 instead of the probe's `expected 'a'` at offset 2. A failing `look_ahead` is a failure like any other and merges with the earlier ones.
@@ -61,6 +64,21 @@ This is the 0.5.0 release.
 - **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with an `Expected` error whose `found` is `Short` or `End`.
 - **Document the cost of `match_regex` failures.** `Re` searches forward when the regex does not match at the current position, so a failed match scans the rest of the input and a loop of failing matches takes quadratic time.
 - **`consume` reports a mismatch instead of end of input.** When fewer bytes remain than the literal needs but the available bytes already differ, `consume` fails at the first differing byte, so `or_` composes the messages of its branches. Only input that ends inside a prefix of the literal has `found` set to `End`.
+
+### Migrating runners, `error` and `warn`
+
+| Before | After |
+|---|---|
+| `parse_until_end s p` | `parse ~consume:`All s p` |
+| `parse_source_until_end src p` | `parse_source ~consume:`All src p` |
+| `Ok (v, ds)` and `Error { error; diagnostics }` | `Ok v` and `Error e`; read the diagnostics from the collector |
+| `warn x` | `let d = Diagnostics.create ()`, `parse ~diagnostics:d`, `warn d x` |
+| `warn_at ~pos x` | `warn_at d ~pos x` |
+| `'d Parseff.diagnostic = { pos; diagnostic }` | `'d Parseff.Diagnostics.entry = { pos; value }` |
+| `error (`Too_large n)` | `type Parseff.Error.user += Too_large of int`, then `error (Too_large n)` |
+| `User (`Too_large n)` | `User (Too_large n)`, with a final `_` case |
+| `render_error ~user:(fun (`Too_large n) -> ...)` | `render_error ~user:(function Too_large n -> ... | _ -> ...)` |
+| `('a, 'e) Parseff.result` | `('a, Parseff.Error.t) result` |
 
 ### Migrating from 0.4
 

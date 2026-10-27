@@ -79,26 +79,28 @@ address:1:4: error: octet out of range
 
 ## `error`
 
-Abort parsing with a typed custom error value.
+Abort parsing with a custom error value. `Parseff.Error.user` is an extensible variant: declare your own cases and match them in `kind`.
 
 ```ocaml
-val error : ?from:int -> ?notes:Error.note list -> 'e -> 'a
+val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
 ```
 ```ocaml
+type Parseff.Error.user += Too_large of int | Negative of int
+
 let number () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error (`Too_large n)
-  else if n < 0 then Parseff.error (`Negative n)
+  if n > 255 then Parseff.error (Too_large n)
+  else if n < 0 then Parseff.error (Negative n)
   else n
 
 let () =
   match Parseff.parse "300" number with
-  | Error { kind = User (`Too_large n); span; _ } ->
+  | Error { kind = User (Too_large n); span; _ } ->
       Printf.printf "Number %d too large at position %d\n" n span.start
-  | Error { kind = User (`Negative n); span; _ } ->
+  | Error { kind = User (Negative n); span; _ } ->
       Printf.printf "Negative number %d at position %d\n" n span.start
   | Error _ -> Printf.printf "Other error\n"
   | Ok n -> Printf.printf "Got %d\n" n
@@ -107,16 +109,18 @@ Use this when callers need to pattern match on specific failure cases. `~from` a
 
 A typed error behaves like any other failure for backtracking: `Parseff.or_` and the repetition combinators absorb it and try something else. If the parse then fails and the typed error is at the furthest failure position, it is the error that `parse` returns. At the same position a typed error wins over an `Expected` error, and the first of two typed errors wins.
 
-Polymorphic variants work great with `error` for quick error types:
+A case without a payload works too:
 
 ```ocaml
+type Parseff.Error.user += Too_large_quick | Negative_quick
+
 let number_quick () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error `Too_large
-  else if n < 0 then Parseff.error `Negative
+  if n > 255 then Parseff.error Too_large_quick
+  else if n < 0 then Parseff.error Negative_quick
   else n
 ```
 
@@ -178,8 +182,8 @@ A failure at the end of the input keeps what was expected. On `"[1, 2"] the erro
 A failed parse returns `Error e`, where `e` is a `Parseff.Error.t`:
 
 ```ocaml
-type 'e Error.t = {
-  kind : 'e Error.kind;
+type Error.t = {
+  kind : Error.kind;
   span : Error.range;  (** the bytes the error is about, empty at the end of the input *)
   position : Error.position option;
       (** line and column of [span.start], [None] when the line is not known *)
@@ -197,12 +201,12 @@ type 'e Error.t = {
 - `User e`: a value given to `Parseff.error`.
 - `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
 - `Backtrack_window_exceeded { limit; oldest }`: a streaming parser needed more rewind history than `~backtrack_window` allows.
-The match on `kind` is exhaustive: the compiler tells you when a case is missing. The type parameter of the error is only the type of your own `error` values, so a parse that never calls `error` leaves it free.
+The match on `kind` is exhaustive: the compiler tells you when a case is missing. `User` holds an `Parseff.Error.user`, which is extensible, so match it with a final `_` case.
 
 ```ocaml
 match Parseff.parse input parser with
 | Ok value -> value
-| Error { kind = User (`Too_large n); _ } -> handle_too_large n
+| Error { kind = User (Too_large n); _ } -> handle_too_large n
 | Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
 ```
 
@@ -227,7 +231,7 @@ input.json:4:5: error: expected ',' or '}', found '"'
 - `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five; when only one more is hidden it is printed too. A construct made with `~delimited:true` that started on an earlier line is shown as a bar that joins its opening token to the caret: `╭─╯` under the opener, `│` on the lines in between and `╰──^` at the failure. A single hidden line between the opener and the failure is shown, longer gaps become a `...` row in the gutter.
 - Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
 - A `Parseff.rec_` nested deeper than `~max_depth` and a streaming parse that exceeds `~backtrack_window` keep the `* while parsing` lines that were open, and end with `* help: raise ~max_depth` or `* help: call commit or cut earlier, or raise ~backtrack_window`.
-- Without `~user`, a user error prints `user error (no ~user printer given)`.
+- `~user` is a printer `Error.user -> string` for `User` errors. Without it, a user error prints `user error (no ~user printer given)`.
 - No row has trailing spaces.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.Error.message` returns only the one-line message.
 
@@ -250,4 +254,4 @@ input.json:1:6: error: expected ',' or ']', found '"'   (code points)
 (* after *)
 | Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
 ```
-User errors move from the variant row into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (`Too_large n); _ }`. ``Failure msg` becomes `Failure msg`. The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. ``Unexpected_end_of_input` is an `Expected` error whose `found` is `End`, so it now says what was expected. The position is `e.span.start`.
+User errors move from the variant row into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (Too_large n); _ }`, with `type Parseff.Error.user += Too_large of int`. ``Failure msg` becomes `Failure msg`. The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. ``Unexpected_end_of_input` is an `Expected` error whose `found` is `End`, so it now says what was expected. The position is `e.span.start`.

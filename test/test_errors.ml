@@ -82,9 +82,6 @@ let test_unhandled_effect_message_content () =
         "mentions Parseff.parse" true
         (Re.(execp (compile (str "Parseff.parse"))) msg);
       Alcotest.(check bool)
-        "mentions parse_until_end" true
-        (Re.(execp (compile (str "Parseff.parse_until_end"))) msg);
-      Alcotest.(check bool)
         "mentions parse_source" true
         (Re.(execp (compile (str "Parseff.parse_source"))) msg)
 
@@ -219,16 +216,21 @@ let test_or_right_commit_does_not_seal_many () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let show_error (e : [> `E | `Other ] Parseff.Error.t) =
+type Parseff.Error.user +=
+  | Cause_e
+  | Boom
+  | Unit_user
+  | Unterminated
+  | Too_large of int
+
+let show_error (e : Parseff.Error.t) =
   match e.kind with
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.Error.message e)
   | Failure s ->
       Printf.sprintf "Failure %S" s
-  | User `E ->
+  | User Cause_e ->
       "E"
-  | User `Other ->
-      "Other"
   | _ ->
       "other"
 
@@ -416,7 +418,7 @@ let test_user_error_absorbed_by_or () =
     "x"
     (fun () ->
       Parseff.or_
-        (fun () -> Parseff.error `E)
+        (fun () -> Parseff.error Cause_e)
         (fun () -> Parseff.consume "x")
         ()
     )
@@ -427,7 +429,7 @@ let test_user_error_reported_when_furthest () =
     Parseff.or_
       (fun () ->
         ignore (Parseff.consume "ab");
-        Parseff.error `E
+        Parseff.error Cause_e
       )
       (fun () -> Parseff.consume "q")
       ()
@@ -436,7 +438,10 @@ let test_user_error_reported_when_furthest () =
 
 let test_user_error_beats_expected_at_tie () =
   let parser () =
-    Parseff.or_ (fun () -> Parseff.error `E) (fun () -> Parseff.consume "q") ()
+    Parseff.or_
+      (fun () -> Parseff.error Cause_e)
+      (fun () -> Parseff.consume "q")
+      ()
   in
   both_runners (fun s -> s) "z" parser "Error@0 E"
 
@@ -547,7 +552,7 @@ let frames_of input parser =
   match Parseff.parse input parser with
   | Stdlib.Ok _ ->
       "ok"
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       String.concat "; "
         (List.map
            (fun (f : E.frame) ->
@@ -848,7 +853,7 @@ let render ?(name = "input.json") ?source ?columns input parser =
   with
   | Stdlib.Ok _ ->
       "ok"
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Parseff.render_error ~name ?source ?columns e
 
 let check_render label expected actual =
@@ -1166,7 +1171,7 @@ let test_render_cut_statement () =
 
 let test_render_without_name () =
   match Parseff.parse "x" (fun () -> ignore (Parseff.digit ())) with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Alcotest.(check string)
         "no name"
         (lines [ "1:1: error: expected digit, found 'x'"; "1 | x"; "  | ^" ])
@@ -1352,7 +1357,7 @@ let test_render_window_cut () =
 let test_render_source () =
   let input = "{\n  \"a\": 1\n  \"b\": 2\n}" in
   match Parseff.parse input ctx_json_parser with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Alcotest.(check string)
         "source gives the same text"
         (Parseff.render_error ~name:"input.json" e)
@@ -1362,7 +1367,7 @@ let test_render_source () =
 
 let test_render_other_kinds () =
   ( match Parseff.parse "abc" (fun () -> Parseff.fail "boom") with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Alcotest.(check string)
         "fail"
         (lines [ "1:1: error: boom"; "1 | abc"; "  | ^" ])
@@ -1381,7 +1386,7 @@ let test_render_other_kinds () =
           f ()
       )
     with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Alcotest.(check string)
         "depth"
         (lines
@@ -1396,12 +1401,12 @@ let test_render_other_kinds () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
-  match Parseff.parse "z" (fun () -> Parseff.error `Boom) with
+  match Parseff.parse "z" (fun () -> Parseff.error Boom) with
   | Stdlib.Error e ->
       Alcotest.(check string)
         "user"
         (lines [ "1:1: error: boom!"; "1 | z"; "  | ^" ])
-        (Parseff.render_error ~user:(fun `Boom -> "boom!") e);
+        (Parseff.render_error ~user:(function Boom -> "boom!" | _ -> "?") e);
       Alcotest.(check string)
         "user without printer"
         (lines
@@ -1434,7 +1439,7 @@ let test_render_streaming_opener_dropped () =
   match
     Parseff.parse_source ~backtrack_window:64 chunked streaming_list_parser
   with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       let out = Parseff.render_error ~name:"stream" e in
       let has sub =
         let n = String.length sub in
@@ -1473,7 +1478,7 @@ let render_error ?(name = "input.json") input parser =
   match Parseff.parse input parser with
   | Stdlib.Ok _ ->
       "ok"
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Parseff.render_error ~name e
 
 let digits_parser () =
@@ -1600,7 +1605,7 @@ let test_error_from_and_notes () =
     ignore (Parseff.consume "ab");
     Parseff.error ~from:0
       ~notes:[ { Parseff.Error.at = None; text = "see the manual" } ]
-      `Boom
+      Boom
   in
   ( match Parseff.parse "abcd" parser with
   | Stdlib.Error e ->
@@ -1614,12 +1619,12 @@ let test_error_from_and_notes () =
              "  * note: see the manual";
            ]
         )
-        (Parseff.render_error ~user:(fun `Boom -> "boom!") e)
+        (Parseff.render_error ~user:(function Boom -> "boom!" | _ -> "?") e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
   match Parseff.parse "abcd" parser with
-  | Error ({ kind = User `Boom; _ } as e) when e.Parseff.Error.span.start = 0 ->
+  | Error ({ kind = User Boom; _ } as e) when e.Parseff.Error.span.start = 0 ->
       ()
   | _ ->
       Alcotest.fail "expected a User error positioned at the span start"
@@ -1700,7 +1705,7 @@ let test_note_on_dropped_line () =
     Parseff.fail ~notes:[ paren_note 0 ] "stray"
   in
   match Parseff.parse_source ~backtrack_window:64 chunked parser with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       let out = Parseff.render_error e in
       Alcotest.(check bool)
         "falls back to a note line" true
@@ -1708,7 +1713,7 @@ let test_note_on_dropped_line () =
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
-let describe_kind (e : unit Parseff.Error.t) =
+let describe_kind (e : Parseff.Error.t) =
   match e.kind with
   | Parseff.Error.Expected { items = _, rest; found; _ } ->
       Printf.sprintf "expected %d more, found %s" (List.length rest)
@@ -1722,7 +1727,7 @@ let describe_kind (e : unit Parseff.Error.t) =
         )
   | Parseff.Error.Failure m ->
       "message " ^ m
-  | Parseff.Error.User () ->
+  | Parseff.Error.User _ ->
       "user"
   | Parseff.Error.Depth_limit_exceeded { limit } ->
       Printf.sprintf "depth %d" limit
@@ -1755,7 +1760,7 @@ let test_exhaustive_kind_match () =
     (kind_of "x" (fun () -> Parseff.fail "boom"));
   Alcotest.(check string)
     "user" "user"
-    (kind_of "x" (fun () -> Parseff.error ()));
+    (kind_of "x" (fun () -> Parseff.error Unit_user));
   Alcotest.(check string)
     "depth" "depth 2"
     (kind_of ~max_depth:2 "[[[" (fun () ->
@@ -1808,8 +1813,6 @@ let test_end_of_input_keeps_expected_set () =
         [ Uchar.to_int a; Uchar.to_int b ]
   | _ ->
       Alcotest.fail "expected the set of the array separator and closer"
-
-type too_large = Too_large of int
 
 let number_checked () =
   let n =
@@ -1880,7 +1883,9 @@ let test_migration_pattern () =
         Printf.sprintf "ok %d" n
     | Stdlib.Error e ->
         Parseff.Error.message
-          ~user:(function Too_large n -> Printf.sprintf "%d is too large" n)
+          ~user:(function
+            | Too_large n -> Printf.sprintf "%d is too large" n | _ -> "?"
+            )
           e
   in
   Alcotest.(check string) "ok" "ok 12" (migrate "12");
@@ -1889,17 +1894,23 @@ let test_migration_pattern () =
     "expected" "expected digit, found end of input" (migrate "")
 
 let test_diagnostics_carry_the_error () =
+  let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
-    Parseff.warn "careful";
+    Parseff.warn diagnostics "careful";
     ignore (Parseff.consume "ab");
     Parseff.consume "c"
   in
-  match Parseff.parse_until_end "abx" parser with
-  | Stdlib.Error
-      { error; diagnostics = [ { diagnostic = "careful"; pos = 0 } ] } ->
+  match Parseff.parse ~consume:`All ~diagnostics "abx" parser with
+  | Stdlib.Error error -> (
       Alcotest.(check string)
         "message" "expected \"c\", found 'x'"
-        (Parseff.Error.message error)
+        (Parseff.Error.message error);
+      match Parseff.Diagnostics.to_list diagnostics with
+      | [ { value = "careful"; pos = 0 } ] ->
+          ()
+      | _ ->
+          Alcotest.fail "expected the diagnostic"
+    )
   | _ ->
       Alcotest.fail "expected an error with its diagnostics"
 
@@ -1989,9 +2000,9 @@ let from_before_the_buffer_parser kind () =
   | `Fail ->
       Parseff.fail ~from "unterminated"
   | `Error ->
-      Parseff.error ~from `Unterminated
+      Parseff.error ~from Unterminated
 
-let check_location_agrees label input (e : _ E.t) =
+let check_location_agrees label input (e : E.t) =
   let at = Parseff.location_of_position input e.E.span.start in
   match e.position with
   | Some { location; _ } ->
@@ -2017,7 +2028,7 @@ let test_from_older_than_the_buffer () =
       (from_before_the_buffer_parser kind)
   in
   let check label = function
-    | Error (e : _ E.t) -> (
+    | Error (e : E.t) -> (
         Alcotest.(check int)
           (label ^ " keeps the span start")
           7 e.Parseff.Error.span.start;
@@ -2040,7 +2051,7 @@ let test_from_older_than_the_buffer () =
           Parseff.parse lines_text (from_before_the_buffer_parser `Fail)
         in
         match exact with
-        | Error (x : _ E.t) when label = "fail" ->
+        | Error (x : E.t) when label = "fail" ->
             Alcotest.(check string)
               (label ^ " with the source gives the exact line")
               (Parseff.render_error ~source:lines_text x)
@@ -2429,14 +2440,14 @@ let render_stream ?name ?source ?(window = 16) input parser =
   with
   | Stdlib.Ok _ ->
       "ok"
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Parseff.render_error ?name ?source e
 
 let message_of input parser =
   match Parseff.parse input parser with
   | Stdlib.Ok _ ->
       "ok"
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       E.message e
 
 let test_unknown_line_has_byte_header () =
@@ -2553,7 +2564,7 @@ let test_take_reports_what_is_left () =
   Alcotest.(check string)
     "streaming" "expected 5 bytes, found only 3 (end of input)"
     ( match Parseff.parse_source (source_of_chunks "abc") (take 5) with
-    | Stdlib.Error (e : unit E.t) ->
+    | Stdlib.Error (e : E.t) ->
         E.message e
     | Stdlib.Ok _ ->
         "ok"
@@ -2614,7 +2625,7 @@ let test_quote_escapes () =
   )
 
 let test_user_error_without_printer () =
-  match Parseff.parse "x" (fun () -> Parseff.error `Boom) with
+  match Parseff.parse "x" (fun () -> Parseff.error Boom) with
   | Stdlib.Error e ->
       Alcotest.(check string)
         "message" "user error (no ~user printer given)" (E.message e);
@@ -2873,7 +2884,7 @@ let test_limits_keep_frames_and_give_help () =
     )
   in
   ( match Parseff.parse ~max_depth:3 "[[[[[[" nest with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       check_render "depth"
         (lines
            [
@@ -3035,7 +3046,7 @@ let test_position_is_known_or_absent () =
           ignore (Parseff.char 'q')
       )
     with
-  | Stdlib.Error (e : unit E.t) -> (
+  | Stdlib.Error (e : E.t) -> (
       match e.position with
       | Some { location; code_point_col } ->
           Alcotest.(check (pair int int))
@@ -3054,7 +3065,7 @@ let test_position_is_known_or_absent () =
         (chunk_source ~chunk:64 lines_text)
         (from_before_the_buffer_parser `Fail)
     with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Alcotest.(check bool)
         "past the buffer has no position" true (e.position = None)
   | Stdlib.Ok _ ->
@@ -3067,7 +3078,7 @@ let test_position_is_known_or_absent () =
         ignore (Parseff.char 'q')
     )
   with
-  | Stdlib.Error (e : unit E.t) -> (
+  | Stdlib.Error (e : E.t) -> (
       match e.position with
       | Some { location; _ } ->
           Alcotest.(check (pair int int))
@@ -3086,7 +3097,7 @@ let test_overflow_count_is_an_int () =
     )
   in
   match Parseff.parse "zzz" (Parseff.one_of alternatives) with
-  | Stdlib.Error (e : unit E.t) -> (
+  | Stdlib.Error (e : E.t) -> (
       match e.kind with
       | Expected { items = _, rest; more; _ } ->
           Alcotest.(check (pair int int))
@@ -3236,7 +3247,7 @@ let test_window_error_points_at_the_parser () =
   match
     Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
   with
-  | Stdlib.Error (e : unit E.t) ->
+  | Stdlib.Error (e : E.t) ->
       Alcotest.(check int) "position is the parser's" 14 e.E.span.start;
       Alcotest.(check bool) "the line is known" true (e.position <> None);
       Alcotest.(check bool)

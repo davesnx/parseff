@@ -238,38 +238,42 @@ let byte () =
 {!val:Parseff.error} aborts parsing with a user-defined error value. Custom
 errors are caught by {!val:Parseff.parse} and returned in the result.
 
-{@ocaml skip[val error : 'e -> 'a]}
+{@ocaml skip[val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a]}
 
 {@ocaml[
+type Parseff.Error.user += Negative of int | Out_of_range of int
+
 let validated_number () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n < 0 then Parseff.error (`Negative n)
-  else if n > 255 then Parseff.error (`Out_of_range n)
+  if n < 0 then Parseff.error (Negative n)
+  else if n > 255 then Parseff.error (Out_of_range n)
   else n
 
 let () =
   match Parseff.parse "300" validated_number with
   | Ok n -> Printf.printf "Got %d\n" n
-  | Error { kind = User (`Out_of_range n); _ } ->
+  | Error { kind = User (Out_of_range n); _ } ->
       Printf.printf "%d is too large (max 255)\n" n
-  | Error { kind = User (`Negative n); _ } ->
+  | Error { kind = User (Negative n); _ } ->
       Printf.printf "%d is negative\n" n
   | Error _ -> Printf.printf "Parse error\n"
 ]}
 
-{b Tip:} Polymorphic variants work great with [error] for quick error types:
+{b Tip:} Cases without a payload are quick error types:
 
 {@ocaml[
+type Parseff.Error.user += Too_large | Negative_number
+
 let number_checked () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error `Too_large
-  else if n < 0 then Parseff.error `Negative
+  if n > 255 then Parseff.error Too_large
+  else if n < 0 then Parseff.error Negative_number
   else n
 ]}
 

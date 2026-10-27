@@ -19,9 +19,11 @@ The streaming API lets you parse input that isn't fully available upfront: files
 val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
+  ?consume:[ `All | `Prefix ] ->
+  ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, 'e) result
+  ('a, Error.t) Stdlib.result
 ```
 ```ocaml
   let ic = open_in "data.json" in
@@ -35,24 +37,16 @@ Error positions are absolute offsets from the start of the stream, also after Pa
 The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 
-## `parse_source_until_end`
+## Requiring the whole input
 
-`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end`. It enforces full input consumption and returns diagnostics in both cases. See [`diagnostics`](./diagnostics.md).
+`~consume:`All` makes `Parseff.parse_source` fail when input remains after the parser returns, as `Parseff.end_of_input` does. `~diagnostics` collects the diagnostics of the parse. See [`diagnostics`](./diagnostics.md).
 
-```ocaml
-val parse_source_until_end :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  Source.t ->
-  (unit -> 'a) ->
-  ('a, 'e, 'd) result_with_diagnostics
-```
 ```ocaml
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
-  let outcome = Parseff.parse_source_until_end source json in
+  let result = Parseff.parse_source ~consume:`All source json in
   close_in ic;
-  outcome
+  result
 ```
 
 ## The Source module
@@ -229,7 +223,7 @@ Two things keep old bytes alive:
 
 ### General advice
 
-Most parsers become streaming parsers by changing only the runner: keep the same parser functions and switch from `Parseff.parse` to `Parseff.parse_source` or `Parseff.parse_source_until_end`. Start there, then tune the streaming behavior only if the grammar needs it.
+Most parsers become streaming parsers by changing only the runner: keep the same parser functions and switch from `Parseff.parse` to `Parseff.parse_source`. Start there, then tune the streaming behavior only if the grammar needs it.
 
 In practice:
 

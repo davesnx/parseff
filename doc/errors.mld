@@ -76,25 +76,28 @@ v}
 
 {1 [error]}
 
-Abort parsing with a typed custom error value.
+Abort parsing with a custom error value. {!type:Parseff.Error.user} is an
+extensible variant: declare your own cases and match them in [kind].
 
-{@ocaml skip[val error : ?from:int -> ?notes:Error.note list -> 'e -> 'a]}
+{@ocaml skip[val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a]}
 
 {@ocaml[
+type Parseff.Error.user += Too_large of int | Negative of int
+
 let number () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error (`Too_large n)
-  else if n < 0 then Parseff.error (`Negative n)
+  if n > 255 then Parseff.error (Too_large n)
+  else if n < 0 then Parseff.error (Negative n)
   else n
 
 let () =
   match Parseff.parse "300" number with
-  | Error { kind = User (`Too_large n); span; _ } ->
+  | Error { kind = User (Too_large n); span; _ } ->
       Printf.printf "Number %d too large at position %d\n" n span.start
-  | Error { kind = User (`Negative n); span; _ } ->
+  | Error { kind = User (Negative n); span; _ } ->
       Printf.printf "Negative number %d at position %d\n" n span.start
   | Error _ -> Printf.printf "Other error\n"
   | Ok n -> Printf.printf "Got %d\n" n
@@ -109,16 +112,18 @@ then fails and the typed error is at the furthest failure position, it is the
 error that [parse] returns. At the same position a typed error wins over an
 [Expected] error, and the first of two typed errors wins.
 
-Polymorphic variants work great with [error] for quick error types:
+A case without a payload works too:
 
 {@ocaml[
+type Parseff.Error.user += Too_large_quick | Negative_quick
+
 let number_quick () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error `Too_large
-  else if n < 0 then Parseff.error `Negative
+  if n > 255 then Parseff.error Too_large_quick
+  else if n < 0 then Parseff.error Negative_quick
   else n
 ]}
 
@@ -198,8 +203,8 @@ so a committed branch reports only what it expected itself.
 A failed parse returns [Error e], where [e] is a {!type:Parseff.Error.t}:
 
 {@ocaml skip[
-type 'e Error.t = {
-  kind : 'e Error.kind;
+type Error.t = {
+  kind : Error.kind;
   span : Error.range;  (** the bytes the error is about, empty at the end of the input *)
   position : Error.position option;
       (** line and column of [span.start], [None] when the line is not known *)
@@ -238,13 +243,13 @@ buildable, for [~notes] of {!val:Parseff.fail}.
   history than [~backtrack_window] allows.
 
 The match on [kind] is exhaustive: the compiler tells you when a case is
-missing. The type parameter of the error is only the type of your own
-[error] values, so a parse that never calls [error] leaves it free.
+missing. [User] holds an {!type:Parseff.Error.user}, which is extensible, so
+match it with a final [_] case.
 
 {@ocaml skip[
 match Parseff.parse input parser with
 | Ok value -> value
-| Error { kind = User (`Too_large n); _ } -> handle_too_large n
+| Error { kind = User (Too_large n); _ } -> handle_too_large n
 | Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
 ]}
 
@@ -294,7 +299,7 @@ v}
   that exceeds [~backtrack_window] keep the [* while parsing] lines that were
   open, and end with [* help: raise ~max_depth] or
   [* help: call commit or cut earlier, or raise ~backtrack_window].
-- Without [~user], a user error prints [user error (no ~user printer given)].
+- [~user] is a printer [Error.user -> string] for [User] errors. Without it, a user error prints [user error (no ~user printer given)].
 - No row has trailing spaces.
 
 [~source] gives the input to read the lines from. Without it the lines kept
@@ -329,7 +334,7 @@ a record. The common migration is one line:
 
 User errors move from the variant row into [kind]:
 [Error { error = `Too_large n; _ }] becomes
-[Error { kind = User (`Too_large n); _ }]. [`Failure msg] becomes [Failure msg].
+[Error { kind = User (Too_large n); _ }], with [type Parseff.Error.user += Too_large of int]. [`Failure msg] becomes [Failure msg].
 The 0.4 messages of primitives that were not expectations (invalid UTF-8, failed
 regex, mismatched [BE.int16]) are now [Expected] items: [valid UTF-8],
 [text matching the pattern] and [int16be 0xFFFE].

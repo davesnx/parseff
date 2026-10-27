@@ -95,7 +95,12 @@ module Error : sig
   (** Source lines kept with the error so that {!Parseff.render_error} does not
       need the input. *)
 
-  type 'e kind = private
+  type user = ..
+  (** The type of the values given to {!val:Parseff.error}. It is extensible:
+      declare your own cases with [type Parseff.Error.user += Too_large of int]
+      and match them as [User (Too_large n)]. *)
+
+  type kind = private
     | Expected of {
         items : expected * expected list;
         found : found;
@@ -110,7 +115,7 @@ module Error : sig
             ["no alternative matched"] when [one_of []] is the only failure at
             the furthest position. Failures of primitives are otherwise
             [Expected]. *)
-    | User of 'e  (** A value given to {!val:Parseff.error}. *)
+    | User of user  (** A value given to {!val:Parseff.error}. *)
     | Depth_limit_exceeded of { limit : int }
         (** {!val:Parseff.rec_} nested deeper than [max_depth]. *)
     | Backtrack_window_exceeded of { limit : int; oldest : int }
@@ -119,8 +124,8 @@ module Error : sig
             to and [limit] is the configured [backtrack_window]. The error
             position is the parser position when the overflow happened. *)
 
-  type 'e t = private {
-    kind : 'e kind;
+  type t = private {
+    kind : kind;
     span : range;
         (** The bytes the error is about, never reversed, empty at the end of
             the input. *)
@@ -133,7 +138,7 @@ module Error : sig
     excerpt : excerpt;
   }
 
-  val message : ?user:('e -> string) -> 'e t -> string
+  val message : ?user:(user -> string) -> t -> string
   (** [message e] is the one-line message, for example
       [expected "else", "if", or "while", found 'xyz']. A message lists at most
       8 expected items, then [, or N more alternatives]. [user] prints [User]
@@ -147,8 +152,8 @@ val render_error :
   ?name:string ->
   ?source:string ->
   ?columns:Error.columns ->
-  ?user:('e -> string) ->
-  'e Error.t ->
+  ?user:(Error.user -> string) ->
+  Error.t ->
   string
 (** [render_error e] prints the error with a source excerpt:
 
@@ -177,12 +182,48 @@ val render_error :
     error ends with a [* help:] line. Rows have no trailing spaces and the
     result has no trailing newline. *)
 
-(** {1 Result Types} *)
+(** {1 Diagnostics} *)
 
-type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result
-(** Parse result. ['a] is the parsed value and ['e] is the type of the values
-    given to {!val:error}. A parse that never calls [error] leaves ['e]
-    unconstrained.
+module Diagnostics : sig
+  type 'd entry = { pos : int; value : 'd }
+  (** A non-fatal diagnostic and the byte offset it refers to. *)
+
+  type 'd t
+  (** Collects the diagnostics of one parse. ['d] is the type of the values
+      given to {!val:Parseff.warn}. *)
+
+  val create : unit -> 'd t
+
+  val to_list : 'd t -> 'd entry list
+  (** Diagnostics in emission order. Available after the parse, on [Ok] and on
+      [Error]. *)
+
+  val length : 'd t -> int
+  val is_empty : 'd t -> bool
+
+  val clear : 'd t -> unit
+  (** Empties the collector. Raises [Invalid_argument] while a parse uses it. *)
+end
+
+(** {1 Runner} *)
+
+val parse :
+  ?max_depth:int ->
+  ?consume:[ `All | `Prefix ] ->
+  ?diagnostics:'d Diagnostics.t ->
+  string ->
+  (unit -> 'a) ->
+  ('a, Error.t) Stdlib.result
+(** [parse input parser] runs [parser] on [input].
+
+    [consume] is [`Prefix] by default: the parser may stop before the end of the
+    input. With [`All], parsing fails with an [Expected End_of_input] error when
+    input remains, as if the parser ended with {!end_of_input}.
+
+    [diagnostics] is the collector given to {!warn}. The runner empties it
+    before the parser starts. Read it with {!Diagnostics.to_list} after the
+    parse, whether the result is [Ok] or [Error]. {!warn} into any other
+    collector does nothing.
 
     When a parse fails, the error is the furthest failure: the failure of any
     primitive that happened at the highest input position, including primitives
@@ -192,36 +233,9 @@ type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result
     [expected "else", "if", or "while", found 'xyz']. A failure at the end of
     the input says [found end of input] and keeps the expected set.
 
-    {[
-      match Parseff.parse input parser with
-      | Ok value -> ...
-      | Error { kind = User (`Too_large n); _ } -> ...
-      | Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
-    ]} *)
-
-type 'd diagnostic = { pos : int; diagnostic : 'd }
-(** Non-fatal diagnostic emitted during parsing. *)
-
-type ('e, 'd) error_with_diagnostics = {
-  error : 'e Error.t;
-  diagnostics : 'd diagnostic list;
-}
-
-type ('a, 'e, 'd) result_with_diagnostics =
-  ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
-(** Parse outcome with diagnostics in both success and failure cases. *)
-
-(** {1 Runner} *)
-
-val parse : ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e) result
-(** [parse ?max_depth input parser] runs [parser] on [input] string.
-
     [max_depth] limits the nesting depth for parsers that use {!rec_} to mark
     recursive entry points. Defaults to [128]. When exceeded, parsing fails with
     [Error.Depth_limit_exceeded] instead of risking a stack overflow.
-
-    This function does not require consuming the full input; call
-    {!end_of_input} in your parser when you want full-consumption behavior.
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
     {!Error.t}. [e.kind] is [Expected] for a mismatch, [Failure] for
@@ -239,17 +253,6 @@ val parse : ?max_depth:int -> string -> (unit -> 'a) -> ('a, 'e) result
     | Error e ->
         prerr_endline (render_error ~name:"input" e)
     ]} *)
-
-val parse_until_end :
-  ?max_depth:int ->
-  string ->
-  (unit -> 'a) ->
-  ('a, 'e, 'd) result_with_diagnostics
-(** [parse_until_end ?max_depth input parser] runs [parser] on [input], requires
-    that all input is consumed, and returns diagnostics on both success and
-    failure.
-
-    Non-fatal diagnostics can be emitted with {!warn} and {!warn_at}. *)
 
 (** {1 Primitive Combinators} *)
 
@@ -418,24 +421,26 @@ val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : ?from:int -> ?notes:Error.note list -> 'e -> 'a
-(** [error ?from ?notes e] aborts parsing with a user-defined typed error value.
+val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
+(** [error ?from ?notes e] aborts parsing with a user-defined error value.
     [~from] and [~notes] work as in {!fail}.
 
-    The error is returned as [Error { kind = User e; _ }]. Use polymorphic
-    variants for rich error reporting:
+    The error is returned as [Error { kind = User e; _ }]. Declare the cases of
+    {!Error.user} for rich error reporting:
     {@ocaml[
+      type Error.user += Out_of_range of int | Negative of int
+
       let number () =
         let n = parse_int () in
-        if n > 255 then error (`Out_of_range n)
-        else if n < 0 then error (`Negative n)
+        if n > 255 then error (Out_of_range n)
+        else if n < 0 then error (Negative n)
         else n
 
-      match run input number with
+      match parse input number with
       | Ok n -> Printf.printf "Got %d\n" n
-      | Error { kind = User (`Out_of_range n); _ } ->
+      | Error { kind = User (Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
-      | Error { kind = User (`Negative n); _ } ->
+      | Error { kind = User (Negative n); _ } ->
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
     ]}
@@ -452,13 +457,14 @@ val error : ?from:int -> ?notes:Error.note list -> 'e -> 'a
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
 
-val warn : 'd -> unit
-(** [warn diagnostic] records a non-fatal diagnostic at the current position and
-    continues parsing. *)
+val warn : 'd Diagnostics.t -> 'd -> unit
+(** [warn diagnostics d] records [d] at the current position and continues
+    parsing. [diagnostics] must be the collector given to the runner as
+    [~diagnostics]; for any other collector [warn] does nothing. A diagnostic
+    recorded in a branch that backtracks is removed with the branch. *)
 
-val warn_at : pos:int -> 'd -> unit
-(** [warn_at ~pos diagnostic] records a non-fatal diagnostic at [pos] and
-    continues parsing. *)
+val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
+(** [warn_at diagnostics ~pos d] is {!warn} at the byte offset [pos]. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -943,12 +949,15 @@ end
 val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
+  ?consume:[ `All | `Prefix ] ->
+  ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, 'e) result
-(** [parse_source ?max_depth source parser] runs [parser] pulling input from
-    [source] on demand. Behaves identically to {!parse} but the input does not
-    need to be fully available up front.
+  ('a, Error.t) Stdlib.result
+(** [parse_source source parser] runs [parser] pulling input from [source] on
+    demand. Takes the same [consume] and [diagnostics] arguments as {!parse} and
+    behaves identically, but the input does not need to be fully available up
+    front.
 
     The same parsers work with both [parse] and [parse_source] — no changes
     required. Streaming backtracking is bounded by [backtrack_window] (default:
@@ -971,25 +980,6 @@ val parse_source :
     let result = parse_source source json in
     close_in ic;
     result
-    ]} *)
-
-val parse_source_until_end :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  Source.t ->
-  (unit -> 'a) ->
-  ('a, 'e, 'd) result_with_diagnostics
-(** [parse_source_until_end ?max_depth source parser] is the streaming
-    equivalent of {!parse_until_end}. It enforces full consumption and returns
-    diagnostics on both success and failure.
-
-    Example:
-    {@ocaml[
-    let ic = open_in "data.json" in
-    let source = Source.of_channel ic in
-    let outcome = parse_source_until_end source json in
-    close_in ic;
-    outcome
     ]} *)
 
 (** {1 Binary Parsing}

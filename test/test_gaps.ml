@@ -7,13 +7,13 @@ let chunked_source ~chunk_size input =
       n
   )
 
-let kind (e : unit Parseff.Error.t) =
+let kind (e : Parseff.Error.t) =
   match e.kind with
   | Expected _ ->
       "Expected " ^ Parseff.Error.message e
   | Failure m ->
       "Failure " ^ m
-  | User () ->
+  | User _ ->
       "User"
   | Depth_limit_exceeded _ ->
       "Depth_limit_exceeded " ^ Parseff.Error.message e

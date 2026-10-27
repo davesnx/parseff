@@ -21,7 +21,49 @@ type note_data = { at : range_data option; text : string }
 
 type endian = Big | Little
 
-type 'd diagnostic = { pos : int; diagnostic : 'd }
+type 'd diagnostic_entry = { pos : int; value : 'd }
+
+type 'd diagnostics = {
+  busy : bool Atomic.t;
+  mutable rev : 'd diagnostic_entry list;
+  mutable self : diag_sink;
+}
+
+and diag_sink = No_sink | Sink : 'd diagnostics -> diag_sink
+
+let diagnostics_create () =
+  let t = { busy = Atomic.make false; rev = []; self = No_sink } in
+  t.self <- Sink t;
+  t
+let diagnostics_to_list t = List.rev t.rev
+let diagnostics_length t = List.length t.rev
+let diagnostics_is_empty t = t.rev = []
+
+let diagnostics_reset t = t.rev <- []
+
+let diagnostics_clear t =
+  if Atomic.get t.busy then
+    invalid_arg "Parseff.Diagnostics.clear: a parse is using these diagnostics";
+  diagnostics_reset t
+
+let rec drop_entries l k =
+  if k = 0 then
+    l
+  else
+    match l with _ :: rest -> drop_entries rest (k - 1) | [] -> l
+
+module Diagnostics = struct
+  type 'd entry = 'd diagnostic_entry = { pos : int; value : 'd }
+  type 'd t = 'd diagnostics
+
+  let create = diagnostics_create
+  let to_list = diagnostics_to_list
+  let length = diagnostics_length
+  let is_empty = diagnostics_is_empty
+  let clear = diagnostics_clear
+end
+
+type user = ..
 
 exception Fail
 type fail_extra = {
@@ -32,6 +74,14 @@ type fail_extra = {
 }
 
 exception User_failure of int * string * fail_extra
+
+type over = { opos : int; mutable oitems : (int * string) list }
+
+type far_extra =
+  | No_extra
+  | Over of over
+  | Payload of user
+  | Payload_ext of user * fail_extra
 type abort_frames = {
   at : int;
   mutable open_frames : (string * int * bool) list;
@@ -76,13 +126,11 @@ type far = {
   mutable kinds : int array;
   mutable strs : string array;
   mutable special : int;
-  mutable obj : Obj.t;
+  mutable extra : far_extra;
   mutable fctx : int;
   mutable chain_pos : int;
   mutable chain : (string * int * bool) list;
 }
-
-type over = { opos : int; mutable oitems : (int * string) list }
 
 let far_none =
   {
@@ -95,7 +143,7 @@ let far_none =
     kinds = [||];
     strs = [||];
     special = 0;
-    obj = Obj.repr 0;
+    extra = No_extra;
     fctx = 0;
     chain_pos = min_int;
     chain = [];
@@ -112,8 +160,8 @@ type state = {
   mutable base : int;
   max_depth : int;
   mutable current_depth : int;
-  mutable diagnostics_rev : (int * Obj.t) list;
-  mutable diagnostics_len : int;
+  mutable diag : diag_sink;
+  mutable diag_len : int;
   mutable far : far;
   mutable ctx_top : int;
   mutable ctx : int array;
@@ -211,8 +259,8 @@ module State = struct
       base = 0;
       max_depth;
       current_depth = 0;
-      diagnostics_rev = [];
-      diagnostics_len = 0;
+      diag = No_sink;
+      diag_len = 0;
       far = far_none;
       ctx_top = 0;
       ctx = [||];
@@ -273,7 +321,8 @@ module State = struct
         leave t previous;
         Printexc.raise_with_backtrace exn bt
 
-  let[@inline always] get_diagnostics_rev (t : t) = t.diagnostics_rev
+  let[@inline always] diag_len (t : t) = t.diag_len
+  let[@inline always] diag (t : t) = t.diag
 
   let push_rewind_frame (t : t) kind =
     let index = t.frames_top in
@@ -286,7 +335,7 @@ module State = struct
     let frames = t.frames in
     Array.unsafe_set frames base t.pos;
     Array.unsafe_set frames (base + 1) kind;
-    Array.unsafe_set frames (base + 2) t.diagnostics_len;
+    Array.unsafe_set frames (base + 2) (diag_len t);
     t.frames_top <- index + 1;
     index
 
@@ -308,20 +357,15 @@ module State = struct
     let base = frame * frame_stride in
     t.pos <- Array.unsafe_get t.frames base;
     let saved = Array.unsafe_get t.frames (base + 2) in
-    if t.diagnostics_len > saved then begin
-      let rec drop l n =
-        if n = 0 then
-          l
-        else
-          match l with _ :: rest -> drop rest (n - 1) | [] -> l
-      in
-      t.diagnostics_rev <- drop t.diagnostics_rev (t.diagnostics_len - saved);
-      t.diagnostics_len <- saved
+    if t.diag_len > saved then begin
+      ( match diag t with
+      | Sink c ->
+          c.rev <- drop_entries c.rev (t.diag_len - saved)
+      | No_sink ->
+          ()
+      );
+      t.diag_len <- saved
     end
-
-  let add_diagnostic (t : t) pos diagnostic =
-    t.diagnostics_rev <- (pos, diagnostic) :: t.diagnostics_rev;
-    t.diagnostics_len <- t.diagnostics_len + 1
 
   let commit_nearest (t : t) =
     let top = t.frames_top in
@@ -377,8 +421,7 @@ let () =
         Some
           "Parseff: parser called outside of a parse context. Parser \
            combinators can only be used inside a function passed to \
-           Parseff.parse, Parseff.parse_until_end, Parseff.parse_source, or \
-           Parseff.parse_source_until_end."
+           Parseff.parse or Parseff.parse_source."
     | _ ->
         None
     )
@@ -618,7 +661,7 @@ let[@inline never] far_advance_int st p k =
         kinds = [||];
         strs = [||];
         special = 0;
-        obj = Obj.repr 0;
+        extra = No_extra;
         fctx = st.ctx_top;
         chain_pos = min_int;
         chain = [];
@@ -645,7 +688,7 @@ let[@inline never] far_advance_str st p k s =
         kinds = [||];
         strs = [||];
         special = 0;
-        obj = Obj.repr 0;
+        extra = No_extra;
         fctx = st.ctx_top;
         chain_pos = min_int;
         chain = [];
@@ -673,7 +716,7 @@ let[@inline never] far_advance_special st p =
         kinds = [||];
         strs = [||];
         special = 0;
-        obj = Obj.repr 0;
+        extra = No_extra;
         fctx = st.ctx_top;
         chain_pos = min_int;
         chain = [];
@@ -709,14 +752,11 @@ let far_carries_string k =
   tag = tag_literal || tag = tag_label || tag = tag_big
 
 let far_over f =
-  if f.special = 0 && not (Obj.is_int f.obj) then begin
-    let o : over = Obj.obj f.obj in
-    if o.opos = f.pos then
+  match f.extra with
+  | Over o when f.special = 0 && o.opos = f.pos ->
       Some o
-    else
+  | _ ->
       None
-  end else
-    None
 
 let[@inline never] far_overflow f k s =
   if f.special = 0 then begin
@@ -741,7 +781,7 @@ let[@inline never] far_overflow f k s =
             o
         | None ->
             let o = { opos = f.pos; oitems = [] } in
-            f.obj <- Obj.repr o;
+            f.extra <- Over o;
             o
       in
       if (not (List.mem (k, s) o.oitems)) && List.length o.oitems < far_max_over
@@ -804,7 +844,7 @@ let[@inline always] far_push_str f k s =
 
 let far_relabel f n0 label =
   f.n <- n0;
-  if n0 < far_total_capacity && far_over f <> None then f.obj <- Obj.repr 0;
+  if n0 < far_total_capacity && far_over f <> None then f.extra <- No_extra;
   if n0 = 0 then begin
     f.k0 <- tag_label;
     f.s0 <- label;
@@ -836,16 +876,15 @@ let[@inline never] fail_int_cold st p k = fail_int st p k
 let[@inline never] fail_str_cold st p k s = fail_str st p k s
 
 let special_user = 2
-let special_user_ext = 3
 
-let[@inline never] fail_special st p kind obj =
+let[@inline never] fail_user st p payload =
   let f = st.far in
   if p < f.pos then raise_notrace Fail;
   if p > f.pos then far_advance_special st p;
   let f = st.far in
   if f.special = 0 then begin
-    f.special <- kind;
-    f.obj <- obj
+    f.special <- special_user;
+    f.extra <- payload
   end;
   raise_notrace Fail
 
@@ -1449,18 +1488,22 @@ let[@inline] fail ?(from = -1) ?(notes = []) msg =
 let[@inline] error ?(from = -1) ?(notes = []) e =
   let st = get_state () in
   if from < 0 && notes == [] then
-    fail_special st st.pos special_user (Obj.repr e)
+    fail_user st st.pos (Payload e)
   else
-    fail_special st st.pos special_user_ext
-      (Obj.repr (e, { from; notes; depth = 0; chain = [] }))
+    fail_user st st.pos (Payload_ext (e, { from; notes; depth = 0; chain = [] }))
 
-let[@inline] warn diagnostic =
-  let st = get_state () in
-  State.add_diagnostic st st.pos (Obj.repr diagnostic)
+let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
+    (value : d) =
+  if st.diag == c.self then begin
+    c.rev <- { pos; value } :: c.rev;
+    st.diag_len <- st.diag_len + 1
+  end
 
-let[@inline] warn_at ~pos diagnostic =
+let[@inline] warn_at c ~pos value = record_diagnostic c (get_state ()) pos value
+
+let[@inline] warn c value =
   let st = get_state () in
-  State.add_diagnostic st pos (Obj.repr diagnostic)
+  record_diagnostic c st st.pos value
 
 let[@inline] commit () =
   let st = get_state () in
@@ -1515,7 +1558,7 @@ let[@inline never] far_merge st saved =
   else begin
     if t.special <> 0 && saved.special = 0 then begin
       saved.special <- t.special;
-      saved.obj <- t.obj
+      saved.extra <- t.extra
     end;
     if t.special = 0 && saved.special = 0 then begin
       for i = 0 to t.n - 1 do
@@ -2077,11 +2120,6 @@ let far_chain st =
   else
     []
 
-let to_diagnostics diagnostics_rev =
-  List.rev_map
-    (fun (pos, diagnostic) -> { pos; diagnostic = Obj.obj diagnostic })
-    diagnostics_rev
-
 let location_of_position input pos =
   let idx = create_line_index () in
   extend_line_index idx input (min pos (String.length input));
@@ -2115,19 +2153,21 @@ module Error = struct
     frame_locs : (int * int * int option) option list;
   }
 
-  type 'e kind =
+  type nonrec user = user = ..
+
+  type kind =
     | Expected of {
         items : expected * expected list;
         found : found;
         more : int;
       }
     | Failure of string
-    | User of 'e
+    | User of user
     | Depth_limit_exceeded of { limit : int }
     | Backtrack_window_exceeded of { limit : int; oldest : int }
 
-  type 'e t = {
-    kind : 'e kind;
+  type t = {
+    kind : kind;
     span : range;
     position : position option;
     frames : frame list;
@@ -3309,27 +3349,24 @@ let error_of_far st =
   if pos < 0 then
     failwith "Parseff: internal error: failure without a recorded position";
   let frames = far_chain st in
-  if f.special = special_user then
-    build st ~pos
-      (Error.User (Obj.obj f.obj))
-      { start = pos; stop = pos }
-      frames
-  else if f.special = special_user_ext then begin
-    let e, x = (Obj.obj f.obj : _ * fail_extra) in
-    let span = extras_span pos x in
-    build st ~pos:span.start ~notes:x.notes (Error.User e) span frames
-  end else
-    begin match expected_of_far f with
-    | [], _ ->
-        build st ~pos (Error.Failure "no alternative matched")
-          { start = pos; stop = pos }
-          frames
-    | x :: xs, more ->
-        let found, span = found_of_far st f pos in
-        build st ~pos
-          (Error.Expected { items = (x, xs); found; more })
-          span frames
-  end
+  match f.extra with
+  | Payload e when f.special = special_user ->
+      build st ~pos (Error.User e) { start = pos; stop = pos } frames
+  | Payload_ext (e, x) when f.special = special_user ->
+      let span = extras_span pos x in
+      build st ~pos:span.start ~notes:x.notes (Error.User e) span frames
+  | _ ->
+      begin match expected_of_far f with
+      | [], _ ->
+          build st ~pos (Error.Failure "no alternative matched")
+            { start = pos; stop = pos }
+            frames
+      | x :: xs, more ->
+          let found, span = found_of_far st f pos in
+          build st ~pos
+            (Error.Expected { items = (x, xs); found; more })
+            span frames
+      end
 
 let error_plain st pos kind frames =
   build st ~pos kind { start = pos; stop = pos } frames
@@ -3337,16 +3374,6 @@ let error_plain st pos kind frames =
 let error_failure st pos msg (x : fail_extra) =
   let span = extras_span pos x in
   build st ~pos:span.start ~notes:x.notes (Error.Failure msg) span x.chain
-
-type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result
-
-type ('e, 'd) error_with_diagnostics = {
-  error : 'e Error.t;
-  diagnostics : 'd diagnostic list;
-}
-
-type ('a, 'e, 'd) result_with_diagnostics =
-  ('a * 'd diagnostic list, ('e, 'd) error_with_diagnostics) Stdlib.result
 
 let run_detailed st thunk =
   State.run st @@ fun () ->
@@ -3378,30 +3405,46 @@ let until_end parser () =
   end_of_input ();
   v
 
-let attach_diagnostics st = function
-  | Stdlib.Ok v ->
-      Stdlib.Ok (v, to_diagnostics (State.get_diagnostics_rev st))
-  | Stdlib.Error error ->
-      Stdlib.Error
-        { error; diagnostics = to_diagnostics (State.get_diagnostics_rev st) }
+let with_diagnostics st thunk (c : _ diagnostics) =
+  if not (Atomic.compare_and_set c.busy false true) then
+    invalid_arg "Parseff: these diagnostics are in use by another parse";
+  diagnostics_reset c;
+  st.diag <- c.self;
+  match run_detailed st thunk with
+  | r ->
+      Atomic.set c.busy false;
+      r
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      Atomic.set c.busy false;
+      Printexc.raise_with_backtrace exn bt
 
-let parse ?(max_depth = 128) input (parser : unit -> 'a) : ('a, 'e) result =
-  run_detailed (State.for_input ~input ~max_depth) parser
+let run_slow st ~consume ~diagnostics parser =
+  let thunk =
+    match consume with `Prefix -> parser | `All -> until_end parser
+  in
+  match diagnostics with
+  | None ->
+      run_detailed st thunk
+  | Some c ->
+      with_diagnostics st thunk c
 
-let parse_until_end ?(max_depth = 128) input (parser : unit -> 'a) :
-    ('a, 'e, 'd) result_with_diagnostics =
+let parse ?(max_depth = 128) ?(consume = `Prefix) ?diagnostics input
+    (parser : unit -> 'a) =
   let st = State.for_input ~input ~max_depth in
-  attach_diagnostics st (run_detailed st (until_end parser))
+  match (diagnostics, consume) with
+  | None, `Prefix ->
+      run_detailed st parser
+  | _ ->
+      run_slow st ~consume ~diagnostics parser
 
 let parse_source ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) (src : Source.t)
-    (parser : unit -> 'a) : ('a, 'e) result =
-  check_backtrack_window backtrack_window;
-  run_detailed (State.for_source ~src ~max_depth ~backtrack_window) parser
-
-let parse_source_until_end ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) (src : Source.t)
-    (parser : unit -> 'a) : ('a, 'e, 'd) result_with_diagnostics =
+    ?(backtrack_window = default_backtrack_window) ?(consume = `Prefix)
+    ?diagnostics (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window in
-  attach_diagnostics st (run_detailed st (until_end parser))
+  match (diagnostics, consume) with
+  | None, `Prefix ->
+      run_detailed st parser
+  | _ ->
+      run_slow st ~consume ~diagnostics parser

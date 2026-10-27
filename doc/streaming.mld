@@ -14,9 +14,11 @@ same parsers, same result type, same error handling.
 {@ocaml skip[val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
+  ?consume:[ `All | `Prefix ] ->
+  ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, 'e) result]}
+  ('a, Error.t) Stdlib.result]}
 
 {@ocaml skip[
   let ic = open_in "data.json" in
@@ -35,25 +37,18 @@ The [~max_depth] parameter works the same as in {!val:Parseff.parse}. The
 [~backtrack_window] parameter bounds how much buffered input Parseff may retain
 for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
-{1 [parse_source_until_end]}
+{1 Requiring the whole input}
 
-{!val:Parseff.parse_source_until_end} is the streaming equivalent of
-{!val:Parseff.parse_until_end}. It enforces full input consumption and returns
-diagnostics in both cases. See {!page:diagnostics}.
-
-{@ocaml skip[val parse_source_until_end :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  Source.t ->
-  (unit -> 'a) ->
-  ('a, 'e, 'd) result_with_diagnostics]}
+[~consume:`All] makes {!val:Parseff.parse_source} fail when input remains after
+the parser returns, as {!val:Parseff.end_of_input} does. [~diagnostics] collects
+the diagnostics of the parse. See {!page:diagnostics}.
 
 {@ocaml skip[
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
-  let outcome = Parseff.parse_source_until_end source json in
+  let result = Parseff.parse_source ~consume:`All source json in
   close_in ic;
-  outcome
+  result
 ]}
 
 {1 The Source module}
@@ -259,7 +254,7 @@ Two things keep old bytes alive:
 
 Most parsers become streaming parsers by changing only the runner: keep the same
 parser functions and switch from {!val:Parseff.parse} to
-{!val:Parseff.parse_source} or {!val:Parseff.parse_source_until_end}. Start
+{!val:Parseff.parse_source}. Start
 there, then tune the streaming behavior only if the grammar needs it.
 
 In practice:

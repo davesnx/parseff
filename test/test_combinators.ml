@@ -1,6 +1,8 @@
-let show_error (e : [> `E ] Parseff.Error.t) =
+type Parseff.Error.user += Cause_e
+
+let show_error (e : Parseff.Error.t) =
   match e.kind with
-  | User `E ->
+  | User Cause_e ->
       "E"
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.Error.message e)
@@ -48,7 +50,7 @@ let test_one_of_labeled_user_error () =
             ( "a",
               fun () ->
                 ignore (Parseff.consume "x");
-                Parseff.error `E
+                Parseff.error Cause_e
             );
             ( "b",
               fun () ->
@@ -68,7 +70,7 @@ let test_expect_user_error_through_or () =
             Parseff.or_
               (fun () ->
                 ignore (Parseff.consume "x");
-                Parseff.error `E
+                Parseff.error Cause_e
               )
               (fun () ->
                 ignore (Parseff.consume "y");

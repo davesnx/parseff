@@ -623,38 +623,41 @@ let test_take_while_span_streaming () =
 
 let test_parse_source_until_end_requires_eof () =
   let src = Parseff.Source.of_string "abcXYZ" in
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_source_until_end src (fun () -> Parseff.consume "abc")
+    Parseff.parse_source ~consume:`All ~diagnostics src (fun () ->
+        Parseff.consume "abc"
+    )
   in
   match outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error
-      { error = { kind = Expected { found = Text _; _ }; _ } as e; diagnostics }
-    ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 3 pos;
-      Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
+      Alcotest.(check int)
+        "no diagnostics" 0
+        (Parseff.Diagnostics.length diagnostics)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
 let test_parse_source_until_end_error_has_diagnostics () =
   let src = chunked_source ~chunk_size:1 "x" in
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_source_until_end src (fun () ->
-        Parseff.warn "streaming-warning";
+    Parseff.parse_source ~consume:`All ~diagnostics src (fun () ->
+        Parseff.warn diagnostics "streaming-warning";
         Parseff.consume "y"
     )
   in
   match outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = { kind = Expected { found = Text _; _ }; _ }; diagnostics }
-    ->
+  | Error { kind = Expected { found = Text _; _ }; _ } ->
       let got =
         List.map
-          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
-          diagnostics
+          (fun ({ value; _ } : string Parseff.Diagnostics.entry) -> value)
+          (Parseff.Diagnostics.to_list diagnostics)
       in
       Alcotest.(check (list string))
         "diagnostics preserved" [ "streaming-warning" ] got
@@ -664,21 +667,21 @@ let test_parse_source_until_end_error_has_diagnostics () =
 let test_parse_source_until_end_preserves_end_of_input_semantics () =
   let ok_src = Parseff.Source.of_string "a" in
   let ok_outcome =
-    Parseff.parse_source_until_end ok_src (fun () ->
+    Parseff.parse_source ~consume:`All ok_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "ok"
     )
   in
   ( match ok_outcome with
-  | Ok (s, _) ->
+  | Ok s ->
       Alcotest.(check string) "explicit eof still works" "ok" s
   | Error _ ->
       Alcotest.fail "Expected success"
   );
   let fail_src = Parseff.Source.of_string "ab" in
   let fail_outcome =
-    Parseff.parse_source_until_end fail_src (fun () ->
+    Parseff.parse_source ~consume:`All fail_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "unreachable"
@@ -687,7 +690,7 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
   match fail_outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = { kind = Expected { found = Text _; _ }; _ } as e; _ } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
       let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "fails at explicit eof position" 1 pos
   | Error _ ->
@@ -894,7 +897,7 @@ let test_of_seq_take_while () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let norm : (_, unit) Parseff.result -> _ = function
+let norm : (_, Parseff.Error.t) Result.t -> _ = function
   | Ok v ->
       Ok v
   | Error e ->
@@ -904,7 +907,7 @@ let norm : (_, unit) Parseff.result -> _ = function
             "Expected " ^ Parseff.Error.message e
         | Failure m ->
             "Failure " ^ m
-        | User () ->
+        | User _ ->
             "User"
         | Depth_limit_exceeded _ ->
             "Depth_limit_exceeded " ^ Parseff.Error.message e
