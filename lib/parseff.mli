@@ -197,6 +197,15 @@ module Error : sig
       open box and the lines keep its indentation. *)
 end
 
+val render_error :
+  ?name:string ->
+  ?source:string ->
+  ?columns:Error.columns ->
+  ?user:('e -> string) ->
+  'e Error.t ->
+  string
+(** [render_error] is {!Error.render}. *)
+
 (** {1 Result Types} *)
 
 type ('a, 'e) result = ('a, 'e Error.t) Stdlib.result

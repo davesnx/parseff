@@ -185,8 +185,8 @@ returns a byte offset.
 
 {1 Columns in error messages}
 
-The column in an error header counts bytes by default, like [location]. For
-text with multi-byte characters, [Parseff.Error.render ~columns:`Code_points]
+The column in an error header counts bytes by default, like [position.location]. For
+text with multi-byte characters, [Parseff.render_error ~columns:`Code_points]
 prints the column in code points instead. The carets under the source line
 always count code points, so they line up in both modes:
 

@@ -62,7 +62,7 @@ To run it:
 ```ocaml
 match Parseff.parse "host = localhost" entry with
 | Ok (k, v) -> Printf.printf "%s -> %s\n" k v  (* "host" -> "localhost" *)
-| Error e -> prerr_endline (Parseff.Error.render ~name:"entry" e)
+| Error e -> prerr_endline (Parseff.render_error ~name:"entry" e)
 ```
 
 `Parseff.parse` returns `Ok value` on success, or `Error e` on failure, where `e` says what was expected and where.
@@ -126,7 +126,7 @@ let () =
       List.iter (fun (k, v) ->
         Printf.printf "%s = %s\n" k v
       ) entries
-  | Error e -> prerr_endline (Parseff.Error.render ~name:"config" e)
+  | Error e -> prerr_endline (Parseff.render_error ~name:"config" e)
 ```
 
 Output:

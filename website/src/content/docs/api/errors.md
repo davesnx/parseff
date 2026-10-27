@@ -66,7 +66,7 @@ let () =
       let _ = Parseff.char '.' in
       (a, octet ()))
   with
-  | Error e -> print_endline (Parseff.Error.render ~name:"address" e)
+  | Error e -> print_endline (Parseff.render_error ~name:"address" e)
   | Ok _ -> ()
 ```
 which prints:
@@ -228,12 +228,12 @@ The match on `kind` is exhaustive: the compiler tells you when a case is missing
 match Parseff.parse input parser with
 | Ok value -> value
 | Error { kind = User (`Too_large n); _ } -> handle_too_large n
-| Error e -> prerr_endline (Parseff.Error.render ~name:"input" e); exit 1
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
 ```
 
 ## Rendering errors
 
-`Parseff.Error.render` prints an error with its source line, a caret under the failure and what the parser was doing:
+`Parseff.render_error`, also available as `Parseff.Error.render`, prints an error with its source line, a caret under the failure and what the parser was doing:
 
 ```
 input.json:4:5: error: expected ',' or '}', found '"'
@@ -273,6 +273,6 @@ input.json:1:6: error: expected ',' or ']', found '"'   (code points)
 (* before *)
 | Error { pos; error = `Expected msg } -> Printf.printf "%d: %s\n" pos msg
 (* after *)
-| Error e -> prerr_endline (Parseff.Error.render ~name:"input" e)
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
 ```
 User errors move from the variant row into `kind`: `Error { error = `Too_large n; _ }` becomes `Error { kind = User (`Too_large n); _ }`. ``Failure msg` becomes `Failure msg`. The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. ``Unexpected_end_of_input` is an `Expected` error whose `found` is `End`, so it now says what was expected. The position is `Parseff.Error.pos e`.

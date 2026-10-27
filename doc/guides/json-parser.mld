@@ -233,7 +233,7 @@ let () =
   | Error { kind = Depth_limit_exceeded { limit }; _ } ->
       Printf.printf "Nesting is deeper than %d\n" limit
   | Error e ->
-      prerr_endline (Parseff.Error.render ~name:"input.json" ~source:input e)
+      prerr_endline (Parseff.render_error ~name:"input.json" ~source:input e)
 v}
 
 {1 Depth limiting}

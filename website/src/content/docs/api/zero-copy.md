@@ -226,7 +226,7 @@ let () =
   match Parseff.parse "[1, 2, 3, 4, 5]" json_array with
   | Ok nums ->
       Printf.printf "Sum: %d\n" (List.fold_left ( + ) 0 nums)
-  | Error e -> prerr_endline (Parseff.Error.render ~name:"array" e)
+  | Error e -> prerr_endline (Parseff.render_error ~name:"array" e)
 ```
 The zero-copy version is roughly 2\.5x faster than the standard API and uses 3x less memory.
 

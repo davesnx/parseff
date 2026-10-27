@@ -2942,6 +2942,8 @@ module Error = struct
       (String.split_on_char '\n' (render ?name ?source ?columns ?user e))
 end
 
+let render_error = Error.render
+
 let expected_of_far f =
   let describe i =
     let kind = far_item_kind f i in

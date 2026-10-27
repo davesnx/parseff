@@ -62,7 +62,7 @@ let () =
       let _ = Parseff.char '.' in
       (a, octet ()))
   with
-  | Error e -> print_endline (Parseff.Error.render ~name:"address" e)
+  | Error e -> print_endline (Parseff.render_error ~name:"address" e)
   | Ok _ -> ()
 ]}
 
@@ -270,12 +270,12 @@ missing. The type parameter of the error is only the type of your own
 match Parseff.parse input parser with
 | Ok value -> value
 | Error { kind = User (`Too_large n); _ } -> handle_too_large n
-| Error e -> prerr_endline (Parseff.Error.render ~name:"input" e); exit 1
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
 ]}
 
 {1 Rendering errors}
 
-{!val:Parseff.Error.render} prints an error with its source line, a caret under
+{!val:Parseff.render_error}, also available as {!val:Parseff.Error.render}, prints an error with its source line, a caret under
 the failure and what the parser was doing:
 
 {v
@@ -351,7 +351,7 @@ a record. The common migration is one line:
 (* before *)
 | Error { pos; error = `Expected msg } -> Printf.printf "%d: %s\n" pos msg
 (* after *)
-| Error e -> prerr_endline (Parseff.Error.render ~name:"input" e)
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
 ]}
 
 User errors move from the variant row into [kind]:

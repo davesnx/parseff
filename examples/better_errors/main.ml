@@ -244,7 +244,7 @@ let run_json input =
   | Ok () ->
       print_endline "valid"
   | Error e ->
-      print_endline (Parseff.Error.render ~name:"input.json" ~source:input e)
+      print_endline (Parseff.render_error ~name:"input.json" ~source:input e)
 
 let run_ip input =
   match Parseff.parse input ip_address_simple with

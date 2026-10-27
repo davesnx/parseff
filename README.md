@@ -40,9 +40,9 @@ let () =
   | Error { kind = User (`Out_of_range n); span; _ } ->
       Printf.printf "Error at %d: %d out of range (0-255)\n" span.start n
   | Error e ->
-      prerr_endline (Parseff.Error.render ~name:"address" e)
+      prerr_endline (Parseff.render_error ~name:"address" e)
 ```
-A failed parse returns one [`Parseff.Error.t`](./Parseff-Error.md#type-t). `Parseff.Error.render` prints the message, the source line and a caret under the failure:
+A failed parse returns one [`Parseff.Error.t`](./Parseff-Error.md#type-t). `Parseff.render_error` prints the message, the source line and a caret under the failure:
 
 ```
 address:1:11: error: expected digit, found end of input

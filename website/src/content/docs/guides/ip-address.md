@@ -53,7 +53,7 @@ The `ip_address` parser reads like the format itself: number, dot, number, dot, 
 match Parseff.parse "192.168.1.1" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-| Error e -> prerr_endline (Parseff.Error.render ~name:"address" e)
+| Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
 ```
 
 On valid input, you get an `Ok` with the four octets as a tuple. On invalid input, the error tells you exactly where parsing failed.

@@ -3,7 +3,7 @@
 This is the 0.5.0 release.
 
 - **Breaking: errors are structured values.** `parse`, `parse_until_end`, `parse_source` and `parse_source_until_end` return `Error e` where `e` is a `Parseff.Error.t`: `{ kind; span; position; frames; notes; excerpt }`, where `position` is `Some { location; code_point_col }` or `None` when the line is not known (streaming, older than the buffered input). `kind` is `Expected { items; found; more }`, `Failure`, `User`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. The result type is `('a, 'e) result = ('a, 'e Error.t) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type parameter `'e` is only the type of the values given to `error`. `error_with_diagnostics` is `{ error : 'e Error.t; diagnostics }`, without `pos`. See "Migrating from 0.4" below.
-- **Add `Error.render`, `Error.pp` and `Error.message`.** `render ?name ?source ?columns ?user e` prints the message, the source line with carets under the failure, a `╭─╯` and `╰──^` bar that joins the opening token to the caret for the construct that started on an earlier line, `* while parsing` lines for the open `context`s, and notes. Control bytes, invalid UTF-8 and C1 controls are escaped in the excerpt as in the message, tabs keep the carets aligned, long lines are cut to 240 bytes around the failure, and `~columns:`Code_points` prints the column in code points. `Error.pos e` is the byte offset of the error.
+- **Add `Error.render`, `Error.pp` and `Error.message`.** `render ?name ?source ?columns ?user e` prints the message, the source line with carets under the failure, a `╭─╯` and `╰──^` bar that joins the opening token to the caret for the construct that started on an earlier line, `* while parsing` lines for the open `context`s, and notes. Control bytes, invalid UTF-8 and C1 controls are escaped in the excerpt as in the message, tabs keep the carets aligned, long lines are cut to 240 bytes around the failure, and `~columns:`Code_points` prints the column in code points. `Error.pos e` is the byte offset of the error. `Parseff.render_error` is `Error.render`.
 - **Failures at the end of the input keep what was expected.** `[1, 2` reports `expected ',' or ']', found end of input` instead of the old end-of-input error without items, including through `expect` and `one_of_labeled`.
 - **A successful `look_ahead` forgets the failures of its probe.** `look_ahead (many (char 'a')); char 'b'` on `aac` reports `expected 'b'` at offset 0 instead of the probe's `expected 'a'` at offset 2. A failing `look_ahead` is a failure like any other and merges with the earlier ones.
 - **`consume` reports a mismatch inside a multi-byte character at the start of the character.** `consume "é"` on `è` fails at the character, expecting `"é"`, with the caret under it. Before it failed in the middle of the character with half a literal.
@@ -69,7 +69,7 @@ match Parseff.parse input parser with
 (* 0.5 *)
 match Parseff.parse input parser with
 | Ok v -> v
-| Error e -> prerr_endline (Parseff.Error.render ~name:"input" e); exit 1
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
 ```
 
 - `Error { pos; error }` becomes `Error e`. The position is `Parseff.Error.pos e`, the message is `Parseff.Error.message e`.
