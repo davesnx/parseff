@@ -43,17 +43,6 @@ type location = { offset : int; line : int; col : int }
 (** A source location. [line] and [col] are 1-based. [col] counts bytes from the
     start of the line (not characters — relevant for UTF-8). *)
 
-type range = { start : int; stop : int }
-(** A range of byte offsets, [start] included and [stop] excluded, with
-    [start <= stop]. *)
-
-type backtrack_window_error = { limit : int; oldest : int }
-(** Streaming backtracking exceeded the configured history window.
-
-    [oldest] is the earliest position the runtime still needs to rewind to and
-    [limit] is the configured [backtrack_window]. The error position is the
-    parser position when the overflow happened. *)
-
 (** {1 Errors} *)
 
 (** A parse error: what failed, where, and what the parser was doing.
@@ -61,14 +50,18 @@ type backtrack_window_error = { limit : int; oldest : int }
     A failed parse returns one [Error.t]. Match on its [kind] to react to the
     failure, or print it with {!render_error}. *)
 module Error : sig
-  type expected =
+  type range = { start : int; stop : int }
+  (** A range of byte offsets, [start] included and [stop] excluded, with
+      [start <= stop]. *)
+
+  type expected = private
     | Char of Uchar.t  (** A specific character, printed as ['x']. *)
     | Literal of string  (** A literal string, printed as ["abc"]. *)
     | Label of string
         (** A name given by {!satisfy}, {!take_while}, {!expect} and others. *)
     | End_of_input  (** The end of the input. *)
 
-  type found =
+  type found = private
     | Text of string
         (** The text at the failure position. A token cut at 32 bytes ends with
             [...]. *)
@@ -81,7 +74,7 @@ module Error : sig
         (** An integer field that differs from the expected one, as the
             hexadecimal value read in the same width, for example [0x0002]. *)
 
-  type frame = { name : string; start : int; delimited : bool }
+  type frame = private { name : string; start : int; delimited : bool }
   (** A construct that was open at the failure, see {!val:Parseff.context}.
       [start] is the byte offset where it started, [delimited] is true for
       constructs with an opening token. *)
@@ -92,7 +85,7 @@ module Error : sig
       excerpt with the text next to the underline. [at = None] adds a
       ["* note:"] line under the excerpt. *)
 
-  type position = { location : location; code_point_col : int option }
+  type position = private { location : location; code_point_col : int option }
   (** Where an error is in the input, known only when the line is known.
       [location] is the line and column of the error in bytes. [code_point_col]
       is the column in code points, [None] if the start of the line is no longer
@@ -102,7 +95,7 @@ module Error : sig
   (** Source lines kept with the error so that {!Parseff.render_error} does not
       need the input. *)
 
-  type 'e kind =
+  type 'e kind = private
     | Expected of {
         items : expected * expected list;
         found : found;
@@ -120,10 +113,13 @@ module Error : sig
     | User of 'e  (** A value given to {!val:Parseff.error}. *)
     | Depth_limit_exceeded of { limit : int }
         (** {!val:Parseff.rec_} nested deeper than [max_depth]. *)
-    | Backtrack_window_exceeded of backtrack_window_error
-        (** A streaming parser needed more rewind history than the window. *)
+    | Backtrack_window_exceeded of { limit : int; oldest : int }
+        (** A streaming parser needed more rewind history than the window.
+            [oldest] is the earliest position the runtime still needs to rewind
+            to and [limit] is the configured [backtrack_window]. The error
+            position is the parser position when the overflow happened. *)
 
-  type 'e t = {
+  type 'e t = private {
     kind : 'e kind;
     span : range;
         (** The bytes the error is about, never reversed, empty at the end of
@@ -137,9 +133,6 @@ module Error : sig
     excerpt : excerpt;
   }
 
-  val pos : 'e t -> int
-  (** [pos e] is [e.span.start], the byte offset of the error. *)
-
   val message : ?user:('e -> string) -> 'e t -> string
   (** [message e] is the one-line message, for example
       [expected "else", "if", or "while", found 'xyz']. A message lists at most
@@ -148,19 +141,6 @@ module Error : sig
   *)
 
   type columns = [ `Bytes | `Code_points ]
-
-  val pp :
-    ?name:string ->
-    ?source:string ->
-    ?columns:columns ->
-    ?user:(Format.formatter -> 'e -> unit) ->
-    Format.formatter ->
-    'e t ->
-    unit
-  (** [pp] prints what {!Parseff.render_error} returns. The [user] printer is
-      run in a horizontal box, so its line breaks do not split the header. The
-      lines of the result are separated by [Format.pp_force_newline], so [pp]
-      works in an open box and the lines keep its indentation. *)
 end
 
 val render_error :
@@ -691,8 +671,8 @@ val expect : string -> (unit -> 'a) -> 'a
     [expected digit] at offset [3], and [expected key] on ["foo"]. A failure at
     the end of the input keeps its expected items and says [found end of input].
 
-    Failures from {!val:fail} propagate unchanged (use {!val:catch} to intercept
-    those). User errors raised via {!val-error} propagate unchanged — this lets
+    Failures from {!val:fail} propagate unchanged (there is no way to intercept
+    them). User errors raised via {!val-error} propagate unchanged — this lets
     you use [expect] around parsers that perform validation without losing the
     structured error:
 
@@ -713,34 +693,6 @@ val expect : string -> (unit -> 'a) -> 'a
     {@ocaml[
     let dot () = expect "a dot separator" (fun () -> char '.')
     let digit_val () = expect "a digit (0-9)" digit
-    ]} *)
-
-val catch : (unit -> 'a) -> (string -> 'a) -> 'a
-(** [catch parser handler] runs [parser]. If [parser] raises a failure (via
-    {!val:fail}), calls [handler msg] instead of propagating the failure.
-
-    This is the escape hatch for when you want a {!val:fail} to participate in
-    backtracking or be recovered from. Without [catch], failures always
-    propagate through combinators like {!val:or_} and {!val:many}.
-
-    Example:
-    {@ocaml[
-    (* Make a failure recoverable inside or_ *)
-    let lenient_byte () =
-      Parseff.or_
-        (fun () ->
-          Parseff.catch
-            (fun () ->
-              let n = number () in
-              if n > 255 then
-                Parseff.fail "out of range"
-              else
-                n
-            )
-            (fun _msg -> -1)
-        )
-        (fun () -> 0)
-        ()
     ]} *)
 
 val one_of : (unit -> 'a) list -> unit -> 'a
@@ -1045,9 +997,8 @@ val parse_source_until_end :
     Big-endian and little-endian parsers for multi-byte integers, floats, and
     doubles. Pick the module matching your wire format's byte order.
 
-    Single-byte readers ({!BE.any_uint8}, {!LE.any_uint8}, etc.) are present in
-    both modules for convenience — their results are identical since endianness
-    does not affect single bytes.
+    Single-byte readers ({!any_uint8}, {!any_int8}) are at the top level, since
+    endianness does not affect single bytes.
 
     Example:
     {@ocaml[
@@ -1064,14 +1015,14 @@ val parse_source_until_end :
       size
     ]} *)
 
+val any_uint8 : unit -> int
+(** Read one byte as an unsigned integer (0–255). *)
+
+val any_int8 : unit -> int
+(** Read one byte as a signed integer (−128–127). *)
+
 (** Big-endian binary parsers. *)
 module BE : sig
-  val any_uint8 : unit -> int
-  (** Read one byte as an unsigned integer (0–255). *)
-
-  val any_int8 : unit -> int
-  (** Read one byte as a signed integer (−128–127). *)
-
   val any_int16 : unit -> int
   (** Read 2 bytes as a big-endian signed 16-bit integer. *)
 
@@ -1110,12 +1061,6 @@ end
 
 (** Little-endian binary parsers. *)
 module LE : sig
-  val any_uint8 : unit -> int
-  (** Read one byte as an unsigned integer (0–255). *)
-
-  val any_int8 : unit -> int
-  (** Read one byte as a signed integer (−128–127). *)
-
   val any_int16 : unit -> int
   (** Read 2 bytes as a little-endian signed 16-bit integer. *)
 
@@ -1236,11 +1181,6 @@ module Utf8 : sig
       (* Matches 'a', 'é', 'λ', '中', 'д', etc. *)
       let l = Parseff.Utf8.letter ()
       ]} *)
-
-  val digit : unit -> int
-  (** [digit ()] parses an ASCII digit (0--9) and returns its integer value.
-      Only matches ASCII digits; does not match Unicode digit characters from
-      other scripts. *)
 
   val alphanum : unit -> Uchar.t
   (** [alphanum ()] parses a Unicode alphabetic character or an ASCII digit. *)

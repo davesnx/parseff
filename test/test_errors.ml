@@ -186,7 +186,7 @@ let test_or_right_commit_stops_at_or () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       let msg = Parseff.Error.message e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string) "right error only" "expected 'y', found 'z'" msg
@@ -236,7 +236,7 @@ let show_result show_v = function
   | Ok v ->
       "Ok " ^ show_v v
   | Error e ->
-      Printf.sprintf "Error@%d %s" (Parseff.Error.pos e) (show_error e)
+      Printf.sprintf "Error@%d %s" e.Parseff.Error.span.start (show_error e)
 
 let show_unit () = "()"
 let ws () = Parseff.skip_whitespace ()
@@ -468,7 +468,7 @@ let test_item_buffer_overflow () =
   in
   match Parseff.parse "zzz" (Parseff.one_of alternatives) with
   | Error ({ kind = Expected { items = _, rest; more; _ }; _ } as e)
-    when Parseff.Error.pos e = 0 ->
+    when e.Parseff.Error.span.start = 0 ->
       Alcotest.(check int) "items kept" 64 (List.length rest + 1);
       Alcotest.(check int) "items counted" 36 more;
       Alcotest.(check string)
@@ -498,7 +498,7 @@ let test_item_buffer_dedupes_on_overflow () =
   in
   match Parseff.parse "zzz" (Parseff.one_of alternatives) with
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
-    when Parseff.Error.pos e = 0 ->
+    when e.Parseff.Error.span.start = 0 ->
       let msg = Parseff.Error.message e in
       Alcotest.(check string)
         "three items" {|expected "item0", "item1", or "item2", found 'zzz'|} msg
@@ -624,7 +624,7 @@ let test_context_chain_after_frame_closes () =
     "chain copied when inner closed" "outer@0; inner@0" (frames_of "abx" parser);
   match Parseff.parse "abx" parser with
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
-    when Parseff.Error.pos e = 2 ->
+    when e.Parseff.Error.span.start = 2 ->
       Alcotest.(check string)
         "message" "expected \"c\", found 'x'" (Parseff.Error.message e)
   | _ ->
@@ -1172,7 +1172,7 @@ let test_render_without_name () =
         (lines [ "1:1: error: expected digit, found 'x'"; "1 | x"; "  | ^" ])
         (Parseff.render_error e);
       Alcotest.(check string) "message" "expected digit, found 'x'" (E.message e);
-      Alcotest.(check int) "pos" 0 (E.pos e)
+      Alcotest.(check int) "pos" 0 e.E.span.start
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
@@ -1349,21 +1349,14 @@ let test_render_window_cut () =
   | _ ->
       Alcotest.fail "unexpected rendering"
 
-let test_render_source_and_pp () =
+let test_render_source () =
   let input = "{\n  \"a\": 1\n  \"b\": 2\n}" in
   match Parseff.parse input ctx_json_parser with
   | Stdlib.Error (e : unit E.t) ->
       Alcotest.(check string)
         "source gives the same text"
         (Parseff.render_error ~name:"input.json" e)
-        (Parseff.render_error ~name:"input.json" ~source:input e);
-      Alcotest.(check string)
-        "pp is render"
-        (Parseff.render_error ~name:"input.json" e)
-        (Format.asprintf "%a"
-           (E.pp ~name:"input.json" ?source:None ?columns:None ?user:None)
-           e
-        )
+        (Parseff.render_error ~name:"input.json" ~source:input e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
 
@@ -1508,7 +1501,7 @@ let test_fail_from_span () =
     (render_error "x = 300;" parser);
   match Parseff.parse "x = 300;" parser with
   | Error ({ kind = Failure "number is too large"; _ } as e)
-    when Parseff.Error.pos e = 4 ->
+    when e.Parseff.Error.span.start = 4 ->
       ()
   | _ ->
       Alcotest.fail "expected a Failure error positioned at the span start"
@@ -1545,7 +1538,7 @@ let test_loose_note () =
 
 let paren_note start =
   {
-    Parseff.Error.at = Some { Parseff.start; stop = start + 1 };
+    Parseff.Error.at = Some { Parseff.Error.start; stop = start + 1 };
     text = "to match this";
   }
 
@@ -1626,45 +1619,10 @@ let test_error_from_and_notes () =
       Alcotest.fail "expected an error"
   );
   match Parseff.parse "abcd" parser with
-  | Error ({ kind = User `Boom; _ } as e) when Parseff.Error.pos e = 0 ->
+  | Error ({ kind = User `Boom; _ } as e) when e.Parseff.Error.span.start = 0 ->
       ()
   | _ ->
       Alcotest.fail "expected a User error positioned at the span start"
-
-let test_catch_with_extras () =
-  let parser () =
-    Parseff.catch
-      (fun () ->
-        Parseff.fail ~from:0
-          ~notes:[ { Parseff.Error.at = None; text = "n" } ]
-          "inner"
-      )
-      (fun msg -> msg ^ "!")
-  in
-  both_runners (fun s -> s) "abc" parser "Ok inner!"
-
-let test_fail_does_not_hide_furthest_failure () =
-  let parser () =
-    ignore
-      (Parseff.optional
-         (fun () ->
-           ignore (Parseff.consume "abcd");
-           Parseff.consume "X"
-         )
-         ()
-      );
-    ignore (Parseff.catch (fun () -> Parseff.fail "boom") (fun _ -> ()));
-    ignore (Parseff.consume "Q")
-  in
-  check_render "furthest failure survives a caught fail"
-    (lines
-       [
-         "input.json:1:5: error: expected \"X\", found 'Y'";
-         "1 | abcdY";
-         "  |     ^";
-       ]
-    )
-    (render_error "abcdY" parser)
 
 let test_fail_frames () =
   let parser () =
@@ -1688,27 +1646,6 @@ let test_fail_frames () =
     )
     (render_error "abc" parser);
   Alcotest.(check string) "frames" "outer@0!; inner@1" (frames_of "abc" parser)
-
-let test_fail_frames_with_catch_in_between () =
-  let parser () =
-    Parseff.context "outer" (fun () ->
-        ignore (Parseff.consume "a");
-        ignore
-          (Parseff.catch
-             (fun () ->
-               Parseff.context "inner" (fun () ->
-                   ignore (Parseff.consume "b");
-                   Parseff.fail "ignored"
-               )
-             )
-             (fun _ -> ())
-          );
-        Parseff.fail "real"
-    )
-  in
-  Alcotest.(check string)
-    "only the contexts open at the real failure" "outer@0"
-    (frames_of "ab" parser)
 
 let id_re = Re.compile (Re.Posix.re "[a-z]+")
 let digit_re = Re.compile (Re.Posix.re "[0-9]+")
@@ -1984,7 +1921,7 @@ let render_all e input =
   ignore (Parseff.render_error ~source:input e);
   ignore (Parseff.render_error ~columns:`Code_points e)
 
-let test_backtrack_window_error_builds () =
+let test_backtrack_window_error_renders () =
   let long = String.make 5000 'a' in
   let check label input =
     match
@@ -2006,7 +1943,8 @@ let test_backtrack_window_error_builds () =
           ~notes:
             [
               {
-                Parseff.Error.at = Some { Parseff.start = 9000; stop = 9001 };
+                Parseff.Error.at =
+                  Some { Parseff.Error.start = 9000; stop = 9001 };
                 text = "far";
               };
             ]
@@ -2027,7 +1965,8 @@ let test_notes_past_the_line_end () =
           ~notes:
             [
               {
-                Parseff.Error.at = Some { Parseff.start = 5000; stop = 5001 };
+                Parseff.Error.at =
+                  Some { Parseff.Error.start = 5000; stop = 5001 };
                 text = "far";
               };
             ]
@@ -2053,21 +1992,21 @@ let from_before_the_buffer_parser kind () =
       Parseff.error ~from `Unterminated
 
 let check_location_agrees label input (e : _ E.t) =
-  let at = Parseff.location_of_position input (E.pos e) in
+  let at = Parseff.location_of_position input e.E.span.start in
   match e.position with
   | Some { location; _ } ->
       Alcotest.(check (pair int int))
         (label ^ " line and column")
         (at.line, at.col)
         (location.line, location.col);
-      Alcotest.(check int) (label ^ " offset") (E.pos e) location.offset
+      Alcotest.(check int) (label ^ " offset") e.E.span.start location.offset
   | None ->
       Alcotest.failf "%s has no position" label
 
 let test_from_older_than_the_buffer () =
   ( match Parseff.parse lines_text (from_before_the_buffer_parser `Fail) with
   | Error e ->
-      Alcotest.(check int) "string mode keeps the offset" 7 (E.pos e);
+      Alcotest.(check int) "string mode keeps the offset" 7 e.E.span.start;
       check_location_agrees "string" lines_text e
   | Ok _ ->
       Alcotest.fail "expected an error"
@@ -2079,8 +2018,10 @@ let test_from_older_than_the_buffer () =
   in
   let check label = function
     | Error (e : _ E.t) -> (
-        Alcotest.(check int) (label ^ " keeps the span start") 7 e.span.start;
-        Alcotest.(check int) (label ^ " keeps the position") 7 (E.pos e);
+        Alcotest.(check int)
+          (label ^ " keeps the span start")
+          7 e.Parseff.Error.span.start;
+        Alcotest.(check int) (label ^ " keeps the position") 7 e.E.span.start;
         Alcotest.(check bool)
           (label ^ " has no position")
           true (e.position = None);
@@ -2654,70 +2595,6 @@ let test_int_mismatch_shows_the_value () =
        ]
     )
     (render_error "\x00\x02" (fun () -> Parseff.BE.int16 1))
-
-let test_pp_matches_render () =
-  let long_message ppf () =
-    Format.pp_print_list ~pp_sep:Format.pp_print_space Format.pp_print_string
-      ppf
-      (List.init 30 (fun i -> Printf.sprintf "word%d" i))
-  in
-  let words =
-    String.concat " " (List.init 30 (fun i -> Printf.sprintf "word%d" i))
-  in
-  match Parseff.parse "x" (fun () -> Parseff.error ()) with
-  | Stdlib.Error e ->
-      Alcotest.(check string)
-        "user printer with breaks"
-        (Parseff.render_error ~name:"input" ~user:(fun () -> words) e)
-        (Format.asprintf "%a"
-           (fun ppf e -> E.pp ~name:"input" ~user:long_message ppf e)
-           e
-        );
-      Alcotest.(check string)
-        "header on one line"
-        ("input:1:1: error: " ^ words)
-        (List.hd
-           (String.split_on_char '\n'
-              (Format.asprintf "%a"
-                 (fun ppf e -> E.pp ~name:"input" ~user:long_message ppf e)
-                 e
-              )
-           )
-        )
-  | Stdlib.Ok _ ->
-      Alcotest.fail "expected an error"
-
-let test_pp_in_an_open_box () =
-  match
-    Parseff.parse "abc" (fun () ->
-        ignore (Parseff.take 1);
-        ignore (Parseff.char 'q')
-    )
-  with
-  | Stdlib.Error (e : unit E.t) ->
-      let b = Buffer.create 100 in
-      let ppf = Format.formatter_of_buffer b in
-      Format.pp_set_margin ppf 20;
-      Format.fprintf ppf "@[<v 2>prefix:@ %a@]@?"
-        (fun ppf e -> E.pp ~name:"input" ppf e)
-        e;
-      Alcotest.(check string)
-        "every line keeps the indentation"
-        (lines
-           [
-             "prefix:";
-             "  input:1:2: error: expected 'q', found 'bc'";
-             "  1 | abc";
-             "    |  ^^";
-           ]
-        )
-        (Buffer.contents b);
-      Alcotest.(check string)
-        "outside a box it is the render"
-        (Parseff.render_error ~name:"input" e)
-        (Format.asprintf "%a" (fun ppf e -> E.pp ~name:"input" ppf e) e)
-  | Stdlib.Ok _ ->
-      Alcotest.fail "expected an error"
 
 let test_quote_escapes () =
   let check label expected input parser =
@@ -3360,7 +3237,7 @@ let test_window_error_points_at_the_parser () =
     Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
   with
   | Stdlib.Error (e : unit E.t) ->
-      Alcotest.(check int) "position is the parser's" 14 (E.pos e);
+      Alcotest.(check int) "position is the parser's" 14 e.E.span.start;
       Alcotest.(check bool) "the line is known" true (e.position <> None);
       Alcotest.(check bool)
         "no byte header" false
@@ -3492,7 +3369,7 @@ let () =
           test_case "invalid UTF-8 and control bytes" `Quick
             test_render_invalid_utf8_and_controls;
           test_case "window cut" `Quick test_render_window_cut;
-          test_case "source and pp" `Quick test_render_source_and_pp;
+          test_case "source" `Quick test_render_source;
           test_case "other kinds" `Quick test_render_other_kinds;
           test_case "streaming opener dropped" `Quick
             test_render_streaming_opener_dropped;
@@ -3509,12 +3386,7 @@ let () =
           test_case "underline on earlier lines" `Quick
             test_secondary_underline_earlier_lines;
           test_case "error ~from ~notes" `Quick test_error_from_and_notes;
-          test_case "catch with extras" `Quick test_catch_with_extras;
-          test_case "caught fail keeps the furthest failure" `Quick
-            test_fail_does_not_hide_furthest_failure;
           test_case "fail frames" `Quick test_fail_frames;
-          test_case "fail frames, catch in between" `Quick
-            test_fail_frames_with_catch_in_between;
           test_case "match_regex label" `Quick test_match_regex_label;
           test_case "note on a dropped line" `Quick test_note_on_dropped_line;
         ]
@@ -3533,7 +3405,7 @@ let () =
       ( "review fixes",
         [
           test_case "window error builds" `Quick
-            test_backtrack_window_error_builds;
+            test_backtrack_window_error_renders;
           test_case "notes past the line end" `Quick
             test_notes_past_the_line_end;
           test_case "from older than the buffer" `Quick
@@ -3567,8 +3439,6 @@ let () =
             test_take_reports_what_is_left;
           test_case "int mismatch shows the value" `Quick
             test_int_mismatch_shows_the_value;
-          test_case "pp matches render" `Quick test_pp_matches_render;
-          test_case "pp in an open box" `Quick test_pp_in_an_open_box;
           test_case "quote escapes" `Quick test_quote_escapes;
           test_case "user error without printer" `Quick
             test_user_error_without_printer;

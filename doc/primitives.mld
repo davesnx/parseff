@@ -343,7 +343,7 @@ let number () =
 let report_error input result =
   match result with
   | Error e ->
-      let loc = Parseff.location_of_position input (Parseff.Error.pos e) in
+      let loc = Parseff.location_of_position input e.Parseff.Error.span.start in
       Printf.printf "line %d, col %d: %s\n" loc.line loc.col
         (Parseff.Error.message e)
   | Ok _ -> ()

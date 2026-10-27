@@ -51,12 +51,12 @@ let chunk_header () =
 let ihdr_data () =
   let width = Parseff.BE.any_int32 () in
   let height = Parseff.BE.any_int32 () in
-  let bit_depth = Parseff.BE.any_uint8 () in
-  let color_type = color_type_of_int (Parseff.BE.any_uint8 ()) in
+  let bit_depth = Parseff.any_uint8 () in
+  let color_type = color_type_of_int (Parseff.any_uint8 ()) in
   (* Skip compression method, filter method, interlace method, CRC *)
-  let _compression = Parseff.BE.any_uint8 () in
-  let _filter = Parseff.BE.any_uint8 () in
-  let _interlace = Parseff.BE.any_uint8 () in
+  let _compression = Parseff.any_uint8 () in
+  let _filter = Parseff.any_uint8 () in
+  let _interlace = Parseff.any_uint8 () in
   let _crc = Parseff.BE.any_int32 () in
   { width; height; bit_depth; color_type }
 
@@ -78,5 +78,5 @@ let () =
       Printf.printf "  %ldx%ld, %d-bit %s\n" hdr.width hdr.height hdr.bit_depth
         (color_type_to_string hdr.color_type)
   | Error e ->
-      Printf.printf "%s: error at byte %d: %s\n" path (Parseff.Error.pos e)
+      Printf.printf "%s: error at byte %d: %s\n" path e.Parseff.Error.span.start
         (Parseff.Error.message e)

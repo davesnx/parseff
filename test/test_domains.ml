@@ -230,7 +230,7 @@ let test_json_across_domains () =
       | Error e ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: JSON parse failed at pos %d for %S" i
-               (Parseff.Error.pos e) input
+               e.Parseff.Error.span.start input
             )
     )
     results
@@ -374,7 +374,7 @@ let test_streaming_json_across_domains () =
       | Error e ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i
-               (Parseff.Error.pos e)
+               e.Parseff.Error.span.start
             )
     )
     results

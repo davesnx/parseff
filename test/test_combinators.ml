@@ -13,7 +13,7 @@ let show show_v = function
   | Ok v ->
       "Ok " ^ show_v v
   | Error e ->
-      Printf.sprintf "Error@%d %s" (Parseff.Error.pos e) (show_error e)
+      Printf.sprintf "Error@%d %s" e.Parseff.Error.span.start (show_error e)
 
 let chunked_source input =
   let pos = ref 0 in
@@ -175,7 +175,7 @@ let test_take_while_huge_at_least () =
       )
     with
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      Alcotest.(check int) "position" 3 (Parseff.Error.pos e);
+      Alcotest.(check int) "position" 3 e.Parseff.Error.span.start;
       Alcotest.(check string)
         "message"
         ("expected at least " ^ huge ^ " characters, found end of input")
@@ -189,7 +189,7 @@ let test_take_while_huge_at_least () =
       )
     with
   | Error ({ kind = Expected { found = Text "b"; _ }; _ } as e) ->
-      Alcotest.(check int) "position" 2 (Parseff.Error.pos e);
+      Alcotest.(check int) "position" 2 e.Parseff.Error.span.start;
       Alcotest.(check string)
         "message"
         ("expected at least " ^ huge ^ " characters, found 'b'")

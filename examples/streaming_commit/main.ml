@@ -55,5 +55,5 @@ let () =
       Printf.printf "window error at %d: limit=%d oldest=%d\n" span.start limit
         oldest
   | Error e ->
-      Printf.printf "parse error at %d: %s\n" (Parseff.Error.pos e)
+      Printf.printf "parse error at %d: %s\n" e.Parseff.Error.span.start
         (Parseff.Error.message e)

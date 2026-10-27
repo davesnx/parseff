@@ -111,7 +111,7 @@ let test title parser cases =
             )
       | Error e ->
           Printf.printf "✗ %-15s -> Error at %d: %s\n" input
-            (Parseff.Error.pos e) (Parseff.Error.message e)
+            e.Parseff.Error.span.start (Parseff.Error.message e)
     )
     cases
 

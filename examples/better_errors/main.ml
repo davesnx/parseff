@@ -180,7 +180,7 @@ let statements () =
     ()
 
 let format_error e =
-  Printf.sprintf "Error at pos %d: %s" (Parseff.Error.pos e)
+  Printf.sprintf "Error at pos %d: %s" e.Parseff.Error.span.start
     (Parseff.Error.message e)
 
 let ws () = Parseff.skip_whitespace ()

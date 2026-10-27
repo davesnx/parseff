@@ -24,7 +24,7 @@ let norm = function
   | Ok v ->
       Ok v
   | Error e ->
-      Error (Parseff.Error.pos e, kind e)
+      Error (e.Parseff.Error.span.start, kind e)
 
 let show_result show_v = function
   | Ok v ->
@@ -184,22 +184,19 @@ let test_utf8_invalid_after_compaction_take_while () =
   check_all ~chunk_sizes:[ 1; 7; 1000 ] "take_while" string_of_int text parser
     expected
 
-let test_utf8_digit_alphanum_reject_non_ascii_digit () =
+let test_utf8_alphanum_rejects_non_ascii_digit () =
   let arabic_indic_three = "\xD9\xA3" in
   List.iter
     (fun (name, parser) ->
       match Parseff.parse arabic_indic_three parser with
-      | Error e when Parseff.Error.pos e = 0 ->
+      | Error e when e.Parseff.Error.span.start = 0 ->
           ()
       | _ ->
           Alcotest.failf "%s accepted U+0663" name
     )
-    [
-      ("digit", fun () -> ignore (Parseff.Utf8.digit ()));
-      ("alphanum", fun () -> ignore (Parseff.Utf8.alphanum ()));
-    ]
+    [ ("alphanum", fun () -> ignore (Parseff.Utf8.alphanum ())) ]
 
-let test_utf8_digit_alphanum_ascii_edges () =
+let test_utf8_alphanum_ascii_edges () =
   List.iter
     (fun (c, expected) ->
       let input = String.make 1 c in
@@ -210,9 +207,6 @@ let test_utf8_digit_alphanum_ascii_edges () =
         | Error _ ->
             false
       in
-      Alcotest.(check bool)
-        (Printf.sprintf "Utf8.digit %C" c)
-        expected (ok Parseff.Utf8.digit);
       Alcotest.(check bool)
         (Printf.sprintf "Utf8.alphanum %C" c)
         (expected || c = 'a')
@@ -368,9 +362,9 @@ let () =
       ( "utf8 classes",
         [
           test_case "digit alphanum non-ASCII digit" `Quick
-            test_utf8_digit_alphanum_reject_non_ascii_digit;
+            test_utf8_alphanum_rejects_non_ascii_digit;
           test_case "digit alphanum ASCII edges" `Quick
-            test_utf8_digit_alphanum_ascii_edges;
+            test_utf8_alphanum_ascii_edges;
           test_case "is_whitespace" `Quick test_utf8_is_whitespace;
         ]
       );

@@ -125,7 +125,7 @@ let () =
               Printf.printf "  at %d: octet %d out of range (0-255)\n" pos n)
         diagnostics
   | Error { error; diagnostics } ->
-      Printf.printf "Parse error at %d: %s\n" (Parseff.Error.pos error)
+      Printf.printf "Parse error at %d: %s\n" error.Parseff.Error.span.start
         (Parseff.Error.message error);
       List.iter
         (fun ({ pos; diagnostic } : validation Parseff.diagnostic) ->

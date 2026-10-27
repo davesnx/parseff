@@ -3,12 +3,12 @@ let int32_testable =
 let int64_testable =
   Alcotest.testable (fun fmt v -> Format.fprintf fmt "0x%016LX" v) Int64.equal
 
-let test_be_any_uint8 () =
+let test_any_uint8 () =
   match
     Parseff.parse "\x00\x7F\xFF" (fun () ->
-        let a = Parseff.BE.any_uint8 () in
-        let b = Parseff.BE.any_uint8 () in
-        let c = Parseff.BE.any_uint8 () in
+        let a = Parseff.any_uint8 () in
+        let b = Parseff.any_uint8 () in
+        let c = Parseff.any_uint8 () in
         (a, b, c)
     )
   with
@@ -19,13 +19,13 @@ let test_be_any_uint8 () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_be_any_int8 () =
+let test_any_int8 () =
   match
     Parseff.parse "\x00\x7F\xFF\x80" (fun () ->
-        let a = Parseff.BE.any_int8 () in
-        let b = Parseff.BE.any_int8 () in
-        let c = Parseff.BE.any_int8 () in
-        let d = Parseff.BE.any_int8 () in
+        let a = Parseff.any_int8 () in
+        let b = Parseff.any_int8 () in
+        let c = Parseff.any_int8 () in
+        let d = Parseff.any_int8 () in
         (a, b, c, d)
     )
   with
@@ -37,15 +37,8 @@ let test_be_any_int8 () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_le_uint8_same_as_be () =
-  match Parseff.parse "\xAB" (fun () -> Parseff.LE.any_uint8 ()) with
-  | Ok v ->
-      Alcotest.(check int) "single byte is endian-agnostic" 0xAB v
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
 let test_uint8_eof () =
-  match Parseff.parse "" (fun () -> Parseff.BE.any_uint8 ()) with
+  match Parseff.parse "" (fun () -> Parseff.any_uint8 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
@@ -277,7 +270,7 @@ let test_le_int32_match () =
 let expect_error_at pos msg (result : (_, unit) Parseff.result) =
   match result with
   | Error ({ kind = Expected { found = Value _; _ }; _ } as e) ->
-      let p = Parseff.Error.pos e in
+      let p = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" pos p;
       Alcotest.(check string) "error message" msg (Parseff.Error.message e)
   | Ok _ ->
@@ -441,12 +434,12 @@ let test_tlv_header () =
   let input = "TL\x01\x00\x01\x0A\x00\x03foo" in
   let parser () =
     let _ = Parseff.consume "TL" in
-    let version = Parseff.BE.any_uint8 () in
+    let version = Parseff.any_uint8 () in
     let count = Parseff.BE.any_uint16 () in
     let fields =
       Parseff.count count
         (fun () ->
-          let tag = Parseff.BE.any_uint8 () in
+          let tag = Parseff.any_uint8 () in
           let len = Parseff.BE.any_uint16 () in
           let value = Parseff.take len in
           (tag, value)
@@ -543,12 +536,12 @@ let test_streaming_composition () =
   let src = byte_at_a_time input in
   let parser () =
     let _ = Parseff.consume "TL" in
-    let version = Parseff.BE.any_uint8 () in
+    let version = Parseff.any_uint8 () in
     let count = Parseff.BE.any_uint16 () in
     let fields =
       Parseff.count count
         (fun () ->
-          let tag = Parseff.BE.any_uint8 () in
+          let tag = Parseff.any_uint8 () in
           let len = Parseff.BE.any_uint16 () in
           let value = Parseff.take len in
           (tag, value)
@@ -572,10 +565,8 @@ let () =
     [
       ( "byte reads",
         [
-          Alcotest.test_case "BE.any_uint8" `Quick test_be_any_uint8;
-          Alcotest.test_case "BE.any_int8" `Quick test_be_any_int8;
-          Alcotest.test_case "LE.any_uint8 same as BE" `Quick
-            test_le_uint8_same_as_be;
+          Alcotest.test_case "any_uint8" `Quick test_any_uint8;
+          Alcotest.test_case "any_int8" `Quick test_any_int8;
           Alcotest.test_case "uint8 eof" `Quick test_uint8_eof;
         ]
       );

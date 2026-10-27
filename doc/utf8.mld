@@ -119,14 +119,6 @@ let l = Parseff.Utf8.letter ()
 (* Matches: 'a', 'é', 'λ', '中', 'д', 'ع', 'अ', ... *)
 ]}
 
-{2 [digit]}
-
-{!val:Parseff.Utf8.digit} matches ASCII digits 0--9 only and returns an [int].
-Unicode digit categories (Nd) include Arabic-Indic, Devanagari, and other
-numeral systems where mapping to [int] is non-trivial. Keeping it ASCII-only
-makes the return value unambiguous. For Unicode digit handling, use
-{!val:Parseff.Utf8.satisfy} with a custom predicate.
-
 {2 [alphanum]}
 
 {!val:Parseff.Utf8.alphanum} matches a Unicode alphabetic character or an ASCII

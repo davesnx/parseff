@@ -4,7 +4,6 @@ Parseff exposes four main APIs for error handling:
 
 - {!val:Parseff.fail}: fail with a string message
 - {!val:Parseff.error}: fail with a typed custom value
-- {!val:Parseff.catch}: intercept a failure and recover
 - {!val:Parseff.expect}: relabel failures from another parser
 - {!val:Parseff.context} and {!val:Parseff.cut}: name a construct and decide it
 
@@ -123,34 +122,6 @@ let number_quick () =
   else n
 ]}
 
-{1 [catch]}
-
-Intercept a {!val:Parseff.fail} failure and recover from it.
-
-{@ocaml skip[val catch : (unit -> 'a) -> (string -> 'a) -> 'a]}
-
-Since [fail] produces [Failure] errors that punch through backtracking, they
-cannot be recovered with {!val:Parseff.or_} or {!val:Parseff.optional}. Use
-[catch] when you want a failure to be recoverable:
-
-{@ocaml[
-(* Without catch: the fail punches through or_, second branch never runs *)
-(* With catch: the failure is intercepted and converted to a fallback value *)
-let lenient_number () =
-  Parseff.catch
-    (fun () ->
-      let s =
-        Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-      in
-      let n = int_of_string s in
-      if n > 255 then Parseff.fail "out of range"
-      else n)
-    (fun _msg -> 0)
-]}
-
-The handler receives the failure message and can return a value, raise a
-different error with {!val:Parseff.error}, or call {!val:Parseff.fail} again.
-
 {1 [expect]}
 
 Run a parser and replace its failure message with a clearer description. The
@@ -229,7 +200,7 @@ A failed parse returns [Error e], where [e] is a {!type:Parseff.Error.t}:
 {@ocaml skip[
 type 'e Error.t = {
   kind : 'e Error.kind;
-  span : range;  (** the bytes the error is about, empty at the end of the input *)
+  span : Error.range;  (** the bytes the error is about, empty at the end of the input *)
   position : Error.position option;
       (** line and column of [span.start], [None] when the line is not known *)
   frames : Error.frame list;  (** open constructs, outermost first *)
@@ -237,6 +208,10 @@ type 'e Error.t = {
   excerpt : Error.excerpt;
 }
 ]}
+
+[Error.t] and the types it holds are [private]: you can read and match them,
+not build them. {!type:Parseff.Error.note} and {!type:Parseff.Error.range} stay
+buildable, for [~notes] of {!val:Parseff.fail}.
 
 [kind] says what happened:
 
@@ -259,7 +234,7 @@ type 'e Error.t = {
 - [User e]: a value given to {!val:Parseff.error}.
 - [Depth_limit_exceeded { limit }]: a {!val:Parseff.rec_} call exceeded the
   [~max_depth] limit.
-- [Backtrack_window_exceeded info]: a streaming parser needed more rewind
+- [Backtrack_window_exceeded { limit; oldest }]: a streaming parser needed more rewind
   history than [~backtrack_window] allows.
 
 The match on [kind] is exhaustive: the compiler tells you when a case is
@@ -326,9 +301,7 @@ v}
 inside the error are used: the error line, the line before it and the line of
 the opener, each cut to 240 bytes around the failure. That is enough for
 in-memory and streaming parses; with a streaming source the old lines may be gone
-and the frame line then says [from byte N]. [Parseff.Error.pp] prints through a
-formatter: the [~user] printer runs in a horizontal box and the lines of the
-result are separated by forced newlines, so it works inside a box.
+and the frame line then says [from byte N].
 [Parseff.Error.message] returns only the one-line message.
 
 [~columns] chooses the unit of the column in the header: bytes by default, or
@@ -361,4 +334,4 @@ The 0.4 messages of primitives that were not expectations (invalid UTF-8, failed
 regex, mismatched [BE.int16]) are now [Expected] items: [valid UTF-8],
 [text matching the pattern] and [int16be 0xFFFE].
 [`Unexpected_end_of_input] is an [Expected] error whose [found] is [End], so it
-now says what was expected. The position is [Parseff.Error.pos e].
+now says what was expected. The position is [e.span.start].

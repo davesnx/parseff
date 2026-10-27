@@ -212,7 +212,7 @@ let test_of_string_json () =
   | Ok _ ->
       Alcotest.fail "Expected Object"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       let msg = Parseff.Error.message e in
       Alcotest.fail (Printf.sprintf "Error at pos %d: %s" pos msg)
   | Error _ ->
@@ -476,7 +476,7 @@ let test_streaming_commit_blocks_backtrack () =
   | Ok _ ->
       Alcotest.fail "Expected committed branch failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       let msg = Parseff.Error.message e in
       Alcotest.(check int) "error position" 2 pos;
       Alcotest.(check string) "error message" "expected 'x', found 'cd'" msg
@@ -495,7 +495,7 @@ let test_backtrack_window_exceeded () =
   | Ok _ ->
       Alcotest.fail "Expected backtrack window failure"
   | Error ({ kind = Backtrack_window_exceeded { limit; oldest }; _ } as e) ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check int) "limit" 2 limit;
       Alcotest.(check int) "oldest" 0 oldest
@@ -632,7 +632,7 @@ let test_parse_source_until_end_requires_eof () =
   | Error
       { error = { kind = Expected { found = Text _; _ }; _ } as e; diagnostics }
     ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 3 pos;
       Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
   | Error _ ->
@@ -688,7 +688,7 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { error = { kind = Expected { found = Text _; _ }; _ } as e; _ } ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "fails at explicit eof position" 1 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -911,7 +911,7 @@ let norm : (_, unit) Parseff.result -> _ = function
         | Backtrack_window_exceeded _ ->
             "Backtrack_window_exceeded"
       in
-      Error (Parseff.Error.pos e, kind)
+      Error (e.Parseff.Error.span.start, kind)
 
 let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
   let expected = norm (Parseff.parse input parser) in
@@ -1116,7 +1116,7 @@ let test_utf8_scan_after_ascii () =
   let all () = Parseff.Utf8.take_while (fun _ -> true) in
   ( match Parseff.parse "ab\xFFc" all with
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      Alcotest.(check int) "invalid byte position" 2 (Parseff.Error.pos e);
+      Alcotest.(check int) "invalid byte position" 2 e.Parseff.Error.span.start;
       Alcotest.(check string)
         "invalid byte message" "expected valid UTF-8, found '\\xFF'"
         (Parseff.Error.message e)
@@ -1271,7 +1271,7 @@ let show_failure = function
   | Ok _ ->
       "ok"
   | Error e ->
-      Printf.sprintf "%d %s" (Parseff.Error.pos e) (Parseff.Error.message e)
+      Printf.sprintf "%d %s" e.Parseff.Error.span.start (Parseff.Error.message e)
 
 let test_error_position_across_chunk_boundary () =
   List.iter
@@ -1365,7 +1365,7 @@ let test_context_in_streaming () =
       parser
   with
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = Parseff.Error.pos e in
+      let pos = e.Parseff.Error.span.start in
       let msg = Parseff.Error.message e in
       Alcotest.(check int) "position" 6001 pos;
       Alcotest.(check string) "message" "expected \"b\", found 'x'" msg

@@ -16,8 +16,8 @@ let[@inline always] span_to_string s =
   string_slice s.buf s.off s.len (String.length s.buf)
 
 type location = { offset : int; line : int; col : int }
-type range = { start : int; stop : int }
-type note_data = { at : range option; text : string }
+type range_data = { start : int; stop : int }
+type note_data = { at : range_data option; text : string }
 
 type endian = Big | Little
 
@@ -1859,8 +1859,6 @@ let expect label p =
       end;
       raise_notrace Fail
 
-let catch p handler = try p () with User_failure (_pos, msg, _) -> handler msg
-
 let one_of parsers () =
   let rec try_all = function
     | [] ->
@@ -1901,11 +1899,11 @@ let alphanum () =
 
 let any_char () = satisfy (fun _ -> true) ~label:"any character"
 
-let[@inline] binary_any_uint8 () =
+let[@inline] any_uint8 () =
   let st = get_state () in
   handle_any_uint8 st
 
-let[@inline] binary_any_int8 () =
+let[@inline] any_int8 () =
   let st = get_state () in
   handle_any_int8 st
 
@@ -1962,8 +1960,6 @@ let expect_int64 endian any_fn expected =
   end
 
 module BE = struct
-  let any_uint8 = binary_any_uint8
-  let any_int8 = binary_any_int8
   let[@inline] any_int16 () = binary_any_int16 Big ()
 
   let[@inline] any_uint16 () =
@@ -1980,8 +1976,6 @@ module BE = struct
 end
 
 module LE = struct
-  let any_uint8 = binary_any_uint8
-  let any_int8 = binary_any_int8
   let[@inline] any_int16 () = binary_any_int16 Little ()
 
   let[@inline] any_uint16 () =
@@ -2060,17 +2054,6 @@ module Utf8 = struct
 
   let letter () = satisfy Uucp.Alpha.is_alphabetic ~label:"letter"
 
-  let digit () =
-    let u =
-      satisfy
-        (fun u ->
-          let i = Uchar.to_int u in
-          i >= 0x30 && i <= 0x39
-        )
-        ~label:"digit"
-    in
-    Uchar.to_int u - 0x30
-
   let alphanum () =
     satisfy
       (fun u ->
@@ -2113,6 +2096,7 @@ module Error = struct
     | End_of_input
 
   type found = Text of string | End | Short of int | Value of string
+  type range = range_data = { start : int; stop : int }
   type frame = { name : string; start : int; delimited : bool }
   type note = note_data = { at : range option; text : string }
 
@@ -2140,7 +2124,7 @@ module Error = struct
     | Failure of string
     | User of 'e
     | Depth_limit_exceeded of { limit : int }
-    | Backtrack_window_exceeded of backtrack_window_error
+    | Backtrack_window_exceeded of { limit : int; oldest : int }
 
   type 'e t = {
     kind : 'e kind;
@@ -2155,7 +2139,6 @@ module Error = struct
 
   let window_size = 240
   let max_frames = 5
-  let pos e = e.span.start
 
   let char_len s i =
     let d = String.get_utf_8_uchar s i in
@@ -2931,15 +2914,6 @@ module Error = struct
         ()
     );
     Buffer.contents b
-
-  let pp ?name ?source ?columns ?user ppf e =
-    let user = Option.map (fun f v -> Format.asprintf "@[<h>%a@]" f v) user in
-    List.iteri
-      (fun i line ->
-        if i > 0 then Format.pp_force_newline ppf ();
-        Format.pp_print_string ppf line
-      )
-      (String.split_on_char '\n' (render ?name ?source ?columns ?user e))
 end
 
 let render_error = Error.render
@@ -3393,7 +3367,10 @@ let run_detailed st thunk =
   | exception Backtrack_window_exceeded (info, a) ->
       Stdlib.Error
         (error_plain (State.current ()) a.at
-           (Error.Backtrack_window_exceeded info) a.open_frames
+           (Error.Backtrack_window_exceeded
+              { limit = info.limit; oldest = info.oldest }
+           )
+           a.open_frames
         )
 
 let until_end parser () =
