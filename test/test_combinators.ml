@@ -145,7 +145,7 @@ let test_take_max_int () =
   in
   Alcotest.(check string)
     "short input"
-    {|Error@1 Expected "expected 4611686018427387903 bytes, found 'bc'"|}
+    {|Error@1 Expected "expected 4611686018427387903 bytes, found only 2 (end of input)"|}
     (show show_string r)
 
 let test_take_max_int_streaming () =
@@ -156,9 +156,10 @@ let test_take_max_int_streaming () =
     )
   in
   match r with
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 4611686018427387903 bytes, found 'bc'"
+        "expected items"
+        "expected 4611686018427387903 bytes, found only 2 (end of input)"
         (Parseff.Error.message e);
       ()
   | Error { kind = Backtrack_window_exceeded _; _ } ->

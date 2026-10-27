@@ -170,7 +170,7 @@ sequence. This includes:
 
 The error expects ["valid UTF-8"] and the position points to the first invalid
 byte: [expected valid UTF-8, found '\xFF']. In an error report the invalid byte
-prints as [\xFF] in the found text and as [?] in the source line.
+prints as [\xFF] in the found text and in the source line.
 
 {!val:Parseff.Utf8.char} reports the expected character itself, for example
 [expected 'é', found 'e'], and the failure of any [Utf8] primitive carries the
@@ -197,8 +197,10 @@ input.json:1:6: error: expected ',' or ']', found '"'     (code points)
   |      ^
 v}
 
-[Parseff.Error.t] also carries [code_point_col]. It is [None] when the start of
-the line is no longer buffered, which only happens when streaming; pass
+[Parseff.Error.t] carries [position], with the line and column in bytes and
+[code_point_col]. [position] is [None] when the line is not known, and
+[code_point_col] is [None] when the start of the line is no longer buffered,
+which only happens when streaming; pass
 [~source] to [render] to get exact columns then. Wide characters and combining
 marks count as one column each: Parseff has no width tables.
 

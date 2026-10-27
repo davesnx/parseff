@@ -496,7 +496,7 @@ let test_backtrack_window_exceeded () =
       Alcotest.fail "Expected backtrack window failure"
   | Error ({ kind = Backtrack_window_exceeded { limit; oldest }; _ } as e) ->
       let pos = Parseff.Error.pos e in
-      Alcotest.(check int) "error position" 3 pos;
+      Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check int) "limit" 2 limit;
       Alcotest.(check int) "oldest" 0 oldest
   | Error _ ->
@@ -936,15 +936,15 @@ let test_regex_lookbehind_after_peek () =
     [
       ( "bol",
         Re.(compile (seq [ bol; str "ab" ])),
-        Error (2, "Expected expected regex match, found 'ab'")
+        Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ( "bow",
         Re.(compile (seq [ bow; str "ab" ])),
-        Error (2, "Expected expected regex match, found 'ab'")
+        Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ( "bos",
         Re.(compile (seq [ bos; str "ab" ])),
-        Error (2, "Expected expected regex match, found 'ab'")
+        Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
     ]
@@ -1248,9 +1248,9 @@ let test_take_beyond_end_of_input () =
     )
   in
   match result with
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+  | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
-        "expected items" "expected 10 bytes, found 'abc'"
+        "expected items" "expected 10 bytes, found only 3 (end of input)"
         (Parseff.Error.message e);
       ()
   | _ ->

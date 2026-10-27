@@ -1475,7 +1475,7 @@ let test_match_regex_failure () =
       let pos = Parseff.Error.pos e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
-        "error message" "expected regex match, found 'abc'"
+        "error message" "expected text matching the pattern, found 'abc'"
         (Parseff.Error.message e)
   | Error _ ->
       Alcotest.fail "Unexpected error type"

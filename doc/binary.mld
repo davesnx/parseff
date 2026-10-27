@@ -116,8 +116,10 @@ fields, and length-prefixed payloads.
 
 {@ocaml skip[val take : int -> string]}
 
-Returns [""] for [n <= 0] without consuming input. Fails with an
-unexpected-end-of-input error if fewer than [n] bytes remain.
+Returns [""] for [n = 0] without consuming input and raises [Invalid_argument]
+for a negative [n]. Fails if fewer than [n] bytes remain, with
+[expected 5 bytes, found only 3 (end of input)], or [found end of input] when
+none remain.
 
 {@ocaml skip[
 (* Length-prefixed payload *)
@@ -190,14 +192,16 @@ let version_field () =
 
 All binary parsers fail with [expected N bytes] when there are not enough bytes
 remaining. The position in the error points to the byte where the read was
-attempted, not the end of input, and the found text is what is left there (or
-[end of input] when nothing is left).
+attempted, not the end of input, and the error says how many bytes are left:
+[expected 4 bytes, found only 3 (end of input)], or [found end of input] when
+nothing is left.
 
 Exact-match parsers ({!val:Parseff.BE.int16}, {!val:Parseff.BE.int32},
 {!val:Parseff.BE.int64}) fail with the expected value in hexadecimal as an
-expected item, e.g. [expected int32 0x01020304, found '\xDE']. Like any other
-expected item it merges with what the alternatives expected at the same
-position.
+expected item with the endianness, and [found] shows the integer that was read
+in the same width, e.g. [expected int32be 0x01020304, found 0xDE000000]. Like
+any other expected item it merges with what the alternatives expected at the
+same position.
 
 {1 Position tracking}
 

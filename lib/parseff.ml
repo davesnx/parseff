@@ -32,7 +32,12 @@ type fail_extra = {
 }
 
 exception User_failure of int * string * fail_extra
-exception Depth_limit_exceeded of int * string
+type abort_frames = {
+  at : int;
+  mutable open_frames : (string * int * bool) list;
+}
+
+exception Depth_limit_exceeded of abort_frames
 
 type line_index = {
   mutable starts : int array;
@@ -51,7 +56,7 @@ let frame_stride = 3
 
 type backtrack_window_error = { limit : int; oldest : int }
 
-exception Backtrack_window_exceeded of int * backtrack_window_error
+exception Backtrack_window_exceeded of backtrack_window_error * abort_frames
 
 type source = {
   initial : string;
@@ -540,7 +545,10 @@ let[@inline never] rec fill st ~keep_from need =
           imin (limit - (st.input_len - floor)) (Bytes.length src.tmp)
         in
         if max_bytes <= 0 then
-          raise (Backtrack_window_exceeded (need, { limit; oldest = floor }))
+          raise
+            (Backtrack_window_exceeded
+               ({ limit; oldest = floor }, { at = st.pos; open_frames = [] })
+            )
         else
           let n = read_source st src src.tmp 0 max_bytes in
           if n = 0 then begin
@@ -863,8 +871,9 @@ let[@inline never] fail_at_least st n =
     fail_int st st.pos (at_least_kind n)
   else
     fail_str st st.pos ((1 lsl 3) lor tag_big) (string_of_int n)
+let none_kind = (8 lsl 3) lor tag_big
 let label_value = "value"
-let label_regex = "regex match"
+let label_regex = "text matching the pattern"
 
 let[@inline never] far_commit_reset st = st.far <- far_none
 
@@ -1113,29 +1122,28 @@ let regex_failure st label =
   | None ->
       fail_str st st.pos tag_label label_regex
 
+let raise_if_pinned st = function
+  | Some (_, info) ->
+      raise (Backtrack_window_exceeded (info, { at = st.pos; open_frames = [] }))
+  | None ->
+      ()
+
 let[@inline never] handle_match_regex st re label =
   let pinned = buffer_for_regex st in
-  let raise_if_pinned () =
-    match pinned with
-    | Some (need, info) ->
-        raise (Backtrack_window_exceeded (need, info))
-    | None ->
-        ()
-  in
   match Re.exec ~pos:(st.pos - st.base) re st.input with
   | groups ->
       let match_start = st.base + Re.Group.start groups 0 in
       let match_end = st.base + Re.Group.stop groups 0 in
       if match_start <> st.pos then begin
-        raise_if_pinned ();
+        raise_if_pinned st pinned;
         regex_failure st label
       end else begin
-        if match_end >= st.input_len then raise_if_pinned ();
+        if match_end >= st.input_len then raise_if_pinned st pinned;
         st.pos <- match_end;
         Re.Group.get groups 0
       end
   | exception Not_found ->
-      raise_if_pinned ();
+      raise_if_pinned st pinned;
       regex_failure st label
 
 let[@inline never] handle_any_uint8 st =
@@ -1459,7 +1467,7 @@ let[@inline] commit () =
   if State.commit_nearest st && st.far.pos >= st.pos then far_commit_reset st
 
 let take n =
-  if n < 0 then fail "Parseff.take: count must be non-negative";
+  if n < 0 then invalid_arg "Parseff.take: count must be non-negative";
   if n = 0 then
     ""
   else begin
@@ -1587,6 +1595,9 @@ let context ?(delimited = false) name p =
       | User_failure (pos, _, x) when x.depth = d + 1 ->
           if pos > start then x.chain <- (name, start, delimited) :: x.chain;
           x.depth <- d
+      | Depth_limit_exceeded a | Backtrack_window_exceeded (_, a) ->
+          if a.at > start then
+            a.open_frames <- (name, start, delimited) :: a.open_frames
       | _ ->
           ()
       );
@@ -1608,12 +1619,7 @@ let cut () =
 let rec_ p =
   let st = get_state () in
   if st.current_depth >= st.max_depth then
-    raise
-      (Depth_limit_exceeded
-         ( st.pos,
-           Printf.sprintf "maximum nesting depth %d exceeded" st.max_depth
-         )
-      );
+    raise (Depth_limit_exceeded { at = st.pos; open_frames = [] });
   st.current_depth <- st.current_depth + 1;
   match p () with
   | v ->
@@ -1859,7 +1865,7 @@ let one_of parsers () =
   let rec try_all = function
     | [] ->
         let st = get_state () in
-        fail_str st st.pos tag_label "an alternative"
+        fail_str st st.pos none_kind ""
     | [ p ] ->
         p ()
     | p :: rest ->
@@ -1915,29 +1921,45 @@ let[@inline] binary_any_int64 endian () =
   let st = get_state () in
   handle_any_int64 st endian
 
-let expect_int16 any_fn expected =
+let int_kind index endian =
+  let little = match endian with Big -> 0 | Little -> 1 in
+  ((2 + (index * 2) + little) lsl 3) lor tag_big
+
+let expect_int16 endian any_fn expected =
   if expected < -0x8000 || expected > 0xFFFF then
     invalid_arg "Parseff.int16: value must be in -32768..65535";
   let st = get_state () in
   let start = st.pos in
   let actual = any_fn () land 0xFFFF in
   let expected = expected land 0xFFFF in
-  if actual <> expected then
-    fail_str st start tag_label (Printf.sprintf "int16 0x%04X" expected)
+  if actual <> expected then begin
+    let b = Bytes.create 4 in
+    Bytes.set_uint16_be b 0 expected;
+    Bytes.set_uint16_be b 2 actual;
+    fail_str st start (int_kind 0 endian) (Bytes.unsafe_to_string b)
+  end
 
-let expect_int32 any_fn expected =
+let expect_int32 endian any_fn expected =
   let st = get_state () in
   let start = st.pos in
   let actual = any_fn () in
-  if actual <> expected then
-    fail_str st start tag_label (Printf.sprintf "int32 0x%08lX" expected)
+  if actual <> expected then begin
+    let b = Bytes.create 8 in
+    Bytes.set_int32_be b 0 expected;
+    Bytes.set_int32_be b 4 actual;
+    fail_str st start (int_kind 1 endian) (Bytes.unsafe_to_string b)
+  end
 
-let expect_int64 any_fn expected =
+let expect_int64 endian any_fn expected =
   let st = get_state () in
   let start = st.pos in
   let actual = any_fn () in
-  if actual <> expected then
-    fail_str st start tag_label (Printf.sprintf "int64 0x%016LX" expected)
+  if actual <> expected then begin
+    let b = Bytes.create 16 in
+    Bytes.set_int64_be b 0 expected;
+    Bytes.set_int64_be b 8 actual;
+    fail_str st start (int_kind 2 endian) (Bytes.unsafe_to_string b)
+  end
 
 module BE = struct
   let any_uint8 = binary_any_uint8
@@ -1952,9 +1974,9 @@ module BE = struct
   let[@inline] any_int64 () = binary_any_int64 Big ()
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
-  let int16 = expect_int16 any_int16
-  let int32 = expect_int32 any_int32
-  let int64 = expect_int64 any_int64
+  let int16 = expect_int16 Big any_int16
+  let int32 = expect_int32 Big any_int32
+  let int64 = expect_int64 Big any_int64
 end
 
 module LE = struct
@@ -1970,9 +1992,9 @@ module LE = struct
   let[@inline] any_int64 () = binary_any_int64 Little ()
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
-  let int16 = expect_int16 any_int16
-  let int32 = expect_int32 any_int32
-  let int64 = expect_int64 any_int64
+  let int16 = expect_int16 Little any_int16
+  let int32 = expect_int32 Little any_int32
+  let int64 = expect_int64 Little any_int64
 end
 
 module Utf8 = struct
@@ -2090,7 +2112,7 @@ module Error = struct
     | Label of string
     | End_of_input
 
-  type found = Text of string | End
+  type found = Text of string | End | Short of int | Value of string
   type frame = { name : string; start : int; delimited : bool }
   type note = note_data = { at : range option; text : string }
 
@@ -2102,14 +2124,19 @@ module Error = struct
     right_cut : bool;
   }
 
+  type position = { location : location; code_point_col : int option }
+
   type excerpt = {
     views : view list;
-    frame_locs : (int * int) option list;
-    located : bool;
+    frame_locs : (int * int * int option) option list;
   }
 
   type 'e kind =
-    | Expected of { items : expected * expected list; found : found }
+    | Expected of {
+        items : expected * expected list;
+        found : found;
+        more : int;
+      }
     | Failure of string
     | User of 'e
     | Depth_limit_exceeded of { limit : int }
@@ -2118,8 +2145,7 @@ module Error = struct
   type 'e t = {
     kind : 'e kind;
     span : range;
-    location : location;
-    code_point_col : int option;
+    position : position option;
     frames : frame list;
     notes : note list;
     excerpt : excerpt;
@@ -2167,6 +2193,25 @@ module Error = struct
     | _ ->
         Printf.sprintf "\\x%02X" c
 
+  let hidden_code_point c =
+    c = 0xA0
+    ||
+    match Uucp.Gc.general_category (Uchar.of_int c) with
+    | `Cf | `Zl | `Zp ->
+        true
+    | _ ->
+        false
+
+  let combining_mark c =
+    match Uucp.Gc.general_category (Uchar.of_int c) with
+    | `Mn | `Me ->
+        true
+    | _ ->
+        false
+
+  let invisible ~first c =
+    c >= 0x80 && (c < 0xA0 || hidden_code_point c || (first && combining_mark c))
+
   let escape_text ?(quote = '\'') s =
     let b = Buffer.create (String.length s + 2) in
     let i = ref 0 in
@@ -2177,10 +2222,13 @@ module Error = struct
         let c = Uchar.to_int (Uchar.utf_decode_uchar d) in
         if c < 0x20 || c = 0x7F then
           Buffer.add_string b (escape_code c)
-        else if c >= 0x80 && c < 0xA0 then
+        else if invisible ~first:(!i = 0) c then
           Buffer.add_string b (Printf.sprintf "\\u{%04X}" c)
-        else if c = Char.code quote && quote = '"' then
-          Buffer.add_string b "\\\""
+        else if c = Char.code quote then
+          if quote = '"' then
+            Buffer.add_string b "\\\""
+          else
+            Buffer.add_string b "\\'"
         else if c = Char.code '\\' && quote = '"' then
           Buffer.add_string b "\\\\"
         else
@@ -2202,12 +2250,53 @@ module Error = struct
   let expected_text = function
     | Char u ->
         "'" ^ escape_text (utf8_of_uchar u) ^ "'"
+    | Literal s when String.length s = 1 && Char.code s.[0] >= 0x80 ->
+        "'" ^ escape_text s ^ "'"
     | Literal s ->
         "\"" ^ escape_text ~quote:'"' s ^ "\""
     | Label l ->
         l
     | End_of_input ->
         "end of input"
+
+  let max_items = 8
+
+  let more_alternatives n =
+    if n = 1 then
+      "1 more alternative"
+    else
+      string_of_int n ^ " more alternatives"
+
+  let int_mismatch payload s =
+    let index = (payload - 2) / 2 in
+    let suffix =
+      if (payload - 2) land 1 = 1 then
+        "le"
+      else
+        "be"
+    in
+    match index with
+    | 0 ->
+        let expected = String.get_uint16_be s 0 in
+        let actual = String.get_uint16_be s 2 in
+        ( Printf.sprintf "int16%s 0x%04X" suffix expected,
+          Printf.sprintf "0x%04X" actual,
+          2
+        )
+    | 1 ->
+        let expected = String.get_int32_be s 0 in
+        let actual = String.get_int32_be s 4 in
+        ( Printf.sprintf "int32%s 0x%08lX" suffix expected,
+          Printf.sprintf "0x%08lX" actual,
+          4
+        )
+    | _ ->
+        let expected = String.get_int64_be s 0 in
+        let actual = String.get_int64_be s 8 in
+        ( Printf.sprintf "int64%s 0x%016LX" suffix expected,
+          Printf.sprintf "0x%016LX" actual,
+          8
+        )
 
   let join_items = function
     | [ a ] ->
@@ -2225,23 +2314,44 @@ module Error = struct
         in
         go items
 
+  let list_expected items more =
+    if List.length items <= max_items && more = 0 then
+      join_items (List.map expected_text items)
+    else begin
+      let shown = List.filteri (fun i _ -> i < max_items) items in
+      String.concat ", " (List.map expected_text shown)
+      ^ ", or "
+      ^ more_alternatives (List.length items - List.length shown + more)
+    end
+
+  let found_text = function
+    | End ->
+        "end of input"
+    | Short n ->
+        Printf.sprintf "only %d (end of input)" n
+    | Value v ->
+        v
+    | Text s ->
+        let n = String.length s in
+        if n > 3 && String.sub s (n - 3) 3 = "..." then
+          "'" ^ escape_text (String.sub s 0 (n - 3)) ^ "'..."
+        else
+          "'" ^ escape_text s ^ "'"
+
   let message ?user e =
     match e.kind with
-    | Expected { items = x, xs; found } ->
-        let found =
-          match found with
-          | End ->
-              "end of input"
-          | Text s ->
-              "'" ^ escape_text s ^ "'"
-        in
+    | Expected { items = x, xs; found; more } ->
         "expected "
-        ^ join_items (List.map expected_text (x :: xs))
-        ^ ", found " ^ found
+        ^ list_expected (x :: xs) more
+        ^ ", found " ^ found_text found
     | Failure m ->
         m
     | User v -> (
-        match user with Some f -> f v | None -> "error"
+        match user with
+        | Some f ->
+            f v
+        | None ->
+            "user error (no ~user printer given)"
       )
     | Depth_limit_exceeded { limit } ->
         Printf.sprintf "maximum nesting depth %d exceeded" limit
@@ -2326,48 +2436,86 @@ module Error = struct
     done;
     Buffer.add_string b (string_of_int n)
 
+  let display_unit text i =
+    let c = String.unsafe_get text i in
+    if Char.code c < 0x80 then
+      begin if c <> '\t' && (c < ' ' || c = '\x7F') then
+        (1, escape_code (Char.code c))
+      else
+        (1, "")
+    end
+    else begin
+      let d = String.get_utf_8_uchar text i in
+      if Uchar.utf_decode_is_valid d then begin
+        let n = Uchar.utf_decode_length d in
+        let cp = Uchar.to_int (Uchar.utf_decode_uchar d) in
+        if invisible ~first:(i = 0) cp then
+          (n, Printf.sprintf "\\u{%04X}" cp)
+        else
+          (n, "")
+      end else
+        (1, Printf.sprintf "\\x%02X" (Char.code c))
+    end
+
+  let unit_width esc =
+    if esc = "" then
+      1
+    else
+      String.length esc
+
   let add_display b text =
     let i = ref 0 in
     let len = String.length text in
     while !i < len do
-      let c = String.unsafe_get text !i in
-      if Char.code c < 0x80 then begin
-        if c = '\t' then
-          Buffer.add_char b '\t'
-        else if c < ' ' || c = '\x7F' then
-          Buffer.add_char b '?'
-        else
-          Buffer.add_char b c;
-        incr i
-      end else begin
-        let d = String.get_utf_8_uchar text !i in
-        if Uchar.utf_decode_is_valid d then begin
-          let n = Uchar.utf_decode_length d in
-          let cp = Uchar.to_int (Uchar.utf_decode_uchar d) in
-          if cp < 0xA0 then
-            Buffer.add_char b '?'
-          else
-            Buffer.add_substring b text !i n;
-          i := !i + n
-        end else begin
-          Buffer.add_char b '?';
-          incr i
-        end
-      end
+      let n, esc = display_unit text !i in
+      if esc = "" then
+        Buffer.add_substring b text !i n
+      else
+        Buffer.add_string b esc;
+      i := !i + n
     done
 
-  let add_padding b prefix =
+  let add_padding b text upto =
     let i = ref 0 in
-    let len = String.length prefix in
-    while !i < len do
-      if String.unsafe_get prefix !i = '\t' then begin
-        Buffer.add_char b '\t';
-        incr i
-      end else begin
-        Buffer.add_char b ' ';
-        i := !i + char_len prefix !i
-      end
+    while !i < upto do
+      let n, esc = display_unit text !i in
+      if String.unsafe_get text !i = '\t' then
+        Buffer.add_char b '\t'
+      else
+        for _ = 1 to unit_width esc do
+          Buffer.add_char b ' '
+        done;
+      i := !i + n
     done
+
+  let char_boundary text i =
+    if i >= String.length text then
+      i
+    else
+      let j = ref i in
+      while !j > 0 && i - !j < 3 && is_continuation text !j do
+        decr j
+      done;
+      let d = String.get_utf_8_uchar text !j in
+      if Uchar.utf_decode_is_valid d && !j + Uchar.utf_decode_length d > i then
+        !j
+      else
+        i
+
+  let display_width text a z =
+    let w = ref 0 and i = ref (char_boundary text a) in
+    while !i < z do
+      let n, esc = display_unit text !i in
+      w := !w + unit_width esc;
+      i := !i + n
+    done;
+    !w
+
+  let add_text b text =
+    if text <> "" then begin
+      Buffer.add_char b ' ';
+      Buffer.add_string b text
+    end
 
   let render ?name ?source ?(columns = `Bytes) ?user e =
     let src =
@@ -2377,22 +2525,48 @@ module Error = struct
       | None ->
           None
     in
-    let loc =
-      match source with
-      | Some s ->
-          location_of_position s e.span.start
-      | None ->
-          e.location
+    let where =
+      match (src, e.position) with
+      | Some (s, starts), _ ->
+          let l = location_of_position s e.span.start in
+          Some
+            ( l,
+              Some
+                (1
+                + count_code_points s
+                    starts.(l.line - 1)
+                    (imin e.span.start (String.length s))
+                )
+            )
+      | None, Some p ->
+          Some (p.location, p.code_point_col)
+      | None, None ->
+          None
     in
-    let located = source <> None || e.excerpt.located in
-    let line = loc.line in
     let frame_loc i (f : frame) =
       match src with
-      | Some (s, _) ->
+      | Some (s, starts) ->
           let l = location_of_position s f.start in
-          Some (l.line, l.col)
+          let shown =
+            match columns with
+            | `Bytes ->
+                l.col
+            | `Code_points ->
+                1
+                + count_code_points s
+                    starts.(l.line - 1)
+                    (imin f.start (String.length s))
+          in
+          Some (l.line, l.col, shown)
       | None ->
-          List.nth e.excerpt.frame_locs i
+          Option.map
+            (fun (l, c, cp) ->
+              ( l,
+                c,
+                match (columns, cp) with `Code_points, Some cp -> cp | _ -> c
+              )
+            )
+            (List.nth e.excerpt.frame_locs i)
     in
     let get number focus =
       match src with
@@ -2401,51 +2575,35 @@ module Error = struct
       | None ->
           List.find_opt (fun v -> v.number = number) e.excerpt.views
     in
-    let col =
-      match columns with
-      | `Bytes ->
-          loc.col
-      | `Code_points -> (
-          match (e.code_point_col, src) with
-          | Some c, _ ->
-              c
-          | None, Some (s, starts) ->
-              let a = starts.(line - 1) in
-              1 + count_code_points s a (imin e.span.start (String.length s))
-          | None, None ->
-              loc.col
-        )
-    in
     let b = Buffer.create 256 in
     ( match name with
     | Some n ->
         Buffer.add_string b n;
-        Buffer.add_char b ':'
+        Buffer.add_char b ':';
+        if where = None then Buffer.add_char b ' '
     | None ->
         ()
     );
-    if located then begin
-      Buffer.add_string b (string_of_int line);
-      Buffer.add_char b ':';
-      Buffer.add_string b (string_of_int col)
-    end else begin
-      Buffer.add_string b "byte ";
-      Buffer.add_string b (string_of_int e.span.start)
-    end;
-    Buffer.add_string b ": error: ";
-    Buffer.add_string b (message ?user e);
+    ( match where with
+    | Some (loc, cp) ->
+        Buffer.add_string b (string_of_int loc.line);
+        Buffer.add_char b ':';
+        Buffer.add_string b
+          (string_of_int
+             ( match (columns, cp) with
+             | `Code_points, Some c ->
+                 c
+             | _ ->
+                 loc.col
+             )
+          )
+    | None ->
+        Buffer.add_string b "byte ";
+        Buffer.add_string b (string_of_int e.span.start)
+    );
+    Buffer.add_string b ": error:";
+    add_text b (message ?user e);
     let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.frames in
-    let opener =
-      List.find_map
-        (fun ((f : frame), loc) ->
-          match loc with
-          | Some (l, c) when f.delimited && l < line ->
-              Some (l, c, f.start)
-          | _ ->
-              None
-        )
-        (List.rev frames)
-    in
     let note_line (n : note) =
       match n.at with
       | None ->
@@ -2476,223 +2634,254 @@ module Error = struct
                 e.excerpt.views
         )
     in
-    let placed = List.filter_map note_line e.notes in
+    let error_view =
+      Option.bind where (fun ((loc : location), _) -> get loc.line (loc.col - 1))
+    in
+    let placed =
+      if error_view = None then
+        []
+      else
+        List.filter_map note_line e.notes
+    in
     let loose =
       List.filter
         (fun (n : note) -> not (List.exists (fun (m, _, _, _) -> m == n) placed))
         e.notes
     in
-    let error_view =
-      if located then
-        get line (loc.col - 1)
-      else
-        None
-    in
-    let prev_view =
-      if line > 1 then
-        get (line - 1) 0
-      else
-        None
-    in
-    let opener_view =
-      match opener with Some (l, c, _) -> get l (c - 1) | None -> None
-    in
-    let shown =
-      List.fold_left
-        (fun acc (v : view) ->
-          if List.exists (fun (u : view) -> u.number = v.number) acc then
-            acc
-          else
-            v :: acc
-        )
-        []
-        (List.filter_map Fun.id [ error_view; opener_view; prev_view ]
-        @ List.map (fun (_, _, v, _) -> v) placed
-        )
-      |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
-    in
     let w =
-      List.fold_left
-        (fun m (v : view) -> imax m (digits v.number))
-        (digits line) shown
-    in
-    let gutter () =
-      Buffer.add_char b '\n';
-      for _ = 1 to w do
-        Buffer.add_char b ' '
-      done;
-      Buffer.add_string b " | "
-    in
-    let bar = ref "" in
-    let line_row (v : view) =
-      Buffer.add_char b '\n';
-      add_padded b w v.number;
-      Buffer.add_string b " | ";
-      Buffer.add_string b !bar;
-      if v.left_cut then Buffer.add_string b "...";
-      add_display b v.text;
-      if v.right_cut then Buffer.add_string b "..."
-    in
-    let prefix_pad (v : view) upto =
-      if v.left_cut then Buffer.add_string b "   ";
-      add_padding b
-        (String.sub v.text 0
-           (imax 0 (imin (upto - v.first) (String.length v.text)))
-        );
-      if upto - v.first > String.length v.text then Buffer.add_char b ' '
-    in
-    let marks (v : view) a z =
-      let len = String.length v.text in
-      let a = imax 0 (imin (a - v.first) len) in
-      let z = imax a (imin (z - v.first) len) in
-      imax 1 (count_code_points v.text a z)
-    in
-    let note_rows (v : view) =
-      List.iter
-        (fun ((n : note), (r : range), (nv : view), _) ->
-          if nv.number = v.number then begin
-            gutter ();
-            Buffer.add_string b !bar;
-            prefix_pad v r.start;
-            for _ = 1 to marks v r.start r.stop do
-              Buffer.add_char b '-'
-            done;
-            Buffer.add_char b ' ';
-            Buffer.add_string b n.text
-          end
-        )
-        placed
-    in
-    let framed =
-      match (opener, opener_view, error_view) with
-      | Some _, Some _, Some _ ->
-          true
-      | _ ->
-          false
-    in
-    let cols (v : view) upto =
-      let text = v.text in
-      let n = imax 0 (imin (upto - v.first) (String.length text)) in
-      let col =
-        ref
-          (w + 5
-          +
-          if v.left_cut then
-            3
-          else
-            0
-          )
-      in
-      let i = ref 0 in
-      while !i < n do
-        if String.unsafe_get text !i = '\t' then
-          col := ((!col / 8) + 1) * 8
-        else begin
-          incr col;
-          i := !i + char_len text !i - 1
-        end;
-        incr i
-      done;
-      if upto - v.first > String.length text then incr col;
-      !col - (w + 3)
-    in
-    let rule first last upto (v : view) =
-      gutter ();
-      Buffer.add_string b first;
-      for _ = 1 to cols v upto - 1 do
-        Buffer.add_string b "\xe2\x94\x80"
-      done;
-      Buffer.add_string b last
-    in
-    let carets (v : view) =
-      if e.span.start - v.first >= String.length v.text then
-        1
-      else
-        marks v e.span.start e.span.stop
-    in
-    let add_carets v =
-      for _ = 1 to carets v do
-        Buffer.add_char b '^'
-      done
-    in
-    let opener_row (v : view) =
-      match opener with
-      | Some (_, _, start) ->
-          rule "\xe2\x95\xad" "\xe2\x95\xaf" start v
+      match error_view with
       | None ->
-          ()
-    in
-    let caret_row (v : view) =
-      if framed && !bar <> "" then begin
-        rule "\xe2\x95\xb0" "" e.span.start v;
-        add_carets v
-      end else begin
-        gutter ();
-        prefix_pad v e.span.start;
-        add_carets v
-      end
-    in
-    let is_opener (v : view) =
-      match opener with Some (l, _, _) -> l = v.number | None -> false
-    in
-    let opener_number =
-      match opener with Some (l, _, _) -> l | None -> max_int
-    in
-    let in_block number = framed && number >= opener_number && number < line in
-    let rec emit = function
-      | [] ->
-          ()
-      | (v : view) :: rest ->
-          bar :=
-            if (not framed) || v.number < opener_number || v.number > line then
-              ""
-            else if v.number = opener_number then
-              "  "
+          1
+      | Some error_view ->
+          let line = error_view.number in
+          let opener =
+            List.find_map
+              (fun ((f : frame), loc) ->
+                match loc with
+                | Some (l, c, _) when f.delimited && l < line ->
+                    Some (l, c, f.start)
+                | _ ->
+                    None
+              )
+              (List.rev frames)
+          in
+          let prev_view =
+            if line > 1 then
+              get (line - 1) 0
             else
-              "\xe2\x94\x82 ";
-          line_row v;
-          if is_opener v && framed then opener_row v;
-          if v.number = line then begin
-            caret_row v;
-            if framed then
-              bar :=
-                if !bar = "" then
-                  ""
+              None
+          in
+          let opener_view =
+            match opener with Some (l, c, _) -> get l (c - 1) | None -> None
+          in
+          let shown =
+            List.fold_left
+              (fun acc (v : view) ->
+                if List.exists (fun (u : view) -> u.number = v.number) acc then
+                  acc
                 else
-                  "  "
-          end;
-          note_rows v;
-          ( match rest with
-          | (nxt : view) :: _ ->
-              let hidden = nxt.number - v.number - 1 in
-              let elide () =
-                if in_block v.number then begin
+                  v :: acc
+              )
+              []
+              (List.filter_map Fun.id
+                 [ Some error_view; opener_view; prev_view ]
+              @ List.map (fun (_, _, v, _) -> v) placed
+              )
+            |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
+          in
+          let w =
+            List.fold_left
+              (fun m (v : view) -> imax m (digits v.number))
+              (digits line) shown
+          in
+          let gutter () =
+            Buffer.add_char b '\n';
+            for _ = 1 to w do
+              Buffer.add_char b ' '
+            done;
+            Buffer.add_string b " | "
+          in
+          let bar = ref "" in
+          let line_row (v : view) =
+            Buffer.add_char b '\n';
+            add_padded b w v.number;
+            Buffer.add_string b " |";
+            if v.text = "" && (not v.left_cut) && not v.right_cut then
+              add_text b (String.trim !bar)
+            else begin
+              Buffer.add_char b ' ';
+              Buffer.add_string b !bar;
+              if v.left_cut then Buffer.add_string b "...";
+              add_display b v.text;
+              if v.right_cut then Buffer.add_string b "..."
+            end
+          in
+          let prefix_pad (v : view) upto =
+            if v.left_cut then Buffer.add_string b "   ";
+            add_padding b v.text
+              (imax 0 (imin (upto - v.first) (String.length v.text)));
+            if upto - v.first > String.length v.text then Buffer.add_char b ' '
+          in
+          let marks (v : view) a z =
+            let len = String.length v.text in
+            let a = imax 0 (imin (a - v.first) len) in
+            let z = imax a (imin (z - v.first) len) in
+            imax 1 (display_width v.text a z)
+          in
+          let note_rows (v : view) =
+            List.iter
+              (fun ((n : note), (r : range), (nv : view), _) ->
+                if nv.number = v.number then begin
                   gutter ();
-                  Buffer.add_string b "\xe2\x94\x82 ..."
-                end else
-                  Buffer.add_string b "\n..."
-              in
-              if hidden = 1 then
-                begin match get (v.number + 1) 0 with
-                | Some m ->
+                  Buffer.add_string b !bar;
+                  prefix_pad v r.start;
+                  for _ = 1 to marks v r.start r.stop do
+                    Buffer.add_char b '-'
+                  done;
+                  add_text b n.text
+                end
+              )
+              placed
+          in
+          let framed =
+            match (opener, opener_view) with
+            | Some _, Some _ ->
+                true
+            | _ ->
+                false
+          in
+          let cols (v : view) upto =
+            let text = v.text in
+            let n = imax 0 (imin (upto - v.first) (String.length text)) in
+            let col =
+              ref
+                (w + 5
+                +
+                if v.left_cut then
+                  3
+                else
+                  0
+                )
+            in
+            let i = ref 0 in
+            while !i < n do
+              let len, esc = display_unit text !i in
+              if String.unsafe_get text !i = '\t' then
+                col := ((!col / 8) + 1) * 8
+              else
+                col := !col + unit_width esc;
+              i := !i + len
+            done;
+            if upto - v.first > String.length text then incr col;
+            !col - (w + 3)
+          in
+          let rule first last upto (v : view) =
+            gutter ();
+            Buffer.add_string b first;
+            for _ = 1 to cols v upto - 1 do
+              Buffer.add_string b "\xe2\x94\x80"
+            done;
+            Buffer.add_string b last
+          in
+          let carets (v : view) =
+            if e.span.start - v.first >= String.length v.text then
+              1
+            else
+              marks v e.span.start e.span.stop
+          in
+          let add_carets v =
+            for _ = 1 to carets v do
+              Buffer.add_char b '^'
+            done
+          in
+          let opener_row (v : view) =
+            match opener with
+            | Some (_, _, start) ->
+                rule "\xe2\x95\xad" "\xe2\x95\xaf" start v
+            | None ->
+                ()
+          in
+          let caret_row (v : view) =
+            if framed && !bar <> "" then begin
+              rule "\xe2\x95\xb0" "" e.span.start v;
+              add_carets v
+            end else begin
+              gutter ();
+              prefix_pad v e.span.start;
+              add_carets v
+            end
+          in
+          let is_opener (v : view) =
+            match opener with Some (l, _, _) -> l = v.number | None -> false
+          in
+          let opener_number =
+            match opener with Some (l, _, _) -> l | None -> max_int
+          in
+          let in_block number =
+            framed && number >= opener_number && number < line
+          in
+          let rec emit = function
+            | [] ->
+                ()
+            | (v : view) :: rest ->
+                bar :=
+                  if (not framed) || v.number < opener_number || v.number > line
+                  then
+                    ""
+                  else if v.number = opener_number then
+                    "  "
+                  else
+                    "\xe2\x94\x82 ";
+                line_row v;
+                if is_opener v && framed then opener_row v;
+                if v.number = line then begin
+                  caret_row v;
+                  if framed then
                     bar :=
-                      if in_block v.number then
-                        "\xe2\x94\x82 "
+                      if !bar = "" then
+                        ""
                       else
-                        "";
-                    line_row m
-                | None ->
-                    elide ()
-              end
-              else if hidden > 1 then
-                elide ()
-          | [] ->
-              ()
-          );
-          emit rest
+                        "  "
+                end;
+                note_rows v;
+                ( match rest with
+                | (nxt : view) :: _ ->
+                    let hidden = nxt.number - v.number - 1 in
+                    let elide () =
+                      gutter ();
+                      if in_block v.number then
+                        Buffer.add_string b "\xe2\x94\x82 ";
+                      Buffer.add_string b "..."
+                    in
+                    if hidden = 1 then
+                      begin match get (v.number + 1) 0 with
+                      | Some m ->
+                          bar :=
+                            if in_block v.number then
+                              "\xe2\x94\x82 "
+                            else
+                              "";
+                          line_row m
+                      | None ->
+                          elide ()
+                    end
+                    else if hidden > 1 then
+                      elide ()
+                | [] ->
+                    ()
+                );
+                emit rest
+          in
+          emit shown;
+          w
     in
-    if error_view <> None then emit shown;
     let n_frames = List.length frames in
+    let shown_frames =
+      if n_frames = max_frames + 1 then
+        n_frames
+      else
+        max_frames
+    in
     let gutter_star () =
       Buffer.add_char b '\n';
       for _ = 1 to w do
@@ -2700,48 +2889,57 @@ module Error = struct
       done;
       Buffer.add_string b " * "
     in
-    let innermost_first = List.rev frames in
     List.iteri
       (fun i ((f : frame), loc) ->
-        if i < max_frames then begin
+        if i < shown_frames then begin
           gutter_star ();
           Buffer.add_string b "while parsing ";
           Buffer.add_string b f.name;
           Buffer.add_string b ", from ";
           match loc with
-          | Some (l, c) ->
+          | Some (l, _, c) ->
               Buffer.add_string b (string_of_int l);
               Buffer.add_char b ':';
               Buffer.add_string b (string_of_int c)
           | None ->
               Buffer.add_string b "byte ";
               Buffer.add_string b (string_of_int f.start)
-        end else if i = max_frames then begin
+        end else if i = shown_frames then begin
           gutter_star ();
           Buffer.add_string b "... and ";
-          Buffer.add_string b (string_of_int (n_frames - max_frames));
+          Buffer.add_string b (string_of_int (n_frames - shown_frames));
           Buffer.add_string b " more"
         end
       )
-      innermost_first;
+      (List.rev frames);
     List.iter
       (fun (n : note) ->
         gutter_star ();
-        Buffer.add_string b "note: ";
-        Buffer.add_string b n.text
+        Buffer.add_string b "note:";
+        add_text b n.text
       )
       loose;
+    ( match e.kind with
+    | Depth_limit_exceeded _ ->
+        gutter_star ();
+        Buffer.add_string b "help: raise ~max_depth"
+    | Backtrack_window_exceeded _ ->
+        gutter_star ();
+        Buffer.add_string b
+          "help: call commit or cut earlier, or raise ~backtrack_window"
+    | _ ->
+        ()
+    );
     Buffer.contents b
 
   let pp ?name ?source ?columns ?user ppf e =
-    let user =
-      match user with
-      | Some f ->
-          Some (fun v -> Format.asprintf "%a" f v)
-      | None ->
-          None
-    in
-    Format.pp_print_string ppf (render ?name ?source ?columns ?user e)
+    let user = Option.map (fun f v -> Format.asprintf "@[<h>%a@]" f v) user in
+    List.iteri
+      (fun i line ->
+        if i > 0 then Format.pp_force_newline ppf ();
+        Format.pp_print_string ppf line
+      )
+      (String.split_on_char '\n' (render ?name ?source ?columns ?user e))
 end
 
 let expected_of_far f =
@@ -2767,7 +2965,10 @@ let expected_of_far f =
           else
             string_of_int payload ^ " bytes"
         )
-    else if tag = tag_big then
+    else if tag = tag_big && payload >= 2 then begin
+      let label, _, _ = Error.int_mismatch payload s in
+      Error.Label label
+    end else if tag = tag_big then
       Error.Label
         ( if payload = 0 then
             s ^ " bytes"
@@ -2792,16 +2993,22 @@ let expected_of_far f =
     | Error.End_of_input ->
         (3, "")
   in
-  let items = List.init f.n describe in
+  let items =
+    List.filter_map
+      (fun i ->
+        if far_item_kind f i = none_kind then
+          None
+        else
+          Some (describe i)
+      )
+      (List.init f.n Fun.id)
+  in
   let items = List.sort_uniq (fun a b -> compare (key a) (key b)) items in
   match far_over f with
   | Some { oitems = _ :: _ as more; _ } ->
-      items
-      @ [
-          Error.Label (Printf.sprintf "%d more alternatives" (List.length more));
-        ]
+      (items, List.length more)
   | _ ->
-      items
+      (items, 0)
 
 let is_ident_byte c =
   (c >= 'a' && c <= 'z')
@@ -2839,6 +3046,41 @@ let found_of st pos =
     end
   end
 
+let found_of_far st f pos =
+  let all_short = ref true and all_value = ref true and value = ref None in
+  for i = 0 to f.n - 1 do
+    let kind = far_item_kind f i in
+    let tag = kind land 7 and payload = kind lsr 3 in
+    if kind <> none_kind then begin
+      if not (tag = tag_bytes || (tag = tag_big && payload = 0)) then
+        all_short := false;
+      if tag = tag_big && payload >= 2 then begin
+        let ((_, found, _) as v) =
+          Error.int_mismatch payload (far_item_str f i)
+        in
+        match !value with
+        | None ->
+            value := Some v
+        | Some (_, first, _) ->
+            if first <> found then all_value := false
+      end else
+        all_value := false
+    end
+  done;
+  if !all_short then
+    if pos >= st.input_len then
+      (Error.End, { start = pos; stop = pos })
+    else
+      (Error.Short (st.input_len - pos), { start = pos; stop = st.input_len })
+  else
+    match !value with
+    | Some (_, found, width) when !all_value ->
+        ( Error.Value found,
+          { start = pos; stop = imin st.input_len (pos + width) }
+        )
+    | _ ->
+        found_of st pos
+
 let build st ~pos ?(notes = []) kind span frames =
   let idx =
     match st.line_index with
@@ -2851,33 +3093,31 @@ let build st ~pos ?(notes = []) kind span frames =
   in
   extend_line_index idx ~base_offset:st.base st.input (imin pos st.input_len);
   let floor = idx.starts.(0) in
-  let located = pos >= floor in
-  let li = find_line idx (imax pos floor) in
-  let line_start = idx.starts.(li) in
-  let line = idx.line_base + li + 1 in
-  let location =
-    {
-      offset = pos;
-      line;
-      col =
-        ( if located then
-            imax 1 (pos - line_start + 1)
-          else
-            1
-        );
-    }
-  in
-  let code_point_col =
-    if
-      located && line_start >= st.base && pos >= line_start
-      && pos <= st.input_len
-    then
-      Some
-        (1
-        + Error.count_code_points st.input (line_start - st.base) (pos - st.base)
-        )
-    else
+  let here =
+    if pos >= floor && pos <= st.input_len then begin
+      let li = find_line idx pos in
+      Some (li, idx.starts.(li), idx.line_base + li + 1)
+    end else
       None
+  in
+  let position =
+    Option.map
+      (fun (_, line_start, line) ->
+        {
+          Error.location = { offset = pos; line; col = pos - line_start + 1 };
+          code_point_col =
+            ( if line_start >= st.base then
+                Some
+                  (1
+                  + Error.count_code_points st.input (line_start - st.base)
+                      (pos - st.base)
+                  )
+              else
+                None
+            );
+        }
+      )
+      here
   in
   let source_open =
     match st.source with Some src -> not src.eof | None -> false
@@ -2939,41 +3179,66 @@ let build st ~pos ?(notes = []) kind span frames =
     end
   in
   let locate p =
-    if p < idx.starts.(0) then
+    if p < idx.starts.(0) || p > st.input_len then
       None
     else begin
       let l = find_line idx p in
       Some (idx.line_base + l + 1, p - idx.starts.(l) + 1)
     end
   in
-  let frame_locs = List.map (fun (_, s, _) -> locate s) frames in
-  let error_start = imax line_start st.base in
+  let frame_locs =
+    List.map
+      (fun (_, s, _) ->
+        Option.map
+          (fun (l, c) ->
+            let first = s - c + 1 in
+            ( l,
+              c,
+              if first >= st.base && s <= st.input_len then
+                Some
+                  (1
+                  + Error.count_code_points st.input (first - st.base)
+                      (s - st.base)
+                  )
+              else
+                None
+            )
+          )
+          (locate s)
+      )
+      frames
+  in
   let error_view =
-    if located then
-      Option.map
-        (fun (v : Error.view) ->
-          { v with Error.left_cut = v.Error.left_cut || line_start < st.base }
-        )
-        (view ~number:line ~start:error_start ~focus:(pos - error_start))
-    else
-      None
+    Option.bind here (fun (_, line_start, line) ->
+        let error_start = imax line_start st.base in
+        Option.map
+          (fun (v : Error.view) ->
+            { v with Error.left_cut = v.Error.left_cut || line_start < st.base }
+          )
+          (view ~number:line ~start:error_start ~focus:(pos - error_start))
+    )
   in
   let prev_view =
-    if located && li >= 1 then
-      view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
-    else
-      None
+    match here with
+    | Some (li, _, line) when li >= 1 ->
+        view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
+    | _ ->
+        None
   in
   let opener =
-    List.fold_left2
-      (fun acc (_, s, delimited) loc ->
-        match loc with
-        | Some (l, c) when located && delimited && l < line ->
-            Some (s, l, c)
-        | _ ->
-            acc
-      )
-      None frames frame_locs
+    match here with
+    | Some (_, _, line) ->
+        List.fold_left2
+          (fun acc (_, s, delimited) loc ->
+            match loc with
+            | Some (l, c, _) when delimited && l < line ->
+                Some (s, l, c)
+            | _ ->
+                acc
+          )
+          None frames frame_locs
+    | None ->
+        None
   in
   let opener_view =
     match opener with
@@ -3047,14 +3312,13 @@ let build st ~pos ?(notes = []) kind span frames =
   {
     Error.kind;
     span;
-    location;
-    code_point_col;
+    position;
     frames =
       List.map
         (fun (name, start, delimited) -> { Error.name; start; delimited })
         frames;
     notes;
-    excerpt = { Error.views; frame_locs; located };
+    excerpt = { Error.views; frame_locs };
   }
 
 let extras_span pos (x : fail_extra) =
@@ -3080,14 +3344,19 @@ let error_of_far st =
     build st ~pos:span.start ~notes:x.notes (Error.User e) span frames
   end else
     begin match expected_of_far f with
-    | [] ->
-        failwith "Parseff: internal error: failure without expected items"
-    | x :: xs ->
-        let found, span = found_of st pos in
-        build st ~pos (Error.Expected { items = (x, xs); found }) span frames
+    | [], _ ->
+        build st ~pos (Error.Failure "no alternative matched")
+          { start = pos; stop = pos }
+          frames
+    | x :: xs, more ->
+        let found, span = found_of_far st f pos in
+        build st ~pos
+          (Error.Expected { items = (x, xs); found; more })
+          span frames
   end
 
-let error_plain st pos kind = build st ~pos kind { start = pos; stop = pos } []
+let error_plain st pos kind frames =
+  build st ~pos kind { start = pos; stop = pos } frames
 
 let error_failure st pos msg (x : fail_extra) =
   let span = extras_span pos x in
@@ -3112,16 +3381,17 @@ let run_detailed st thunk =
       Stdlib.Error (error_of_far (State.current ()))
   | exception User_failure (pos, msg, x) ->
       Stdlib.Error (error_failure (State.current ()) pos msg x)
-  | exception Depth_limit_exceeded (pos, _) ->
+  | exception Depth_limit_exceeded a ->
       let st = State.current () in
       Stdlib.Error
-        (error_plain st pos
+        (error_plain st a.at
            (Error.Depth_limit_exceeded { limit = st.max_depth })
+           a.open_frames
         )
-  | exception Backtrack_window_exceeded (pos, info) ->
+  | exception Backtrack_window_exceeded (info, a) ->
       Stdlib.Error
-        (error_plain (State.current ()) pos
-           (Error.Backtrack_window_exceeded info)
+        (error_plain (State.current ()) a.at
+           (Error.Backtrack_window_exceeded info) a.open_frames
         )
 
 let until_end parser () =

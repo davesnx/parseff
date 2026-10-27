@@ -52,8 +52,7 @@ type backtrack_window_error = { limit : int; oldest : int }
 
     [oldest] is the earliest position the runtime still needs to rewind to and
     [limit] is the configured [backtrack_window]. The error position is the
-    furthest byte position Parseff needed to retain or reach when the overflow
-    happened. *)
+    parser position when the overflow happened. *)
 
 (** {1 Errors} *)
 
@@ -70,8 +69,17 @@ module Error : sig
     | End_of_input  (** The end of the input. *)
 
   type found =
-    | Text of string  (** The text at the failure position. *)
+    | Text of string
+        (** The text at the failure position. A token cut at 32 bytes ends with
+            [...]. *)
     | End  (** The input ended. *)
+    | Short of int
+        (** A read of a fixed number of bytes, such as {!val:Parseff.take},
+            found fewer bytes than it needed before the end of the input. The
+            value is how many bytes were left. *)
+    | Value of string
+        (** An integer field that differs from the expected one, as the
+            hexadecimal value read in the same width, for example [0x0002]. *)
 
   type frame = { name : string; start : int; delimited : bool }
   (** A construct that was open at the failure, see {!val:Parseff.context}.
@@ -84,17 +92,31 @@ module Error : sig
       excerpt with the text next to the underline. [at = None] adds a
       ["* note:"] line under the excerpt. *)
 
+  type position = { location : location; code_point_col : int option }
+  (** Where an error is in the input, known only when the line is known.
+      [location] is the line and column of the error in bytes. [code_point_col]
+      is the column in code points, [None] if the start of the line is no longer
+      buffered (streaming). *)
+
   type excerpt
   (** Source lines kept with the error so that {!render} does not need the
       input. *)
 
   type 'e kind =
-    | Expected of { items : expected * expected list; found : found }
+    | Expected of {
+        items : expected * expected list;
+        found : found;
+        more : int;
+      }
         (** A primitive failed. [items] is everything that was expected at the
-            furthest failure position, sorted and without duplicates. *)
+            furthest failure position, sorted and without duplicates, up to 64
+            items. [more] is how many further alternatives were expected and are
+            not in [items], [0] unless more than 64 were. *)
     | Failure of string
-        (** A failure raised with {!val:Parseff.fail}. Failures of primitives
-            are always [Expected]. *)
+        (** A failure raised with {!val:Parseff.fail}, or
+            ["no alternative matched"] when [one_of []] is the only failure at
+            the furthest position. Failures of primitives are otherwise
+            [Expected]. *)
     | User of 'e  (** A value given to {!val:Parseff.error}. *)
     | Depth_limit_exceeded of { limit : int }
         (** {!val:Parseff.rec_} nested deeper than [max_depth]. *)
@@ -106,13 +128,10 @@ module Error : sig
     span : range;
         (** The bytes the error is about, never reversed, empty at the end of
             the input. *)
-    location : location;
-        (** Line and column of [span.start], in bytes. When streaming and the
-            position is older than the buffered input, the line is the oldest
-            buffered one and {!render} prints the byte offset instead. *)
-    code_point_col : int option;
-        (** Column in code points, [None] if the start of the line is no longer
-            buffered (streaming). *)
+    position : position option;
+        (** Line and column of [span.start]. [None] when the line is not known:
+            in streaming, when the position is older than the buffered input.
+            {!render} prints the byte offset then. *)
     frames : frame list;  (** Open constructs, outermost first. *)
     notes : note list;
     excerpt : excerpt;
@@ -123,8 +142,10 @@ module Error : sig
 
   val message : ?user:('e -> string) -> 'e t -> string
   (** [message e] is the one-line message, for example
-      [expected "else", "if", or "while", found 'xyz']. [user] prints [User]
-      errors, the default is ["error"]. *)
+      [expected "else", "if", or "while", found 'xyz']. A message lists at most
+      8 expected items, then [, or N more alternatives]. [user] prints [User]
+      errors, without it the message is [user error (no ~user printer given)].
+  *)
 
   type columns = [ `Bytes | `Code_points ]
 
@@ -151,9 +172,16 @@ module Error : sig
       [name] is printed at the start of the header. [source] is the parsed
       input; without it the excerpt kept in the error is used, which is enough
       for the error line and the lines around it, and may miss old lines in
-      streaming. [columns] chooses the column unit of the header, [`Bytes] by
-      default. Carets always count code points. The result has no trailing
-      newline. *)
+      streaming. When the line of the error is not known, which happens in
+      streaming when the position is older than the buffered input, the header
+      is [input.json: byte N: error: ...] and there is no excerpt. [columns]
+      chooses the column unit of the header, [`Bytes] by default; it applies to
+      the columns of [* while parsing] lines too. Carets count code points, and
+      a control byte, an invalid UTF-8 byte or a C1 control prints in the
+      excerpt as the escape [message] uses, such as [\x1B], with as many carets
+      as the escape has characters. A [Depth_limit_exceeded] or
+      [Backtrack_window_exceeded] error ends with a [* help:] line. Rows have no
+      trailing spaces and the result has no trailing newline. *)
 
   val pp :
     ?name:string ->
@@ -163,7 +191,10 @@ module Error : sig
     Format.formatter ->
     'e t ->
     unit
-  (** [pp] prints what {!render} returns. *)
+  (** [pp] prints what {!render} returns. The [user] printer is run in a
+      horizontal box, so its line breaks do not split the header. The lines of
+      the result are separated by [Format.pp_force_newline], so [pp] works in an
+      open box and the lines keep its indentation. *)
 end
 
 (** {1 Result Types} *)
@@ -282,7 +313,7 @@ val match_regex : ?label:string -> Re.re -> string
     When the regex does not match, the parse fails with [expected <label>] if
     [~label] is given, so the failure merges with the other alternatives
     expected at the same position like any other primitive. Without [~label] the
-    label is ["regex match"].
+    label is ["text matching the pattern"].
 
     In streaming mode, the parser keeps at least half of the backtrack window
     buffered ahead of the current position, unless the source has ended. A match
@@ -715,7 +746,9 @@ val catch : (unit -> 'a) -> (string -> 'a) -> 'a
 val one_of : (unit -> 'a) list -> unit -> 'a
 (** [one_of parsers] tries each parser in order until one succeeds. When every
     parser fails, the error lists what the parsers expected at the furthest
-    position, as for {!or_}. [one_of []] expects ["an alternative"].
+    position, as for {!or_}. [one_of []] expects nothing: alone it fails with
+    ["no alternative matched"], and next to other failures at the same position
+    it adds nothing to what they expected.
 
     Example:
     {@ocaml[
@@ -882,7 +915,9 @@ val any_char : unit -> char
 
 val take : int -> string
 (** [take n] reads exactly [n] bytes and returns them as a string. Fails if
-    fewer than [n] bytes remain or if [n] is negative.
+    fewer than [n] bytes remain, with
+    [expected 5 bytes, found only 3 (end of input)], or [found end of input]
+    when none remain. Raises [Invalid_argument] if [n] is negative.
 
     Useful for length-prefixed binary fields and fixed-width text fields alike.
 
@@ -1059,15 +1094,18 @@ module BE : sig
   (** [int16 i] matches exactly the 2 bytes that encode [i] in big-endian order.
       Accepts values from [-32768] to [65535], so [int16 0xFFFE] and
       [int16 (-2)] match the same bytes. Raises [Invalid_argument] outside that
-      range. Fails at the start of the field if the bytes don't match. *)
+      range. Fails at the start of the field if the bytes don't match, with
+      [expected int16be 0x0001, found 0x0002]. *)
 
   val int32 : int32 -> unit
   (** [int32 i] matches exactly the 4 bytes that encode [i] in big-endian order.
-      Fails at the start of the field if the bytes don't match. *)
+      Fails at the start of the field if the bytes don't match, with
+      [expected int32be 0x00000001, found 0x00000002]. *)
 
   val int64 : int64 -> unit
   (** [int64 i] matches exactly the 8 bytes that encode [i] in big-endian order.
-      Fails at the start of the field if the bytes don't match. *)
+      Fails at the start of the field if the bytes don't match, with
+      [expected int64be 0x0000000000000001, found 0x0000000000000002]. *)
 end
 
 (** Little-endian binary parsers. *)
@@ -1100,15 +1138,17 @@ module LE : sig
   (** [int16 i] matches exactly the 2 bytes that encode [i] in little-endian
       order. Accepts values from [-32768] to [65535]. Raises [Invalid_argument]
       outside that range. Fails at the start of the field if the bytes don't
-      match. *)
+      match, with [expected int16le 0x0001, found 0x0002]. *)
 
   val int32 : int32 -> unit
   (** [int32 i] matches exactly the 4 bytes that encode [i] in little-endian
-      order. Fails at the start of the field if the bytes don't match. *)
+      order. Fails at the start of the field if the bytes don't match, with
+      [expected int32le 0x00000001, found 0x00000002]. *)
 
   val int64 : int64 -> unit
   (** [int64 i] matches exactly the 8 bytes that encode [i] in little-endian
-      order. Fails at the start of the field if the bytes don't match. *)
+      order. Fails at the start of the field if the bytes don't match, with
+      [expected int64le 0x0000000000000001, found 0x0000000000000002]. *)
 end
 
 (** {1 UTF-8 Parsing}

@@ -455,10 +455,10 @@ let test_behind_failure_ignored () =
     (fun s -> s)
     "abq" parser {|Error@2 Expected "expected \"c\", found 'q'"|}
 
-let overflow_message n_items n_more =
-  let shown = List.init n_items (fun i -> Printf.sprintf "\"item%03d\"" i) in
+let overflow_message total =
+  let shown = List.init 8 (fun i -> Printf.sprintf "\"item%03d\"" i) in
   "expected " ^ String.concat ", " shown
-  ^ Printf.sprintf ", or %d more alternatives, found 'zzz'" n_more
+  ^ Printf.sprintf ", or %d more alternatives, found 'zzz'" (total - 8)
 
 let test_item_buffer_overflow () =
   let alternatives =
@@ -467,11 +467,12 @@ let test_item_buffer_overflow () =
     )
   in
   match Parseff.parse "zzz" (Parseff.one_of alternatives) with
-  | Error ({ kind = Expected { items = _, rest; _ }; _ } as e)
+  | Error ({ kind = Expected { items = _, rest; more; _ }; _ } as e)
     when Parseff.Error.pos e = 0 ->
-      Alcotest.(check int) "items kept plus the marker" 65 (List.length rest + 1);
+      Alcotest.(check int) "items kept" 64 (List.length rest + 1);
+      Alcotest.(check int) "items counted" 36 more;
       Alcotest.(check string)
-        "message" (overflow_message 64 36) (Parseff.Error.message e)
+        "message" (overflow_message 100) (Parseff.Error.message e)
   | _ ->
       Alcotest.fail "Expected an Expected error at 0"
 
@@ -484,7 +485,7 @@ let test_item_buffer_overflow_counts_distinct () =
   match Parseff.parse "zzz" (Parseff.one_of alternatives) with
   | Error e ->
       Alcotest.(check string)
-        "duplicates are not counted twice" (overflow_message 64 36)
+        "duplicates are not counted twice" (overflow_message 100)
         (Parseff.Error.message e)
   | Ok _ ->
       Alcotest.fail "expected an error"
@@ -1209,7 +1210,7 @@ let test_render_empty_line () =
          "input.json:3:3: error: expected ',' or ']', found '2'";
          "1 |   [";
          "  | ╭─╯";
-         "2 | │ ";
+         "2 | │";
          "3 | │ 1 2]";
          "  | ╰───^";
          "  * while parsing array, from 1:1";
@@ -1224,7 +1225,7 @@ let test_render_eof_at_line_end () =
          "input.json:2:1: error: expected value, found end of input";
          "1 |   [1,";
          "  | ╭─╯";
-         "2 | │ ";
+         "2 | │";
          "  | ╰─^";
          "  * while parsing array, from 1:1";
        ]
@@ -1234,7 +1235,7 @@ let test_render_eof_at_line_end () =
     (lines
        [
          "input.json:1:1: error: expected value, found end of input";
-         "1 | ";
+         "1 |";
          "  | ^";
        ]
     )
@@ -1279,7 +1280,7 @@ let test_render_frame_cap () =
     else
       Parseff.context (Printf.sprintf "level%d" n) (nest (n - 1))
   in
-  check_render "five frames"
+  check_render "six frames are all printed"
     (lines
        [
          "input.json:1:8: error: expected 'x', found end of input";
@@ -1290,18 +1291,33 @@ let test_render_frame_cap () =
          "  * while parsing level3, from 1:5";
          "  * while parsing level4, from 1:4";
          "  * while parsing level5, from 1:3";
-         "  * ... and 1 more";
+         "  * while parsing level6, from 1:2";
        ]
     )
-    (render (String.make 7 'a') (nest 6))
+    (render (String.make 7 'a') (nest 6));
+  check_render "seven frames hide two"
+    (lines
+       [
+         "input.json:1:9: error: expected 'x', found end of input";
+         "1 | aaaaaaaa";
+         "  |         ^";
+         "  * while parsing level1, from 1:8";
+         "  * while parsing level2, from 1:7";
+         "  * while parsing level3, from 1:6";
+         "  * while parsing level4, from 1:5";
+         "  * while parsing level5, from 1:4";
+         "  * ... and 2 more";
+       ]
+    )
+    (render (String.make 8 'a') (nest 7))
 
 let test_render_invalid_utf8_and_controls () =
   check_render "invalid byte"
     (lines
        [
          "input.json:1:5: error: expected value, found '\\xFF'";
-         "1 | [1, ? 2]";
-         "  |     ^";
+         "1 | [1, \\xFF 2]";
+         "  |     ^^^^";
          "  * while parsing array, from 1:1";
        ]
     )
@@ -1310,8 +1326,8 @@ let test_render_invalid_utf8_and_controls () =
     (lines
        [
          "input.json:1:3: error: expected ',' or ']', found '\\x01'";
-         "1 | [1?]";
-         "  |   ^";
+         "1 | [1\\x01]";
+         "  |   ^^^^";
          "  * while parsing array, from 1:1";
        ]
     )
@@ -1380,6 +1396,7 @@ let test_render_other_kinds () =
              "1:3: error: maximum nesting depth 2 exceeded";
              "1 | [[[";
              "  |   ^";
+             "  * help: raise ~max_depth";
            ]
         )
         (E.render e)
@@ -1394,7 +1411,11 @@ let test_render_other_kinds () =
         (E.render ~user:(fun `Boom -> "boom!") e);
       Alcotest.(check string)
         "user without printer"
-        (lines [ "1:1: error: error"; "1 | z"; "  | ^" ])
+        (lines
+           [
+             "1:1: error: user error (no ~user printer given)"; "1 | z"; "  | ^";
+           ]
+        )
         (E.render e)
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
@@ -1556,7 +1577,7 @@ let test_secondary_underline_earlier_lines () =
          "input.json:5:2: error: missing )";
          "1 | foo(";
          "  |    - to match this";
-         "...";
+         "  | ...";
          "4 | c,";
          "5 | d";
          "  |  ^";
@@ -1724,7 +1745,7 @@ let test_match_regex_label () =
     (render_error "!" both);
   both_runners show_unit "!"
     (fun () -> ignore (Parseff.match_regex id_re))
-    {|Error@0 Expected "expected regex match, found '!'"|}
+    {|Error@0 Expected "expected text matching the pattern, found '!'"|}
 
 let test_note_on_dropped_line () =
   let input = String.make 2000 'a' ^ "!" in
@@ -1752,13 +1773,15 @@ let test_note_on_dropped_line () =
 
 let describe_kind (e : unit Parseff.Error.t) =
   match e.kind with
-  | Parseff.Error.Expected { items = _, rest; found } ->
+  | Parseff.Error.Expected { items = _, rest; found; _ } ->
       Printf.sprintf "expected %d more, found %s" (List.length rest)
         ( match found with
         | Parseff.Error.Text t ->
             t
         | Parseff.Error.End ->
             "end"
+        | _ ->
+            "other"
         )
   | Parseff.Error.Failure m ->
       "message " ^ m
@@ -1837,6 +1860,7 @@ let test_end_of_input_keeps_expected_set () =
             {
               items = Parseff.Error.Char a, [ Parseff.Error.Char b ];
               found = Parseff.Error.End;
+              more = 0;
             };
         span = { start = 5; stop = 5 };
         _;
@@ -2030,11 +2054,15 @@ let from_before_the_buffer_parser kind () =
 
 let check_location_agrees label input (e : _ E.t) =
   let at = Parseff.location_of_position input (E.pos e) in
-  Alcotest.(check (pair int int))
-    (label ^ " line and column")
-    (at.line, at.col)
-    (e.location.line, e.location.col);
-  Alcotest.(check int) (label ^ " offset") (E.pos e) e.location.offset
+  match e.position with
+  | Some { location; _ } ->
+      Alcotest.(check (pair int int))
+        (label ^ " line and column")
+        (at.line, at.col)
+        (location.line, location.col);
+      Alcotest.(check int) (label ^ " offset") (E.pos e) location.offset
+  | None ->
+      Alcotest.failf "%s has no position" label
 
 let test_from_older_than_the_buffer () =
   ( match Parseff.parse lines_text (from_before_the_buffer_parser `Fail) with
@@ -2053,7 +2081,9 @@ let test_from_older_than_the_buffer () =
     | Error (e : _ E.t) -> (
         Alcotest.(check int) (label ^ " keeps the span start") 7 e.span.start;
         Alcotest.(check int) (label ^ " keeps the position") 7 (E.pos e);
-        Alcotest.(check int) (label ^ " offset") 7 e.location.offset;
+        Alcotest.(check bool)
+          (label ^ " has no position")
+          true (e.position = None);
         let header = List.hd (String.split_on_char '\n' (E.render e)) in
         Alcotest.(check bool)
           (label ^ " says byte, not a line")
@@ -2170,8 +2200,8 @@ let test_multibyte_literal_mismatch () =
     (lines
        [
          "input.json:1:1: error: expected \"\xC3\xA9\", found '\\xC3'";
-         "1 | ?";
-         "  | ^";
+         "1 | \\xC3";
+         "  | ^^^^";
        ]
     )
     (render_error "\xC3" (fun () -> ignore (Parseff.consume "\xC3\xA9")))
@@ -2264,11 +2294,11 @@ let test_expect_after_far_buffer_overflow () =
       let chars =
         List.init 50 (fun i -> Printf.sprintf "'%c'" (Char.chr (77 + i)))
       in
-      let all = List.filteri (fun i _ -> i < 49) chars in
+      let shown = List.filteri (fun i _ -> i < 7) chars in
       Alcotest.(check string)
         "originals kept, inner items replaced"
-        ("expected thing, " ^ String.concat ", " all ^ ", or "
-       ^ List.nth chars 49 ^ ", found '0'"
+        ("expected thing, " ^ String.concat ", " shown
+       ^ ", or 43 more alternatives, found '0'"
         )
         (E.message e)
   | Ok _ ->
@@ -2362,7 +2392,7 @@ let test_found_with_data_left () =
     (lines
        [
          "input.json:1:1: error: expected 5 bytes or 'x', found end of input";
-         "1 | ";
+         "1 |";
          "  | ^";
        ]
     )
@@ -2385,7 +2415,8 @@ let test_built_in_failures_are_expected_items () =
         "ok"
   in
   Alcotest.(check string)
-    "regex without label" "expected regex match or \"x\", found '?'"
+    "regex without label"
+    "expected text matching the pattern or \"x\", found '?'"
     (message "?" (fun () ->
          ignore
            (Parseff.or_
@@ -2396,7 +2427,7 @@ let test_built_in_failures_are_expected_items () =
      )
     );
   Alcotest.(check string)
-    "int16 mismatch" "expected int16 0x0203 or \"x\", found '\\x00'"
+    "int16 mismatch" "expected int16be 0x0203 or \"x\", found '\\x00'"
     (message "\x00\x01" (fun () ->
          ignore
            (Parseff.or_
@@ -2424,8 +2455,910 @@ let test_built_in_failures_are_expected_items () =
      )
     );
   Alcotest.(check string)
-    "empty one_of" "expected an alternative, found 'z'"
+    "empty one_of" "no alternative matched"
     (message "z" (Parseff.one_of []))
+
+let source_of_chunks ?(chunk = 7) input =
+  let pos = ref 0 in
+  Parseff.Source.of_chunks (fun () ->
+      if !pos >= String.length input then
+        None
+      else begin
+        let n = min chunk (String.length input - !pos) in
+        let s = String.sub input !pos n in
+        pos := !pos + n;
+        Some s
+      end
+  )
+
+let numbered_lines n =
+  String.concat "\n" (List.init n (fun i -> Printf.sprintf "line %d" (i + 1)))
+
+let render_stream ?name ?source ?(window = 16) input parser =
+  match
+    Parseff.parse_source ~backtrack_window:window (source_of_chunks input)
+      parser
+  with
+  | Stdlib.Ok _ ->
+      "ok"
+  | Stdlib.Error (e : unit E.t) ->
+      E.render ?name ?source e
+
+let message_of input parser =
+  match Parseff.parse input parser with
+  | Stdlib.Ok _ ->
+      "ok"
+  | Stdlib.Error (e : unit E.t) ->
+      E.message e
+
+let test_unknown_line_has_byte_header () =
+  let input = numbered_lines 100 in
+  let line_loop () =
+    ignore
+      (Parseff.many
+         (fun () ->
+           ignore (Parseff.take_while (fun c -> c <> '\n') ~label:"x");
+           ignore (Parseff.char '\n')
+         )
+         ()
+      );
+    ignore (Parseff.take_while (fun _ -> true) ~label:"x")
+  in
+  let parser () =
+    line_loop ();
+    Parseff.fail ~from:3 "span starts long ago"
+  in
+  check_render "name and byte offset"
+    "input: byte 3: error: span starts long ago"
+    (render_stream ~name:"input" input parser);
+  check_render "no name" "byte 3: error: span starts long ago"
+    (render_stream input parser);
+  check_render "~source gives the real line"
+    (lines
+       [ "input:1:4: error: span starts long ago"; "1 | line 1"; "  |    ^^^" ]
+    )
+    (render_stream ~name:"input" ~source:input input parser)
+  |> ignore;
+  let small = "ab\ncd\nef" in
+  let small_parser () =
+    ignore (Parseff.take 6);
+    ignore (Parseff.char 'q')
+  in
+  check_render "a known line is correct"
+    "input:3:1: error: expected 'q', found 'ef'"
+    (List.hd
+       (String.split_on_char '\n'
+          (render_stream ~name:"input" ~window:4096 small small_parser)
+       )
+    )
+
+let test_frame_column_in_code_points () =
+  let input = "\xCE\xBB\xCE\xBB\xCE\xBB[x" in
+  let parser () =
+    ignore (Parseff.take 6);
+    Parseff.context ~delimited:true "arr" (fun () ->
+        ignore (Parseff.char '[');
+        ignore (Parseff.char 'q')
+    )
+  in
+  check_render "bytes"
+    (lines
+       [
+         "input.json:1:8: error: expected 'q', found 'x'";
+         "1 | \xCE\xBB\xCE\xBB\xCE\xBB[x";
+         "  |     ^";
+         "  * while parsing arr, from 1:7";
+       ]
+    )
+    (render input parser);
+  let expected =
+    lines
+      [
+        "input.json:1:5: error: expected 'q', found 'x'";
+        "1 | \xCE\xBB\xCE\xBB\xCE\xBB[x";
+        "  |     ^";
+        "  * while parsing arr, from 1:4";
+      ]
+  in
+  check_render "code points" expected (render ~columns:`Code_points input parser);
+  check_render "code points with ~source" expected
+    (render ~columns:`Code_points ~source:input input parser)
+
+let test_take_reports_what_is_left () =
+  let take n () = ignore (Parseff.take n) in
+  Alcotest.(check string)
+    "fewer bytes" "expected 5 bytes, found only 3 (end of input)"
+    (message_of "abc" (take 5));
+  Alcotest.(check string)
+    "nothing left" "expected 5 bytes, found end of input"
+    (message_of "" (take 5));
+  Alcotest.(check string)
+    "a newline is not shown" "expected 5 bytes, found only 1 (end of input)"
+    (message_of "\n" (take 5));
+  Alcotest.(check string)
+    "the rest holds a newline" "expected 5 bytes, found only 3 (end of input)"
+    (message_of "ab\n" (take 5));
+  Alcotest.(check string)
+    "a huge count is exact"
+    "expected 4611686018427387903 bytes, found only 2 (end of input)"
+    (message_of "abc" (fun () ->
+         ignore (Parseff.any_char ());
+         ignore (Parseff.take max_int)
+     )
+    );
+  check_render "rendered"
+    (lines
+       [
+         "input.json:1:1: error: expected 5 bytes, found only 3 (end of input)";
+         "1 | abc";
+         "  | ^^^";
+       ]
+    )
+    (render_error "abc" (take 5));
+  ( match Parseff.parse "abc" (take (-1)) with
+  | _ ->
+      Alcotest.fail "expected Invalid_argument"
+  | exception Invalid_argument msg ->
+      Alcotest.(check string)
+        "negative count" "Parseff.take: count must be non-negative" msg
+  );
+  Alcotest.(check string)
+    "streaming" "expected 5 bytes, found only 3 (end of input)"
+    ( match Parseff.parse_source (source_of_chunks "abc") (take 5) with
+    | Stdlib.Error (e : unit E.t) ->
+        E.message e
+    | Stdlib.Ok _ ->
+        "ok"
+    )
+
+let test_int_mismatch_shows_the_value () =
+  let check label expected input parser =
+    Alcotest.(check string) label expected (message_of input parser)
+  in
+  check "BE.int16" "expected int16be 0x0001, found 0x0002" "\x00\x02" (fun () ->
+      Parseff.BE.int16 1
+  );
+  check "LE.int16" "expected int16le 0x0001, found 0x0200" "\x00\x02" (fun () ->
+      Parseff.LE.int16 1
+  );
+  check "BE.int32" "expected int32be 0x00000001, found 0x00000002"
+    "\x00\x00\x00\x02" (fun () -> Parseff.BE.int32 1l
+  );
+  check "LE.int32" "expected int32le 0x00000001, found 0x02000000"
+    "\x00\x00\x00\x02" (fun () -> Parseff.LE.int32 1l
+  );
+  check "BE.int64"
+    "expected int64be 0x0000000000000001, found 0x0000000000000002"
+    "\x00\x00\x00\x00\x00\x00\x00\x02" (fun () -> Parseff.BE.int64 1L
+  );
+  check "LE.int64"
+    "expected int64le 0x0000000000000001, found 0x0200000000000000"
+    "\x00\x00\x00\x00\x00\x00\x00\x02" (fun () -> Parseff.LE.int64 1L
+  );
+  check "short input" "expected 2 bytes, found only 1 (end of input)" "\x00"
+    (fun () -> Parseff.BE.int16 1
+  );
+  check_render "rendered"
+    (lines
+       [
+         "input.json:1:1: error: expected int16be 0x0001, found 0x0002";
+         "1 | \\x00\\x02";
+         "  | ^^^^^^^^";
+       ]
+    )
+    (render_error "\x00\x02" (fun () -> Parseff.BE.int16 1))
+
+let test_pp_matches_render () =
+  let long_message ppf () =
+    Format.pp_print_list ~pp_sep:Format.pp_print_space Format.pp_print_string
+      ppf
+      (List.init 30 (fun i -> Printf.sprintf "word%d" i))
+  in
+  let words =
+    String.concat " " (List.init 30 (fun i -> Printf.sprintf "word%d" i))
+  in
+  match Parseff.parse "x" (fun () -> Parseff.error ()) with
+  | Stdlib.Error e ->
+      Alcotest.(check string)
+        "user printer with breaks"
+        (E.render ~name:"input" ~user:(fun () -> words) e)
+        (Format.asprintf "%a"
+           (fun ppf e -> E.pp ~name:"input" ~user:long_message ppf e)
+           e
+        );
+      Alcotest.(check string)
+        "header on one line"
+        ("input:1:1: error: " ^ words)
+        (List.hd
+           (String.split_on_char '\n'
+              (Format.asprintf "%a"
+                 (fun ppf e -> E.pp ~name:"input" ~user:long_message ppf e)
+                 e
+              )
+           )
+        )
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_pp_in_an_open_box () =
+  match
+    Parseff.parse "abc" (fun () ->
+        ignore (Parseff.take 1);
+        ignore (Parseff.char 'q')
+    )
+  with
+  | Stdlib.Error (e : unit E.t) ->
+      let b = Buffer.create 100 in
+      let ppf = Format.formatter_of_buffer b in
+      Format.pp_set_margin ppf 20;
+      Format.fprintf ppf "@[<v 2>prefix:@ %a@]@?"
+        (fun ppf e -> E.pp ~name:"input" ppf e)
+        e;
+      Alcotest.(check string)
+        "every line keeps the indentation"
+        (lines
+           [
+             "prefix:";
+             "  input:1:2: error: expected 'q', found 'bc'";
+             "  1 | abc";
+             "    |  ^^";
+           ]
+        )
+        (Buffer.contents b);
+      Alcotest.(check string)
+        "outside a box it is the render" (E.render ~name:"input" e)
+        (Format.asprintf "%a" (fun ppf e -> E.pp ~name:"input" ppf e) e)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_quote_escapes () =
+  let check label expected input parser =
+    Alcotest.(check string) label expected (message_of input parser)
+  in
+  check "single quote expected" "expected '\\'', found 'x'" "x" (fun () ->
+      ignore (Parseff.char '\'')
+  );
+  check "single quote found" "expected 'a', found '\\''" "'x" (fun () ->
+      ignore (Parseff.char 'a')
+  );
+  check "raw byte expected" "expected '\\xE9', found 'x'" "x" (fun () ->
+      ignore (Parseff.char '\xE9')
+  );
+  check "double quote literal" "expected \"it's\", found 'x'" "x" (fun () ->
+      ignore (Parseff.consume "it's")
+  )
+
+let test_user_error_without_printer () =
+  match Parseff.parse "x" (fun () -> Parseff.error `Boom) with
+  | Stdlib.Error e ->
+      Alcotest.(check string)
+        "message" "user error (no ~user printer given)" (E.message e);
+      check_render "render"
+        (lines
+           [
+             "input:1:1: error: user error (no ~user printer given)";
+             "1 | x";
+             "  | ^";
+           ]
+        )
+        (E.render ~name:"input" e)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_expected_list_is_capped () =
+  let alternatives n =
+    List.init n (fun i () ->
+        ignore (Parseff.consume (Printf.sprintf "w%02d" (i + 1)))
+    )
+  in
+  let shown k =
+    String.concat ", "
+      (List.init k (fun i -> Printf.sprintf "\"w%02d\"" (i + 1)))
+  in
+  Alcotest.(check string)
+    "eight items are all listed"
+    ("expected " ^ shown 7 ^ ", or \"w08\", found 'zzz'")
+    (message_of "zzz" (Parseff.one_of (alternatives 8)));
+  Alcotest.(check string)
+    "one more is singular"
+    ("expected " ^ shown 8 ^ ", or 1 more alternative, found 'zzz'")
+    (message_of "zzz" (Parseff.one_of (alternatives 9)));
+  Alcotest.(check string)
+    "several more are plural"
+    ("expected " ^ shown 8 ^ ", or 4 more alternatives, found 'zzz'")
+    (message_of "zzz" (Parseff.one_of (alternatives 12)));
+  check_render "the header follows"
+    (lines
+       [
+         "input.json:1:1: error: expected " ^ shown 8
+         ^ ", or 1 more alternative, found 'zzz'";
+         "1 | zzz";
+         "  | ^^^";
+       ]
+    )
+    (render_error "zzz" (Parseff.one_of (alternatives 9)))
+
+let test_excerpt_escapes () =
+  let expect_char = fun () -> ignore (Parseff.char 'a') in
+  check_render "escape byte"
+    (lines
+       [
+         "input.json:1:1: error: expected 'a', found '\\x1B'";
+         "1 | \\x1B[0m";
+         "  | ^^^^";
+       ]
+    )
+    (render_error "\x1b[0m" expect_char);
+  check_render "invalid byte before the error"
+    (lines
+       [
+         "input.json:1:4: error: expected 'q', found 'cd'";
+         "1 | ab\\xFFcd";
+         "  |       ^^";
+       ]
+    )
+    (render_error "ab\xFFcd" (fun () ->
+         ignore (Parseff.take 3);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "invalid byte under the caret"
+    (lines
+       [
+         "input.json:1:3: error: expected 'q', found '\\xFF'";
+         "1 | ab\\xFFcd";
+         "  |   ^^^^";
+       ]
+    )
+    (render_error "ab\xFFcd" (fun () ->
+         ignore (Parseff.take 2);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "C1 control"
+    (lines
+       [
+         "input.json:1:1: error: expected 'a', found '\\u{0085}'";
+         "1 | \\u{0085}";
+         "  | ^^^^^^^^";
+       ]
+    )
+    (render_error "\xC2\x85" expect_char);
+  check_render "lone carriage return"
+    (lines
+       [
+         "input.json:1:5: error: expected 'q', found 'd'";
+         "1 | ab\\rcd";
+         "  |      ^";
+       ]
+    )
+    (render_error "ab\rcd" (fun () ->
+         ignore (Parseff.take 4);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "corner bar after an escape"
+    (lines
+       [
+         "input.json:3:3: error: expected ']', found 'x'";
+         "1 |   \\x01[";
+         "  | ╭─────╯";
+         "2 | │   1,";
+         "3 | │   x";
+         "  | ╰───^";
+         "  * while parsing list, from 1:2";
+       ]
+    )
+    (render_error "\x01[\n  1,\n  x" (fun () ->
+         ignore (Parseff.take 1);
+         Parseff.context ~delimited:true "list" (fun () ->
+             ignore (Parseff.char '[');
+             ignore (Parseff.consume "\n  1,\n  ");
+             ignore (Parseff.char ']')
+         )
+     )
+    )
+
+let test_invisible_code_points_are_escaped () =
+  let found input = message_of input (fun () -> ignore (Parseff.char 'a')) in
+  let expect label code input =
+    Alcotest.(check string)
+      label
+      (Printf.sprintf "expected 'a', found '\\u{%s}'" code)
+      (found input)
+  in
+  expect "no-break space" "00A0" "\xC2\xA0x";
+  expect "zero width space" "200B" "\xE2\x80\x8Bx";
+  expect "byte order mark" "FEFF" "\xEF\xBB\xBFx";
+  expect "line separator" "2028" "\xE2\x80\xA8x";
+  expect "paragraph separator" "2029" "\xE2\x80\xA9x";
+  expect "combining mark first" "0301" "\xCC\x81x";
+  let expected input =
+    message_of "x" (fun () -> ignore (Parseff.consume input))
+  in
+  Alcotest.(check string)
+    "combining mark first in a literal" "expected \"\\u{0301}a\", found 'x'"
+    (expected "\xCC\x81a");
+  Alcotest.(check string)
+    "combining mark inside a literal stays" "expected \"e\xCC\x81\", found 'x'"
+    (expected "e\xCC\x81");
+  Alcotest.(check string)
+    "Utf8.char" "expected '\\u{200B}', found 'x'"
+    (message_of "x" (fun () -> ignore (Parseff.Utf8.char (Uchar.of_int 0x200B))))
+
+let test_no_row_has_trailing_spaces () =
+  let outputs =
+    [
+      render_error "a\n\nx" (fun () ->
+          ignore (Parseff.take 3);
+          ignore (Parseff.char 'q')
+      );
+      render_error "" (fun () -> ignore (Parseff.char 'q'));
+      render_error "[\n\n1 2]" ctx_json_parser;
+      render_error "abc" (fun () ->
+          ignore (Parseff.take 1);
+          Parseff.fail ""
+      );
+    ]
+  in
+  List.iter
+    (fun out ->
+      List.iter
+        (fun row ->
+          Alcotest.(check bool)
+            ("no trailing space in " ^ String.escaped row)
+            false
+            (String.length row > 0 && row.[String.length row - 1] = ' ')
+        )
+        (String.split_on_char '\n' out)
+    )
+    outputs;
+  check_render "empty source row"
+    (lines
+       [
+         "input.json:3:1: error: expected 'q', found 'x'";
+         "2 |";
+         "3 | x";
+         "  | ^";
+       ]
+    )
+    (render_error "a\n\nx" (fun () ->
+         ignore (Parseff.take 3);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "empty message"
+    (lines [ "input.json:1:2: error:"; "1 | abc"; "  |  ^" ])
+    (render_error "abc" (fun () ->
+         ignore (Parseff.take 1);
+         Parseff.fail ""
+     )
+    )
+
+let test_truncated_found_keeps_quotes_closed () =
+  Alcotest.(check string)
+    "dots outside the quotes"
+    ("expected 'q', found '" ^ String.make 32 'x' ^ "'...")
+    (message_of (String.make 40 'x') (fun () -> ignore (Parseff.char 'q')))
+
+let test_no_excerpt_rows_are_indented_by_two () =
+  let input = numbered_lines 100 in
+  let line_loop () =
+    ignore
+      (Parseff.many
+         (fun () ->
+           ignore (Parseff.take_while (fun c -> c <> '\n') ~label:"x");
+           ignore (Parseff.char '\n')
+         )
+         ()
+      );
+    ignore (Parseff.take_while (fun _ -> true) ~label:"x")
+  in
+  check_render "note"
+    (lines [ "input: byte 3: error: span starts long ago"; "  * note: hint" ])
+    (render_stream ~name:"input" input (fun () ->
+         line_loop ();
+         Parseff.fail ~from:3
+           ~notes:[ { E.at = None; text = "hint" } ]
+           "span starts long ago"
+     )
+    );
+  check_render "frame"
+    (lines
+       [
+         "input: byte 3: error: span starts long ago";
+         "  * while parsing block, from byte 0";
+       ]
+    )
+    (render_stream ~name:"input" input (fun () ->
+         Parseff.context "block" (fun () ->
+             line_loop ();
+             Parseff.fail ~from:3 "span starts long ago"
+         )
+     )
+    )
+
+let test_limits_keep_frames_and_give_help () =
+  let rec nest () =
+    Parseff.rec_ (fun () ->
+        Parseff.context "nest" (fun () ->
+            ignore (Parseff.char '[');
+            nest ()
+        )
+    )
+  in
+  ( match Parseff.parse ~max_depth:3 "[[[[[[" nest with
+  | Stdlib.Error (e : unit E.t) ->
+      check_render "depth"
+        (lines
+           [
+             "1:4: error: maximum nesting depth 3 exceeded";
+             "1 | [[[[[[";
+             "  |    ^";
+             "  * while parsing nest, from 1:3";
+             "  * while parsing nest, from 1:2";
+             "  * while parsing nest, from 1:1";
+             "  * help: raise ~max_depth";
+           ]
+        )
+        (E.render e)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  let input = numbered_lines 100 in
+  let parser () =
+    ignore (Parseff.take 7);
+    Parseff.context ~delimited:true "block" (fun () ->
+        ignore (Parseff.take 7);
+        ignore (Parseff.take 100000)
+    )
+  in
+  check_render "backtrack window"
+    (lines
+       [
+         "input:3:1: error: backtrack window of 16 bytes exceeded";
+         "3 | line 3";
+         "  | ^";
+         "  * while parsing block, from 2:1";
+         "  * help: call commit or cut earlier, or raise ~backtrack_window";
+       ]
+    )
+    (render_stream ~name:"input" input parser)
+
+let test_one_hidden_frame_is_printed () =
+  let rec nest n () =
+    ignore (Parseff.char 'a');
+    if n = 0 then
+      ignore (Parseff.char 'x')
+    else
+      Parseff.context (Printf.sprintf "level%d" n) (nest (n - 1))
+  in
+  let out = render (String.make 7 'a') (nest 6) in
+  Alcotest.(check bool)
+    "no 'and 1 more' row" false
+    (List.mem "  * ... and 1 more" (String.split_on_char '\n' out));
+  Alcotest.(check bool)
+    "the sixth frame is printed" true
+    (List.mem "  * while parsing level6, from 1:2"
+       (String.split_on_char '\n' out)
+    )
+
+let test_regex_label_without_label () =
+  Alcotest.(check string)
+    "unlabeled regex" "expected text matching the pattern, found '!'"
+    (message_of "!" (fun () ->
+         ignore (Parseff.match_regex (Re.compile (Re.rep1 Re.digit)))
+     )
+    )
+
+let test_built_in_labels () =
+  let message input parser = message_of input parser in
+  Alcotest.(check (list string))
+    "labels"
+    [
+      "expected digit, found 'x'";
+      "expected letter, found '1'";
+      "expected alphanumeric, found '!'";
+      "expected whitespace, found 'x'";
+      "expected any character, found end of input";
+    ]
+    [
+      message "x" (fun () -> ignore (Parseff.digit ()));
+      message "1" (fun () -> ignore (Parseff.letter ()));
+      message "!" (fun () -> ignore (Parseff.alphanum ()));
+      message "x" (fun () -> ignore (Parseff.whitespace ~at_least:1 ()));
+      message "" (fun () -> ignore (Parseff.any_char ()));
+    ]
+
+let test_gap_row_is_in_the_gutter () =
+  let input =
+    "foo(\n" ^ String.concat "" (List.init 10 (fun _ -> "a,\n")) ^ "d"
+  in
+  let parser () =
+    ignore (Parseff.consume input);
+    Parseff.fail ~notes:[ paren_note 3 ] "missing )"
+  in
+  check_render "gap outside a bar"
+    (lines
+       [
+         "input.json:12:2: error: missing )";
+         " 1 | foo(";
+         "   |    - to match this";
+         "   | ...";
+         "11 | a,";
+         "12 | d";
+         "   |  ^";
+       ]
+    )
+    (render_error input parser)
+
+let test_empty_one_of_adds_no_item () =
+  Alcotest.(check string)
+    "alone" "no alternative matched"
+    (message_of "x" (Parseff.one_of []));
+  check_render "alone, rendered"
+    (lines [ "input.json:1:1: error: no alternative matched"; "1 | x"; "  | ^" ])
+    (render_error "x" (Parseff.one_of []));
+  ( match Parseff.parse "x" (Parseff.one_of []) with
+  | Stdlib.Error { kind = Failure m; _ } ->
+      Alcotest.(check string) "kind" "no alternative matched" m
+  | _ ->
+      Alcotest.fail "expected a Failure"
+  );
+  Alcotest.(check string)
+    "next to another failure" "expected \"a\", found 'x'"
+    (message_of "x" (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () -> Parseff.one_of [] ())
+              (fun () -> Parseff.consume "a")
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "inside one_of" "expected 'b' or \"a\", found 'x'"
+    (message_of "x" (fun () ->
+         ignore
+           (Parseff.one_of
+              [
+                Parseff.one_of [];
+                (fun () -> ignore (Parseff.consume "a"));
+                (fun () -> ignore (Parseff.char 'b'));
+              ]
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "still backtracks" "ok"
+    ( match
+        Parseff.parse "x" (fun () ->
+            Parseff.or_ (fun () -> Parseff.one_of [] ()) (fun () -> "ok") ()
+        )
+      with
+    | Stdlib.Ok s ->
+        s
+    | Stdlib.Error _ ->
+        "error"
+    )
+
+let test_position_is_known_or_absent () =
+  ( match
+      Parseff.parse "ab\n\xCE\xBB!" (fun () ->
+          ignore (Parseff.take 5);
+          ignore (Parseff.char 'q')
+      )
+    with
+  | Stdlib.Error (e : unit E.t) -> (
+      match e.position with
+      | Some { location; code_point_col } ->
+          Alcotest.(check (pair int int))
+            "line and column" (2, 3)
+            (location.line, location.col);
+          Alcotest.(check (option int))
+            "code point column" (Some 2) code_point_col
+      | None ->
+          Alcotest.fail "expected a position"
+    )
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  ( match
+      Parseff.parse_source ~backtrack_window:200
+        (chunk_source ~chunk:64 lines_text)
+        (from_before_the_buffer_parser `Fail)
+    with
+  | Stdlib.Error (e : unit E.t) ->
+      Alcotest.(check bool)
+        "past the buffer has no position" true (e.position = None)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  match
+    Parseff.parse_source ~backtrack_window:4096 (source_of_chunks "ab\ncd")
+      (fun () ->
+        ignore (Parseff.take 4);
+        ignore (Parseff.char 'q')
+    )
+  with
+  | Stdlib.Error (e : unit E.t) -> (
+      match e.position with
+      | Some { location; _ } ->
+          Alcotest.(check (pair int int))
+            "a known line is exact" (2, 2)
+            (location.line, location.col)
+      | None ->
+          Alcotest.fail "expected a position"
+    )
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_overflow_count_is_an_int () =
+  let alternatives =
+    List.init 100 (fun i () ->
+        ignore (Parseff.consume (Printf.sprintf "item%03d" i))
+    )
+  in
+  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  | Stdlib.Error (e : unit E.t) -> (
+      match e.kind with
+      | Expected { items = _, rest; more; _ } ->
+          Alcotest.(check (pair int int))
+            "items and more" (64, 36)
+            (List.length rest + 1, more);
+          Alcotest.(check bool)
+            "no item is a count label" false
+            (List.exists
+               (function Parseff.Error.Label _ -> true | _ -> false)
+               rest
+            )
+      | _ ->
+          Alcotest.fail "expected Expected"
+    )
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_mixed_int_widths_fall_back_to_text () =
+  let message ?(input = "\x00\x00\x00\x02") parser = message_of input parser in
+  Alcotest.(check string)
+    "different widths"
+    "expected int16be 0x0001 or int32be 0x00000001, found '\\x00'"
+    (message (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () -> Parseff.BE.int16 1)
+              (fun () -> Parseff.BE.int32 1l)
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "different endianness"
+    "expected int16be 0x0001 or int16le 0x0001, found '\\x00'"
+    (message ~input:"\x00\x02\x00\x00" (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () -> Parseff.BE.int16 1)
+              (fun () -> Parseff.LE.int16 1)
+              ()
+           )
+     )
+    );
+  Alcotest.(check string)
+    "same width and value"
+    "expected int16be 0x0001 or int16be 0x0003, found 0x0000"
+    (message (fun () ->
+         ignore
+           (Parseff.or_
+              (fun () -> Parseff.BE.int16 1)
+              (fun () -> Parseff.BE.int16 3)
+              ()
+           )
+     )
+    )
+
+let test_source_and_user_text_keep_trailing_spaces () =
+  check_render "source line ending in spaces"
+    (lines
+       [
+         "input.json:1:6: error: expected 'q', found end of input";
+         "1 | ab   ";
+         "  |      ^";
+       ]
+    )
+    (render_error "ab   " (fun () ->
+         ignore (Parseff.take 5);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "found spaces"
+    (lines
+       [
+         "input.json:1:3: error: expected 'q', found ' '";
+         "1 | ab   ";
+         "  |   ^";
+       ]
+    )
+    (render_error "ab   " (fun () ->
+         ignore (Parseff.take 2);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "user text"
+    (lines [ "input.json:1:1: error: msg "; "1 | x"; "  | ^"; "  * note: n " ])
+    (render_error "x" (fun () ->
+         Parseff.fail ~notes:[ { E.at = None; text = "n " } ] "msg "
+     )
+    )
+
+let test_excerpt_escapes_invisible_code_points () =
+  let expect_char = fun () -> ignore (Parseff.char 'a') in
+  check_render "no-break space"
+    (lines
+       [
+         "input.json:1:1: error: expected 'a', found '\\u{00A0}'";
+         "1 | \\u{00A0}x";
+         "  | ^^^^^^^^";
+       ]
+    )
+    (render_error "\xC2\xA0x" expect_char);
+  check_render "zero width space before the error"
+    (lines
+       [
+         "input.json:1:4: error: expected 'q', found 'x'";
+         "1 | \\u{200B}x";
+         "  |         ^";
+       ]
+    )
+    (render_error "\xE2\x80\x8Bx" (fun () ->
+         ignore (Parseff.take 3);
+         ignore (Parseff.char 'q')
+     )
+    );
+  check_render "combining mark at the start of the row"
+    (lines
+       [
+         "input.json:1:1: error: expected 'a', found '\\u{0301}'";
+         "1 | \\u{0301}x";
+         "  | ^^^^^^^^";
+       ]
+    )
+    (render_error "\xCC\x81x" expect_char);
+  check_render "combining mark after a base character stays"
+    (lines
+       [
+         "input.json:1:4: error: expected 'q', found 'x'";
+         "1 | e\xCC\x81x";
+         "  |   ^";
+       ]
+    )
+    (render_error "e\xCC\x81x" (fun () ->
+         ignore (Parseff.take 3);
+         ignore (Parseff.char 'q')
+     )
+    )
+
+let test_window_error_points_at_the_parser () =
+  let input = numbered_lines 100 in
+  let parser () =
+    ignore (Parseff.take 7);
+    Parseff.context ~delimited:true "block" (fun () ->
+        ignore (Parseff.take 7);
+        ignore (Parseff.take 100000)
+    )
+  in
+  match
+    Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
+  with
+  | Stdlib.Error (e : unit E.t) ->
+      Alcotest.(check int) "position is the parser's" 14 (E.pos e);
+      Alcotest.(check bool) "the line is known" true (e.position <> None);
+      Alcotest.(check bool)
+        "no byte header" false
+        (String.starts_with ~prefix:"byte" (E.render e))
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
 
 let () =
   let open Alcotest in
@@ -2614,6 +3547,54 @@ let () =
           test_case "C1 controls" `Quick test_c1_controls_are_escaped;
           test_case "built-in failures are expected items" `Quick
             test_built_in_failures_are_expected_items;
+        ]
+      );
+      ( "output polish",
+        [
+          test_case "unknown line has a byte header" `Quick
+            test_unknown_line_has_byte_header;
+          test_case "frame column in code points" `Quick
+            test_frame_column_in_code_points;
+          test_case "take reports what is left" `Quick
+            test_take_reports_what_is_left;
+          test_case "int mismatch shows the value" `Quick
+            test_int_mismatch_shows_the_value;
+          test_case "pp matches render" `Quick test_pp_matches_render;
+          test_case "pp in an open box" `Quick test_pp_in_an_open_box;
+          test_case "quote escapes" `Quick test_quote_escapes;
+          test_case "user error without printer" `Quick
+            test_user_error_without_printer;
+          test_case "expected list is capped" `Quick
+            test_expected_list_is_capped;
+          test_case "excerpt escapes" `Quick test_excerpt_escapes;
+          test_case "invisible code points" `Quick
+            test_invisible_code_points_are_escaped;
+          test_case "no trailing spaces" `Quick test_no_row_has_trailing_spaces;
+          test_case "truncated found" `Quick
+            test_truncated_found_keeps_quotes_closed;
+          test_case "no-excerpt rows" `Quick
+            test_no_excerpt_rows_are_indented_by_two;
+          test_case "limits keep frames and give help" `Quick
+            test_limits_keep_frames_and_give_help;
+          test_case "one hidden frame is printed" `Quick
+            test_one_hidden_frame_is_printed;
+          test_case "regex label" `Quick test_regex_label_without_label;
+          test_case "built-in labels" `Quick test_built_in_labels;
+          test_case "gap row in the gutter" `Quick test_gap_row_is_in_the_gutter;
+          test_case "empty one_of adds no item" `Quick
+            test_empty_one_of_adds_no_item;
+          test_case "position is known or absent" `Quick
+            test_position_is_known_or_absent;
+          test_case "overflow count is an int" `Quick
+            test_overflow_count_is_an_int;
+          test_case "mixed int widths fall back to text" `Quick
+            test_mixed_int_widths_fall_back_to_text;
+          test_case "trailing spaces of source and user text" `Quick
+            test_source_and_user_text_keep_trailing_spaces;
+          test_case "excerpt escapes invisible code points" `Quick
+            test_excerpt_escapes_invisible_code_points;
+          test_case "window error points at the parser" `Quick
+            test_window_error_points_at_the_parser;
         ]
       );
       ( "fold exceptions",
