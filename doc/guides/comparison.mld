@@ -30,8 +30,8 @@ iterations (3 runs). Source:
 
 {v
                         Parses/sec     vs. Angstrom (generic)   Minor allocs
-Parseff (optimized)     ~2,470,000     2.0x faster              1.4 GB
-Parseff (generic)       ~1,740,000     1.4x faster              1.4 GB
+Parseff (optimized)     ~2,470,000     2.0x faster              1.5 GB
+Parseff (generic)       ~1,740,000     1.4x faster              1.1 GB
 Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
 Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 v}
