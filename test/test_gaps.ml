@@ -7,16 +7,16 @@ let chunked_source ~chunk_size input =
       n
   )
 
-let kind (e : Parseff.Error.t) =
+let kind (e : Parseff.error) =
   match e.kind with
   | Expected _ ->
-      "Expected " ^ Parseff.Error.message e
+      "Expected " ^ Parseff.error_message e
   | Failure m ->
       "Failure " ^ m
-  | User _ ->
-      "User"
+  | Custom _ ->
+      "Custom"
   | Depth_limit_exceeded _ ->
-      "Depth_limit_exceeded " ^ Parseff.Error.message e
+      "Depth_limit_exceeded " ^ Parseff.error_message e
   | Backtrack_window_exceeded _ ->
       "Backtrack_window_exceeded"
 
@@ -24,7 +24,7 @@ let norm = function
   | Ok v ->
       Ok v
   | Error e ->
-      Error (e.Parseff.Error.span.start, kind e)
+      Error (e.Parseff.range.start, kind e)
 
 let show_result show_v = function
   | Ok v ->
@@ -35,7 +35,7 @@ let show_result show_v = function
 let check_all ?(chunk_sizes = [ 1; 2; 3 ]) name show_v input parser expected =
   Alcotest.(check string)
     (name ^ " parse") expected
-    (show_result show_v (norm (Parseff.parse input parser)));
+    (show_result show_v (norm (Parseff.parse ~consume:`Partial input parser)));
   List.iter
     (fun chunk_size ->
       Alcotest.(check string)
@@ -43,7 +43,10 @@ let check_all ?(chunk_sizes = [ 1; 2; 3 ]) name show_v input parser expected =
         expected
         (show_result show_v
            (norm
-              (Parseff.parse_source (chunked_source ~chunk_size input) parser)
+              (Parseff.parse_source ~consume:`Partial
+                 (chunked_source ~chunk_size input)
+                 parser
+              )
            )
         )
     )
@@ -120,7 +123,7 @@ let test_utf8_skip_while_then_char_split () =
     (fun (text, target, _) ->
       let expected =
         match
-          Parseff.parse text (fun () ->
+          Parseff.parse ~consume:`Partial text (fun () ->
               Parseff.Utf8.skip_while_then_char
                 (fun u -> not (Uchar.equal u target))
                 target;
@@ -189,7 +192,7 @@ let test_utf8_alphanum_rejects_non_ascii_digit () =
   List.iter
     (fun (name, parser) ->
       match Parseff.parse arabic_indic_three parser with
-      | Error e when e.Parseff.Error.span.start = 0 ->
+      | Error e when e.range.start = 0 ->
           ()
       | _ ->
           Alcotest.failf "%s accepted U+0663" name
@@ -278,7 +281,7 @@ let test_depth_restored_after_exception () =
 let test_count_zero () =
   let calls = ref 0 in
   match
-    Parseff.parse "abc" (fun () ->
+    Parseff.parse ~consume:`Partial "abc" (fun () ->
         Parseff.count 0
           (fun () ->
             incr calls;

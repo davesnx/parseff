@@ -214,7 +214,7 @@ let number () =
 `Parseff.fail` aborts parsing with an error message.
 
 ```ocaml
-val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
+val fail : ?from:int -> ?notes:note list -> string -> 'a
 ```
 ```ocaml
 (* Validate range *)
@@ -237,10 +237,10 @@ let byte () =
 `Parseff.error` aborts parsing with a user-defined error value. Custom errors are caught by `Parseff.parse` and returned in the result.
 
 ```ocaml
-val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
+val error : ?from:int -> ?notes:note list -> custom_error -> 'a
 ```
 ```ocaml
-type Parseff.Error.user += Negative of int | Out_of_range of int
+type Parseff.custom_error += Negative of int | Out_of_range of int
 
 let validated_number () =
   let s =
@@ -254,16 +254,16 @@ let validated_number () =
 let () =
   match Parseff.parse "300" validated_number with
   | Ok n -> Printf.printf "Got %d\n" n
-  | Error { kind = User (Out_of_range n); _ } ->
+  | Error { kind = Custom (Out_of_range n); _ } ->
       Printf.printf "%d is too large (max 255)\n" n
-  | Error { kind = User (Negative n); _ } ->
+  | Error { kind = Custom (Negative n); _ } ->
       Printf.printf "%d is negative\n" n
   | Error _ -> Printf.printf "Parse error\n"
 ```
 **Tip:** Cases without a payload are quick error types:
 
 ```ocaml
-type Parseff.Error.user += Too_large | Negative_number
+type Parseff.custom_error += Too_large | Negative_number
 
 let number_checked () =
   let s =
@@ -277,7 +277,7 @@ let number_checked () =
 
 ### `end_of_input`
 
-`Parseff.end_of_input` succeeds only if no input remains. Use this to ensure the entire input has been consumed.
+`Parseff.end_of_input` succeeds only if no input remains. Use this to ensure the entire input has been consumed at a given point.
 
 ```ocaml
 val end_of_input : unit -> unit
@@ -292,10 +292,10 @@ let complete_number () =
 (* Matches: "5" -> 5 *)
 (* Fails: "52" -> Error: expected end of input *)
 
-(* Without end_of_input, "52" would succeed and return 5,
-   leaving "2" unparsed *)
+(* parse already requires all input by default. end_of_input is for
+   checks inside a parser, or when parsing with ~consume:`Partial *)
 ```
-**Caution:** Use `Parseff.end_of_input` when you want to ensure all input is consumed. Without it, `parse` happily returns a result even if there's leftover input.
+**Note:** `Parseff.parse` and `Parseff.parse_source` fail with `Expected End_of_input` when input remains, so a top-level parser does not need a final `end_of_input`. With `~consume:`Partial`, leftover input is ignored.
 
 
 ### `position`
@@ -337,9 +337,9 @@ let number () =
 let report_error input result =
   match result with
   | Error e ->
-      let loc = Parseff.location_of_position input e.Parseff.Error.span.start in
+      let loc = Parseff.location_of_position input e.Parseff.range.start in
       Printf.printf "line %d, col %d: %s\n" loc.line loc.col
-        (Parseff.Error.message e)
+        (Parseff.error_message e)
   | Ok _ -> ()
 ```
 **Tip:** Use `location` during parsing to attach source positions to AST nodes or other parsed structures. Use `location_of_position` after parsing to convert byte offsets from error results into line and column numbers for diagnostics.

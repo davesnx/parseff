@@ -49,9 +49,9 @@ let () =
       Printf.printf "unexpected success: GET %s\n" p
   | Ok (`POST, p) ->
       Printf.printf "unexpected success: POST %s\n" p
-  | Error { kind = Backtrack_window_exceeded { limit; oldest }; span; _ } ->
+  | Error { kind = Backtrack_window_exceeded { limit; oldest }; range; _ } ->
       Printf.printf "backtrack window exceeded at %d: limit=%d oldest=%d\n"
-        span.start limit oldest
+        range.start limit oldest
   | Error e ->
-      Printf.printf "parse error at %d: %s\n" e.Parseff.Error.span.start
-        (Parseff.Error.message e)
+      Printf.printf "parse error at %d: %s\n" e.range.start
+        (Parseff.error_message e)

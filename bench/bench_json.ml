@@ -31,7 +31,6 @@ module Parseff_JSON = struct
     let elements = Parseff.sep_by number comma () in
     Parseff.skip_whitespace ();
     let _ = Parseff.char ']' in
-    Parseff.end_of_input ();
     elements
 
   let parse input =
@@ -53,7 +52,6 @@ module Parseff_JSON_Optimized = struct
     let spans = Parseff.sep_by_take_span Parseff.is_whitespace ',' is_num in
     let elements = List.map float_of_span spans in
     Parseff.skip_while_then_char Parseff.is_whitespace ']';
-    Parseff.end_of_input ();
     elements
 
   let parse input =

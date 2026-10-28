@@ -137,7 +137,6 @@ module Parseff_Arith_Generic = struct
 
   let expr () =
     let result = Parseff.fold_left term add_op () in
-    Parseff.end_of_input ();
     result
 
   let parse input =
@@ -211,7 +210,6 @@ module Parseff_Arith_Fused = struct
     in
     let first_term, rest_nums, rest_ops = pass1 first nums ops in
     let result = pass2 first_term rest_nums rest_ops in
-    Parseff.end_of_input ();
     result
 
   let parse input =

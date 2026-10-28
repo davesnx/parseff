@@ -63,7 +63,7 @@ module Diagnostics = struct
   let clear = diagnostics_clear
 end
 
-type user = ..
+type custom_error = ..
 
 exception Fail
 type fail_extra = {
@@ -80,8 +80,8 @@ type over = { opos : int; mutable oitems : (int * string) list }
 type far_extra =
   | No_extra
   | Over of over
-  | Payload of user
-  | Payload_ext of user * fail_extra
+  | Payload of custom_error
+  | Payload_ext of custom_error * fail_extra
 type abort_frames = {
   at : int;
   mutable open_frames : (string * int * bool) list;
@@ -333,7 +333,9 @@ module State = struct
     let index = t.frames_top in
     let base = index * frame_stride in
     if base + frame_stride > Array.length t.frames then begin
-      let grown = Array.make (imax 48 (2 * Array.length t.frames)) 0 in
+      let grown =
+        Array.make (imax (4 * frame_stride) (2 * Array.length t.frames)) 0
+      in
       Array.blit t.frames 0 grown 0 base;
       t.frames <- grown
     end;
@@ -2138,871 +2140,838 @@ let location_of_position input pos =
   let line_idx = find_line idx pos in
   { offset = pos; line = line_idx + 1; col = pos - idx.starts.(line_idx) + 1 }
 
-module Error = struct
-  type expected =
-    | Char of Uchar.t
-    | Literal of string
-    | Label of string
-    | End_of_input
+type expected =
+  | Char of Uchar.t
+  | Literal of string
+  | Label of string
+  | End_of_input
 
-  type found = Text of string | End | Short of int | Value of string
-  type range = range_data = { start : int; stop : int }
-  type frame = { name : string; start : int; delimited : bool }
-  type note = note_data = { at : range option; text : string }
+type found = Text of string | End | Short of int | Value of string
+type range = range_data = { start : int; stop : int }
+type context = { name : string; start : int; delimited : bool }
+type note = note_data = { at : range option; text : string }
 
-  type view = {
-    number : int;
-    text : string;
-    first : int;
-    left_cut : bool;
-    right_cut : bool;
-  }
+type view = {
+  number : int;
+  text : string;
+  first : int;
+  left_cut : bool;
+  right_cut : bool;
+}
 
-  type position = { location : location; code_point_col : int option }
+type excerpt = {
+  views : view list;
+  frame_locs : (int * int * int option) option list;
+  char_column : int option;
+}
 
-  type excerpt = {
-    views : view list;
-    frame_locs : (int * int * int option) option list;
-  }
+type error_kind =
+  | Expected of { items : expected * expected list; found : found; more : int }
+  | Failure of string
+  | Custom of custom_error
+  | Depth_limit_exceeded of { limit : int }
+  | Backtrack_window_exceeded of { limit : int; oldest : int }
 
-  type nonrec user = user = ..
+type error = {
+  kind : error_kind;
+  range : range;
+  location : location option;
+  contexts : context list;
+  notes : note list;
+  excerpt : excerpt;
+}
 
-  type kind =
-    | Expected of {
-        items : expected * expected list;
-        found : found;
-        more : int;
-      }
-    | Failure of string
-    | User of user
-    | Depth_limit_exceeded of { limit : int }
-    | Backtrack_window_exceeded of { limit : int; oldest : int }
+let window_size = 240
+let max_frames = 5
 
-  type t = {
-    kind : kind;
-    span : range;
-    position : position option;
-    frames : frame list;
-    notes : note list;
-    excerpt : excerpt;
-  }
+let char_len s i =
+  let d = String.get_utf_8_uchar s i in
+  if Uchar.utf_decode_is_valid d then
+    Uchar.utf_decode_length d
+  else
+    1
 
-  type columns = [ `Bytes | `Code_points ]
-
-  let window_size = 240
-  let max_frames = 5
-
-  let char_len s i =
-    let d = String.get_utf_8_uchar s i in
-    if Uchar.utf_decode_is_valid d then
-      Uchar.utf_decode_length d
-    else
-      1
-
-  let count_code_points s a b =
-    let n = ref 0 and i = ref a in
-    while
-      !i + 8 <= b
-      && Int64.logand (String.get_int64_ne s !i) 0x8080808080808080L = 0L
-    do
-      i := !i + 8;
-      n := !n + 8
-    done;
-    while !i < b do
-      if Char.code (String.unsafe_get s !i) < 0x80 then
-        incr i
-      else
-        i := !i + char_len s !i;
+let count_code_points s a b =
+  let n = ref 0 and i = ref a in
+  while
+    !i + 8 <= b
+    && Int64.logand (String.get_int64_ne s !i) 0x8080808080808080L = 0L
+  do
+    i := !i + 8;
+    n := !n + 8
+  done;
+  while !i < b do
+    if Char.code (String.unsafe_get s !i) < 0x80 then begin
+      incr i;
       incr n
-    done;
-    !n
-
-  let escape_code c =
-    match c with
-    | 10 ->
-        "\\n"
-    | 9 ->
-        "\\t"
-    | 13 ->
-        "\\r"
-    | _ ->
-        Printf.sprintf "\\x%02X" c
-
-  let hidden_code_point c =
-    c = 0xA0
-    ||
-    match Uucp.Gc.general_category (Uchar.of_int c) with
-    | `Cf | `Zl | `Zp ->
-        true
-    | _ ->
-        false
-
-  let combining_mark c =
-    match Uucp.Gc.general_category (Uchar.of_int c) with
-    | `Mn | `Me ->
-        true
-    | _ ->
-        false
-
-  let invisible ~first c =
-    c >= 0x80 && (c < 0xA0 || hidden_code_point c || (first && combining_mark c))
-
-  let escape_text ?(quote = '\'') s =
-    let b = Buffer.create (String.length s + 2) in
-    let i = ref 0 in
-    while !i < String.length s do
-      let d = String.get_utf_8_uchar s !i in
-      if Uchar.utf_decode_is_valid d then begin
-        let n = Uchar.utf_decode_length d in
-        let c = Uchar.to_int (Uchar.utf_decode_uchar d) in
-        if c < 0x20 || c = 0x7F then
-          Buffer.add_string b (escape_code c)
-        else if invisible ~first:(!i = 0) c then
-          Buffer.add_string b (Printf.sprintf "\\u{%04X}" c)
-        else if c = Char.code quote then
-          if quote = '"' then
-            Buffer.add_string b "\\\""
-          else
-            Buffer.add_string b "\\'"
-        else if c = Char.code '\\' && quote = '"' then
-          Buffer.add_string b "\\\\"
-        else
-          Buffer.add_string b (String.sub s !i n);
-        i := !i + n
-      end else begin
-        Buffer.add_string b
-          (Printf.sprintf "\\x%02X" (Char.code (String.get s !i)));
-        incr i
-      end
-    done;
-    Buffer.contents b
-
-  let utf8_of_uchar u =
-    let b = Buffer.create 4 in
-    Buffer.add_utf_8_uchar b u;
-    Buffer.contents b
-
-  let expected_text = function
-    | Char u ->
-        "'" ^ escape_text (utf8_of_uchar u) ^ "'"
-    | Literal s when String.length s = 1 && Char.code s.[0] >= 0x80 ->
-        "'" ^ escape_text s ^ "'"
-    | Literal s ->
-        "\"" ^ escape_text ~quote:'"' s ^ "\""
-    | Label l ->
-        l
-    | End_of_input ->
-        "end of input"
-
-  let max_items = 8
-
-  let more_alternatives n =
-    if n = 1 then
-      "1 more alternative"
-    else
-      string_of_int n ^ " more alternatives"
-
-  let int_mismatch payload s =
-    let index = (payload - 2) / 2 in
-    let suffix =
-      if (payload - 2) land 1 = 1 then
-        "le"
-      else
-        "be"
-    in
-    match index with
-    | 0 ->
-        let expected = String.get_uint16_be s 0 in
-        let actual = String.get_uint16_be s 2 in
-        ( Printf.sprintf "int16%s 0x%04X" suffix expected,
-          Printf.sprintf "0x%04X" actual,
-          2
-        )
-    | 1 ->
-        let expected = String.get_int32_be s 0 in
-        let actual = String.get_int32_be s 4 in
-        ( Printf.sprintf "int32%s 0x%08lX" suffix expected,
-          Printf.sprintf "0x%08lX" actual,
-          4
-        )
-    | _ ->
-        let expected = String.get_int64_be s 0 in
-        let actual = String.get_int64_be s 8 in
-        ( Printf.sprintf "int64%s 0x%016LX" suffix expected,
-          Printf.sprintf "0x%016LX" actual,
-          8
-        )
-
-  let join_items = function
-    | [ a ] ->
-        a
-    | [ a; b ] ->
-        a ^ " or " ^ b
-    | items ->
-        let rec go = function
-          | [] ->
-              ""
-          | [ last ] ->
-              "or " ^ last
-          | x :: tl ->
-              x ^ ", " ^ go tl
-        in
-        go items
-
-  let list_expected items more =
-    if List.length items <= max_items && more = 0 then
-      join_items (List.map expected_text items)
-    else begin
-      let shown = List.filteri (fun i _ -> i < max_items) items in
-      String.concat ", " (List.map expected_text shown)
-      ^ ", or "
-      ^ more_alternatives (List.length items - List.length shown + more)
+    end else begin
+      let len = char_len s !i in
+      if !i + len <= b then incr n;
+      i := !i + len
     end
+  done;
+  !n
 
-  let found_text = function
-    | End ->
-        "end of input"
-    | Short n ->
-        Printf.sprintf "only %d (end of input)" n
-    | Value v ->
-        v
-    | Text s ->
-        let n = String.length s in
-        if n > 3 && String.sub s (n - 3) 3 = "..." then
-          "'" ^ escape_text (String.sub s 0 (n - 3)) ^ "'..."
+let escape_code c =
+  match c with
+  | 10 ->
+      "\\n"
+  | 9 ->
+      "\\t"
+  | 13 ->
+      "\\r"
+  | _ ->
+      Printf.sprintf "\\x%02X" c
+
+let hidden_code_point c =
+  c = 0xA0
+  ||
+  match Uucp.Gc.general_category (Uchar.of_int c) with
+  | `Cf | `Zl | `Zp ->
+      true
+  | _ ->
+      false
+
+let combining_mark c =
+  match Uucp.Gc.general_category (Uchar.of_int c) with
+  | `Mn | `Me ->
+      true
+  | _ ->
+      false
+
+let invisible ~first c =
+  c >= 0x80 && (c < 0xA0 || hidden_code_point c || (first && combining_mark c))
+
+let escape_text ?(quote = '\'') s =
+  let b = Buffer.create (String.length s + 2) in
+  let i = ref 0 in
+  while !i < String.length s do
+    let d = String.get_utf_8_uchar s !i in
+    if Uchar.utf_decode_is_valid d then begin
+      let n = Uchar.utf_decode_length d in
+      let c = Uchar.to_int (Uchar.utf_decode_uchar d) in
+      if c < 0x20 || c = 0x7F then
+        Buffer.add_string b (escape_code c)
+      else if invisible ~first:(!i = 0) c then
+        Buffer.add_string b (Printf.sprintf "\\u{%04X}" c)
+      else if c = Char.code quote then
+        if quote = '"' then
+          Buffer.add_string b "\\\""
         else
-          "'" ^ escape_text s ^ "'"
+          Buffer.add_string b "\\'"
+      else if c = Char.code '\\' && quote = '"' then
+        Buffer.add_string b "\\\\"
+      else
+        Buffer.add_string b (String.sub s !i n);
+      i := !i + n
+    end else begin
+      Buffer.add_string b
+        (Printf.sprintf "\\x%02X" (Char.code (String.get s !i)));
+      incr i
+    end
+  done;
+  Buffer.contents b
 
-  let message ?user e =
-    match e.kind with
-    | Expected { items = x, xs; found; more } ->
-        "expected "
-        ^ list_expected (x :: xs) more
-        ^ ", found " ^ found_text found
-    | Failure m ->
-        m
-    | User v -> (
-        match user with
-        | Some f ->
-            f v
-        | None ->
-            "user error (no ~user printer given)"
+let utf8_of_uchar u =
+  let b = Buffer.create 4 in
+  Buffer.add_utf_8_uchar b u;
+  Buffer.contents b
+
+let expected_text = function
+  | Char u ->
+      "'" ^ escape_text (utf8_of_uchar u) ^ "'"
+  | Literal s when String.length s = 1 && Char.code s.[0] >= 0x80 ->
+      "'" ^ escape_text s ^ "'"
+  | Literal s ->
+      "\"" ^ escape_text ~quote:'"' s ^ "\""
+  | Label l ->
+      l
+  | End_of_input ->
+      "end of input"
+
+let max_items = 8
+
+let more_alternatives n =
+  if n = 1 then
+    "1 more alternative"
+  else
+    string_of_int n ^ " more alternatives"
+
+let int_mismatch payload s =
+  let index = (payload - 2) / 2 in
+  let suffix =
+    if (payload - 2) land 1 = 1 then
+      "le"
+    else
+      "be"
+  in
+  match index with
+  | 0 ->
+      let expected = String.get_uint16_be s 0 in
+      let actual = String.get_uint16_be s 2 in
+      ( Printf.sprintf "int16%s 0x%04X" suffix expected,
+        Printf.sprintf "0x%04X" actual,
+        2
       )
-    | Depth_limit_exceeded { limit } ->
-        Printf.sprintf "maximum nesting depth %d exceeded" limit
-    | Backtrack_window_exceeded { limit; _ } ->
-        Printf.sprintf "backtrack window of %d bytes exceeded" limit
+  | 1 ->
+      let expected = String.get_int32_be s 0 in
+      let actual = String.get_int32_be s 4 in
+      ( Printf.sprintf "int32%s 0x%08lX" suffix expected,
+        Printf.sprintf "0x%08lX" actual,
+        4
+      )
+  | _ ->
+      let expected = String.get_int64_be s 0 in
+      let actual = String.get_int64_be s 8 in
+      ( Printf.sprintf "int64%s 0x%016LX" suffix expected,
+        Printf.sprintf "0x%016LX" actual,
+        8
+      )
 
-  let is_continuation s i =
-    i < String.length s && Char.code (String.unsafe_get s i) land 0xC0 = 0x80
-
-  let window_start s line_start focus =
-    let start =
-      ref
-        (imin (String.length s)
-           (line_start + imax 0 (focus - (window_size / 2)))
-        )
-    in
-    while is_continuation s !start do
-      incr start
-    done;
-    !start
-
-  let window_stop s start limit =
-    let stop = ref (imin limit (start + window_size)) in
-    while !stop > start && is_continuation s !stop do
-      decr stop
-    done;
-    !stop
-
-  let window ~number ~first text focus =
-    let len = String.length text in
-    if len <= window_size then
-      { number; text; first; left_cut = false; right_cut = false }
-    else begin
-      let start = window_start text 0 focus in
-      let stop = window_stop text start len in
-      {
-        number;
-        text = String.sub text start (stop - start);
-        first = first + start;
-        left_cut = start > 0;
-        right_cut = stop < len;
-      }
-    end
-
-  let source_line_starts s =
-    let starts = ref [ 0 ] in
-    String.iteri (fun i c -> if c = '\n' then starts := (i + 1) :: !starts) s;
-    Array.of_list (List.rev !starts)
-
-  let source_view s starts number focus =
-    if number < 1 || number > Array.length starts then
-      None
-    else begin
-      let a = starts.(number - 1) in
-      let b =
-        if number < Array.length starts then
-          starts.(number) - 1
-        else
-          String.length s
+let join_items = function
+  | [ a ] ->
+      a
+  | [ a; b ] ->
+      a ^ " or " ^ b
+  | items ->
+      let rec go = function
+        | [] ->
+            ""
+        | [ last ] ->
+            "or " ^ last
+        | x :: tl ->
+            x ^ ", " ^ go tl
       in
-      let b =
-        if b > a && String.get s (b - 1) = '\r' then
-          b - 1
-        else
-          b
-      in
-      Some (window ~number ~first:a (String.sub s a (b - a)) focus)
-    end
+      go items
 
-  let digits n =
-    let rec go n acc =
-      if n < 10 then
-        acc
+let list_expected items more =
+  if List.length items <= max_items && more = 0 then
+    join_items (List.map expected_text items)
+  else begin
+    let shown = List.filteri (fun i _ -> i < max_items) items in
+    String.concat ", " (List.map expected_text shown)
+    ^ ", or "
+    ^ more_alternatives (List.length items - List.length shown + more)
+  end
+
+let found_text = function
+  | End ->
+      "end of input"
+  | Short n ->
+      Printf.sprintf "only %d (end of input)" n
+  | Value v ->
+      v
+  | Text s ->
+      let n = String.length s in
+      if n > 3 && String.sub s (n - 3) 3 = "..." then
+        "'" ^ escape_text (String.sub s 0 (n - 3)) ^ "'..."
       else
-        go (n / 10) (acc + 1)
+        "'" ^ escape_text s ^ "'"
+
+let error_message ?custom e =
+  match e.kind with
+  | Expected { items = x, xs; found; more } ->
+      "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
+  | Failure m ->
+      m
+  | Custom v -> (
+      match custom with
+      | Some f ->
+          f v
+      | None ->
+          "custom error (no ~custom printer given)"
+    )
+  | Depth_limit_exceeded { limit } ->
+      Printf.sprintf "maximum nesting depth %d exceeded" limit
+  | Backtrack_window_exceeded { limit; _ } ->
+      Printf.sprintf "backtrack window of %d bytes exceeded" limit
+
+let is_continuation s i =
+  i < String.length s && Char.code (String.unsafe_get s i) land 0xC0 = 0x80
+
+let window_start s line_start focus =
+  let start =
+    ref
+      (imin (String.length s) (line_start + imax 0 (focus - (window_size / 2))))
+  in
+  while is_continuation s !start do
+    incr start
+  done;
+  !start
+
+let window_stop s start limit =
+  let stop = ref (imin limit (start + window_size)) in
+  while !stop > start && is_continuation s !stop do
+    decr stop
+  done;
+  !stop
+
+let window ~number ~first text focus =
+  let len = String.length text in
+  if len <= window_size then
+    { number; text; first; left_cut = false; right_cut = false }
+  else begin
+    let start = window_start text 0 focus in
+    let stop = window_stop text start len in
+    {
+      number;
+      text = String.sub text start (stop - start);
+      first = first + start;
+      left_cut = start > 0;
+      right_cut = stop < len;
+    }
+  end
+
+let source_line_starts s =
+  let starts = ref [ 0 ] in
+  String.iteri (fun i c -> if c = '\n' then starts := (i + 1) :: !starts) s;
+  Array.of_list (List.rev !starts)
+
+let source_view s starts number focus =
+  if number < 1 || number > Array.length starts then
+    None
+  else begin
+    let a = starts.(number - 1) in
+    let b =
+      if number < Array.length starts then
+        starts.(number) - 1
+      else
+        String.length s
     in
-    go n 1
-
-  let add_padded b width n =
-    for _ = 1 to width - digits n do
-      Buffer.add_char b ' '
-    done;
-    Buffer.add_string b (string_of_int n)
-
-  let display_unit text i =
-    let c = String.unsafe_get text i in
-    if Char.code c < 0x80 then
-      begin if c <> '\t' && (c < ' ' || c = '\x7F') then
-        (1, escape_code (Char.code c))
+    let b =
+      if b > a && String.get s (b - 1) = '\r' then
+        b - 1
       else
-        (1, "")
-    end
-    else begin
-      let d = String.get_utf_8_uchar text i in
-      if Uchar.utf_decode_is_valid d then begin
-        let n = Uchar.utf_decode_length d in
-        let cp = Uchar.to_int (Uchar.utf_decode_uchar d) in
-        if invisible ~first:(i = 0) cp then
-          (n, Printf.sprintf "\\u{%04X}" cp)
-        else
-          (n, "")
-      end else
-        (1, Printf.sprintf "\\x%02X" (Char.code c))
-    end
+        b
+    in
+    Some (window ~number ~first:a (String.sub s a (b - a)) focus)
+  end
 
-  let unit_width esc =
+let digits n =
+  let rec go n acc =
+    if n < 10 then
+      acc
+    else
+      go (n / 10) (acc + 1)
+  in
+  go n 1
+
+let add_padded b width n =
+  for _ = 1 to width - digits n do
+    Buffer.add_char b ' '
+  done;
+  Buffer.add_string b (string_of_int n)
+
+let display_unit text i =
+  let c = String.unsafe_get text i in
+  if Char.code c < 0x80 then
+    begin if c <> '\t' && (c < ' ' || c = '\x7F') then
+      (1, escape_code (Char.code c))
+    else
+      (1, "")
+  end
+  else begin
+    let d = String.get_utf_8_uchar text i in
+    if Uchar.utf_decode_is_valid d then begin
+      let n = Uchar.utf_decode_length d in
+      let cp = Uchar.to_int (Uchar.utf_decode_uchar d) in
+      if invisible ~first:(i = 0) cp then
+        (n, Printf.sprintf "\\u{%04X}" cp)
+      else
+        (n, "")
+    end else
+      (1, Printf.sprintf "\\x%02X" (Char.code c))
+  end
+
+let unit_width esc =
+  if esc = "" then
+    1
+  else
+    String.length esc
+
+let add_display b text =
+  let i = ref 0 in
+  let len = String.length text in
+  while !i < len do
+    let n, esc = display_unit text !i in
     if esc = "" then
-      1
+      Buffer.add_substring b text !i n
     else
-      String.length esc
+      Buffer.add_string b esc;
+    i := !i + n
+  done
 
-  let add_display b text =
-    let i = ref 0 in
-    let len = String.length text in
-    while !i < len do
-      let n, esc = display_unit text !i in
-      if esc = "" then
-        Buffer.add_substring b text !i n
-      else
-        Buffer.add_string b esc;
-      i := !i + n
-    done
-
-  let add_padding b text upto =
-    let i = ref 0 in
-    while !i < upto do
-      let n, esc = display_unit text !i in
-      if String.unsafe_get text !i = '\t' then
-        Buffer.add_char b '\t'
-      else
-        for _ = 1 to unit_width esc do
-          Buffer.add_char b ' '
-        done;
-      i := !i + n
-    done
-
-  let char_boundary text i =
-    if i >= String.length text then
-      i
-    else
-      let j = ref i in
-      while !j > 0 && i - !j < 3 && is_continuation text !j do
-        decr j
-      done;
-      let d = String.get_utf_8_uchar text !j in
-      if Uchar.utf_decode_is_valid d && !j + Uchar.utf_decode_length d > i then
-        !j
-      else
-        i
-
-  let display_width text a z =
-    let w = ref 0 and i = ref (char_boundary text a) in
-    while !i < z do
-      let n, esc = display_unit text !i in
-      w := !w + unit_width esc;
-      i := !i + n
+let char_boundary text i =
+  if i >= String.length text then
+    i
+  else
+    let j = ref i in
+    while !j > 0 && i - !j < 3 && is_continuation text !j do
+      decr j
     done;
-    !w
+    let d = String.get_utf_8_uchar text !j in
+    if Uchar.utf_decode_is_valid d && !j + Uchar.utf_decode_length d > i then
+      !j
+    else
+      i
 
-  let add_text b text =
-    if text <> "" then begin
-      Buffer.add_char b ' ';
-      Buffer.add_string b text
-    end
-
-  let render ?name ?source ?(columns = `Bytes) ?user e =
-    let src =
-      match source with
-      | Some s ->
-          Some (s, source_line_starts s)
-      | None ->
-          None
-    in
-    let where =
-      match (src, e.position) with
-      | Some (s, starts), _ ->
-          let l = location_of_position s e.span.start in
-          Some
-            ( l,
-              Some
-                (1
-                + count_code_points s
-                    starts.(l.line - 1)
-                    (imin e.span.start (String.length s))
-                )
-            )
-      | None, Some p ->
-          Some (p.location, p.code_point_col)
-      | None, None ->
-          None
-    in
-    let frame_loc i (f : frame) =
-      match src with
-      | Some (s, starts) ->
-          let l = location_of_position s f.start in
-          let shown =
-            match columns with
-            | `Bytes ->
-                l.col
-            | `Code_points ->
-                1
-                + count_code_points s
-                    starts.(l.line - 1)
-                    (imin f.start (String.length s))
-          in
-          Some (l.line, l.col, shown)
-      | None ->
-          Option.map
-            (fun (l, c, cp) ->
-              ( l,
-                c,
-                match (columns, cp) with `Code_points, Some cp -> cp | _ -> c
-              )
-            )
-            (List.nth e.excerpt.frame_locs i)
-    in
-    let get number focus =
-      match src with
-      | Some (s, starts) ->
-          source_view s starts number focus
-      | None ->
-          List.find_opt (fun v -> v.number = number) e.excerpt.views
-    in
-    let b = Buffer.create 256 in
-    ( match name with
-    | Some n ->
-        Buffer.add_string b n;
-        Buffer.add_char b ':';
-        if where = None then Buffer.add_char b ' '
-    | None ->
-        ()
-    );
-    ( match where with
-    | Some (loc, cp) ->
-        Buffer.add_string b (string_of_int loc.line);
-        Buffer.add_char b ':';
-        Buffer.add_string b
-          (string_of_int
-             ( match (columns, cp) with
-             | `Code_points, Some c ->
-                 c
-             | _ ->
-                 loc.col
-             )
-          )
-    | None ->
-        Buffer.add_string b "byte ";
-        Buffer.add_string b (string_of_int e.span.start)
-    );
-    Buffer.add_string b ": [error]";
-    add_text b (message ?user e);
-    let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.frames in
-    let note_line (n : note) =
-      match n.at with
-      | None ->
-          None
-      | Some r -> (
-          let loc =
-            match src with
-            | Some (s, _) ->
-                let l = location_of_position s r.start in
-                Some (l.line, l.col)
-            | None ->
-                None
-          in
-          match loc with
-          | Some (l, c) ->
-              Option.map (fun v -> (n, r, v, c)) (get l (c - 1))
-          | None ->
-              List.find_map
-                (fun (v : view) ->
-                  if
-                    r.start >= v.first
-                    && r.start <= v.first + String.length v.text
-                  then
-                    Some (n, r, v, r.start - v.first + 1)
-                  else
-                    None
-                )
-                e.excerpt.views
-        )
-    in
-    let error_view =
-      Option.bind where (fun ((loc : location), _) -> get loc.line (loc.col - 1))
-    in
-    let placed =
-      if error_view = None then
-        []
-      else
-        List.filter_map note_line e.notes
-    in
-    let loose =
-      List.filter
-        (fun (n : note) -> not (List.exists (fun (m, _, _, _) -> m == n) placed))
-        e.notes
-    in
-    let w =
-      match error_view with
-      | None ->
-          1
-      | Some error_view ->
-          let line = error_view.number in
-          let opener =
-            List.find_map
-              (fun ((f : frame), loc) ->
-                match loc with
-                | Some (l, c, _) when f.delimited && l < line ->
-                    Some (l, c, f.start)
-                | _ ->
-                    None
-              )
-              (List.rev frames)
-          in
-          let prev_view =
-            if line > 1 then
-              get (line - 1) 0
-            else
-              None
-          in
-          let opener_view =
-            match opener with Some (l, c, _) -> get l (c - 1) | None -> None
-          in
-          let shown =
-            List.fold_left
-              (fun acc (v : view) ->
-                if List.exists (fun (u : view) -> u.number = v.number) acc then
-                  acc
-                else
-                  v :: acc
-              )
-              []
-              (List.filter_map Fun.id
-                 [ Some error_view; opener_view; prev_view ]
-              @ List.map (fun (_, _, v, _) -> v) placed
-              )
-            |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
-          in
-          let w =
-            List.fold_left
-              (fun m (v : view) -> imax m (digits v.number))
-              (digits line) shown
-          in
-          let gutter () =
-            Buffer.add_char b '\n';
-            for _ = 1 to w do
-              Buffer.add_char b ' '
-            done;
-            Buffer.add_string b " | "
-          in
-          let bar = ref "" in
-          let line_row (v : view) =
-            Buffer.add_char b '\n';
-            add_padded b w v.number;
-            Buffer.add_string b " |";
-            if v.text = "" && (not v.left_cut) && not v.right_cut then
-              add_text b (String.trim !bar)
-            else begin
-              Buffer.add_char b ' ';
-              Buffer.add_string b !bar;
-              if v.left_cut then Buffer.add_string b "...";
-              add_display b v.text;
-              if v.right_cut then Buffer.add_string b "..."
-            end
-          in
-          let prefix_pad (v : view) upto =
-            if v.left_cut then Buffer.add_string b "   ";
-            add_padding b v.text
-              (imax 0 (imin (upto - v.first) (String.length v.text)));
-            if upto - v.first > String.length v.text then Buffer.add_char b ' '
-          in
-          let marks (v : view) a z =
-            let len = String.length v.text in
-            let a = imax 0 (imin (a - v.first) len) in
-            let z = imax a (imin (z - v.first) len) in
-            imax 1 (display_width v.text a z)
-          in
-          let note_rows (v : view) =
-            List.iter
-              (fun ((n : note), (r : range), (nv : view), _) ->
-                if nv.number = v.number then begin
-                  gutter ();
-                  Buffer.add_string b !bar;
-                  prefix_pad v r.start;
-                  for _ = 1 to marks v r.start r.stop do
-                    Buffer.add_char b '-'
-                  done;
-                  add_text b n.text
-                end
-              )
-              placed
-          in
-          let framed =
-            match (opener, opener_view) with
-            | Some _, Some _ ->
-                true
-            | _ ->
-                false
-          in
-          let cols (v : view) upto =
-            let text = v.text in
-            let n = imax 0 (imin (upto - v.first) (String.length text)) in
-            let col =
-              ref
-                (w + 5
-                +
-                if v.left_cut then
-                  3
-                else
-                  0
-                )
-            in
-            let i = ref 0 in
-            while !i < n do
-              let len, esc = display_unit text !i in
-              if String.unsafe_get text !i = '\t' then
-                col := ((!col / 8) + 1) * 8
-              else
-                col := !col + unit_width esc;
-              i := !i + len
-            done;
-            if upto - v.first > String.length text then incr col;
-            !col - (w + 3)
-          in
-          let rule first last upto (v : view) =
-            gutter ();
-            Buffer.add_string b first;
-            for _ = 1 to cols v upto - 1 do
-              Buffer.add_string b "\xe2\x94\x80"
-            done;
-            Buffer.add_string b last
-          in
-          let carets (v : view) =
-            if e.span.start - v.first >= String.length v.text then
-              1
-            else
-              marks v e.span.start e.span.stop
-          in
-          let add_carets v =
-            for _ = 1 to carets v do
-              Buffer.add_char b '^'
-            done
-          in
-          let opener_row (v : view) =
-            match opener with
-            | Some (_, _, start) ->
-                rule "\xe2\x95\xad" "\xe2\x95\xaf" start v
-            | None ->
-                ()
-          in
-          let caret_row (v : view) =
-            if framed && !bar <> "" then begin
-              rule "\xe2\x95\xb0" "" e.span.start v;
-              add_carets v
-            end else begin
-              gutter ();
-              prefix_pad v e.span.start;
-              add_carets v
-            end
-          in
-          let is_opener (v : view) =
-            match opener with Some (l, _, _) -> l = v.number | None -> false
-          in
-          let opener_number =
-            match opener with Some (l, _, _) -> l | None -> max_int
-          in
-          let in_block number =
-            framed && number >= opener_number && number < line
-          in
-          let rec emit = function
-            | [] ->
-                ()
-            | (v : view) :: rest ->
-                bar :=
-                  if (not framed) || v.number < opener_number || v.number > line
-                  then
-                    ""
-                  else if v.number = opener_number then
-                    "  "
-                  else
-                    "\xe2\x94\x82 ";
-                line_row v;
-                if is_opener v && framed then opener_row v;
-                if v.number = line then begin
-                  caret_row v;
-                  if framed then
-                    bar :=
-                      if !bar = "" then
-                        ""
-                      else
-                        "  "
-                end;
-                note_rows v;
-                ( match rest with
-                | (nxt : view) :: _ ->
-                    let hidden = nxt.number - v.number - 1 in
-                    let elide () =
-                      gutter ();
-                      if in_block v.number then
-                        Buffer.add_string b "\xe2\x94\x82 ";
-                      Buffer.add_string b "..."
-                    in
-                    if hidden = 1 then
-                      begin match get (v.number + 1) 0 with
-                      | Some m ->
-                          bar :=
-                            if in_block v.number then
-                              "\xe2\x94\x82 "
-                            else
-                              "";
-                          line_row m
-                      | None ->
-                          elide ()
-                    end
-                    else if hidden > 1 then
-                      elide ()
-                | [] ->
-                    ()
-                );
-                emit rest
-          in
-          emit shown;
-          w
-    in
-    let n_frames = List.length frames in
-    let shown_frames =
-      if n_frames = max_frames + 1 then
-        n_frames
-      else
-        max_frames
-    in
-    let gutter_star () =
-      Buffer.add_char b '\n';
-      for _ = 1 to w do
+let add_padding b text upto =
+  let i = ref 0 in
+  let upto = char_boundary text upto in
+  while !i < upto do
+    let n, esc = display_unit text !i in
+    if String.unsafe_get text !i = '\t' then
+      Buffer.add_char b '\t'
+    else
+      for _ = 1 to unit_width esc do
         Buffer.add_char b ' '
       done;
-      Buffer.add_string b " * "
-    in
-    List.iteri
-      (fun i ((f : frame), loc) ->
-        if i < shown_frames then begin
-          gutter_star ();
-          Buffer.add_string b "while parsing ";
-          Buffer.add_string b f.name;
-          Buffer.add_string b ", from ";
-          match loc with
-          | Some (l, _, c) ->
-              Buffer.add_string b (string_of_int l);
-              Buffer.add_char b ':';
-              Buffer.add_string b (string_of_int c)
-          | None ->
-              Buffer.add_string b "byte ";
-              Buffer.add_string b (string_of_int f.start)
-        end else if i = shown_frames then begin
-          gutter_star ();
-          Buffer.add_string b "... and ";
-          Buffer.add_string b (string_of_int (n_frames - shown_frames));
-          Buffer.add_string b " more"
-        end
-      )
-      (List.rev frames);
-    List.iter
-      (fun (n : note) ->
-        gutter_star ();
-        Buffer.add_string b "note:";
-        add_text b n.text
-      )
-      loose;
-    ( match e.kind with
-    | Depth_limit_exceeded _ ->
-        gutter_star ();
-        Buffer.add_string b "help: raise ~max_depth"
-    | Backtrack_window_exceeded _ ->
-        gutter_star ();
-        Buffer.add_string b
-          "help: call commit or cut earlier, or raise ~backtrack_window"
-    | _ ->
-        ()
-    );
-    Buffer.contents b
-end
+    i := !i + n
+  done
 
-let render_error = Error.render
+let display_width text a z =
+  let w = ref 0 and i = ref (char_boundary text a) in
+  while !i < z do
+    let n, esc = display_unit text !i in
+    w := !w + unit_width esc;
+    i := !i + n
+  done;
+  !w
+
+let add_text b text =
+  if text <> "" then begin
+    Buffer.add_char b ' ';
+    Buffer.add_string b text
+  end
+
+let render ?name ?source ?custom e =
+  let src =
+    match source with Some s -> Some (s, source_line_starts s) | None -> None
+  in
+  let where =
+    match (src, e.location) with
+    | Some (s, starts), _ ->
+        let l = location_of_position s e.range.start in
+        Some
+          ( l,
+            Some
+              (1
+              + count_code_points s
+                  starts.(l.line - 1)
+                  (imin e.range.start (String.length s))
+              )
+          )
+    | None, Some l ->
+        Some (l, e.excerpt.char_column)
+    | None, None ->
+        None
+  in
+  let frame_loc i (f : context) =
+    match src with
+    | Some (s, starts) ->
+        let l = location_of_position s f.start in
+        let shown =
+          Some
+            (1
+            + count_code_points s
+                starts.(l.line - 1)
+                (imin f.start (String.length s))
+            )
+        in
+        Some (l.line, l.col, shown)
+    | None ->
+        List.nth e.excerpt.frame_locs i
+  in
+  let get number focus =
+    match src with
+    | Some (s, starts) ->
+        source_view s starts number focus
+    | None ->
+        List.find_opt (fun v -> v.number = number) e.excerpt.views
+  in
+  let header_column =
+    match where with Some (loc, Some c) -> Some (loc.line, c) | _ -> None
+  in
+  let b = Buffer.create 256 in
+  ( match name with
+  | Some n ->
+      Buffer.add_string b n;
+      Buffer.add_char b ':';
+      if header_column = None then Buffer.add_char b ' '
+  | None ->
+      ()
+  );
+  ( match header_column with
+  | Some (line, c) ->
+      Buffer.add_string b (string_of_int line);
+      Buffer.add_char b ':';
+      Buffer.add_string b (string_of_int c)
+  | None ->
+      Buffer.add_string b "byte ";
+      Buffer.add_string b (string_of_int e.range.start)
+  );
+  Buffer.add_string b ": [error]";
+  add_text b (error_message ?custom e);
+  let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.contexts in
+  let note_line (n : note) =
+    match n.at with
+    | None ->
+        None
+    | Some r -> (
+        let loc =
+          match src with
+          | Some (s, _) ->
+              let l = location_of_position s r.start in
+              Some (l.line, l.col)
+          | None ->
+              None
+        in
+        match loc with
+        | Some (l, c) ->
+            Option.map (fun v -> (n, r, v, c)) (get l (c - 1))
+        | None ->
+            List.find_map
+              (fun (v : view) ->
+                if
+                  r.start >= v.first
+                  && r.start <= v.first + String.length v.text
+                then
+                  Some (n, r, v, r.start - v.first + 1)
+                else
+                  None
+              )
+              e.excerpt.views
+      )
+  in
+  let error_view =
+    Option.bind where (fun ((loc : location), _) -> get loc.line (loc.col - 1))
+  in
+  let placed =
+    if error_view = None then
+      []
+    else
+      List.filter_map note_line e.notes
+  in
+  let loose =
+    List.filter
+      (fun (n : note) -> not (List.exists (fun (m, _, _, _) -> m == n) placed))
+      e.notes
+  in
+  let w =
+    match error_view with
+    | None ->
+        1
+    | Some error_view ->
+        let line = error_view.number in
+        let opener =
+          List.find_map
+            (fun ((f : context), loc) ->
+              match loc with
+              | Some (l, c, _) when f.delimited && l < line ->
+                  Some (l, c, f.start)
+              | _ ->
+                  None
+            )
+            (List.rev frames)
+        in
+        let prev_view =
+          if line > 1 then
+            get (line - 1) 0
+          else
+            None
+        in
+        let opener_view =
+          match opener with Some (l, c, _) -> get l (c - 1) | None -> None
+        in
+        let shown =
+          List.fold_left
+            (fun acc (v : view) ->
+              if List.exists (fun (u : view) -> u.number = v.number) acc then
+                acc
+              else
+                v :: acc
+            )
+            []
+            (List.filter_map Fun.id [ Some error_view; opener_view; prev_view ]
+            @ List.map (fun (_, _, v, _) -> v) placed
+            )
+          |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
+        in
+        let w =
+          List.fold_left
+            (fun m (v : view) -> imax m (digits v.number))
+            (digits line) shown
+        in
+        let gutter () =
+          Buffer.add_char b '\n';
+          for _ = 1 to w do
+            Buffer.add_char b ' '
+          done;
+          Buffer.add_string b " | "
+        in
+        let bar = ref "" in
+        let line_row (v : view) =
+          Buffer.add_char b '\n';
+          add_padded b w v.number;
+          Buffer.add_string b " |";
+          if v.text = "" && (not v.left_cut) && not v.right_cut then
+            add_text b (String.trim !bar)
+          else begin
+            Buffer.add_char b ' ';
+            Buffer.add_string b !bar;
+            if v.left_cut then Buffer.add_string b "...";
+            add_display b v.text;
+            if v.right_cut then Buffer.add_string b "..."
+          end
+        in
+        let prefix_pad (v : view) upto =
+          if v.left_cut then Buffer.add_string b "   ";
+          add_padding b v.text
+            (imax 0 (imin (upto - v.first) (String.length v.text)));
+          if upto - v.first > String.length v.text then Buffer.add_char b ' '
+        in
+        let marks (v : view) a z =
+          let len = String.length v.text in
+          let a = imax 0 (imin (a - v.first) len) in
+          let z = imax a (imin (z - v.first) len) in
+          imax 1 (display_width v.text a z)
+        in
+        let note_rows (v : view) =
+          List.iter
+            (fun ((n : note), (r : range), (nv : view), _) ->
+              if nv.number = v.number then begin
+                gutter ();
+                Buffer.add_string b !bar;
+                prefix_pad v r.start;
+                for _ = 1 to marks v r.start r.stop do
+                  Buffer.add_char b '-'
+                done;
+                add_text b n.text
+              end
+            )
+            placed
+        in
+        let framed =
+          match (opener, opener_view) with Some _, Some _ -> true | _ -> false
+        in
+        let cols (v : view) upto =
+          let text = v.text in
+          let n = imax 0 (imin (upto - v.first) (String.length text)) in
+          let n = char_boundary text n in
+          let col =
+            ref
+              (w + 5
+              +
+              if v.left_cut then
+                3
+              else
+                0
+              )
+          in
+          let i = ref 0 in
+          while !i < n do
+            let len, esc = display_unit text !i in
+            if String.unsafe_get text !i = '\t' then
+              col := ((!col / 8) + 1) * 8
+            else
+              col := !col + unit_width esc;
+            i := !i + len
+          done;
+          if upto - v.first > String.length text then incr col;
+          !col - (w + 3)
+        in
+        let rule first last upto (v : view) =
+          gutter ();
+          Buffer.add_string b first;
+          for _ = 1 to cols v upto - 1 do
+            Buffer.add_string b "\xe2\x94\x80"
+          done;
+          Buffer.add_string b last
+        in
+        let carets (v : view) =
+          if e.range.start - v.first >= String.length v.text then
+            1
+          else
+            marks v e.range.start e.range.stop
+        in
+        let add_carets v =
+          for _ = 1 to carets v do
+            Buffer.add_char b '^'
+          done
+        in
+        let opener_row (v : view) =
+          match opener with
+          | Some (_, _, start) ->
+              rule "\xe2\x95\xad" "\xe2\x95\xaf" start v
+          | None ->
+              ()
+        in
+        let caret_row (v : view) =
+          if framed && !bar <> "" then begin
+            rule "\xe2\x95\xb0" "" e.range.start v;
+            add_carets v
+          end else begin
+            gutter ();
+            prefix_pad v e.range.start;
+            add_carets v
+          end
+        in
+        let is_opener (v : view) =
+          match opener with Some (l, _, _) -> l = v.number | None -> false
+        in
+        let opener_number =
+          match opener with Some (l, _, _) -> l | None -> max_int
+        in
+        let in_block number =
+          framed && number >= opener_number && number < line
+        in
+        let rec emit = function
+          | [] ->
+              ()
+          | (v : view) :: rest ->
+              bar :=
+                if (not framed) || v.number < opener_number || v.number > line
+                then
+                  ""
+                else if v.number = opener_number then
+                  "  "
+                else
+                  "\xe2\x94\x82 ";
+              line_row v;
+              if is_opener v && framed then opener_row v;
+              if v.number = line then begin
+                caret_row v;
+                if framed then
+                  bar :=
+                    if !bar = "" then
+                      ""
+                    else
+                      "  "
+              end;
+              note_rows v;
+              ( match rest with
+              | (nxt : view) :: _ ->
+                  let hidden = nxt.number - v.number - 1 in
+                  let elide () =
+                    gutter ();
+                    if in_block v.number then
+                      Buffer.add_string b "\xe2\x94\x82 ";
+                    Buffer.add_string b "..."
+                  in
+                  if hidden = 1 then
+                    begin match get (v.number + 1) 0 with
+                    | Some m ->
+                        bar :=
+                          if in_block v.number then
+                            "\xe2\x94\x82 "
+                          else
+                            "";
+                        line_row m
+                    | None ->
+                        elide ()
+                  end
+                  else if hidden > 1 then
+                    elide ()
+              | [] ->
+                  ()
+              );
+              emit rest
+        in
+        emit shown;
+        w
+  in
+  let n_frames = List.length frames in
+  let shown_frames =
+    if n_frames = max_frames + 1 then
+      n_frames
+    else
+      max_frames
+  in
+  let gutter_star () =
+    Buffer.add_char b '\n';
+    for _ = 1 to w do
+      Buffer.add_char b ' '
+    done;
+    Buffer.add_string b " * "
+  in
+  List.iteri
+    (fun i ((f : context), loc) ->
+      if i < shown_frames then begin
+        gutter_star ();
+        Buffer.add_string b "while parsing ";
+        Buffer.add_string b f.name;
+        Buffer.add_string b ", from ";
+        match loc with
+        | Some (l, _, Some c) ->
+            Buffer.add_string b (string_of_int l);
+            Buffer.add_char b ':';
+            Buffer.add_string b (string_of_int c)
+        | Some (_, _, None) | None ->
+            Buffer.add_string b "byte ";
+            Buffer.add_string b (string_of_int f.start)
+      end else if i = shown_frames then begin
+        gutter_star ();
+        Buffer.add_string b "... and ";
+        Buffer.add_string b (string_of_int (n_frames - shown_frames));
+        Buffer.add_string b " more"
+      end
+    )
+    (List.rev frames);
+  List.iter
+    (fun (n : note) ->
+      gutter_star ();
+      Buffer.add_string b "note:";
+      add_text b n.text
+    )
+    loose;
+  ( match e.kind with
+  | Depth_limit_exceeded _ ->
+      gutter_star ();
+      Buffer.add_string b "help: raise ~max_depth"
+  | Backtrack_window_exceeded _ ->
+      gutter_star ();
+      Buffer.add_string b
+        "help: call commit or cut earlier, or raise ~backtrack_window"
+  | _ ->
+      ()
+  );
+  Buffer.contents b
+
+let render_error = render
 
 let expected_of_far f =
   let describe (kind, s) =
     let payload = kind lsr 3 in
     let tag = kind land 7 in
     if tag = tag_char then
-      Error.Char (Uchar.of_int payload)
+      Char (Uchar.of_int payload)
     else if tag = tag_byte then
-      Error.Literal (String.make 1 (Char.chr payload))
+      Literal (String.make 1 (Char.chr payload))
     else if tag = tag_literal then
-      Error.Literal (String.sub s payload (String.length s - payload))
+      Literal (String.sub s payload (String.length s - payload))
     else if tag = tag_label then
-      Error.Label s
+      Label s
     else if tag = tag_end_of_input then
-      Error.End_of_input
+      End_of_input
     else if tag = tag_bytes then
-      Error.Label
+      Label
         ( if payload = 1 then
             "1 byte"
           else
             string_of_int payload ^ " bytes"
         )
     else if tag = tag_big && payload >= 2 then begin
-      let label, _, _ = Error.int_mismatch payload s in
-      Error.Label label
+      let label, _, _ = int_mismatch payload s in
+      Label label
     end else if tag = tag_big then
-      Error.Label
+      Label
         ( if payload = 0 then
             s ^ " bytes"
           else
             "at least " ^ s ^ " characters"
         )
     else
-      Error.Label
+      Label
         ( if payload = 1 then
             "at least 1 character"
           else
@@ -3010,13 +2979,13 @@ let expected_of_far f =
         )
   in
   let key = function
-    | Error.Label l ->
+    | Label l ->
         (0, l)
-    | Error.Char u ->
-        (1, Error.utf8_of_uchar u)
-    | Error.Literal l ->
+    | Char u ->
+        (1, utf8_of_uchar u)
+    | Literal l ->
         (2, l)
-    | Error.End_of_input ->
+    | End_of_input ->
         (3, "")
   in
   let raw =
@@ -3036,12 +3005,10 @@ let expected_of_far f =
   let items =
     List.filter
       (function
-        | Error.Literal l when String.length l = 1 ->
+        | Literal l when String.length l = 1 ->
             not
               (List.exists
-                 (function
-                   | Error.Char u -> Error.utf8_of_uchar u = l | _ -> false
-                   )
+                 (function Char u -> utf8_of_uchar u = l | _ -> false)
                  items
               )
         | _ ->
@@ -3075,13 +3042,9 @@ let is_ident_byte c =
 
 let found_of st pos =
   if pos >= st.input_len then
-    (Error.End, { start = pos; stop = pos })
+    (End, { start = pos; stop = pos })
   else begin
     let p = imax pos st.base in
-    ( if p + 33 > st.input_len && st.source <> None then
-        try ignore (fill st ~keep_from:p (p + 33))
-        with Backtrack_window_exceeded _ -> ()
-    );
     let rel = p - st.base in
     let len = String.length st.input in
     let c = String.unsafe_get st.input rel in
@@ -3091,15 +3054,13 @@ let found_of st pos =
         incr k
       done;
       if !k > 32 then
-        ( Error.Text (String.sub st.input rel 32 ^ "..."),
-          { start = p; stop = p + 32 }
-        )
+        (Text (String.sub st.input rel 32 ^ "..."), { start = p; stop = p + 32 })
       else
-        (Error.Text (String.sub st.input rel !k), { start = p; stop = p + !k })
+        (Text (String.sub st.input rel !k), { start = p; stop = p + !k })
     end else begin
-      let n = Error.char_len st.input rel in
+      let n = char_len st.input rel in
       let n = imin n (len - rel) in
-      (Error.Text (String.sub st.input rel n), { start = p; stop = p + n })
+      (Text (String.sub st.input rel n), { start = p; stop = p + n })
     end
   end
 
@@ -3112,9 +3073,7 @@ let found_of_far st f pos =
       if not (tag = tag_bytes || (tag = tag_big && payload = 0)) then
         all_short := false;
       if tag = tag_big && payload >= 2 then begin
-        let ((_, found, _) as v) =
-          Error.int_mismatch payload (far_item_str f i)
-        in
+        let ((_, found, _) as v) = int_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
             value := Some v
@@ -3126,15 +3085,13 @@ let found_of_far st f pos =
   done;
   if !all_short then
     if pos >= st.input_len then
-      (Error.End, { start = pos; stop = pos })
+      (End, { start = pos; stop = pos })
     else
-      (Error.Short (st.input_len - pos), { start = pos; stop = st.input_len })
+      (Short (st.input_len - pos), { start = pos; stop = st.input_len })
   else
     match !value with
     | Some (_, found, width) when !all_value ->
-        ( Error.Value found,
-          { start = pos; stop = imin st.input_len (pos + width) }
-        )
+        (Value found, { start = pos; stop = imin st.input_len (pos + width) })
     | _ ->
         found_of st pos
 
@@ -3157,24 +3114,23 @@ let build st ~pos ?(notes = []) kind span frames =
     end else
       None
   in
-  let position =
+  let location =
     Option.map
       (fun (_, line_start, line) ->
-        {
-          Error.location = { offset = pos; line; col = pos - line_start + 1 };
-          code_point_col =
-            ( if line_start >= st.base then
-                Some
-                  (1
-                  + Error.count_code_points st.input (line_start - st.base)
-                      (pos - st.base)
-                  )
-              else
-                None
-            );
-        }
+        { offset = pos; line; col = pos - line_start + 1 }
       )
       here
+  in
+  let char_column =
+    Option.bind here (fun (_, line_start, _) ->
+        if line_start >= st.base then
+          Some
+            (1
+            + count_code_points st.input (line_start - st.base) (pos - st.base)
+            )
+        else
+          None
+    )
   in
   let source_open =
     match st.source with Some src -> not src.eof | None -> false
@@ -3188,7 +3144,7 @@ let build st ~pos ?(notes = []) kind span frames =
       let len = String.length input in
       let rel = start - st.base in
       let scan_end from limit = find_newline input from limit in
-      let line_end = scan_end rel (imin len (rel + Error.window_size + 1)) in
+      let line_end = scan_end rel (imin len (rel + window_size + 1)) in
       let ended = line_end < len && String.unsafe_get input line_end = '\n' in
       let strip_cr stop =
         if stop > rel && String.unsafe_get input (stop - 1) = '\r' then
@@ -3196,7 +3152,7 @@ let build st ~pos ?(notes = []) kind span frames =
         else
           stop
       in
-      if line_end - rel <= Error.window_size && (ended || line_end = len) then begin
+      if line_end - rel <= window_size && (ended || line_end = len) then begin
         let stop =
           if ended || (line_end = len && not source_open) then
             strip_cr line_end
@@ -3205,15 +3161,15 @@ let build st ~pos ?(notes = []) kind span frames =
         in
         Some
           {
-            Error.number;
+            number;
             text = String.sub input rel (stop - rel);
             first = start;
             left_cut = false;
             right_cut = (not ended) && source_open;
           }
       end else begin
-        let ws = Error.window_start input rel focus in
-        let limit = imin len (ws + Error.window_size + 1) in
+        let ws = window_start input rel focus in
+        let limit = imin len (ws + window_size + 1) in
         let nl = scan_end ws limit in
         let ended = nl < len && String.unsafe_get input nl = '\n' in
         let line_stop =
@@ -3222,10 +3178,10 @@ let build st ~pos ?(notes = []) kind span frames =
           else
             nl
         in
-        let stop = imax ws (Error.window_stop input ws line_stop) in
+        let stop = imax ws (window_stop input ws line_stop) in
         Some
           {
-            Error.number;
+            number;
             text = String.sub input ws (stop - ws);
             first = ws + st.base;
             left_cut = ws > rel;
@@ -3254,8 +3210,7 @@ let build st ~pos ?(notes = []) kind span frames =
               if first >= st.base && s <= st.input_len then
                 Some
                   (1
-                  + Error.count_code_points st.input (first - st.base)
-                      (s - st.base)
+                  + count_code_points st.input (first - st.base) (s - st.base)
                   )
               else
                 None
@@ -3283,8 +3238,8 @@ let build st ~pos ?(notes = []) kind span frames =
           end
         in
         Option.map
-          (fun (v : Error.view) ->
-            { v with Error.left_cut = v.Error.left_cut || line_start < st.base }
+          (fun (v : view) ->
+            { v with left_cut = v.left_cut || line_start < st.base }
           )
           (view ~number:line ~start:error_start ~focus:(pos - error_start))
     )
@@ -3318,7 +3273,7 @@ let build st ~pos ?(notes = []) kind span frames =
     | None ->
         None
   in
-  let note_offset (n : Error.note) =
+  let note_offset (n : note) =
     match n.at with Some r -> r.start | None -> -1
   in
   let max_note = List.fold_left (fun m n -> imax m (note_offset n)) 0 notes in
@@ -3342,8 +3297,8 @@ let build st ~pos ?(notes = []) kind span frames =
   in
   let views =
     List.fold_left
-      (fun acc (v : Error.view) ->
-        if List.exists (fun (u : Error.view) -> u.number = v.number) acc then
+      (fun acc (v : view) ->
+        if List.exists (fun (u : view) -> u.number = v.number) acc then
           acc
         else
           v :: acc
@@ -3352,9 +3307,7 @@ let build st ~pos ?(notes = []) kind span frames =
       (List.filter_map Fun.id [ error_view; opener_view; prev_view ]
       @ note_views
       )
-    |> List.sort (fun (a : Error.view) (b : Error.view) ->
-        compare a.number b.number
-    )
+    |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
   in
   let line_start_of n =
     let l = n - 1 - idx.line_base in
@@ -3364,8 +3317,7 @@ let build st ~pos ?(notes = []) kind span frames =
       None
   in
   let rec with_middles = function
-    | (a : Error.view) :: (b : Error.view) :: rest when b.number = a.number + 2
-      ->
+    | (a : view) :: (b : view) :: rest when b.number = a.number + 2 ->
         let middle =
           match line_start_of (a.number + 1) with
           | Some start ->
@@ -3381,15 +3333,15 @@ let build st ~pos ?(notes = []) kind span frames =
   in
   let views = with_middles views in
   {
-    Error.kind;
-    span;
-    position;
-    frames =
+    kind;
+    range = span;
+    location;
+    contexts =
       List.map
-        (fun (name, start, delimited) -> { Error.name; start; delimited })
+        (fun (name, start, delimited) -> { name; start; delimited })
         frames;
     notes;
-    excerpt = { Error.views; frame_locs };
+    excerpt = { views; frame_locs; char_column };
   }
 
 let extras_span pos (x : fail_extra) =
@@ -3406,21 +3358,19 @@ let error_of_far st =
   let frames = far_chain st in
   match f.extra with
   | Payload e when f.special = special_user ->
-      build st ~pos (Error.User e) { start = pos; stop = pos } frames
+      build st ~pos (Custom e) { start = pos; stop = pos } frames
   | Payload_ext (e, x) when f.special = special_user ->
       let span = extras_span pos x in
-      build st ~pos:span.start ~notes:x.notes (Error.User e) span frames
+      build st ~pos:span.start ~notes:x.notes (Custom e) span frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
-          build st ~pos (Error.Failure "no alternative matched")
+          build st ~pos (Failure "no alternative matched")
             { start = pos; stop = pos }
             frames
       | x :: xs, more ->
           let found, span = found_of_far st f pos in
-          build st ~pos
-            (Error.Expected { items = (x, xs); found; more })
-            span frames
+          build st ~pos (Expected { items = (x, xs); found; more }) span frames
       end
 
 let error_plain st pos kind frames =
@@ -3428,7 +3378,7 @@ let error_plain st pos kind frames =
 
 let error_failure st pos msg (x : fail_extra) =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes (Error.Failure msg) span x.chain
+  build st ~pos:span.start ~notes:x.notes (Failure msg) span x.chain
 
 let run_detailed st thunk =
   let previous = State.enter st in
@@ -3443,13 +3393,13 @@ let run_detailed st thunk =
     | exception Depth_limit_exceeded a ->
         Stdlib.Error
           (error_plain st a.at
-             (Error.Depth_limit_exceeded { limit = st.max_depth })
+             (Depth_limit_exceeded { limit = st.max_depth })
              a.open_frames
           )
     | exception Backtrack_window_exceeded (info, a) ->
         Stdlib.Error
           (error_plain st a.at
-             (Error.Backtrack_window_exceeded
+             (Backtrack_window_exceeded
                 { limit = info.limit; oldest = info.oldest }
              )
              a.open_frames
@@ -3484,7 +3434,7 @@ let with_diagnostics st thunk (c : _ diagnostics) =
 
 let run_slow st ~consume ~diagnostics parser =
   let thunk =
-    match consume with `Prefix -> parser | `All -> until_end parser
+    match consume with `Partial -> parser | `All -> until_end parser
   in
   match diagnostics with
   | None ->
@@ -3492,22 +3442,22 @@ let run_slow st ~consume ~diagnostics parser =
   | Some c ->
       with_diagnostics st thunk c
 
-let parse ?(max_depth = 128) ?(consume = `Prefix) ?diagnostics input
+let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
     (parser : unit -> 'a) =
   let st = State.for_input ~input ~max_depth in
   match (diagnostics, consume) with
-  | None, `Prefix ->
+  | None, `Partial ->
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
 
 let parse_source ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?(consume = `Prefix)
+    ?(backtrack_window = default_backtrack_window) ?(consume = `All)
     ?diagnostics (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window in
   match (diagnostics, consume) with
-  | None, `Prefix ->
+  | None, `Partial ->
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser

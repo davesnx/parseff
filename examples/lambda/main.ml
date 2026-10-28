@@ -110,8 +110,8 @@ let test title parser cases =
                 Format.asprintf "(expected [%a])" pp expected
             )
       | Error e ->
-          Printf.printf "✗ %-15s -> Error at %d: %s\n" input
-            e.Parseff.Error.span.start (Parseff.Error.message e)
+          Printf.printf "✗ %-15s -> Error at %d: %s\n" input e.range.start
+            (Parseff.error_message e)
     )
     cases
 
@@ -119,7 +119,6 @@ let () =
   let parser () =
     let lst = parse_lambda () in
     let _ = ws () in
-    Parseff.end_of_input ();
     lst
   in
   test "Untyped Lambda Calculus Parser" parser naive_test_cases;
@@ -139,7 +138,6 @@ let () =
   let parser () =
     let lst = parse_lambda_sugared () in
     let _ = ws () in
-    Parseff.end_of_input ();
     lst
   in
   test "Untyped Lambda Calculus Parser" parser

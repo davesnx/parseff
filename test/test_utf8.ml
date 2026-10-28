@@ -4,7 +4,7 @@ let uchar_testable =
     Uchar.equal
 
 let parse_with_pos input parser =
-  Parseff.parse input (fun () ->
+  Parseff.parse ~consume:`Partial input (fun () ->
       let value = parser () in
       (value, Parseff.position ())
   )
@@ -68,8 +68,8 @@ let test_satisfy_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
         "error message" "expected non-ASCII, found 'a'" expected
@@ -85,10 +85,10 @@ let test_satisfy_eof () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check string)
         "expected items" "expected any, found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       Alcotest.(check int) "error position" 0 pos
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -103,11 +103,11 @@ let test_satisfy_invalid_utf8 () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
         "error message" "expected valid UTF-8, found '\\xFF'"
-        (Parseff.Error.message e)
+        (Parseff.error_message e)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -137,7 +137,7 @@ let test_char_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check int) "error position" 0 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -164,7 +164,7 @@ let test_any_char_eof () =
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected any character, found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -200,7 +200,7 @@ let test_take_while_unicode () =
 
 let test_take_while_empty () =
   match
-    Parseff.parse "123" (fun () ->
+    Parseff.parse ~consume:`Partial "123" (fun () ->
         Parseff.Utf8.take_while Uucp.Alpha.is_alphabetic
     )
   with
@@ -231,10 +231,10 @@ let test_take_while_at_least_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check string)
         "expected items" "expected letters, found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       Alcotest.(check int) "error position" 1 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -249,8 +249,8 @@ let test_take_while_at_least_failure_message () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 1 pos;
       Alcotest.(check string)
         "error message" "expected letters, found '1'" expected
@@ -266,8 +266,8 @@ let test_take_while_at_least_without_label () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 1 pos;
       Alcotest.(check string)
         "error message" "expected at least 2 characters, found '1'" expected
@@ -300,7 +300,7 @@ let test_take_while_at_least_codepoint_count_fail () =
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected letters, found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -313,11 +313,11 @@ let test_take_while_invalid_utf8 () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check int) "error at invalid byte" 1 pos;
       Alcotest.(check string)
         "error message" "expected valid UTF-8, found '\\xFF'"
-        (Parseff.Error.message e)
+        (Parseff.error_message e)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -407,7 +407,7 @@ let test_skip_while_then_char_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check int) "error at non-matching char" 2 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -422,10 +422,10 @@ let test_skip_while_then_char_eof () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check string)
         "expected items" "expected ':', found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       Alcotest.(check int) "error at eof" 2 pos
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -466,8 +466,8 @@ let test_letter_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
         "error message" "expected letter, found '1'" expected
@@ -493,8 +493,8 @@ let test_alphanum_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
         "error message" "expected alphanumeric, found '!'" expected
@@ -502,7 +502,11 @@ let test_alphanum_failure () =
       Alcotest.fail "Unexpected error type"
 
 let test_whitespace_ascii () =
-  match Parseff.parse "  \t\nX" (fun () -> Parseff.Utf8.whitespace ()) with
+  match
+    Parseff.parse ~consume:`Partial "  \t\nX" (fun () ->
+        Parseff.Utf8.whitespace ()
+    )
+  with
   | Ok s ->
       Alcotest.(check string) "whitespace" "  \t\n" s
   | Error _ ->
@@ -511,14 +515,18 @@ let test_whitespace_ascii () =
 let test_whitespace_unicode () =
   (* NBSP (U+00A0) + EM SPACE (U+2003) + ASCII space *)
   let input = "\xC2\xA0\xE2\x80\x83 X" in
-  match Parseff.parse input (fun () -> Parseff.Utf8.whitespace ()) with
+  match
+    Parseff.parse ~consume:`Partial input (fun () -> Parseff.Utf8.whitespace ())
+  with
   | Ok s ->
       Alcotest.(check string) "unicode whitespace" "\xC2\xA0\xE2\x80\x83 " s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace_empty () =
-  match Parseff.parse "abc" (fun () -> Parseff.Utf8.whitespace ()) with
+  match
+    Parseff.parse ~consume:`Partial "abc" (fun () -> Parseff.Utf8.whitespace ())
+  with
   | Ok s ->
       Alcotest.(check string) "no whitespace" "" s
   | Error _ ->
@@ -531,8 +539,8 @@ let test_whitespace_at_least_failure () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check string)
         "error message" "expected whitespace, found 'abc'" expected

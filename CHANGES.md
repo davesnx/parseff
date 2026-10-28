@@ -2,11 +2,11 @@
 
 This is the 0.5.0 release.
 
-- **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.Error.t`: `{ kind; span; position; frames; notes; excerpt }`, where `position` is `Some { location; code_point_col }` or `None` when the line is not known (streaming, older than the buffered input). `kind` is `Expected { items; found; more }`, `Failure`, `User`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. `found` is `Text`, `End`, `Short` or `Value`. The result type is `('a, Error.t) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. `Error.t` and its parts are `private`: you can read and match them, not build them. `Error.note` and `Error.range` stay buildable, for `fail ~notes`. See "Migrating from 0.4" below.
-- **Breaking: `error` takes an extensible variant.** `error` was `'e -> 'a` and the result carried a free `'e`, so a parser could raise an `int` and the caller could read a `string`: a segfault. `Error.user` is now an extensible variant, `error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a`, and `kind` has `User of Error.user`. `render_error ?user` and `Error.message ?user` take a printer `Error.user -> string`. Declare your cases with `type Parseff.Error.user += Too_large of int` and match `User (Too_large n)`. A `User` match needs a final `_` case.
+- **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.error`: `{ kind; range; location; contexts; notes; excerpt }`, where `location` is the line and column in bytes. `location` is `None` when the line is not known (streaming, older than the buffered input). `kind : error_kind` is `Expected { items; found; more }`, `Failure`, `Custom`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. `found` is `Text`, `End`, `Short` or `Value`. The result type is `('a, error) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type `error` and its parts are `private`: you can read and match them, not build them. `note` and `range` stay buildable, for `fail ~notes`. See "Migrating from 0.4" below.
+- **Breaking: `error` takes an extensible variant.** `error` was `'e -> 'a` and the result carried a free `'e`, so a parser could raise an `int` and the caller could read a `string`: a segfault. `custom_error` is now an extensible variant, `error : ?from:int -> ?notes:note list -> custom_error -> 'a`, and `error_kind` has `Custom of custom_error`. `render_error ?custom` and `error_message ?custom` take a printer `custom_error -> string`. Declare your cases with `type Parseff.custom_error += Too_large of int` and match `Custom (Too_large n)`. A `Custom` match needs a final `_` case.
 - **Breaking: diagnostics are typed by a collector.** `warn : 'd -> unit` had the same hole. `Diagnostics.create ()` makes a `'d Diagnostics.t`; `warn d x` and `warn_at d ~pos x` record into it; pass it to the runner with `~diagnostics:d` and read `Diagnostics.to_list d` after the parse, on `Ok` and on `Error`. The runner empties the collector first. `warn` into a collector the runner did not get does nothing. Diagnostics are still rolled back with a branch that backtracks. A collector in use by one parse raises `Invalid_argument` if another parse gets it, or if `Diagnostics.clear` is called on it.
-- **Breaking: two runners.** `parse` and `parse_source` take `` ?consume:[ `All | `Prefix ] `` (default `` `Prefix ``) and `?diagnostics`. `parse_until_end s p` is `` parse ~consume:`All s p ``, and `parse_source_until_end` is `` parse_source ~consume:`All ``. Removed: `parse_until_end`, `parse_source_until_end`, the `result` alias (it shadowed `Stdlib.result` under `open Parseff`), `diagnostic`, `error_with_diagnostics` and `result_with_diagnostics`.
-- **Add `render_error` and `Error.message`.** `render_error ?name ?source ?columns ?user e` prints a `name:line:col: [error] message` header, the source line with carets under the failure, a `╭─╯` and `╰──^` bar that joins the opening token to the caret for the construct that started on an earlier line, `* while parsing` lines for the open `context`s, and notes. Control bytes, invalid UTF-8 and C1 controls are escaped in the excerpt as in the message, tabs keep the carets aligned, long lines are cut to 240 bytes around the failure, and `` ~columns:`Code_points `` prints the column in code points.
+- **Breaking: two runners.** `parse` and `parse_source` take `` ?consume:[ `All | `Partial ] `` (default `` `All ``) and `?diagnostics`. By default the parse fails with `Expected End_of_input` when input remains. `parse_until_end s p` is now `parse s p`, and `parse_source_until_end` is now `parse_source`. To parse a leading part and ignore the rest, which was what `parse s p` did in 0.4, pass `` ~consume:`Partial ``. Removed: `parse_until_end`, `parse_source_until_end`, the `result` alias (it shadowed `Stdlib.result` under `open Parseff`), `diagnostic`, `error_with_diagnostics` and `result_with_diagnostics`.
+- **Add `render_error` and `error_message`.** `render_error ?name ?source ?custom e` prints a `name:line:col: [error] message` header, the source line with carets under the failure, a `╭─╯` and `╰──^` bar that joins the opening token to the caret for the construct that started on an earlier line, `* while parsing` lines for the open `context`s, and notes. Control bytes, invalid UTF-8 and C1 controls are escaped in the excerpt as in the message, tabs keep the carets aligned, long lines are cut to 240 bytes around the failure, and the columns of the header and of the `* while parsing` lines count Unicode characters, while `location.col` counts bytes. When streaming has dropped the start of the line and `~source` is not given, the header is `name: byte N: [error] ...` and the context line says `from byte N`.
 - **`Source.of_function`, `of_chunks` and `of_seq` start with a smaller read buffer and grow it.** The first `read` call gets a `len` of 2040 instead of 4096; the buffer grows to 4096 after a read that fills it.
 - **Failures at the end of the input keep what was expected.** `[1, 2` reports `expected ',' or ']', found end of input` instead of the old end-of-input error without items, including through `expect` and `one_of_labeled`.
 - **A successful `look_ahead` forgets the failures of its probe.** `look_ahead (many (char 'a')); char 'b'` on `aac` reports `expected 'b'` at offset 0 instead of the probe's `expected 'a'` at offset 2. A failing `look_ahead` is a failure like any other and merges with the earlier ones.
@@ -24,11 +24,10 @@ This is the 0.5.0 release.
 - **`Backtrack_window_exceeded` reports the parser position.** Its error position, line and excerpt are those of the parser when the window was exceeded, not the end of the read that did not fit, and the open `* while parsing` lines follow the usual rule.
 - **Polish the error output.**
   - A streaming error whose line is not known, such as a `~from` older than the buffered input, prints `input: byte N: [error] ...` with no excerpt instead of a line and column computed from the partial buffer. `render_error` also indents the `*` rows by two spaces then.
-  - `` ~columns:`Code_points `` also applies to the column of `* while parsing` lines.
   - A mismatch of `BE.int16`, `BE.int32`, `BE.int64` and the `LE` versions reports `expected int16be 0x0001, found 0x0002`: the endianness is in the label and `found` is the integer read in the same width. `found` is `Value` for it.
   - `'` in a quoted character is escaped as `'\''`, a non-UTF-8 byte from `char '\xE9'` prints as `'\xE9'`, and a truncated `found` is `'abcdef'...`.
   - Non-breaking spaces, format characters, line and paragraph separators, and a combining mark at the start of the quoted text are escaped as `\u{...}` in `found` and in expected items.
-  - A `User` error without a `~user` printer says `user error (no ~user printer given)`.
+  - A `Custom` error without a `~custom` printer says `custom error (no ~custom printer given)`.
   - A message lists at most 8 expected items and then `, or N more alternatives` (`or 1 more alternative` for one). `Expected.more` holds the count of alternatives past the 64 kept.
   - The excerpt shows control bytes, invalid UTF-8 and C1 controls as the escapes of the message, and the carets and the corner bar count the escape.
   - The rows the renderer adds never end with a space, including empty source rows and an empty message. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
@@ -43,7 +42,7 @@ This is the 0.5.0 release.
 - **Merge, sort and deduplicate what was expected.** Failures at the same position give one message: `expected "else", "if", or "while"` instead of `expected "if" or expected "else" or expected "while"`, and `or_ digit digit` says `expected digit` once. The order of the branches does not change the message. Characters print as `'x'`, literals as `"abc"`.
 - **`consume` fails at the first byte that differs.** `consume "ab"` on `ax` fails at offset 1 with `expected "b"`, and `consume "hello"` on `hel` fails at offset 3 with `expected "lo", found end of input`. Both used to report offset 0. When fewer bytes remain than the literal needs but the available bytes already differ, `consume` fails at the first differing byte, so `or_` composes the messages of its branches. Only input that ends inside a prefix of the literal has `found` set to `End`. A mismatch inside a multi-byte character is reported at the start of the character: `consume "é"` on `è` fails at the character, expecting `"é"`.
 - **`expect` and `one_of_labeled` relabel only failures at their start.** A parser that got past its first byte keeps its own, more precise message. `expect "key" (fun () -> consume "id:"; digit ())` on `id:x` reports `expected digit` at offset 3. `expect` and `take_while ~label` messages now start with `expected`, and `one_of_labeled` reports `expected number or string` instead of `expected one of: number, string`.
-- **Report a user error from an abandoned branch when it is the furthest failure.** `error` still lets `or_`, `many` and `optional` backtrack. At the same position a user error wins over `Expected`, and the first of two user errors wins. It used to be the second.
+- **Report a custom error from an abandoned branch when it is the furthest failure.** `error` still lets `or_`, `many` and `optional` backtrack. At the same position a custom error wins over `Expected`, and the first of two custom errors wins. It used to be the second.
 - **`commit` forgets the failures at or beyond its position.** A committed branch reports only what it expected itself, not the failure of the previous branch.
 - **`take_while ~at_least` without `~label` says `expected at least n characters`** instead of `take_while`.
 - **`Utf8.char` no longer formats a label on every call.** Its failure reports the expected character, formatted only when an error is built.
@@ -55,7 +54,7 @@ This is the 0.5.0 release.
 - **Fix `match_regex` hiding a full backtrack window.** When the window was full and the source had not ended, the regex ran on the short buffer and failed, so `or_` took another branch. It now returns a match that ends before the buffered end, and otherwise fails with `` `Backtrack_window_exceeded ``, as `take` does, because more input could change the result.
 - **Check streaming arguments.** `parse_source` raises `Invalid_argument` for `~backtrack_window` below `2`, `Source.of_channel` for `~buf_size` below `1`, and a parse for a `read` result outside `0..len`. A window of `0` or `1` used to report a false end of input.
 - **Fix streaming documentation.** `span` is an owned copy in streaming, `match_regex` reads ahead half a window instead of retrying at chunk boundaries, and a source is for one parse.
-- **Fix `expect` and `one_of_labeled` relabeling user errors.** A user error raised through an `or_` or `one_of` with several branches was replaced by the `expect` or `one_of_labeled` message. It now passes through unchanged, as documented.
+- **Fix `expect` and `one_of_labeled` relabeling custom errors.** A custom error raised through an `or_` or `one_of` with several branches was replaced by the `expect` or `one_of_labeled` message. It now passes through unchanged, as documented.
 - **Fix `many`, `sep_by`, `end_by` and `fold_left` looping forever on parsers that consume no input.** The loop now stops after an iteration that consumes nothing and drops that iteration's result and diagnostics. `~at_least` still applies to the kept results.
 - **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with an `Expected` error whose `found` is `Short` or `End`.
 - **Document the cost of `match_regex` failures.** `Re` searches forward when the regex does not match at the current position, so a failed match scans the rest of the input and a loop of failing matches takes quadratic time.
@@ -64,16 +63,17 @@ This is the 0.5.0 release.
 
 | Before | After |
 |---|---|
-| `parse_until_end s p` | `` parse ~consume:`All s p `` |
-| `parse_source_until_end src p` | `` parse_source ~consume:`All src p `` |
+| `parse_until_end s p` | `parse s p` |
+| `parse_source_until_end src p` | `parse_source src p` |
+| `parse s p` | `` parse ~consume:`Partial s p `` |
+| `parse_source src p` | `` parse_source ~consume:`Partial src p `` |
 | `Ok (v, ds)` and `Error { error; diagnostics }` | `Ok v` and `Error e`; read the diagnostics from the collector |
 | `warn x` | `let d = Diagnostics.create ()`, `parse ~diagnostics:d`, `warn d x` |
 | `warn_at ~pos x` | `warn_at d ~pos x` |
 | `'d Parseff.diagnostic = { pos; diagnostic }` | `'d Parseff.Diagnostics.entry = { pos; value }` |
-| `` error (`Too_large n) `` | `type Parseff.Error.user += Too_large of int`, then `error (Too_large n)` |
-| `` User (`Too_large n) `` | `User (Too_large n)`, with a final `_` case |
-| `` render_error ~user:(fun (`Too_large n) -> ...) `` | `render_error ~user:(function Too_large n -> ... \| _ -> ...)` |
-| `('a, 'e) Parseff.result` | `('a, Parseff.Error.t) result` |
+| `` error (`Too_large n) `` | `type Parseff.custom_error += Too_large of int`, then `error (Too_large n)` |
+| `` Error { pos; error = `Too_large n } `` | `Error { kind = Custom (Too_large n); _ }`, with a final `_` case |
+| `('a, 'e) Parseff.result` | `('a, Parseff.error) result` |
 
 ### Migrating from 0.4
 
@@ -93,14 +93,14 @@ match Parseff.parse input parser with
 | Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
 ```
 
-- `Error { pos; error }` becomes `Error e`. The position is `e.span.start`, the message is `Parseff.Error.message e`.
-- User errors move into `kind`: `` Error { error = `Too_large n; _ } `` becomes `Error { kind = User (Too_large n); _ }`, with `type Parseff.Error.user += Too_large of int`.
+- `Error { pos; error }` becomes `Error e`. The position is `e.range.start`, the message is `Parseff.error_message e`.
+- Custom errors move into `kind`: `` Error { error = `Too_large n; _ } `` becomes `Error { kind = Custom (Too_large n); _ }`, with `type Parseff.custom_error += Too_large of int`.
 - `` `Failure msg `` becomes `Failure msg`. The 0.4 messages of primitives that were not expectations (invalid UTF-8, a failed `match_regex` without a label, a mismatched `BE.int16`) are `Expected` items now (`valid UTF-8`, `text matching the pattern`, `int16be 0xFFFE`), so they merge with the alternatives expected at the same position.
-- `` `Expected msg `` becomes `Expected { items; found; more }`. `Parseff.Error.message e` gives `expected A, B, or C, found X` instead of `expected A or expected B`, sorted and without duplicates.
+- `` `Expected msg `` becomes `Expected { items; found; more }`. `Parseff.error_message e` gives `expected A, B, or C, found X` instead of `expected A or expected B`, sorted and without duplicates.
 - `` `Unexpected_end_of_input `` becomes `Expected { found = End; _ }` and now has `items`.
 - `` `Depth_limit_exceeded msg `` becomes `Depth_limit_exceeded { limit }`, and `` `Backtrack_window_exceeded info `` becomes `Backtrack_window_exceeded { limit; oldest }`.
 - `Parseff.Ok` and `Parseff.Error` are `Stdlib.Ok` and `Stdlib.Error`. Code that writes `Ok v` and `Error e` keeps compiling.
-- `parse_until_end` and `parse_source_until_end` become `` parse ~consume:`All `` and `` parse_source ~consume:`All ``, and their diagnostics are read from a `Diagnostics.t` collector. See the table above.
+- `parse_until_end` and `parse_source_until_end` become `parse` and `parse_source`. `parse` and `parse_source` now require all input to be consumed unless you pass `` ~consume:`Partial ``. Diagnostics are read from a `Diagnostics.t` collector. See the table above.
 - Tests that compared error strings change: messages now name what was expected at the furthest failure, and `consume` fails at the first differing byte.
 
 ## 0.4.0

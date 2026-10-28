@@ -105,7 +105,7 @@ Without `expect`, the errors name raw tokens. With `expect`, they use the words 
 Parseff reports everything that was expected at the furthest position, so the message lists each alternative that could have continued the input. The messages below come from running the parser so that all input must be consumed:
 
 ```ocaml
-Parseff.parse ~consume:`All input expr
+Parseff.parse input expr
 ```
 
 Compare the error messages on `"1+x"`:

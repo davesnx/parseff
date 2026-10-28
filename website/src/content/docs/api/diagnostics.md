@@ -44,21 +44,21 @@ val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
 
 Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. The parser must warn into the same collector. `warn` into a collector that the runner did not get does nothing.
 
-The result of the parse is the usual `Parseff.Error.t` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
+The result of the parse is the usual `Parseff.error` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
 
 ```ocaml
 val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   string ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result
+  ('a, error) Stdlib.result
 ```
 ```ocaml
-Parseff.parse ~consume:`All input parser
+Parseff.parse input parser
 ```
-This requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Without `~consume`, the parse may stop before the end of the input. `Parseff.parse_source` takes the same arguments.
+By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `~consume:`Partial` to let the parse stop before the end of the input. `Parseff.parse_source` takes the same arguments.
 
 
 ## Example
@@ -89,14 +89,14 @@ let () =
     Parseff.Diagnostics.create ()
   in
   let outcome =
-    Parseff.parse ~consume:`All ~diagnostics "999.2.3.256"
+    Parseff.parse ~diagnostics "999.2.3.256"
       (ip_address_lenient diagnostics)
   in
   (match outcome with
   | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error error ->
-      Printf.printf "Parse error at %d: %s\n" error.Parseff.Error.span.start
-        (Parseff.Error.message error));
+      Printf.printf "Parse error at %d: %s\n" error.range.start
+        (Parseff.error_message error));
   List.iter
     (fun ({ pos; value } : validation Parseff.Diagnostics.entry) ->
       match value with

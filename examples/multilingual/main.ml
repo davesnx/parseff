@@ -31,7 +31,6 @@ let record () =
   let fields =
     Parseff.sep_by ~at_least:1 field (fun () -> Parseff.char '\n') ()
   in
-  Parseff.end_of_input ();
   fields
 
 let run input =
@@ -39,7 +38,7 @@ let run input =
   | Ok fields ->
       List.iter (fun (k, v) -> Printf.printf "%s = %s\n" k v) fields
   | Error e ->
-      Printf.printf "Error at byte %d: %s\n" e.Parseff.Error.span.start
-        (Parseff.Error.message e)
+      Printf.printf "Error at byte %d: %s\n" e.range.start
+        (Parseff.error_message e)
 
 let () = run Sys.argv.(1)

@@ -39,13 +39,12 @@ let ip_address () =
   let c = number () in
   let _ = Parseff.char '.' in
   let d = number () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 ```
 
 `Parseff.digit` parses a single digit and returns its integer value (0-9). `many ~at_least:1` applies it one or more times, producing a list like `[1; 9; 2]`. The `fold_left` converts that to `192`. Then we validate: if the number isn't in range, `Parseff.fail` reports it. This is the parse-then-validate pattern.
 
-The `ip_address` parser reads like the format itself: number, dot, number, dot, number, dot, number. `end_of_input` ensures there's no trailing data -- without it, `"1.2.3.4 extra"` would silently succeed.
+The `ip_address` parser reads like the format itself: number, dot, number, dot, number, dot, number. `parse` requires all input to be consumed, so `"1.2.3.4 extra"` fails instead of silently succeeding.
 
 ## Running it
 
@@ -66,7 +65,7 @@ Let's look at what happens with bad input:
 
 **Incomplete**: `"1.2.3"` parses `1`, `.`, `2`, `.`, `3`, then tries to match `'.'` and fails because the input is exhausted.
 
-**Trailing data**: `"1.2.3.4 extra"` parses all four octets, then `end_of_input` fails because there are characters remaining. The error is at position 7 and says `expected digit or end of input`: the last `many` stopped at the space because it needed another digit, and Parseff reports every failure at the furthest position.
+**Trailing data**: `"1.2.3.4 extra"` parses all four octets, then `parse` fails because there are characters remaining. The error is at position 7 and says `expected digit or end of input`: the last `many` stopped at the space because it needed another digit, and Parseff reports every failure at the furthest position.
 
 ## Improving error messages with `expect`
 
@@ -90,7 +89,6 @@ let ip_address () =
   let c = number_0_255 () in
   let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
   let d = number_0_255 () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 ```
 
@@ -98,10 +96,10 @@ Now on `"192.168.1.x"`, instead of `expected digit`, the error says `expected a 
 
 ## Using typed errors
 
-For programmatic error handling, extend `Parseff.Error.user` with your own cases and pattern match on them:
+For programmatic error handling, extend `Parseff.custom_error` with your own cases and pattern match on them:
 
 ```ocaml
-type Parseff.Error.user += Out_of_range of int
+type Parseff.custom_error += Out_of_range of int
 
 let number_0_255_typed () =
   let digits = Parseff.many ~at_least:1 digit_val () in
@@ -116,10 +114,10 @@ Now callers can distinguish parsing failures from validation failures:
 match Parseff.parse "192.168.1.300" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "%d.%d.%d.%d\n" a b c d
-| Error { kind = User (Out_of_range n); _ } ->
+| Error { kind = Custom (Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
 | Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
+    Printf.printf "Parse error: %s\n" (Parseff.error_message e)
 ```
 
 `fail` is fine for errors shown directly to users. `error` is better when code needs to react differently to different failure modes.

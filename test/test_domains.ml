@@ -230,7 +230,7 @@ let test_json_across_domains () =
       | Error e ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: JSON parse failed at pos %d for %S" i
-               e.Parseff.Error.span.start input
+               e.Parseff.range.start input
             )
     )
     results
@@ -374,7 +374,7 @@ let test_streaming_json_across_domains () =
       | Error e ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i
-               e.Parseff.Error.span.start
+               e.Parseff.range.start
             )
     )
     results
@@ -422,9 +422,9 @@ let test_context_across_domains () =
         )
       in
       match Parseff.parse "ababx" parser with
-      | Stdlib.Error (e : Parseff.Error.t)
-        when match e.frames with
-             | [ { Parseff.Error.name = n; start = 0; delimited = false } ] ->
+      | Stdlib.Error (e : Parseff.error)
+        when match e.contexts with
+             | [ { Parseff.name = n; start = 0; delimited = false } ] ->
                  n = name
              | _ ->
                  false ->

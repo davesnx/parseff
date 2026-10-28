@@ -59,7 +59,6 @@ module Parseff_CSV_Generic = struct
     let fields =
       Parseff.sep_by field (fun () -> ignore (Parseff.char ',')) ()
     in
-    Parseff.end_of_input ();
     fields
 
   let parse input =
@@ -75,7 +74,6 @@ module Parseff_CSV_Fused = struct
   let csv () =
     let spans = Parseff.sep_by_take_span (fun _ -> false) ',' is_not_comma in
     let fields = List.map Parseff.span_to_string spans in
-    Parseff.end_of_input ();
     fields
 
   let parse input =

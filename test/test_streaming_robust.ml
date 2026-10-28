@@ -91,7 +91,7 @@ let show_failure = function
   | Ok _ ->
       "ok"
   | Error e ->
-      Printf.sprintf "%d %s" e.Parseff.Error.span.start (Parseff.Error.message e)
+      Printf.sprintf "%d %s" e.Parseff.range.start (Parseff.error_message e)
 
 let test_interleaved_failures_keep_separate_groups () =
   let a = ref "unset" and b = ref "unset" in
@@ -111,7 +111,7 @@ let test_interleaved_failures_keep_separate_groups () =
   go b "abxx";
   run ();
   Alcotest.(check string) "first" "3 expected \"d\", found 'x'" !a;
-  Alcotest.(check string) "second" "2 expected \"c\" or \"d\", found 'xx'" !b;
+  Alcotest.(check string) "second" "2 expected \"c\" or \"d\", found 'x'" !b;
   check_outside_parse ()
 
 let chunk_source ?(chunk = 3000) total line =
@@ -236,7 +236,7 @@ let test_regex_pinned_complete_match () =
   let re = Re.compile (Re.rep1 (Re.char 'a')) in
   let data = String.make 10 'x' ^ "aabccc" in
   let expected =
-    match Parseff.parse data (pinned_regex_parser re) with
+    match Parseff.parse ~consume:`Partial data (pinned_regex_parser re) with
     | Ok s ->
         s
     | Error _ ->
@@ -246,8 +246,8 @@ let test_regex_pinned_complete_match () =
   List.iter
     (fun chunk ->
       match
-        Parseff.parse_source ~backtrack_window:16 (fn_src data chunk)
-          (pinned_regex_parser re)
+        Parseff.parse_source ~consume:`Partial ~backtrack_window:16
+          (fn_src data chunk) (pinned_regex_parser re)
       with
       | Ok s ->
           Alcotest.(check string) (Printf.sprintf "chunk %d" chunk) expected s
@@ -274,7 +274,8 @@ let test_small_window_rejected () =
   List.iter
     (fun w ->
       match
-        Parseff.parse_source ~backtrack_window:w (fn_src "hello" 5) (fun () ->
+        Parseff.parse_source ~consume:`Partial ~backtrack_window:w
+          (fn_src "hello" 5) (fun () ->
             Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
         )
       with
@@ -285,8 +286,8 @@ let test_small_window_rejected () =
     )
     [ -5; 0; 1 ];
   match
-    Parseff.parse_source ~backtrack_window:2 (fn_src "hello" 5) (fun () ->
-        Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
+    Parseff.parse_source ~consume:`Partial ~backtrack_window:2 (fn_src "hello" 5)
+      (fun () -> Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
     )
   with
   | Ok s ->

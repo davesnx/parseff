@@ -14,11 +14,11 @@ same parsers, same result type, same error handling.
 {@ocaml skip[val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result]}
+  ('a, error) Stdlib.result]}
 
 {@ocaml skip[
   let ic = open_in "data.json" in
@@ -37,19 +37,24 @@ The [~max_depth] parameter works the same as in {!val:Parseff.parse}. The
 [~backtrack_window] parameter bounds how much buffered input Parseff may retain
 for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
-{1 Requiring the whole input}
+{1 Reading the whole source}
 
-Pass [~consume] as below to make {!val:Parseff.parse_source} fail when input
-remains after the parser returns, as {!val:Parseff.end_of_input} does:
+By default {!val:Parseff.parse_source} fails with [Expected End_of_input] when
+input remains after the parser returns, as {!val:Parseff.end_of_input} does. The
+check pulls one more byte from the source. It does not read the rest of the
+source: it stops at the first byte that remains.
 
-{@ocaml skip[Parseff.parse_source ~consume:`All source parser]}
+To parse a leading part of the source and leave the rest unread, pass
+[~consume:`Partial]:
+
+{@ocaml skip[Parseff.parse_source ~consume:`Partial source parser]}
 
 [~diagnostics] collects the diagnostics of the parse. See {!page:diagnostics}.
 
 {@ocaml skip[
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
-  let result = Parseff.parse_source ~consume:`All source json in
+  let result = Parseff.parse_source source json in
   close_in ic;
   result
 ]}
@@ -266,7 +271,7 @@ In practice:
 - Prefer grammars that dispatch early, so the runtime does not need to keep a
   long ambiguous prefix alive.
 - Call {!val:Parseff.commit} only when a branch has become logically certain.
-- If you hit [Error.Backtrack_window_exceeded], first try to commit earlier; only
+- If you hit [Backtrack_window_exceeded], first try to commit earlier; only
   increase [~backtrack_window] when the ambiguity is real.
 
 The guides section includes a small CSV walkthrough that starts with a normal
@@ -303,14 +308,14 @@ body of [many], outside the [or_].
 becomes certain: after [cut ()], none of those frames pins buffered input, and
 a failure of the construct is not retried by the frames outside it. With a
 small window, an [or_] whose left branch reads a long run of tokens fails with
-[Error.Backtrack_window_exceeded] until the branch calls [cut ()].
+[Backtrack_window_exceeded] until the branch calls [cut ()].
 
 Before [commit ()], Parseff must keep enough buffered input to rewind and try
 the other branch. After [commit ()], that rewind point stops pinning the old
 prefix.
 
 If the retained region would exceed [~backtrack_window], parsing fails with
-[Error.Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
+[Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
 
 {1 Thread safety}
 
@@ -380,7 +385,7 @@ extend past the window. If the window is already full of rewind history and
 the source has not ended, the regex runs on what is buffered. A match that ends
 before the end of the buffer is returned. Otherwise, because more input could
 change the result, {!val:Parseff.match_regex} fails with
-[Error.Backtrack_window_exceeded]. [~backtrack_window] must be at least [2].
+[Backtrack_window_exceeded]. [~backtrack_window] must be at least [2].
 
 {2 No partial results}
 

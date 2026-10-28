@@ -18,7 +18,6 @@
         let c = number () in
         let _ = Parseff.consume "." in
         let d = number () in
-        Parseff.end_of_input ();
         (a, b, c, d)
 
       match Parseff.parse "192.168.1.1" ip_address with
@@ -45,115 +44,103 @@ type location = { offset : int; line : int; col : int }
 
 (** {1 Errors} *)
 
+type range = { start : int; stop : int }
+(** A range of byte offsets, [start] included and [stop] excluded, with
+    [start <= stop]. *)
+
+type expected = private
+  | Char of Uchar.t  (** A specific character, printed as ['x']. *)
+  | Literal of string  (** A literal string, printed as ["abc"]. *)
+  | Label of string
+      (** A name given by {!val:satisfy}, {!val:take_while}, {!val:expect} and
+          others. *)
+  | End_of_input  (** The end of the input. *)
+
+type found = private
+  | Text of string
+      (** The text at the failure position. A token cut at 32 bytes ends with
+          [...]. *)
+  | End  (** The input ended. *)
+  | Short of int
+      (** A read of a fixed number of bytes, such as {!val:take}, found fewer
+          bytes than it needed before the end of the input. The value is how
+          many bytes were left. *)
+  | Value of string
+      (** An integer field that differs from the expected one, as the
+          hexadecimal value read in the same width, for example [0x0002]. *)
+
+type context = private { name : string; start : int; delimited : bool }
+(** A construct that was open at the failure, see {!val:context}. [start] is the
+    byte offset where it started, [delimited] is true for constructs with an
+    opening token. *)
+
+type note = { at : range option; text : string }
+(** An annotation added with [~notes] in {!val:fail} or {!val:error}.
+    [at = Some r] underlines the bytes [r] in the source excerpt with the text
+    next to the underline. [at = None] adds a ["* note:"] line under the
+    excerpt. *)
+
+type excerpt
+(** Source lines kept with the error so that {!render_error} does not need the
+    input. *)
+
+type custom_error = ..
+(** The type of the values given to {!val:error}. It is extensible: declare your
+    own cases with [type Parseff.custom_error += Too_large of int] and match
+    them as [Custom (Too_large n)]. *)
+
+type error_kind = private
+  | Expected of { items : expected * expected list; found : found; more : int }
+      (** A primitive failed. [items] is everything that was expected at the
+          furthest failure position, sorted and without duplicates, up to 64
+          items. [more] is how many further alternatives were expected and are
+          not in [items], [0] unless more than 64 were. *)
+  | Failure of string
+      (** A failure raised with {!val:fail}, or ["no alternative matched"] when
+          [one_of []] is the only failure at the furthest position. Failures of
+          primitives are otherwise [Expected]. *)
+  | Custom of custom_error  (** A value given to {!val:error}. *)
+  | Depth_limit_exceeded of { limit : int }
+      (** {!val:rec_} nested deeper than [max_depth]. *)
+  | Backtrack_window_exceeded of { limit : int; oldest : int }
+      (** A streaming parser needed more rewind history than the window.
+          [oldest] is the earliest position the runtime still needs to rewind to
+          and [limit] is the configured [backtrack_window]. The error position
+          is the parser position when the overflow happened. *)
+
+type error = private {
+  kind : error_kind;
+  range : range;
+      (** The bytes the error is about, never reversed, empty at the end of the
+          input. *)
+  location : location option;
+      (** Line and column of [range.start], 1-based. [location.col] counts
+          bytes, while the column {!render_error} prints counts Unicode
+          characters, so the two differ on a line with non-ASCII text. [None]
+          when the line is not known: in streaming, when the position is older
+          than the buffered input. {!render_error} prints the byte offset then.
+      *)
+  contexts : context list;  (** Open constructs, outermost first. *)
+  notes : note list;
+  excerpt : excerpt;
+}
 (** A parse error: what failed, where, and what the parser was doing.
 
-    A failed parse returns one [Error.t]. Match on its [kind] to react to the
+    A failed parse returns one [error]. Match on its [kind] to react to the
     failure, or print it with {!render_error}. *)
-module Error : sig
-  type range = { start : int; stop : int }
-  (** A range of byte offsets, [start] included and [stop] excluded, with
-      [start <= stop]. *)
 
-  type expected = private
-    | Char of Uchar.t  (** A specific character, printed as ['x']. *)
-    | Literal of string  (** A literal string, printed as ["abc"]. *)
-    | Label of string
-        (** A name given by {!satisfy}, {!take_while}, {!expect} and others. *)
-    | End_of_input  (** The end of the input. *)
-
-  type found = private
-    | Text of string
-        (** The text at the failure position. A token cut at 32 bytes ends with
-            [...]. *)
-    | End  (** The input ended. *)
-    | Short of int
-        (** A read of a fixed number of bytes, such as {!val:Parseff.take},
-            found fewer bytes than it needed before the end of the input. The
-            value is how many bytes were left. *)
-    | Value of string
-        (** An integer field that differs from the expected one, as the
-            hexadecimal value read in the same width, for example [0x0002]. *)
-
-  type frame = private { name : string; start : int; delimited : bool }
-  (** A construct that was open at the failure, see {!val:Parseff.context}.
-      [start] is the byte offset where it started, [delimited] is true for
-      constructs with an opening token. *)
-
-  type note = { at : range option; text : string }
-  (** An annotation added with [~notes] in {!val:Parseff.fail} or
-      {!val:Parseff.error}. [at = Some r] underlines the bytes [r] in the source
-      excerpt with the text next to the underline. [at = None] adds a
-      ["* note:"] line under the excerpt. *)
-
-  type position = private { location : location; code_point_col : int option }
-  (** Where an error is in the input, known only when the line is known.
-      [location] is the line and column of the error in bytes. [code_point_col]
-      is the column in code points, [None] if the start of the line is no longer
-      buffered (streaming). *)
-
-  type excerpt
-  (** Source lines kept with the error so that {!Parseff.render_error} does not
-      need the input. *)
-
-  type user = ..
-  (** The type of the values given to {!val:Parseff.error}. It is extensible:
-      declare your own cases with [type Parseff.Error.user += Too_large of int]
-      and match them as [User (Too_large n)]. *)
-
-  type kind = private
-    | Expected of {
-        items : expected * expected list;
-        found : found;
-        more : int;
-      }
-        (** A primitive failed. [items] is everything that was expected at the
-            furthest failure position, sorted and without duplicates, up to 64
-            items. [more] is how many further alternatives were expected and are
-            not in [items], [0] unless more than 64 were. *)
-    | Failure of string
-        (** A failure raised with {!val:Parseff.fail}, or
-            ["no alternative matched"] when [one_of []] is the only failure at
-            the furthest position. Failures of primitives are otherwise
-            [Expected]. *)
-    | User of user  (** A value given to {!val:Parseff.error}. *)
-    | Depth_limit_exceeded of { limit : int }
-        (** {!val:Parseff.rec_} nested deeper than [max_depth]. *)
-    | Backtrack_window_exceeded of { limit : int; oldest : int }
-        (** A streaming parser needed more rewind history than the window.
-            [oldest] is the earliest position the runtime still needs to rewind
-            to and [limit] is the configured [backtrack_window]. The error
-            position is the parser position when the overflow happened. *)
-
-  type t = private {
-    kind : kind;
-    span : range;
-        (** The bytes the error is about, never reversed, empty at the end of
-            the input. *)
-    position : position option;
-        (** Line and column of [span.start]. [None] when the line is not known:
-            in streaming, when the position is older than the buffered input.
-            {!Parseff.render_error} prints the byte offset then. *)
-    frames : frame list;  (** Open constructs, outermost first. *)
-    notes : note list;
-    excerpt : excerpt;
-  }
-
-  val message : ?user:(user -> string) -> t -> string
-  (** [message e] is the one-line message, for example
-      [expected "else", "if", or "while", found 'xyz']. A message lists at most
-      8 expected items, then [, or N more alternatives]. [user] prints [User]
-      errors, without it the message is [user error (no ~user printer given)].
-  *)
-
-  type columns = [ `Bytes | `Code_points ]
-end
+val error_message : ?custom:(custom_error -> string) -> error -> string
+(** [error_message e] is the one-line message, for example
+    [expected "else", "if", or "while", found 'xyz']. A message lists at most 8
+    expected items, then [, or N more alternatives]. [custom] prints [Custom]
+    errors, without it the message is [custom error (no ~custom printer given)].
+*)
 
 val render_error :
   ?name:string ->
   ?source:string ->
-  ?columns:Error.columns ->
-  ?user:(Error.user -> string) ->
-  Error.t ->
+  ?custom:(custom_error -> string) ->
+  error ->
   string
 (** [render_error e] prints the error with a source excerpt:
 
@@ -173,11 +160,16 @@ val render_error :
     error line and the lines around it, and may miss old lines in streaming.
     When the line of the error is not known, which happens in streaming when the
     position is older than the buffered input, the header is
-    [input.json: byte N: [error] ...] and there is no excerpt. [columns] chooses
-    the column unit of the header, [`Bytes] by default; it applies to the
-    columns of [* while parsing] lines too. Carets count code points, and a
-    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
-    the escape [message] uses, such as [\x1B], with as many carets as the escape
+    [input.json: byte N: [error] ...] and there is no excerpt. The columns of
+    the header and of the [* while parsing] lines count Unicode characters (code
+    points), while [location.col] counts bytes, so they differ on a line with
+    non-ASCII text. In streaming, when the start of a line is no longer buffered
+    and [source] is not given, the character column is not known: the header is
+    then [input.json: byte N: [error] ...] too, the excerpt of the error line is
+    still printed, cut on the left with [...], and a [* while parsing] line says
+    [from byte N]. Carets count code points, and a control byte, an invalid
+    UTF-8 byte or a C1 control prints in the excerpt as the escape
+    {!val:error_message} uses, such as [\x1B], with as many carets as the escape
     has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
     error ends with a [* help:] line. The rows the renderer adds never end with
     a space, and source text is printed byte for byte. The result has no
@@ -210,16 +202,20 @@ end
 
 val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   string ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result
+  ('a, error) Stdlib.result
 (** [parse input parser] runs [parser] on [input].
 
-    [consume] is [`Prefix] by default: the parser may stop before the end of the
-    input. With [`All], parsing fails with an [Expected End_of_input] error when
-    input remains, as if the parser ended with {!end_of_input}.
+    [consume] is [`All] by default: parsing fails with an
+    [Expected End_of_input] error when input remains after the parser returns,
+    as if the parser ended with {!end_of_input}. The error is at the offset of
+    the first unconsumed byte. Pass [~consume:`Partial] to parse a leading part
+    of the input on purpose and ignore the rest, for example to read one record
+    from the start of a buffer. With [`Partial], the result does not say where
+    the parser stopped; call {!position} at the end of the parser to read it.
 
     [diagnostics] is the collector given to {!warn}. The runner empties it
     before the parser starts. Read it with {!Diagnostics.to_list} after the
@@ -236,13 +232,13 @@ val parse :
 
     [max_depth] limits the nesting depth for parsers that use {!rec_} to mark
     recursive entry points. Defaults to [128]. When exceeded, parsing fails with
-    [Error.Depth_limit_exceeded] instead of risking a stack overflow.
+    [Depth_limit_exceeded] instead of risking a stack overflow.
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
-    {!Error.t}. [e.kind] is [Expected] for a mismatch, [Failure] for
-    {!val:fail}, [User] for {!val-error}, [Depth_limit_exceeded] when recursion
-    nested deeper than [max_depth], and [Backtrack_window_exceeded] for
-    streaming.
+    {!type:error}. [e.kind] is [Expected] for a mismatch, [Failure] for
+    {!val:fail}, [Custom] for {!val-error}, [Depth_limit_exceeded] when
+    recursion nested deeper than [max_depth], and [Backtrack_window_exceeded]
+    for streaming.
 
     Example:
     {@ocaml[
@@ -309,8 +305,7 @@ val match_regex : ?label:string -> Re.re -> string
     If the window is full of rewind history, the regex runs on the buffered
     input. A match that ends before the end of the buffer is returned. A failed
     match, or one that reaches the end of the buffer, fails with
-    [Error.Backtrack_window_exceeded], because more input could change the
-    result.
+    [Backtrack_window_exceeded], because more input could change the result.
 
     The match must start at the current position, but [Re] searches forward when
     it does not. A failed match therefore scans the rest of the input, and a
@@ -365,13 +360,13 @@ val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
     strings. Runs entirely in a single operation for maximum efficiency. *)
 
 val take_while_span : (char -> bool) -> span
-(** [take_while_span fun] like {!take_while} but returns a zero-copy {!span}
-    instead of allocating a string. No memory allocation until you call
-    {!span_to_string}. *)
+(** [take_while_span fun] like {!take_while} but returns a zero-copy
+    {!type:span} instead of allocating a string. No memory allocation until you
+    call {!span_to_string}. *)
 
 val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
 (** [sep_by_take_span is_whitespace separator is_value_char] like {!sep_by_take}
-    but returns zero-copy {!span}s instead of strings. No [String.sub]
+    but returns zero-copy {!type:span}s instead of strings. No [String.sub]
     allocations per element. *)
 
 val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
@@ -381,11 +376,11 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     operation. Returns the taken string. Much more efficient than calling each
     step separately when parsing separated values. *)
 
-val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
+val fail : ?from:int -> ?notes:note list -> string -> 'a
 (** [fail ?from ?notes msg] aborts parsing with a [Failure msg] error.
 
     [~from] makes the error cover the bytes from [from] up to the current
-    position instead of a single position, and [~notes] attaches {!Error.note}s.
+    position instead of a single position, and [~notes] attaches {!type:note}s.
     {!render_error} underlines the span and prints the notes. This is intended
     for user-initiated validation failures (e.g. a parsed value is out of
     range). In streaming, a [~from] older than the buffered input is kept as the
@@ -423,14 +418,14 @@ val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
+val error : ?from:int -> ?notes:note list -> custom_error -> 'a
 (** [error ?from ?notes e] aborts parsing with a user-defined error value.
     [~from] and [~notes] work as in {!fail}.
 
-    The error is returned as [Error { kind = User e; _ }]. Declare the cases of
-    {!Error.user} for rich error reporting:
+    The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
+    of {!type:custom_error} for rich error reporting:
     {@ocaml[
-      type Error.user += Out_of_range of int | Negative of int
+      type custom_error += Out_of_range of int | Negative of int
 
       let number () =
         let n = parse_int () in
@@ -440,21 +435,21 @@ val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
 
       match parse input number with
       | Ok n -> Printf.printf "Got %d\n" n
-      | Error { kind = User (Out_of_range n); _ } ->
+      | Error { kind = Custom (Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
-      | Error { kind = User (Negative n); _ } ->
+      | Error { kind = Custom (Negative n); _ } ->
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
     ]}
 
-    {b Note:} User errors from [error] pass through {!val:expect} and
+    {b Note:} Custom errors from [error] pass through {!val:expect} and
     {!val:one_of_labeled} without being caught or relabeled. However,
     backtracking combinators ({!val:or_}, {!val:many}, {!val:one_of},
-    {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
-    like any other parse failure. An absorbed user error is still reported when
-    the parse fails and the error is at the furthest failure position. At the
-    same position, a user error wins over [Expected]. Between two user errors at
-    the same position, the first one wins.
+    {!val:optional}, {!val:look_ahead}) will catch and absorb custom errors just
+    like any other parse failure. An absorbed custom error is still reported
+    when the parse fails and the error is at the furthest failure position. At
+    the same position, a custom error wins over [Expected]. Between two custom
+    errors at the same position, the first one wins.
 
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
@@ -485,7 +480,9 @@ val location_of_position : string -> int -> location
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only if no input remains. Use this to ensure the
-    entire input has been consumed.
+    input has been consumed at a given point, for example in a sub-parser.
+    {!parse} already does this at the end of the top-level parser unless you
+    pass [~consume:`Partial].
 
     Example:
     {@ocaml[
@@ -628,14 +625,14 @@ val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
 val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
-    opened since the innermost enclosing {!context}, so none of them backtracks
-    after the cut. It stops at a {!look_ahead}.
+    opened since the innermost enclosing {!val:context}, so none of them
+    backtracks after the cut. It stops at a {!look_ahead}.
 
-    When the enclosing {!context} then fails, the frames outside it are sealed
-    too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
+    When the enclosing {!val:context} then fails, the frames outside it are
+    sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
     failure. If the context ends without failing, the outer frames stay as they
-    were. Without an enclosing {!context}, [cut ()] seals every frame down to
-    the first {!look_ahead}.
+    were. Without an enclosing {!val:context}, [cut ()] seals every frame down
+    to the first {!look_ahead}.
 
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
@@ -683,12 +680,12 @@ val expect : string -> (unit -> 'a) -> 'a
     the end of the input keeps its expected items and says [found end of input].
 
     Failures from {!val:fail} propagate unchanged (there is no way to intercept
-    them). User errors raised via {!val-error} propagate unchanged — this lets
+    them). Custom errors raised via {!val-error} propagate unchanged — this lets
     you use [expect] around parsers that perform validation without losing the
     structured error:
 
     {@ocaml[
-    type Error.user += Out_of_range of int
+    type custom_error += Out_of_range of int
 
     let octet () =
       expect "an octet (0-255)" (fun () ->
@@ -699,7 +696,7 @@ val expect : string -> (unit -> 'a) -> 'a
             n
       )
     (* A non-digit input gives: "expected an octet (0-255)" *)
-    (* Input "300" gives: User (Out_of_range 300), not swallowed *)
+    (* Input "300" gives: Custom (Out_of_range 300), not swallowed *)
     ]}
 
     Example:
@@ -733,8 +730,8 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Each branch is wrapped by {!expect} with its label, so only failures at the
     position where [one_of_labeled] started are relabeled. A branch that fails
-    deeper keeps its own message. User errors raised via {!val-error} inside any
-    branch propagate unchanged.
+    deeper keeps its own message. Custom errors raised via {!val-error} inside
+    any branch propagate unchanged.
 
     Example:
     {@ocaml[
@@ -956,20 +953,26 @@ end
 val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result
+  ('a, error) Stdlib.result
 (** [parse_source source parser] runs [parser] pulling input from [source] on
     demand. Takes the same [consume] and [diagnostics] arguments as {!parse} and
     behaves identically, but the input does not need to be fully available up
     front.
 
+    With the default [`All], the check for remaining input pulls one more byte
+    from [source] after the parser returns. It succeeds when [source] is at its
+    end, and fails with [Expected End_of_input] as soon as one more byte exists.
+    It does not read the rest of [source]. With [`Partial], [source] is read
+    only as far as the parser needs.
+
     The same parsers work with both [parse] and [parse_source] — no changes
     required. Streaming backtracking is bounded by [backtrack_window] (default:
     [65536] bytes). If the parser needs to keep more rewind history than that,
-    parsing fails with [Error.Backtrack_window_exceeded]. Use {!commit} to seal
+    parsing fails with [Backtrack_window_exceeded]. Use {!commit} to seal
     branches once the grammar has clearly chosen them.
 
     [backtrack_window] must be at least [2], because {!match_regex} reads ahead
@@ -1155,8 +1158,8 @@ module Utf8 : sig
       Like {!take_while} but returns [unit] — no string allocation. *)
 
   val take_while_span : (Uchar.t -> bool) -> span
-  (** [take_while_span pred] like {!take_while} but returns a zero-copy {!span}.
-  *)
+  (** [take_while_span pred] like {!take_while} but returns a zero-copy
+      {!type:span}. *)
 
   val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit
   (** [skip_while_then_char pred u] skips code points where [pred] returns

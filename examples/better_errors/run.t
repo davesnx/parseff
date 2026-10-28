@@ -35,10 +35,10 @@ Expression parser with precedence
   (1+2)*3              -> ((1 + 2) * 3)
 
   $ ./main.exe expr "1+"
-  1+                   -> 1
+  1+                   -> Error at pos 2: expected a number or an opening parenthesis, found end of input
 
   $ ./main.exe expr '1*)'
-  1*)                  -> 1
+  1*)                  -> Error at pos 2: expected a number or an opening parenthesis, found ')'
 
 Using one_of and one_of_labeled
 
@@ -49,7 +49,7 @@ Using one_of and one_of_labeled
   xyz                  -> Error at pos 0: expected "else", "if", or "while", found 'xyz'
 
   $ ./main.exe literal "99"
-  99                   -> 9
+  99                   -> Error at pos 1: expected end of input, found '9'
 
   $ ./main.exe literal "xyz"
   xyz                  -> Error at pos 0: expected boolean or number, found 'xyz'

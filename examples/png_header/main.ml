@@ -72,11 +72,11 @@ let parse_png_header () =
 let () =
   let path = Sys.argv.(1) in
   let input = In_channel.with_open_bin path In_channel.input_all in
-  match Parseff.parse input parse_png_header with
+  match Parseff.parse ~consume:`Partial input parse_png_header with
   | Ok hdr ->
       Printf.printf "%s:\n" path;
       Printf.printf "  %ldx%ld, %d-bit %s\n" hdr.width hdr.height hdr.bit_depth
         (color_type_to_string hdr.color_type)
   | Error e ->
-      Printf.printf "%s: error at byte %d: %s\n" path e.Parseff.Error.span.start
-        (Parseff.Error.message e)
+      Printf.printf "%s: error at byte %d: %s\n" path e.range.start
+        (Parseff.error_message e)

@@ -19,10 +19,9 @@ let ip_address_simple () =
   let c = number_0_255_simple () in
   let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
   let d = number_0_255_simple () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 
-type Parseff.Error.user += Out_of_range of int
+type Parseff.custom_error += Out_of_range of int
 
 let number_0_255_with_error () =
   let n = accumulate_digits () in
@@ -39,7 +38,6 @@ let ip_address_with_custom_errors () =
   let c = number_0_255_with_error () in
   let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
   let d = number_0_255_with_error () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 
 type expr = Num of int | Add of expr * expr | Mul of expr * expr
@@ -137,7 +135,6 @@ let pairs () =
       (fun () -> Parseff.char ',')
       ()
   in
-  Parseff.end_of_input ();
   List.length items
 
 let ident () =
@@ -182,8 +179,8 @@ let statements () =
     ()
 
 let format_error e =
-  Printf.sprintf "Error at pos %d: %s" e.Parseff.Error.span.start
-    (Parseff.Error.message e)
+  Printf.sprintf "Error at pos %d: %s" e.Parseff.range.start
+    (Parseff.error_message e)
 
 let ws () = Parseff.skip_whitespace ()
 
@@ -237,12 +234,7 @@ and json_string () =
   ignore (Parseff.char '"')
 
 let run_json input =
-  match
-    Parseff.parse input (fun () ->
-        json_value ();
-        Parseff.end_of_input ()
-    )
-  with
+  match Parseff.parse input (fun () -> json_value ()) with
   | Ok () ->
       print_endline "valid"
   | Error e ->
@@ -259,10 +251,10 @@ let run_ip_custom input =
   match Parseff.parse input ip_address_with_custom_errors with
   | Ok (a, b, c, d) ->
       Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
-  | Error { kind = User (Out_of_range n); span; _ } ->
+  | Error { kind = Custom (Out_of_range n); range; _ } ->
       Printf.printf
         "%-20s -> Custom error at pos %d: octet %d out of range (0-255)\n" input
-        span.start n
+        range.start n
   | Error e ->
       Printf.printf "%-20s -> %s\n" input (format_error e)
 

@@ -52,7 +52,7 @@ let test_invalid_out_of_range () =
   | Ok _ ->
       Alcotest.fail "Expected failure for out of range"
   | Error ({ kind = Failure msg; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check int) "error position" 9 pos;
       Alcotest.(check string) "error message" "number out of range: 256" msg
   | Error _ ->
@@ -63,10 +63,10 @@ let test_invalid_incomplete () =
   | Ok _ ->
       Alcotest.fail "Expected failure for incomplete IP"
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
+      let pos = e.range.start in
       Alcotest.(check string)
         "expected items" "expected digit or \".\", found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       Alcotest.(check int) "error position" 5 pos
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -76,8 +76,8 @@ let test_invalid_trailing () =
   | Ok _ ->
       Alcotest.fail "Expected failure for trailing data"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.Parseff.Error.span.start in
-      let expected = Parseff.Error.message e in
+      let pos = e.range.start in
+      let expected = Parseff.error_message e in
       Alcotest.(check int) "error position" 7 pos;
       Alcotest.(check string)
         "error message" "expected digit or end of input, found ' '" expected

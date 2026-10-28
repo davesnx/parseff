@@ -44,7 +44,7 @@ let test_uint8_eof () =
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected 1 byte, found end of input"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -84,7 +84,7 @@ let test_int16_eof () =
   | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected 2 bytes, found only 1 (end of input)"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -114,7 +114,7 @@ let test_int32_eof () =
   | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected 4 bytes, found only 3 (end of input)"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -152,7 +152,7 @@ let test_int64_eof () =
   | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected 8 bytes, found only 7 (end of input)"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -234,7 +234,7 @@ let test_be_int16_mismatch () =
   | Error ({ kind = Expected { found = Value _; _ }; _ } as e) ->
       Alcotest.(check string)
         "message" "expected int16be 0x0102, found 0x0201"
-        (Parseff.Error.message e)
+        (Parseff.error_message e)
   | Error _ ->
       Alcotest.fail "Expected an Expected error"
 
@@ -267,12 +267,12 @@ let test_le_int32_match () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let expect_error_at pos msg (result : (_, Parseff.Error.t) Stdlib.result) =
+let expect_error_at pos msg (result : (_, Parseff.error) Stdlib.result) =
   match result with
   | Error ({ kind = Expected { found = Value _; _ }; _ } as e) ->
-      let p = e.Parseff.Error.span.start in
+      let p = e.range.start in
       Alcotest.(check int) "error position" pos p;
-      Alcotest.(check string) "error message" msg (Parseff.Error.message e)
+      Alcotest.(check string) "error message" msg (Parseff.error_message e)
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error _ ->
@@ -383,7 +383,7 @@ let test_le_int64_match_high_bits () =
 
 let test_take_exact () =
   match
-    Parseff.parse "abcdef" (fun () ->
+    Parseff.parse ~consume:`Partial "abcdef" (fun () ->
         let s = Parseff.take 4 in
         let pos = Parseff.position () in
         (s, pos)
@@ -397,7 +397,7 @@ let test_take_exact () =
 
 let test_take_zero () =
   match
-    Parseff.parse "abc" (fun () ->
+    Parseff.parse ~consume:`Partial "abc" (fun () ->
         let s = Parseff.take 0 in
         let pos = Parseff.position () in
         (s, pos)
@@ -416,7 +416,7 @@ let test_take_eof () =
   | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected 10 bytes, found only 3 (end of input)"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
@@ -474,7 +474,7 @@ let test_backtracking () =
       )
       ()
   in
-  match Parseff.parse input parser with
+  match Parseff.parse ~consume:`Partial input parser with
   | Ok s ->
       Alcotest.(check string) "backtracked" "got_0102" s
   | Error _ ->
@@ -512,7 +512,9 @@ let test_streaming_le_int64 () =
 
 let test_streaming_take () =
   let src = byte_at_a_time "hello world" in
-  match Parseff.parse_source src (fun () -> Parseff.take 5) with
+  match
+    Parseff.parse_source ~consume:`Partial src (fun () -> Parseff.take 5)
+  with
   | Ok v ->
       Alcotest.(check string) "taken" "hello" v
   | Error _ ->
@@ -526,7 +528,7 @@ let test_streaming_eof () =
   | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
       Alcotest.(check string)
         "expected items" "expected 2 bytes, found only 1 (end of input)"
-        (Parseff.Error.message e);
+        (Parseff.error_message e);
       ()
   | Error _ ->
       Alcotest.fail "Expected an end of input error"
