@@ -52,9 +52,19 @@ The site uses a custom dark theme inspired by errore.org. Colors and styles can 
 3. Update `astro.config.mjs` sidebar configuration
 4. Write your content using Markdown
 
+## Versions
+
+`make website-build-versions` builds `main` and every tag from 0.4.0 on into `website/dist`, through `website/build-versions.sh`:
+
+- `/parseff/` is the newest tag, `/parseff/X.Y.Z/` is each tag, `/parseff/main/` is `main`.
+- Versions other than the newest tag get an "old version" or "unreleased" banner and `noindex`.
+- `versions.json` at the site root feeds the version selector. `public/versions.json` is a stub for `npm run dev`.
+- Tags that predate the env-driven config are patched at build time. The script fails if a pattern is missing.
+- Use links relative to the page root such as `api/errors/` in content, not `/parseff/...`.
+
 ## Deployment
 
-The site automatically deploys to GitHub Pages when pushed to the `main` branch via GitHub Actions (`.github/workflows/deploy-docs.yml`).
+The `deploy` job in `.github/workflows/ci.yml` runs on pushes to `main`, tag pushes and manual dispatch. It rebuilds every version and publishes them to GitHub Pages.
 
 ## Resources
 

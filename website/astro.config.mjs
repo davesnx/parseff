@@ -46,10 +46,13 @@ function fixOgImageBase(base) {
 	};
 }
 
+const base = process.env.DOCS_BASE ?? '/parseff';
+const channel = process.env.DOCS_CHANNEL ?? 'latest';
+
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://davesnx.github.io',
-	base: '/parseff',
+	base,
 	markdown: {
 		remarkPlugins: [remarkBoldAsides],
 	},
@@ -57,11 +60,17 @@ export default defineConfig({
 		starlight({
 			plugins: [starlightThemeFlexoki()],
 			components: {
+				Banner: './src/components/VersionBanner.astro',
 				Head: './src/components/Head.astro',
 				PageSidebar: './src/components/PageSidebar.astro',
 				PageTitle: './src/components/PageTitle.astro',
+				ThemeSelect: './src/components/VersionSelect.astro',
 			},
 			title: 'Parseff',
+			head:
+				channel === 'latest'
+					? []
+					: [{ tag: 'meta', attrs: { name: 'robots', content: 'noindex' } }],
 			description: 'Parser combinators with OCaml 5 algebraic effects',
 			social: [
 				{
@@ -130,6 +139,6 @@ export default defineConfig({
 			},
 		],
 		})),
-		fixOgImageBase('/parseff'),
+		fixOgImageBase(base),
 	],
 });

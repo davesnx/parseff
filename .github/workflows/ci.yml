@@ -77,13 +77,17 @@ jobs:
 
   deploy:
     name: Deploy website
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Setup OCaml and dependencies
@@ -104,8 +108,8 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
 
-      - name: Build website
-        run: make website-build
+      - name: Build website for every version
+        run: make website-build-versions
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
