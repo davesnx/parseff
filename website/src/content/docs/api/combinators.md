@@ -33,11 +33,13 @@ let bool_parser () =
     ()
 (* "true"  -> Ok true  *)
 (* "false" -> Ok false *)
-(* "maybe" -> Error { pos = 0; error = `Expected "\"true\" or \"false\"" } *)
+(* "maybe" -> Error: expected "false" or "true", found 'maybe' *)
 ```
-On `"maybe"`, both branches fail at the same position (position 0\), the left branch fails at position 0 (expected `"true"`, got `"m"`), their `Expected` messages are composed with `"or"`: **expected "true" or "false"**
+On `"maybe"`, both branches fail at the same position (position 0\). Parseff merges what each branch expected into one sorted list: **expected "false" or "true"**. The order of the branches does not change the message.
 
-If the branches fail at *different* positions, the error from whichever branch made the most progress (reached the furthest position) is reported.
+If the branches fail at *different* positions, the parse reports the failure that reached the furthest position. On `"tr"` the left branch fails at the end of the input, which is further than the mismatch of the right branch, so the error says `expected "ue", found end of input` at position 2\.
+
+A failure is recorded when it happens, not when the parse gives up. A branch that fails and is abandoned still counts if it went further than anything else, even when a later alternative succeeds.
 
 `or_` is ideal for two alternatives. When you have more, use `Parseff.one_of`, which takes a list and avoids nested `or_` calls:
 
@@ -82,12 +84,12 @@ let json_value () =
     ]
     ()
 ```
-Error composition follows the same rules as `or_`: if all parsers fail at the same position, their `Expected` messages are joined with `"or"`. If they fail at different positions, the error from the parser that progressed furthest wins.
+Error composition follows the same rules as `or_`: if all parsers fail at the same position, what they expected is merged into one sorted list without duplicates: `expected "else", "if", or "while"`. With three or more items the list ends with `", or"`. If they fail at different positions, the failure that progressed furthest wins.
 
 
 ### `one_of_labeled`
 
-`Parseff.one_of_labeled` is like `Parseff.one_of`, but each parser has a label. On failure, the error message reports all labels:
+`Parseff.one_of_labeled` is like `Parseff.one_of`, but each parser has a label. On failure, the error message reports all labels, sorted:
 
 ```ocaml
 val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
@@ -101,9 +103,11 @@ let literal () =
       ("boolean", bool_parser);
     ]
     ()
-(* On failure: "expected one of: number, string, boolean" *)
+(* On failure: "expected boolean, number, or string" *)
 ```
 This gives users a clear picture of what was expected at a given position, without exposing internal parser details.
+
+Each branch is wrapped by `expect`: only failures at the position where `one_of_labeled` started are replaced by the label. If a branch fails further in, for example an unterminated string, its own message is kept, because it describes the problem better than `"string"`.
 
 
 ### `optional`
@@ -148,7 +152,7 @@ Useful for context-sensitive decisions: peek at what's coming, then choose which
 
 ### `expect`
 
-`Parseff.expect` runs a parser and relabels its failure with a clearer message.
+`Parseff.expect` runs a parser and relabels its failure with a clearer message. The error reads `expected <description>`.
 
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
@@ -174,6 +178,77 @@ let ip_address () =
   (a, b, c, d)
 ```
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.
+
+`expect` relabels only failures at the position where the parser started. In `expect "key" (fun () -> consume "id:"; digit ())`, the input `"foo"` reports `expected key`, but `"id:x"` reports `expected digit` at offset 3, because the parser got past `"id:"` and the digit message is more precise.
+
+
+## Naming constructs
+
+
+### `context`
+
+`Parseff.context` runs a parser inside a named construct. The name does not change what the parser accepts. A failure that happens inside it remembers which constructs were open, outermost first, so an error report can say "while parsing array".
+
+```ocaml
+val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
+```
+```ocaml
+let array_parser value () =
+  Parseff.context ~delimited:true "array" (fun () ->
+      let _ = Parseff.char '[' in
+      let xs =
+        Parseff.sep_by value
+          (fun () ->
+            Parseff.skip_whitespace ();
+            Parseff.char ',')
+          ()
+      in
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char ']' in
+      xs)
+```
+Use `~delimited:true` for constructs that have an opening token, such as an array or a block. A parser that never calls `context` pays nothing for it. Each call costs about 100 instructions, so name constructs, not single tokens.
+
+A construct is reported only when the failure is strictly past the place where it started. An alternative that fails at its first byte, such as an array tried where there is no opening bracket, does not appear in the list.
+
+If two failures tie at the furthest position, the construct list of the first one is kept.
+
+
+### `cut`
+
+`Parseff.cut` declares that the construct that is running is decided. `Parseff.commit` seals the nearest frame only. `cut` seals every `or_`, `one_of`, `many`, `sep_by`, `optional` and `fold_*` frame that was opened since the innermost enclosing `context`. It stops at `Parseff.look_ahead`.
+
+```ocaml
+val cut : unit -> unit
+```
+If the enclosing `context` then fails, the frames outside it are sealed too, so an enclosing `or_`, `many` or `sep_by` cannot swallow the failure:
+
+```ocaml
+let statement () =
+  Parseff.context "statement" (fun () ->
+      Parseff.or_
+        (fun () ->
+          let _ = Parseff.consume "let" in
+          Parseff.cut ();
+          Parseff.skip_whitespace ();
+          let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
+          Parseff.skip_whitespace ();
+          let _ = Parseff.char '=' in
+          Parseff.skip_whitespace ();
+          let _ = Parseff.take_while ~at_least:1 ~label:"expression" (fun c -> c >= '0' && c <= '9') in
+          Parseff.char ';')
+        (fun () ->
+          let _ = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+          Parseff.char ';')
+        ())
+
+let statements () = Parseff.many (fun () -> Parseff.skip_whitespace (); statement ()) ()
+(* "let x = 1; 2;"  -> Ok [';'; ';'] *)
+(* "let x = ;"      -> Error at 8: expected expression *)
+```
+With `commit ()` in place of `cut ()`, only the `or_` is sealed, `many` stops and `statements` returns `[]` without reading the rest of the input. With `cut ()`, the failure of `let x = ;` is the error of the parse.
+
+`cut` also helps streaming: sealed frames no longer pin buffered input. See [`streaming`](./streaming.md).
 
 
 ## Recursion

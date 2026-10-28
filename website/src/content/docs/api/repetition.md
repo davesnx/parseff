@@ -75,6 +75,11 @@ let hex_color () =
 (* "#ff00aa" -> (['f';'f'], ['0';'0'], ['a';'a']) *)
 ```
 
+### Errors at the end of a loop
+
+A loop ends when its parser fails. That failure is recorded, so it can become the error of the whole parse when something later fails at the same position or earlier. For `"12x"`, `many digit` stops at `'x'`, and a following `end_of_input` fails at the same offset: the error is `expected digit or end of input` at offset 2\. A loop that stopped on a half-matched element reports the half-match: `sep_by (fun () -> consume "ab") (fun () -> char ',')` followed by `end_of_input` on `"ab,ab,ax"` reports `expected "b"` at offset 7, not `expected end of input` at offset 5\.
+
+
 ## Separated lists
 
 
@@ -279,7 +284,5 @@ let () =
   match Parseff.parse "[1, -2, 3]" json_array with
   | Ok nums ->
       Printf.printf "Sum: %d\n" (List.fold_left ( + ) 0 nums)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error _ -> print_endline "Parse error"
+  | Error e -> prerr_endline (Parseff.render_error ~name:"array" e)
 ```

@@ -12,15 +12,15 @@ Parseff exposes four main APIs for error handling:
 
 - `Parseff.fail`: fail with a string message
 - `Parseff.error`: fail with a typed custom value
-- `Parseff.catch`: intercept a failure and recover
 - `Parseff.expect`: relabel failures from another parser
+- `Parseff.context` and `Parseff.cut`: name a construct and decide it
 
 ## `fail`
 
-Abort parsing with a message. The message is returned as `Error { error = `Failure msg; ... }`.
+Abort parsing with a message. The message is returned as `Error { kind = Failure msg; ... }`.
 
 ```ocaml
-val fail : string -> 'a
+val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
 ```
 ```ocaml
 let byte () =
@@ -35,85 +35,98 @@ let byte () =
 
 let () =
   match Parseff.parse "300" byte with
-  | Error { pos; error = `Failure msg } ->
-      (* pos = 3, msg = "number must be between 0 and 255" *)
-      Printf.printf "Error at %d: %s\n" pos msg
+  | Error { kind = Failure msg; span; _ } ->
+      (* span.start = 3, msg = "number must be between 0 and 255" *)
+      Printf.printf "Error at %d: %s\n" span.start msg
   | Ok n -> Printf.printf "Got: %d\n" n
   | Error _ -> ()
 ```
 Use this when a human-readable string is enough.
 
+`~from` makes the error cover the bytes from `from` to the current position instead of a single position, so the rendered error underlines the whole value. `~notes` attaches annotations: a note with a range is underlined in the source excerpt with its text, a note without one is printed as a `* note:` line.
+
+```ocaml
+let octet () =
+  let start = Parseff.position () in
+  let n =
+    int_of_string
+      (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+         ~label:"digit")
+  in
+  if n <= 255 then n
+  else
+    Parseff.fail ~from:start
+      ~notes:[ { Parseff.Error.at = None; text = "octets go from 0 to 255" } ]
+      "octet out of range"
+
+let () =
+  match Parseff.parse "10.300" (fun () ->
+      let a = octet () in
+      let _ = Parseff.char '.' in
+      (a, octet ()))
+  with
+  | Error e -> print_endline (Parseff.render_error ~name:"address" e)
+  | Ok _ -> ()
+```
+which prints:
+
+```
+address:1:4: [error] octet out of range
+1 | 10.300
+  |    ^^^
+  * note: octets go from 0 to 255
+```
 
 ## `error`
 
-Abort parsing with a typed custom error value.
+Abort parsing with a custom error value. `Parseff.Error.user` is an extensible variant: declare your own cases and match them in `kind`.
 
 ```ocaml
-val error : 'e -> 'a
+val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
 ```
 ```ocaml
+type Parseff.Error.user += Too_large of int | Negative of int
+
 let number () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error (`Too_large n)
-  else if n < 0 then Parseff.error (`Negative n)
+  if n > 255 then Parseff.error (Too_large n)
+  else if n < 0 then Parseff.error (Negative n)
   else n
 
 let () =
   match Parseff.parse "300" number with
-  | Error { error = `Too_large n; pos } ->
-      Printf.printf "Number %d too large at position %d\n" n pos
-  | Error { error = `Negative n; pos } ->
-      Printf.printf "Negative number %d at position %d\n" n pos
+  | Error { kind = User (Too_large n); span; _ } ->
+      Printf.printf "Number %d too large at position %d\n" n span.start
+  | Error { kind = User (Negative n); span; _ } ->
+      Printf.printf "Negative number %d at position %d\n" n span.start
   | Error _ -> Printf.printf "Other error\n"
   | Ok n -> Printf.printf "Got %d\n" n
 ```
-Use this when callers need to pattern match on specific failure cases.
+Use this when callers need to pattern match on specific failure cases. `~from` and `~notes` work as in `fail`.
 
-Polymorphic variants work great with `error` for quick error types:
+A typed error behaves like any other failure for backtracking: `Parseff.or_` and the repetition combinators absorb it and try something else. If the parse then fails and the typed error is at the furthest failure position, it is the error that `parse` returns. At the same position a typed error wins over an `Expected` error, and the first of two typed errors wins.
+
+A case without a payload works too:
 
 ```ocaml
+type Parseff.Error.user += Too_large_quick | Negative_quick
+
 let number_quick () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error `Too_large
-  else if n < 0 then Parseff.error `Negative
+  if n > 255 then Parseff.error Too_large_quick
+  else if n < 0 then Parseff.error Negative_quick
   else n
 ```
 
-## `catch`
-
-Intercept a `Parseff.fail` failure and recover from it.
-
-```ocaml
-val catch : (unit -> 'a) -> (string -> 'a) -> 'a
-```
-Since `fail` produces ``Failure` errors that punch through backtracking, they cannot be recovered with `Parseff.or_` or `Parseff.optional`. Use `catch` when you want a failure to be recoverable:
-
-```ocaml
-(* Without catch: the fail punches through or_, second branch never runs *)
-(* With catch: the failure is intercepted and converted to a fallback value *)
-let lenient_number () =
-  Parseff.catch
-    (fun () ->
-      let s =
-        Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-      in
-      let n = int_of_string s in
-      if n > 255 then Parseff.fail "out of range"
-      else n)
-    (fun _msg -> 0)
-```
-The handler receives the failure message and can return a value, raise a different error with `Parseff.error`, or call `Parseff.fail` again.
-
-
 ## `expect`
 
-Run a parser and replace its failure message with a clearer description.
+Run a parser and replace its failure message with a clearer description. The error reads `expected <description>`.
 
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
@@ -141,13 +154,116 @@ let ip_address () =
 ```
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.
 
+`expect` replaces only what the parser expected at the position where it started. If the parser got further before it failed, its own message stays, because it is more precise. See [`combinators`](./combinators.md).
 
-## Built-in error variants
 
-Parseff adds four built-in error variants to every parse result:
+## `context` and `cut`
 
-- ``Expected of string`: The parser encountered the wrong input at a given position. Produced by primitive mismatches (e.g. `Parseff.char` seeing the wrong character), and `Parseff.expect` relabeling.
-- ``Failure of string`: A user-initiated validation failure raised via `Parseff.fail`. Unlike ``Expected`, failures are not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
-- ``Unexpected_end_of_input`: The input ended before the parser could finish. Produced when primitives like `Parseff.char`, `Parseff.consume`, or `Parseff.satisfy` need more input but have reached the end.
-- ``Depth_limit_exceeded of string`: A `Parseff.rec_` call exceeded the `~max_depth` limit. The message contains the depth that was exceeded.
-Your own error types from `Parseff.error` are merged with these via polymorphic variant row extension.
+`Parseff.context` names a construct, for example `"array"`. A failure inside it remembers the constructs that were open, outermost first. `Parseff.cut` says that the construct is decided: after `cut`, a failure inside the construct is not retried by an enclosing `or_`, `many` or `sep_by`. Use `cut` after the token that identifies the construct, such as `let` in a `let` statement. See [`combinators`](./combinators.md).
+
+
+## Which error a parse reports
+
+When a parse fails, Parseff reports the *furthest* failure: the failure of any primitive that happened at the highest input position, also inside branches that `or_`, `many`, `sep_by`, `optional` or `fold_left` abandoned. Everything that was expected at that position is merged into one message, sorted and without duplicates:
+
+```ocaml
+(* "x" with one_of [consume "if"; consume "else"; consume "while"] *)
+(* expected "else", "if", or "while", found 'x' *)
+```
+This also explains errors after a loop. With `sep_by (fun () -> consume "ab") (fun () -> char ',')` followed by `end_of_input`, the input `"ab,ab,ax"` reports `expected "b"` at offset 7\. The loop stopped because `"ax"` is not `"ab"`, and that is further than the `end_of_input` failure at offset 5\.
+
+A failure at the end of the input keeps what was expected. On `"[1, 2"` the error says `expected ',' or ']', found end of input`.
+
+`consume` fails at the first byte that differs from the literal and expects the rest of it. `Parseff.commit` forgets the failures at or beyond its position, so a committed branch reports only what it expected itself.
+
+
+## The error value
+
+A failed parse returns `Error e`, where `e` is a `Parseff.Error.t`:
+
+```ocaml
+type Error.t = {
+  kind : Error.kind;
+  span : Error.range;  (** the bytes the error is about, empty at the end of the input *)
+  position : Error.position option;
+      (** line and column of [span.start], [None] when the line is not known *)
+  frames : Error.frame list;  (** open constructs, outermost first *)
+  notes : Error.note list;
+  excerpt : Error.excerpt;
+}
+```
+`Error.t` and the types it holds are `private`: you can read and match them, not build them. `Parseff.Error.note` and `Parseff.Error.range` stay buildable, for `~notes` of `Parseff.fail`.
+
+`kind` says what happened:
+
+- `Expected { items; found; more }`: a primitive failed. `items` is everything that was expected at the furthest failure position, sorted and without duplicates: `Char`, `Literal`, `Label` or `End_of_input`. `found` is `Text` with the text at that position, `End` at the end of the input, `Short n` when a read of a fixed number of bytes, such as `take`, found only `n` bytes before the end of the input, or `Value` with the integer read in the same width when `BE.int16` and its relatives do not match. Characters print as `'x'`, literals as `"abc"` and labels as written. `items` holds at most 64 items; `more` counts the alternatives past that, `0` otherwise.
+- `Failure msg`: a failure raised with `Parseff.fail`, or `"no alternative matched"` when `one_of []` is the only failure at the furthest position. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. Unlike `Expected`, `fail` is not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
+- `User e`: a value given to `Parseff.error`.
+- `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
+- `Backtrack_window_exceeded { limit; oldest }`: a streaming parser needed more rewind history than `~backtrack_window` allows.
+The match on `kind` is exhaustive: the compiler tells you when a case is missing. `User` holds an `Parseff.Error.user`, which is extensible, so match it with a final `_` case.
+
+```ocaml
+match Parseff.parse input parser with
+| Ok value -> value
+| Error { kind = User (Too_large n); _ } -> handle_too_large n
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
+```
+
+## Rendering errors
+
+`Parseff.render_error` prints an error with its source line, a caret under the failure and what the parser was doing:
+
+```
+input.json:4:5: [error] expected ',' or '}', found '"'
+2 |     "config": {
+  | ╭─────────────╯
+3 | │     "a": 1
+4 | │     "b": 2
+  | ╰─────^
+  * while parsing object, from 2:13
+  * while parsing object, from 1:1
+```
+- The header is `name:line:col: [error] message`. Without `~name` it starts at `line:col`.
+- The message is `expected A, B, or C, found X`. A message lists at most 8 expected items, then `, or N more alternatives`. `found X` is a quoted identifier-like run (up to 32 bytes, `found 'abc'...` when it is cut) or one code point, with control bytes, non-breaking spaces and other invisible code points escaped as `\x1B` or `\u{00A0}`, or `end of input`. A `take` that finds too few bytes says `found only 3 (end of input)`, and a binary integer that differs says `expected int16be 0x0001, found 0x0002`.
+- When the line of the error is not known, which happens in streaming when the position is older than the buffered input, the header is `input.json: byte N: [error] message` and there is no excerpt. The `*` lines are then indented by two spaces.
+- Carets cover the span, one per code point. Tabs in the line are kept, so the caret lines up for any tab width. Control bytes, invalid UTF-8 bytes and C1 control characters in the line print as the escapes of the message, such as `\x1B`, and the carets cover the whole escape.
+- `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five; when only one more is hidden it is printed too. A construct made with `~delimited:true` that started on an earlier line is shown as a bar that joins its opening token to the caret: `╭─╯` under the opener, `│` on the lines in between and `╰──^` at the failure. A single hidden line between the opener and the failure is shown, longer gaps become a `...` row in the gutter.
+- Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
+- A `Parseff.rec_` nested deeper than `~max_depth` and a streaming parse that exceeds `~backtrack_window` keep the `* while parsing` lines that were open, and end with `* help: raise ~max_depth` or `* help: call commit or cut earlier, or raise ~backtrack_window`.
+- `~user` is a printer `Error.user -> string` for `User` errors. Without it, a user error prints `user error (no ~user printer given)`.
+- The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
+`~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.Error.message` returns only the one-line message.
+
+`~columns` chooses the unit of the column in the header: bytes by default, or code points (see the UTF-8 page of the API documentation), also in the columns of the `* while parsing` lines. Carets always count code points.
+
+```
+input.json:1:7: [error] expected ',' or ']', found '"'   (bytes)
+input.json:1:6: [error] expected ',' or ']', found '"'   (code points)
+1 | ["é" "b"]
+  |      ^
+```
+
+## Migrating from 0\.4
+
+`Error { pos; error }` with built-in polymorphic variants became `Error e` with a record. The common migration is one line:
+
+```ocaml
+(* before *)
+| Error { pos; error = `Expected msg } -> Printf.printf "%d: %s\n" pos msg
+(* after *)
+| Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
+```
+User errors move from the variant row into `kind`, with `type Parseff.Error.user += Too_large of int`. The built-in cases become cases of `kind` too:
+
+```ocaml
+(* before *)
+| Error { error = `Too_large n; _ } -> ...
+| Error { error = `Failure msg; _ } -> ...
+| Error { error = `Unexpected_end_of_input; _ } -> ...
+(* after *)
+| Error { kind = User (Too_large n); _ } -> ...
+| Error { kind = Failure msg; _ } -> ...
+| Error { kind = Expected { found = End; _ }; _ } -> ...
+```
+The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. An error at the end of the input now says what was expected. The position is `e.span.start`.

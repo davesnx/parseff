@@ -143,9 +143,9 @@ let test_basic_parallel_parsing () =
     (fun i result ->
       let input = inputs.(i mod Array.length inputs) in
       match result with
-      | Parseff.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "matched" input s
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success for %S" i input)
     )
@@ -163,11 +163,11 @@ let test_same_parser_many_domains () =
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok lst ->
+      | Ok lst ->
           Alcotest.(check int)
             (Printf.sprintf "domain %d length" i)
             (String.length input) (List.length lst)
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: expected success" i)
     )
     results
@@ -194,9 +194,9 @@ let test_alternation_across_domains () =
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "matched choice" input s
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success for %S" i input)
     )
@@ -225,12 +225,12 @@ let test_json_across_domains () =
   List.iter
     (fun (i, input, result) ->
       match result with
-      | Parseff.Ok _ ->
+      | Ok _ ->
           ()
-      | Parseff.Error { pos; _ } ->
+      | Error e ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: JSON parse failed at pos %d for %S" i
-               pos input
+               e.Parseff.Error.span.start input
             )
     )
     results
@@ -247,9 +247,9 @@ let test_streaming_across_domains () =
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "streaming result" input s
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: streaming parse failed for %S" i input)
     )
@@ -266,9 +266,9 @@ let test_high_contention () =
           let input = Printf.sprintf "%d" ((domain_id * iterations) + iter) in
           let parser () = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
           match Parseff.parse input parser with
-          | Parseff.Ok s ->
+          | Ok s ->
               if s <> input then incr failures
-          | Parseff.Error _ ->
+          | Error _ ->
               incr failures
         done;
         !failures
@@ -298,14 +298,14 @@ let test_errors_isolated_across_domains () =
   List.iter
     (fun (i, should_succeed, result) ->
       match (should_succeed, result) with
-      | true, Parseff.Ok s ->
+      | true, Ok s ->
           Alcotest.(check string) (Printf.sprintf "domain %d ok" i) "hello" s
-      | true, Parseff.Error _ ->
+      | true, Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected success, got error" i)
-      | false, Parseff.Error _ ->
+      | false, Error _ ->
           ()
-      | false, Parseff.Ok _ ->
+      | false, Ok _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: expected error, got success" i)
     )
@@ -326,12 +326,12 @@ let test_complex_combinators_across_domains () =
   List.iter
     (fun (i, result) ->
       match result with
-      | Parseff.Ok lst ->
+      | Ok lst ->
           Alcotest.(check (list int))
             (Printf.sprintf "domain %d sep_by" i)
             [ i; i + 1; i + 2 ]
             lst
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: sep_by parse failed" i)
     )
     results
@@ -360,7 +360,7 @@ let test_streaming_json_across_domains () =
   List.iter
     (fun (i, expected_name, result) ->
       match result with
-      | Parseff.Ok (Object pairs) ->
+      | Ok (Object pairs) ->
           let name =
             List.assoc_opt "name" pairs
             |> Option.map (function String s -> s | _ -> "<not string>")
@@ -369,11 +369,13 @@ let test_streaming_json_across_domains () =
           Alcotest.(check string)
             (Printf.sprintf "domain %d name" i)
             expected_name name
-      | Parseff.Ok _ ->
+      | Ok _ ->
           Alcotest.fail (Printf.sprintf "Domain %d: expected Object" i)
-      | Parseff.Error { pos; _ } ->
+      | Error e ->
           Alcotest.fail
-            (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i pos)
+            (Printf.sprintf "Domain %d: streaming JSON failed at pos %d" i
+               e.Parseff.Error.span.start
+            )
     )
     results
 
@@ -399,13 +401,41 @@ let test_chunked_streaming_across_domains () =
   List.iteri
     (fun i (input, result) ->
       match result with
-      | Parseff.Ok s ->
+      | Ok s ->
           Alcotest.(check string) "chunked result" input s
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail
             (Printf.sprintf "Domain %d: chunked parse failed for %S" i input)
     )
     results
+
+let test_context_across_domains () =
+  let run i =
+    let name = Printf.sprintf "ctx%d" i in
+    let results = ref [] in
+    for _ = 1 to 200 do
+      let parser () =
+        Parseff.context name (fun () ->
+            ignore (Parseff.many (fun () -> Parseff.consume "ab") ());
+            Parseff.cut ();
+            ignore (Parseff.consume "!")
+        )
+      in
+      match Parseff.parse "ababx" parser with
+      | Stdlib.Error (e : Parseff.Error.t)
+        when match e.frames with
+             | [ { Parseff.Error.name = n; start = 0; delimited = false } ] ->
+                 n = name
+             | _ ->
+                 false ->
+          ()
+      | _ ->
+          results := i :: !results
+    done;
+    !results
+  in
+  let bad = List.concat (parallel num_domains run) in
+  Alcotest.(check int) "no cross-domain context leaks" 0 (List.length bad)
 
 let () =
   let open Alcotest in
@@ -440,6 +470,7 @@ let () =
           test_case "errors isolated across domains" `Quick
             test_errors_isolated_across_domains;
           test_case "high contention" `Quick test_high_contention;
+          test_case "context across domains" `Quick test_context_across_domains;
         ]
       );
     ]

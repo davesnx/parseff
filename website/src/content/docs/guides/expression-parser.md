@@ -9,7 +9,7 @@ This walkthrough builds an arithmetic expression parser that handles expressions
 
 Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `fold_left` combinator as a shortcut for left-associative operator chains.
 
-Source: [`examples/better_errors.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml)
+Source: [`examples/better_errors/main.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml)
 
 ## What we're building
 
@@ -100,17 +100,25 @@ Each precedence level calls the next one for its operands. `expr` parses `term (
 
 ## How `expect` improves errors
 
-Without `expect`, a failure on the closing parenthesis would say something like `expected ')'`. With `expect`, it says `expected a closing parenthesis`. This matters when users see the error.
+Without `expect`, the errors name raw tokens. With `expect`, they use the words of the grammar. This matters when users see the error.
 
-Compare the error messages on `"1+"`:
+Parseff reports everything that was expected at the furthest position, so the message lists each alternative that could have continued the input. The messages below come from running the parser so that all input must be consumed:
 
-- Without `expect`: `expected digit`
-- With `expect`: `expected a number`
+```ocaml
+Parseff.parse ~consume:`All input expr
+```
 
-And on `"(1+2"`:
+Compare the error messages on `"1+x"`:
 
-- Without `expect`: `expected ')'`
-- With `expect`: `expected a closing parenthesis`
+- Without `expect`: `expected digit or '('`
+- With `expect`: `expected a number or an opening parenthesis`
+
+And on `"(1+2x"`, where the `)`, a `*` or another `+` could follow:
+
+- Without `expect`: `expected ')', '*', or '+'`
+- With `expect`: `expected a '*' operator, a '+' operator, or a closing parenthesis`
+
+When the input ends early, as in `"1+"` or `"(1+2"`, the error keeps the same expected set and says `found end of input`.
 
 ## Tracing a parse
 

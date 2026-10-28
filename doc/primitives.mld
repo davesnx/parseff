@@ -20,6 +20,12 @@ let parser () =
 (* Matches "helloworld" *)
 ]}
 
+When the input differs from the literal, the error sits at the first byte that
+differs and expects the rest of the literal. [consume "ab"] on ["ax"] fails at
+offset 1 with [expected "b"], not at offset 0. When the input ends inside the
+literal, the error says [found end of input] at the end of the input. A mismatch
+inside a multi-byte character is reported at the start of that character.
+
 {b Performance:} [consume] is optimized for literal string matching. It's much
 faster than using regex for exact matches.
 
@@ -87,9 +93,10 @@ These operations scan multiple characters efficiently.
 {2 [take_while]}
 
 {!val:Parseff.take_while} consumes characters while the predicate holds. Returns
-the matched string (may be empty). Always succeeds.
+the matched string (may be empty). It only fails when [~at_least] asks for more
+characters than match.
 
-{@ocaml skip[val take_while : (char -> bool) -> string]}
+{@ocaml skip[val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string]}
 
 {@ocaml[
 (* Parse digits *)
@@ -131,7 +138,8 @@ let identifier1 () =
     ~label:"identifier character"
 
 (* Matches "foo123" -> "foo123" *)
-(* Fails on "" -> Error: expected identifier character *)
+(* Fails on "!" -> Error: expected identifier character *)
+(* Fails on ""  -> Error: expected identifier character, found end of input *)
 ]}
 
 {2 [skip_while]}
@@ -166,12 +174,27 @@ let csv_value () =
 {!val:Parseff.match_regex} matches a compiled regular expression. The regex must
 be compiled with [Re.compile].
 
-{@ocaml skip[val match_regex : Re.re -> string]}
+{@ocaml skip[val match_regex : ?label:string -> Re.re -> string]}
 
 {@ocaml[
 (* Pre-compile at module level. Never inside a parser function *)
 let number_re = Re.compile (Re.Posix.re "[0-9]+")
 let number_from_re () = Parseff.match_regex number_re
+]}
+
+Without [~label], a failed match expects ["text matching the pattern"]. With [~label],
+it reports [expected <label>] and merges with what the other alternatives
+expected at the same position, like [satisfy] and [take_while ~label]:
+
+{@ocaml[
+let identifier_re = Re.compile (Re.Posix.re "[a-z]+")
+
+let value () =
+  Parseff.or_
+    (fun () -> Parseff.match_regex ~label:"number" number_re)
+    (fun () -> Parseff.match_regex ~label:"identifier" identifier_re)
+    ()
+(* "!" -> Error: expected identifier or number *)
 ]}
 
 {b Danger:} Always pre-compile regexes at module level. Compiling inside a
@@ -194,7 +217,7 @@ let number () =
 
 {!val:Parseff.fail} aborts parsing with an error message.
 
-{@ocaml skip[val fail : string -> 'a]}
+{@ocaml skip[val fail : ?from:int -> ?notes:Error.note list -> string -> 'a]}
 
 {@ocaml[
 (* Validate range *)
@@ -217,38 +240,42 @@ let byte () =
 {!val:Parseff.error} aborts parsing with a user-defined error value. Custom
 errors are caught by {!val:Parseff.parse} and returned in the result.
 
-{@ocaml skip[val error : 'e -> 'a]}
+{@ocaml skip[val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a]}
 
 {@ocaml[
+type Parseff.Error.user += Negative of int | Out_of_range of int
+
 let validated_number () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n < 0 then Parseff.error (`Negative n)
-  else if n > 255 then Parseff.error (`Out_of_range n)
+  if n < 0 then Parseff.error (Negative n)
+  else if n > 255 then Parseff.error (Out_of_range n)
   else n
 
 let () =
   match Parseff.parse "300" validated_number with
   | Ok n -> Printf.printf "Got %d\n" n
-  | Error { error = `Out_of_range n; _ } ->
+  | Error { kind = User (Out_of_range n); _ } ->
       Printf.printf "%d is too large (max 255)\n" n
-  | Error { error = `Negative n; _ } ->
+  | Error { kind = User (Negative n); _ } ->
       Printf.printf "%d is negative\n" n
   | Error _ -> Printf.printf "Parse error\n"
 ]}
 
-{b Tip:} Polymorphic variants work great with [error] for quick error types:
+{b Tip:} Cases without a payload are quick error types:
 
 {@ocaml[
+type Parseff.Error.user += Too_large | Negative_number
+
 let number_checked () =
   let s =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
   let n = int_of_string s in
-  if n > 255 then Parseff.error `Too_large
-  else if n < 0 then Parseff.error `Negative
+  if n > 255 then Parseff.error Too_large
+  else if n < 0 then Parseff.error Negative_number
   else n
 ]}
 
@@ -321,10 +348,11 @@ let number () =
 (* Convert error positions after parsing *)
 let report_error input result =
   match result with
-  | Parseff.Error { pos; error = `Expected msg } ->
-      let loc = Parseff.location_of_position input pos in
-      Printf.printf "line %d, col %d: expected %s\n" loc.line loc.col msg
-  | _ -> ()
+  | Error e ->
+      let loc = Parseff.location_of_position input e.Parseff.Error.span.start in
+      Printf.printf "line %d, col %d: %s\n" loc.line loc.col
+        (Parseff.Error.message e)
+  | Ok _ -> ()
 ]}
 
 {b Tip:} Use [location] during parsing to attach source positions to AST nodes

@@ -9,7 +9,7 @@ ensuring complete input consumption.
 Source:
 {{:https://github.com/davesnx/parseff/blob/main/test/test_ip.ml} [test/test_ip.ml]}
 and
-{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors.ml} [examples/better_errors.ml]}
+{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml} [examples/better_errors/main.ml]}
 
 {1 What we're building}
 
@@ -62,9 +62,7 @@ it, ["1.2.3.4 extra"] would silently succeed.
 match Parseff.parse "192.168.1.1" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-| Error { pos; error = `Expected msg } ->
-    Printf.printf "Error at %d: %s\n" pos msg
-| Error _ -> print_endline "Parse error"
+| Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
 ]}
 
 On valid input, you get an [Ok] with the four octets as a tuple. On invalid
@@ -76,13 +74,16 @@ Let's look at what happens with bad input:
 
 {b Out of range}: ["1.2.3.256"] parses [1], [.], [2], [.], [3], [.], then reads
 [256]. The [number] parser validates and fails with
-["number out of range: 256"] at position 6 (the start of [256]).
+["number out of range: 256"] at position 9 (just after [256]).
 
 {b Incomplete}: ["1.2.3"] parses [1], [.], [2], [.], [3], then tries to match
 ['.'] and fails because the input is exhausted.
 
 {b Trailing data}: ["1.2.3.4 extra"] parses all four octets, then [end_of_input]
-fails because there are characters remaining.
+fails because there are characters remaining. The error is at position 7 and
+says [expected digit or end of input]: the last [many] stopped at the space
+because it needed another digit, and Parseff reports every failure at the
+furthest position.
 
 {1 Improving error messages with [expect]}
 
@@ -111,21 +112,25 @@ let ip_address () =
   (a, b, c, d)
 ]}
 
-Now on ["192.168.1."], instead of [expected digit], the error says
-[expected a digit (0-9)]. On ["192.168.1"], instead of [expected '.'], it says
-[expected a dot separator].
+Now on ["192.168.1.x"], instead of [expected digit], the error says
+[expected a digit (0-9)]. On ["192.168.1x"], the parser could take another digit
+or the dot, so the error lists both: [expected a digit (0-9) or a dot
+separator]. When the input ends early, as in ["192.168.1"], the error keeps
+what was expected and says [found end of input].
 
 {1 Using typed errors}
 
-For programmatic error handling, polymorphic variants give you structured errors
-you can pattern match on:
+For programmatic error handling, extend [Parseff.Error.user] with your own
+cases and pattern match on them:
 
 {@ocaml skip[
+type Parseff.Error.user += Out_of_range of int
+
 let number_0_255_typed () =
   let digits = Parseff.many ~at_least:1 digit_val () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n >= 0 && n <= 255 then n
-  else Parseff.error (`Out_of_range n)
+  else Parseff.error (Out_of_range n)
 ]}
 
 Now callers can distinguish parsing failures from validation failures:
@@ -134,11 +139,10 @@ Now callers can distinguish parsing failures from validation failures:
 match Parseff.parse "192.168.1.300" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "%d.%d.%d.%d\n" a b c d
-| Error { error = `Out_of_range n; _ } ->
+| Error { kind = User (Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
-| Error { error = `Expected msg; _ } ->
-    Printf.printf "Parse error: %s\n" msg
-| Error _ -> print_endline "Unknown error"
+| Error e ->
+    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
 ]}
 
 [fail] is fine for errors shown directly to users.

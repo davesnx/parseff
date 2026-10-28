@@ -211,7 +211,9 @@ let test_of_string_json () =
       Alcotest.(check int) "pairs" 1 (List.length pairs)
   | Ok _ ->
       Alcotest.fail "Expected Object"
-  | Error { pos; error = `Expected msg } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = e.Parseff.Error.span.start in
+      let msg = Parseff.Error.message e in
       Alcotest.fail (Printf.sprintf "Error at pos %d: %s" pos msg)
   | Error _ ->
       Alcotest.fail "Expected success (unknown error)"
@@ -473,9 +475,11 @@ let test_streaming_commit_blocks_backtrack () =
   match Parseff.parse_source src parser with
   | Ok _ ->
       Alcotest.fail "Expected committed branch failure"
-  | Error { pos; error = `Expected msg } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = e.Parseff.Error.span.start in
+      let msg = Parseff.Error.message e in
       Alcotest.(check int) "error position" 2 pos;
-      Alcotest.(check string) "error message" "expected 'x'" msg
+      Alcotest.(check string) "error message" "expected 'x', found 'cd'" msg
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -490,8 +494,9 @@ let test_backtrack_window_exceeded () =
   match Parseff.parse_source ~backtrack_window:2 src parser with
   | Ok _ ->
       Alcotest.fail "Expected backtrack window failure"
-  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest } } ->
-      Alcotest.(check int) "error position" 3 pos;
+  | Error ({ kind = Backtrack_window_exceeded { limit; oldest }; _ } as e) ->
+      let pos = e.Parseff.Error.span.start in
+      Alcotest.(check int) "error position" 0 pos;
       Alcotest.(check int) "limit" 2 limit;
       Alcotest.(check int) "oldest" 0 oldest
   | Error _ ->
@@ -597,7 +602,7 @@ let test_consume_failure_streaming () =
   match Parseff.parse_source src (fun () -> Parseff.consume "world") with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Expected _; _ } ->
+  | Error { kind = Expected { found = Text _; _ }; _ } ->
       ()
   | Error _ ->
       Alcotest.fail "Expected `Expected error variant"
@@ -616,60 +621,67 @@ let test_take_while_span_streaming () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_parse_source_until_end_requires_eof () =
+let test_parse_source_consume_all_requires_eof () =
   let src = Parseff.Source.of_string "abcXYZ" in
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_source_until_end src (fun () -> Parseff.consume "abc")
+    Parseff.parse_source ~consume:`All ~diagnostics src (fun () ->
+        Parseff.consume "abc"
+    )
   in
   match outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected _; diagnostics } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "error position" 3 pos;
-      Alcotest.(check int) "no diagnostics" 0 (List.length diagnostics)
+      Alcotest.(check int)
+        "no diagnostics" 0
+        (Parseff.Diagnostics.length diagnostics)
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let test_parse_source_until_end_error_has_diagnostics () =
+let test_parse_source_consume_all_error_has_diagnostics () =
   let src = chunked_source ~chunk_size:1 "x" in
+  let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_source_until_end src (fun () ->
-        Parseff.warn "streaming-warning";
+    Parseff.parse_source ~consume:`All ~diagnostics src (fun () ->
+        Parseff.warn diagnostics "streaming-warning";
         Parseff.consume "y"
     )
   in
   match outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { error = `Expected _; diagnostics; _ } ->
+  | Error { kind = Expected { found = Text _; _ }; _ } ->
       let got =
         List.map
-          (fun ({ diagnostic; _ } : string Parseff.diagnostic) -> diagnostic)
-          diagnostics
+          (fun ({ value; _ } : string Parseff.Diagnostics.entry) -> value)
+          (Parseff.Diagnostics.to_list diagnostics)
       in
       Alcotest.(check (list string))
         "diagnostics preserved" [ "streaming-warning" ] got
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let test_parse_source_until_end_preserves_end_of_input_semantics () =
+let test_parse_source_consume_all_preserves_end_of_input_semantics () =
   let ok_src = Parseff.Source.of_string "a" in
   let ok_outcome =
-    Parseff.parse_source_until_end ok_src (fun () ->
+    Parseff.parse_source ~consume:`All ok_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "ok"
     )
   in
   ( match ok_outcome with
-  | Ok (s, _) ->
+  | Ok s ->
       Alcotest.(check string) "explicit eof still works" "ok" s
   | Error _ ->
       Alcotest.fail "Expected success"
   );
   let fail_src = Parseff.Source.of_string "ab" in
   let fail_outcome =
-    Parseff.parse_source_until_end fail_src (fun () ->
+    Parseff.parse_source ~consume:`All fail_src (fun () ->
         let _ = Parseff.char 'a' in
         Parseff.end_of_input ();
         "unreachable"
@@ -678,7 +690,8 @@ let test_parse_source_until_end_preserves_end_of_input_semantics () =
   match fail_outcome with
   | Ok _ ->
       Alcotest.fail "Expected failure"
-  | Error { pos; error = `Expected _; _ } ->
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = e.Parseff.Error.span.start in
       Alcotest.(check int) "fails at explicit eof position" 1 pos
   | Error _ ->
       Alcotest.fail "Unexpected error type"
@@ -884,11 +897,24 @@ let test_of_seq_take_while () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let norm = function
-  | Parseff.Ok v ->
+let norm : (_, Parseff.Error.t) Result.t -> _ = function
+  | Ok v ->
       Ok v
-  | Parseff.Error { pos; _ } ->
-      Error pos
+  | Error e ->
+      let kind =
+        match e.kind with
+        | Expected _ ->
+            "Expected " ^ Parseff.Error.message e
+        | Failure m ->
+            "Failure " ^ m
+        | User _ ->
+            "User"
+        | Depth_limit_exceeded _ ->
+            "Depth_limit_exceeded " ^ Parseff.Error.message e
+        | Backtrack_window_exceeded _ ->
+            "Backtrack_window_exceeded"
+      in
+      Error (e.Parseff.Error.span.start, kind)
 
 let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
   let expected = norm (Parseff.parse input parser) in
@@ -911,16 +937,25 @@ let test_regex_lookbehind_after_peek () =
   let input = "xyab" in
   let cases =
     [
-      ("bol", Re.(compile (seq [ bol; str "ab" ])), Error 2);
-      ("bow", Re.(compile (seq [ bow; str "ab" ])), Error 2);
-      ("bos", Re.(compile (seq [ bos; str "ab" ])), Error 2);
+      ( "bol",
+        Re.(compile (seq [ bol; str "ab" ])),
+        Error (2, "Expected expected text matching the pattern, found 'ab'")
+      );
+      ( "bow",
+        Re.(compile (seq [ bow; str "ab" ])),
+        Error (2, "Expected expected text matching the pattern, found 'ab'")
+      );
+      ( "bos",
+        Re.(compile (seq [ bos; str "ab" ])),
+        Error (2, "Expected expected text matching the pattern, found 'ab'")
+      );
       ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
     ]
   in
   List.iter
     (fun (name, re, expected) ->
       let parser = lookbehind_parser re in
-      Alcotest.(check (result string int))
+      Alcotest.(check (result string (pair int string)))
         (name ^ " parse") expected
         (norm (Parseff.parse input parser));
       check_matches_parse name input parser
@@ -939,9 +974,9 @@ let test_regex_lookbehind_window_accounting () =
       (chunked_source ~chunk_size:1 input)
       parser
   with
-  | Parseff.Ok s ->
+  | Ok s ->
       Alcotest.(check string) "match" "ab" s
-  | Parseff.Error _ ->
+  | Error _ ->
       Alcotest.fail "unexpected error"
 
 let test_regex_readahead_half_window () =
@@ -985,19 +1020,19 @@ let test_location_after_backtrack () =
       ()
   in
   ( match Parseff.parse input parser with
-  | Parseff.Ok s ->
+  | Ok s ->
       Alcotest.(check string) "parse" "1:1 3:2" s
-  | Parseff.Error _ ->
+  | Error _ ->
       Alcotest.fail "parse failed"
   );
   List.iter
     (fun chunk_size ->
       match Parseff.parse_source (chunked_source ~chunk_size input) parser with
-      | Parseff.Ok s ->
+      | Ok s ->
           Alcotest.(check string)
             (Printf.sprintf "parse_source %d" chunk_size)
             "1:1 3:2" s
-      | Parseff.Error _ ->
+      | Error _ ->
           Alcotest.fail "parse_source failed"
     )
     [ 1; 3; 4096 ]
@@ -1049,21 +1084,47 @@ let test_sep_by_take_leading_whitespace () =
   expect "sep_by_take_span around separator" "a , b" ([ "a"; "b" ], 5) take_span
 
 let test_utf8_truncated_at_eof () =
-  check_matches_parse "Utf8.take_while" "a\xE2" (fun () ->
-      Parseff.Utf8.take_while (fun _ -> true)
+  let rejects name parser =
+    check_matches_parse name "a\xE2" parser;
+    match Parseff.parse "a\xE2" parser with
+    | Error _ ->
+        ()
+    | Ok _ ->
+        Alcotest.failf "%s: parse accepted truncated UTF-8" name
+  in
+  rejects "Utf8.take_while" (fun () ->
+      ignore (Parseff.Utf8.take_while (fun _ -> true))
   );
-  check_matches_parse "Utf8.take_while_span" "a\xE2" (fun () ->
-      Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true))
+  rejects "Utf8.take_while_span" (fun () ->
+      ignore
+        (Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true)))
   );
-  check_matches_parse "Utf8.skip_while" "a\xE2" (fun () ->
-      Parseff.Utf8.skip_while (fun _ -> true)
-  )
+  rejects "Utf8.skip_while" (fun () -> Parseff.Utf8.skip_while (fun _ -> true));
+  List.iter
+    (fun chunk_size ->
+      match
+        Parseff.parse_source (chunked_source ~chunk_size "a\xE2") (fun () ->
+            ignore (Parseff.Utf8.take_while (fun _ -> true))
+        )
+      with
+      | Error _ ->
+          ()
+      | Ok _ ->
+          Alcotest.failf "chunk_size %d: streaming accepted truncated UTF-8"
+            chunk_size
+    )
+    [ 1; 3; 4096 ]
 
 let test_utf8_scan_after_ascii () =
   let all () = Parseff.Utf8.take_while (fun _ -> true) in
   ( match Parseff.parse "ab\xFFc" all with
-  | Error { pos; _ } ->
-      Alcotest.(check int) "invalid byte position" 2 pos
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      Alcotest.(check int) "invalid byte position" 2 e.Parseff.Error.span.start;
+      Alcotest.(check string)
+        "invalid byte message" "expected valid UTF-8, found '\\xFF'"
+        (Parseff.Error.message e)
+  | Error _ ->
+      Alcotest.fail "expected an invalid UTF-8 message"
   | Ok s ->
       Alcotest.failf "expected invalid UTF-8, got %S" s
   );
@@ -1190,10 +1251,13 @@ let test_take_beyond_end_of_input () =
     )
   in
   match result with
-  | Parseff.Error { error = `Unexpected_end_of_input; _ } ->
+  | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
+      Alcotest.(check string)
+        "expected items" "expected 10 bytes, found only 3 (end of input)"
+        (Parseff.Error.message e);
       ()
   | _ ->
-      Alcotest.fail "Expected Unexpected_end_of_input"
+      Alcotest.fail "Expected an end of input error"
 
 let test_take_beyond_window () =
   match
@@ -1201,15 +1265,153 @@ let test_take_beyond_window () =
       (chunked_source (String.make 100 'a'))
       (fun () -> Parseff.take 10)
   with
-  | Parseff.Error { error = `Backtrack_window_exceeded _; _ } ->
+  | Error { kind = Backtrack_window_exceeded _; _ } ->
       ()
   | _ ->
       Alcotest.fail "Expected Backtrack_window_exceeded"
+
+let show_failure = function
+  | Ok _ ->
+      "ok"
+  | Error e ->
+      Printf.sprintf "%d %s" e.Parseff.Error.span.start (Parseff.Error.message e)
+
+let test_error_position_across_chunk_boundary () =
+  List.iter
+    (fun chunk_size ->
+      let r =
+        Parseff.parse_source (chunked_source ~chunk_size "help") (fun () ->
+            ignore (Parseff.consume "hello")
+        )
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "chunk %d" chunk_size)
+        "3 expected \"lo\", found 'p'" (show_failure r)
+    )
+    [ 1; 2; 3; 4; 100 ]
+
+let test_error_position_after_compaction () =
+  let item = "ab" in
+  let count = 20_000 in
+  let input = String.concat "" (List.init count (fun _ -> item)) ^ "ax" in
+  List.iter
+    (fun chunk_size ->
+      let r =
+        Parseff.parse_source ~backtrack_window:64
+          (chunked_source ~chunk_size input) (fun () ->
+            ignore (Parseff.many (fun () -> Parseff.consume item) ());
+            Parseff.end_of_input ()
+        )
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "chunk %d" chunk_size)
+        (Printf.sprintf "%d expected \"b\", found 'x'" ((2 * count) + 1))
+        (show_failure r)
+    )
+    [ 7; 1000 ]
+
+let test_error_at_end_of_input_after_compaction () =
+  let input = String.make 10_000 'a' in
+  let r =
+    Parseff.parse_source ~backtrack_window:64
+      (chunked_source ~chunk_size:100 input) (fun () ->
+        ignore (Parseff.many (fun () -> Parseff.char 'a') ());
+        ignore (Parseff.char 'b')
+    )
+  in
+  Alcotest.(check string)
+    "eof" "10000 expected 'a' or 'b', found end of input" (show_failure r)
+
+let cut_window_parser ~cut () =
+  Parseff.or_
+    (fun () ->
+      ignore (Parseff.consume "x");
+      if cut then Parseff.cut ();
+      List.length (Parseff.many (fun () -> Parseff.char 'a') ())
+    )
+    (fun () -> 0)
+    ()
+
+let test_cut_releases_buffer () =
+  let input = "x" ^ String.make 2000 'a' in
+  ( match
+      Parseff.parse_source ~backtrack_window:64
+        (chunked_source ~chunk_size:16 input)
+        (cut_window_parser ~cut:false)
+    with
+  | Error { kind = Backtrack_window_exceeded _; _ } ->
+      ()
+  | _ ->
+      Alcotest.fail "expected the window to be exceeded without cut"
+  );
+  match
+    Parseff.parse_source ~backtrack_window:64
+      (chunked_source ~chunk_size:16 input)
+      (cut_window_parser ~cut:true)
+  with
+  | Ok n ->
+      Alcotest.(check int) "count" 2000 n
+  | Error _ ->
+      Alcotest.fail "cut should release the buffer"
+
+let test_context_in_streaming () =
+  let input = String.concat "" (List.init 3000 (fun _ -> "ab")) ^ "ax" in
+  let parser () =
+    Parseff.context "items" (fun () ->
+        ignore (Parseff.many (fun () -> Parseff.consume "ab") ());
+        Parseff.end_of_input ()
+    )
+  in
+  match
+    Parseff.parse_source ~backtrack_window:64
+      (chunked_source ~chunk_size:7 input)
+      parser
+  with
+  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
+      let pos = e.Parseff.Error.span.start in
+      let msg = Parseff.Error.message e in
+      Alcotest.(check int) "position" 6001 pos;
+      Alcotest.(check string) "message" "expected \"b\", found 'x'" msg
+  | _ ->
+      Alcotest.fail "expected a failure"
+
+let test_excerpt_does_not_start_inside_a_code_point () =
+  let input = "\xc3\xa9\xc3\xa9\xc3\xa9x" in
+  let parser () =
+    ignore (Parseff.many (fun () -> Parseff.Utf8.char (Uchar.of_int 0xe9)) ());
+    Parseff.char 'y'
+  in
+  match
+    Parseff.parse_source ~backtrack_window:4 (chunked_source input) parser
+  with
+  | Error e ->
+      Alcotest.(check string)
+        "excerpt"
+        "1:7: [error] expected 'y' or '\xc3\xa9', found 'x'\n1 | ...x\n  |    ^"
+        (Parseff.render_error e)
+  | Ok _ ->
+      Alcotest.fail "Expected an error"
 
 let () =
   let open Alcotest in
   run "Streaming"
     [
+      ( "context and cut",
+        [
+          test_case "cut releases the buffer" `Quick test_cut_releases_buffer;
+          test_case "context after compaction" `Quick test_context_in_streaming;
+        ]
+      );
+      ( "error positions",
+        [
+          test_case "across chunk boundary" `Quick
+            test_error_position_across_chunk_boundary;
+          test_case "after compaction" `Quick
+            test_error_position_after_compaction;
+          test_case "end of input after compaction" `Quick
+            test_error_at_end_of_input_after_compaction;
+        ]
+      );
       ( "Source.of_string",
         [
           test_case "consume" `Quick test_of_string_consume;
@@ -1273,12 +1475,12 @@ let () =
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
           test_case "consume failure" `Quick test_consume_failure_streaming;
           test_case "take_while_span" `Quick test_take_while_span_streaming;
-          test_case "parse_source_until_end requires eof" `Quick
-            test_parse_source_until_end_requires_eof;
-          test_case "parse_source_until_end error diagnostics" `Quick
-            test_parse_source_until_end_error_has_diagnostics;
-          test_case "parse_source_until_end preserves end_of_input" `Quick
-            test_parse_source_until_end_preserves_end_of_input_semantics;
+          test_case "parse_source_consume_all requires eof" `Quick
+            test_parse_source_consume_all_requires_eof;
+          test_case "parse_source_consume_all error diagnostics" `Quick
+            test_parse_source_consume_all_error_has_diagnostics;
+          test_case "parse_source_consume_all preserves end_of_input" `Quick
+            test_parse_source_consume_all_preserves_end_of_input_semantics;
         ]
       );
       ( "location",
@@ -1315,6 +1517,12 @@ let () =
           test_case "single shot" `Quick test_of_chunks_single_shot;
           test_case "empty chunks skipped" `Quick test_of_chunks_empty_skipped;
           test_case "backtrack 2-byte" `Quick test_of_chunks_backtrack;
+        ]
+      );
+      ( "excerpt",
+        [
+          test_case "does not start inside a code point" `Quick
+            test_excerpt_does_not_start_inside_a_code_point;
         ]
       );
       ( "Source.of_seq",

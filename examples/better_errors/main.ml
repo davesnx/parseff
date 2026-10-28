@@ -22,12 +22,14 @@ let ip_address_simple () =
   Parseff.end_of_input ();
   (a, b, c, d)
 
+type Parseff.Error.user += Out_of_range of int
+
 let number_0_255_with_error () =
   let n = accumulate_digits () in
   if n >= 0 && n <= 255 then
     n
   else
-    Parseff.error (`Out_of_range n)
+    Parseff.error (Out_of_range n)
 
 let ip_address_with_custom_errors () =
   let a = number_0_255_with_error () in
@@ -128,70 +130,176 @@ let literal () =
     ]
     ()
 
-let format_error pos error = Printf.sprintf "Error at pos %d: %s" pos error
+let pairs () =
+  let items =
+    Parseff.sep_by
+      (fun () -> Parseff.consume "ab")
+      (fun () -> Parseff.char ',')
+      ()
+  in
+  Parseff.end_of_input ();
+  List.length items
+
+let ident () =
+  Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
+
+let number () =
+  Parseff.take_while ~at_least:1 ~label:"number" (fun c -> c >= '0' && c <= '9')
+
+let value () =
+  Parseff.expect "expression" (fun () ->
+      Parseff.or_ (fun () -> number ()) (fun () -> ident ()) ()
+  )
+
+let let_statement () =
+  let _ = Parseff.consume "let" in
+  Parseff.cut ();
+  Parseff.skip_whitespace ();
+  let name = ident () in
+  Parseff.skip_whitespace ();
+  let _ = Parseff.char '=' in
+  Parseff.skip_whitespace ();
+  let v = value () in
+  let _ = Parseff.char ';' in
+  Printf.sprintf "%s = %s" name v
+
+let expression_statement () =
+  let v = value () in
+  let _ = Parseff.char ';' in
+  v
+
+let statement () =
+  Parseff.context "statement" (fun () ->
+      Parseff.or_ let_statement expression_statement ()
+  )
+
+let statements () =
+  Parseff.many
+    (fun () ->
+      Parseff.skip_whitespace ();
+      statement ()
+    )
+    ()
+
+let format_error e =
+  Printf.sprintf "Error at pos %d: %s" e.Parseff.Error.span.start
+    (Parseff.Error.message e)
+
+let ws () = Parseff.skip_whitespace ()
+
+let comma () =
+  ws ();
+  ignore (Parseff.char ',')
+
+let rec json_value () =
+  Parseff.rec_ (fun () ->
+      ws ();
+      Parseff.expect "value" (fun () ->
+          Parseff.one_of
+            [
+              (fun () -> ignore (Parseff.consume "null"));
+              json_array;
+              json_object;
+              json_string;
+              (fun () -> ignore (number ()));
+            ]
+            ()
+      )
+  )
+
+and json_array () =
+  Parseff.context ~delimited:true "array" (fun () ->
+      ignore (Parseff.char '[');
+      ws ();
+      ignore (Parseff.sep_by json_value comma ());
+      ws ();
+      ignore (Parseff.char ']')
+  )
+
+and json_object () =
+  Parseff.context ~delimited:true "object" (fun () ->
+      ignore (Parseff.char '{');
+      ws ();
+      ignore (Parseff.sep_by json_member comma ());
+      ws ();
+      ignore (Parseff.char '}')
+  )
+
+and json_member () =
+  json_string ();
+  ws ();
+  ignore (Parseff.char ':');
+  json_value ()
+
+and json_string () =
+  ignore (Parseff.char '"');
+  ignore (Parseff.take_while (fun c -> c <> '"'));
+  ignore (Parseff.char '"')
+
+let run_json input =
+  match
+    Parseff.parse input (fun () ->
+        json_value ();
+        Parseff.end_of_input ()
+    )
+  with
+  | Ok () ->
+      print_endline "valid"
+  | Error e ->
+      print_endline (Parseff.render_error ~name:"input.json" ~source:input e)
 
 let run_ip input =
   match Parseff.parse input ip_address_simple with
   | Ok (a, b, c, d) ->
       Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Failure msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
-  | Error _ ->
-      Printf.printf "%-20s -> Unknown error\n" input
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
 
 let run_ip_custom input =
   match Parseff.parse input ip_address_with_custom_errors with
   | Ok (a, b, c, d) ->
       Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
-  | Error { pos; error = `Out_of_range n } ->
+  | Error { kind = User (Out_of_range n); span; _ } ->
       Printf.printf
         "%-20s -> Custom error at pos %d: octet %d out of range (0-255)\n" input
-        pos n
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Failure msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
-  | Error _ ->
-      Printf.printf "%-20s -> Unknown error\n" input
+        span.start n
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
 
 let run_expr input =
   match Parseff.parse input expr with
   | Ok result ->
       Printf.printf "%-20s -> %s\n" input (expr_to_string result)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
-  | Error _ ->
-      Printf.printf "%-20s -> Unknown error\n" input
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
 
 let run_keyword input =
   match Parseff.parse input keyword with
   | Ok s ->
       Printf.printf "%-20s -> %s\n" input s
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
-  | Error _ ->
-      Printf.printf "%-20s -> Unknown error\n" input
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
 
 let run_literal input =
   match Parseff.parse input literal with
   | Ok e ->
       Printf.printf "%-20s -> %s\n" input (expr_to_string e)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%-20s -> %s\n" input (format_error pos msg)
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%-20s -> Unexpected end of input at pos %d\n" input pos
-  | Error _ ->
-      Printf.printf "%-20s -> Unknown error\n" input
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
+
+let run_pairs input =
+  match Parseff.parse input pairs with
+  | Ok n ->
+      Printf.printf "%-20s -> %d items\n" input n
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
+
+let run_statements input =
+  match Parseff.parse input statements with
+  | Ok items ->
+      Printf.printf "%-20s -> %s\n" input (String.concat " | " items)
+  | Error e ->
+      Printf.printf "%-20s -> %s\n" input (format_error e)
 
 let () =
   let cmd = Sys.argv.(1) in
@@ -207,6 +315,12 @@ let () =
       run_keyword input
   | "literal" ->
       run_literal input
+  | "pairs" ->
+      run_pairs input
+  | "json" ->
+      run_json input
+  | "statements" ->
+      run_statements input
   | _ ->
       Printf.eprintf "Unknown command: %s\n" cmd;
       exit 1

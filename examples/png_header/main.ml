@@ -51,12 +51,12 @@ let chunk_header () =
 let ihdr_data () =
   let width = Parseff.BE.any_int32 () in
   let height = Parseff.BE.any_int32 () in
-  let bit_depth = Parseff.BE.any_uint8 () in
-  let color_type = color_type_of_int (Parseff.BE.any_uint8 ()) in
+  let bit_depth = Parseff.any_uint8 () in
+  let color_type = color_type_of_int (Parseff.any_uint8 ()) in
   (* Skip compression method, filter method, interlace method, CRC *)
-  let _compression = Parseff.BE.any_uint8 () in
-  let _filter = Parseff.BE.any_uint8 () in
-  let _interlace = Parseff.BE.any_uint8 () in
+  let _compression = Parseff.any_uint8 () in
+  let _filter = Parseff.any_uint8 () in
+  let _interlace = Parseff.any_uint8 () in
   let _crc = Parseff.BE.any_int32 () in
   { width; height; bit_depth; color_type }
 
@@ -77,11 +77,6 @@ let () =
       Printf.printf "%s:\n" path;
       Printf.printf "  %ldx%ld, %d-bit %s\n" hdr.width hdr.height hdr.bit_depth
         (color_type_to_string hdr.color_type)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "%s: error at byte %d: expected %s\n" path pos msg
-  | Error { pos; error = `Failure msg } ->
-      Printf.printf "%s: error at byte %d: %s\n" path pos msg
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%s: unexpected end of input at byte %d\n" path pos
-  | Error _ ->
-      Printf.printf "%s: unknown error\n" path
+  | Error e ->
+      Printf.printf "%s: error at byte %d: %s\n" path e.Parseff.Error.span.start
+        (Parseff.Error.message e)

@@ -53,7 +53,7 @@ let entry () =
   (k, v)
 ```
 
-`take_while ~at_least:1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
+`take_while ~at_least:1` scans characters while the predicate holds and requires at least one match. The `~label` appears in error messages if nothing matches, as `expected <label>`. `char '='` matches a single character. `skip_while` advances past whitespace without allocating a string.
 
 Sequencing is just `let` bindings. Each line advances the cursor through the input.
 
@@ -62,12 +62,10 @@ To run it:
 ```ocaml
 match Parseff.parse "host = localhost" entry with
 | Ok (k, v) -> Printf.printf "%s -> %s\n" k v  (* "host" -> "localhost" *)
-| Error { pos; error = `Expected msg } ->
-    Printf.printf "Error at %d: %s\n" pos msg
-| Error _ -> print_endline "Parse error"
+| Error e -> prerr_endline (Parseff.render_error ~name:"entry" e)
 ```
 
-`Parseff.parse` returns `Ok value` on success, or `Error { pos; error }` on failure.
+`Parseff.parse` returns `Ok value` on success, or `Error e` on failure, where `e` says what was expected and where.
 
 ## Step 2: comments and blank lines
 
@@ -128,9 +126,7 @@ let () =
       List.iter (fun (k, v) ->
         Printf.printf "%s = %s\n" k v
       ) entries
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error _ -> print_endline "Parse error"
+  | Error e -> prerr_endline (Parseff.render_error ~name:"config" e)
 ```
 
 Output:
@@ -198,14 +194,16 @@ let typed_entry () =
 
 ## Step 5: validation with typed errors
 
-Suppose ports must be 0-65535. Use `Parseff.error` with a polymorphic variant to report a structured error:
+Suppose ports must be 0-65535. Use `Parseff.error` with a case of `Parseff.Error.user` to report a structured error:
 
 ```ocaml
+type Parseff.Error.user += Port_out_of_range of int
+
 let port_value () =
   let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
   let n = int_of_string s in
   if n >= 0 && n <= 65535 then Int n
-  else Parseff.error (`Port_out_of_range n)
+  else Parseff.error (Port_out_of_range n)
 ```
 
 The error flows through to the result type:
@@ -213,10 +211,10 @@ The error flows through to the result type:
 ```ocaml
 match Parseff.parse "port = 99999" typed_entry with
 | Ok _ -> ()
-| Error { error = `Port_out_of_range n; _ } ->
+| Error { kind = User (Port_out_of_range n); _ } ->
     Printf.printf "%d is not a valid port\n" n
-| Error { error = `Expected msg; _ } ->
-    Printf.printf "Parse error: %s\n" msg
+| Error e ->
+    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
 ```
 
-`Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (wrapped as `` `Expected ``). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.
+`Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (reported as `Failure`). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.

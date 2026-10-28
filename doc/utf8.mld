@@ -119,14 +119,6 @@ let l = Parseff.Utf8.letter ()
 (* Matches: 'a', 'é', 'λ', '中', 'д', 'ع', 'अ', ... *)
 ]}
 
-{2 [digit]}
-
-{!val:Parseff.Utf8.digit} matches ASCII digits 0--9 only and returns an [int].
-Unicode digit categories (Nd) include Arabic-Indic, Devanagari, and other
-numeral systems where mapping to [int] is non-trivial. Keeping it ASCII-only
-makes the return value unambiguous. For Unicode digit handling, use
-{!val:Parseff.Utf8.satisfy} with a custom predicate.
-
 {2 [alphanum]}
 
 {!val:Parseff.Utf8.alphanum} matches a Unicode alphabetic character or an ASCII
@@ -168,8 +160,14 @@ sequence. This includes:
 - Overlong encodings
 - Truncated multi-byte sequences
 
-The error message is ["invalid UTF-8"] and the position points to the first
-invalid byte.
+The error expects ["valid UTF-8"] and the position points to the first invalid
+byte: [expected valid UTF-8, found '\xFF']. In an error report the invalid byte
+prints as [\xFF] in the found text and in the source line.
+
+{!val:Parseff.Utf8.char} reports the expected character itself, for example
+[expected 'é', found 'e']. A [Utf8] primitive that takes a label reports it when
+the predicate does not match or too few code points match. Invalid UTF-8 always
+reports [valid UTF-8].
 
 {1 Position tracking}
 
@@ -178,9 +176,29 @@ Positions remain byte offsets, consistent with the rest of parseff. A single
 on the UTF-8 encoding of the matched code point. {!val:Parseff.position} always
 returns a byte offset.
 
+{1 Columns in error messages}
+
+The column in an error header counts bytes by default, like [position.location]. For
+text with multi-byte characters, [Parseff.render_error ~columns:`Code_points]
+prints the column in code points instead. The carets under the source line
+always count code points, so they line up in both modes:
+
+{v
+input.json:1:7: [error] expected ',' or ']', found '"'     (bytes)
+input.json:1:6: [error] expected ',' or ']', found '"'     (code points)
+1 | ["é" "b"]
+  |      ^
+v}
+
+[Parseff.Error.t] carries [position], with the line and column in bytes and
+[code_point_col]. [position] is [None] when the line is not known, and
+[code_point_col] is [None] when the start of the line is no longer buffered,
+which only happens when streaming; pass
+[~source] to [render_error] to get exact columns then. Wide characters and combining
+marks count as one column each: Parseff has no width tables.
+
 {1 Streaming support}
 
-All UTF-8 primitives work with streaming input ({!val:Parseff.parse_source} and
-{!val:Parseff.parse_source_until_end}). Multi-byte UTF-8 sequences that span
+All UTF-8 primitives work with streaming input ({!val:Parseff.parse_source}). Multi-byte UTF-8 sequences that span
 chunk boundaries are handled correctly, the streaming runtime ensures enough
 bytes are available before decoding each code point.

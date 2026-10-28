@@ -174,6 +174,8 @@ and object_parser () =
   Object pairs
 ```
 
+**Tip:** Wrap `array_parser` and `object_parser` in `Parseff.context ~delimited:true "array" (fun () -> ...)` and `Parseff.context ~delimited:true "object" (fun () -> ...)`. A failure inside a nested value then remembers which array or object it was in, so an error report can say "while parsing array". See [the Combinators page](https://davesnx.github.io/parseff/api/combinators/).
+
 The structure mirrors the array parser exactly. The only difference is that elements are key-value pairs instead of bare values.
 
 ## Key-value pairs
@@ -199,13 +201,10 @@ let () =
   let input = {|{"name": "parseff", "version": 1, "tags": ["parser", "ocaml"]}|} in
   match Parseff.parse input json with
   | Ok result -> (* ... process the JSON value ... *)
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "Error at %d: %s\n" pos msg
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "Unexpected end of input at %d\n" pos
-  | Error { pos; error = `Depth_limit_exceeded msg } ->
-      Printf.printf "Depth limit exceeded at %d: %s\n" pos msg
-  | Error _ -> print_endline "Parse error"
+  | Error { kind = Depth_limit_exceeded { limit }; _ } ->
+      Printf.printf "Nesting is deeper than %d\n" limit
+  | Error e ->
+      prerr_endline (Parseff.render_error ~name:"input.json" ~source:input e)
 ```
 
 ## Depth limiting
@@ -229,7 +228,7 @@ Parseff.parse input json_array
 (* 256 levels deep: exceeds the limit *)
 let input = String.make 256 '[' ^ String.make 256 ']' in
 Parseff.parse ~max_depth:128 input json
-(* Error { error = `Depth_limit_exceeded "maximum nesting depth 128 exceeded" } *)
+(* Error { kind = Depth_limit_exceeded { limit = 128 }; ... } *)
 ```
 
 ## The mutual recursion pattern

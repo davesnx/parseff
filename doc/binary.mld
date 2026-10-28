@@ -4,23 +4,23 @@ The {!module:Parseff.BE} and {!module:Parseff.LE} modules provide parsers for
 multi-byte integers, floats, and doubles in big-endian and little-endian byte
 order respectively. Pick the module matching your wire format's byte order.
 
-Single-byte readers ({!val:Parseff.BE.any_uint8}, {!val:Parseff.LE.any_uint8},
-etc.) are present in both modules for convenience: their results are identical
-since endianness does not affect single bytes.
+Single-byte readers ({!val:Parseff.any_uint8}, {!val:Parseff.any_int8}) are at
+the top level of {!module:Parseff}, since endianness does not affect single
+bytes.
 
 {1 Integer parsers}
 
 {2 [any_uint8] and [any_int8]}
 
-{!val:Parseff.BE.any_uint8} reads one byte as an unsigned integer (0--255).
-{!val:Parseff.BE.any_int8} reads one byte as a signed integer (-128--127).
+{!val:Parseff.any_uint8} reads one byte as an unsigned integer (0--255).
+{!val:Parseff.any_int8} reads one byte as a signed integer (-128--127).
 
 {@ocaml skip[val any_uint8 : unit -> int]}
 {@ocaml skip[val any_int8 : unit -> int]}
 
 {@ocaml skip[
-let color_type () = Parseff.BE.any_uint8 ()    (* PNG color type: 0–6 *)
-let temperature () = Parseff.LE.any_int8 ()    (* signed sensor reading *)
+let color_type () = Parseff.any_uint8 ()    (* PNG color type: 0–6 *)
+let temperature () = Parseff.any_int8 ()    (* signed sensor reading *)
 ]}
 
 {2 [any_int16] and [any_uint16]}
@@ -116,8 +116,10 @@ fields, and length-prefixed payloads.
 
 {@ocaml skip[val take : int -> string]}
 
-Returns [""] for [n <= 0] without consuming input. Fails with an
-unexpected-end-of-input error if fewer than [n] bytes remain.
+Returns [""] for [n = 0] without consuming input and raises [Invalid_argument]
+for a negative [n]. Fails if fewer than [n] bytes remain, with
+[expected 5 bytes, found only 3 (end of input)], or [found end of input] when
+none remain.
 
 {@ocaml skip[
 (* Length-prefixed payload *)
@@ -141,8 +143,8 @@ let parse_png_ihdr () =
   let chunk_type = Parseff.take 4 in
   let width = Parseff.BE.any_int32 () in
   let height = Parseff.BE.any_int32 () in
-  let bit_depth = Parseff.BE.any_uint8 () in
-  let color_type = Parseff.BE.any_uint8 () in
+  let bit_depth = Parseff.any_uint8 () in
+  let color_type = Parseff.any_uint8 () in
   (chunk_type, width, height, bit_depth, color_type)
 ]}
 
@@ -155,14 +157,14 @@ compose naturally for this pattern:
 
 {@ocaml skip[
 let tlv_field () =
-  let tag = Parseff.BE.any_uint8 () in
+  let tag = Parseff.any_uint8 () in
   let len = Parseff.BE.any_uint16 () in
   let value = Parseff.take len in
   (tag, value)
 
 let tlv_message () =
   let _ = Parseff.consume "TL" in
-  let version = Parseff.BE.any_uint8 () in
+  let version = Parseff.any_uint8 () in
   let count = Parseff.BE.any_uint16 () in
   let fields = Parseff.count count tlv_field in
   Parseff.end_of_input ();
@@ -188,19 +190,24 @@ let version_field () =
 
 {1 Error handling}
 
-All binary parsers fail with an unexpected-end-of-input error when there are not
-enough bytes remaining. The position in the error points to the byte where the
-read was attempted, not the end of input.
+All binary parsers fail with [expected N bytes] when there are not enough bytes
+remaining. The position in the error points to the byte where the read was
+attempted, not the end of input, and the error says how many bytes are left:
+[expected 4 bytes, found only 3 (end of input)], or [found end of input] when
+nothing is left.
 
 Exact-match parsers ({!val:Parseff.BE.int16}, {!val:Parseff.BE.int32},
-{!val:Parseff.BE.int64}) fail with an error showing the expected and actual
-values in hexadecimal, e.g. ["expected int32 0x01020304, got 0xDEADBEEF"].
+{!val:Parseff.BE.int64}) fail with the expected value in hexadecimal as an
+expected item with the endianness, and [found] shows the integer that was read
+in the same width, e.g. [expected int32be 0x01020304, found 0xDE000000]. Like
+any other expected item it merges with what the alternatives expected at the
+same position.
 
 {1 Position tracking}
 
 Positions are byte offsets, consistent with the rest of parseff. Each parser
 advances the position by the number of bytes it reads:
-- {!val:Parseff.BE.any_uint8}, {!val:Parseff.BE.any_int8}: 1 byte
+- {!val:Parseff.any_uint8}, {!val:Parseff.any_int8}: 1 byte
 - {!val:Parseff.BE.any_int16}, {!val:Parseff.BE.any_uint16}: 2 bytes
 - {!val:Parseff.BE.any_int32}, {!val:Parseff.BE.any_float}: 4 bytes
 - {!val:Parseff.BE.any_int64}, {!val:Parseff.BE.any_double}: 8 bytes
@@ -216,7 +223,6 @@ extra indirection while remaining allocation-free.
 
 {1 Streaming support}
 
-All binary parsers work with streaming input ({!val:Parseff.parse_source} and
-{!val:Parseff.parse_source_until_end}). Multi-byte reads that span chunk
+All binary parsers work with streaming input ({!val:Parseff.parse_source}). Multi-byte reads that span chunk
 boundaries are handled correctly — the streaming runtime ensures enough bytes are
 buffered before each read.

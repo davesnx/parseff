@@ -8,5 +8,8 @@
   test_domains
   test_binary
   test_utf8
-  test_errors)
+  test_errors
+  test_combinators
+  test_streaming_robust
+  test_gaps)
  (libraries parseff alcotest re uucp))

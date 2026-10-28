@@ -47,9 +47,6 @@ let () =
   match Parseff.parse input route with
   | Ok result ->
       Printf.printf "%-25s -> %s\n" input (route_to_string result)
-  | Error { pos; error = `Expected exp } ->
-      Printf.printf "%-25s -> Error at %d: %s\n" input pos exp
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%-25s -> Unexpected end of input at %d\n" input pos
-  | Error _ ->
-      Printf.printf "%-25s -> Unknown error\n" input
+  | Error e ->
+      Printf.printf "%-25s -> Error at %d: %s\n" input
+        e.Parseff.Error.span.start (Parseff.Error.message e)

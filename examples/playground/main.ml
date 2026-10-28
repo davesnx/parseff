@@ -14,9 +14,6 @@ let () =
   match Parseff.parse input parser with
   | Ok result ->
       Printf.printf "%s -> %s" input result
-  | Error { pos; error = `Expected exp } ->
-      Printf.printf "%s -> Error at %d: %s" input pos exp
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "%s -> Unexpected end of input at %d" input pos
-  | Error _ ->
-      Printf.printf "%s -> Unknown error" input
+  | Error e ->
+      Printf.printf "%s -> Error at %d: %s" input e.Parseff.Error.span.start
+        (Parseff.Error.message e)

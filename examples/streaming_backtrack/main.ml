@@ -17,22 +17,9 @@ let parser () =
 
 let () =
   let source = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in
-  match Parseff.parse_source_until_end source parser with
-  | Ok (branch, _diagnostics) ->
+  match Parseff.parse_source ~consume:`All source parser with
+  | Ok branch ->
       Printf.printf "matched %s branch\n" branch
-  | Error { pos; error; diagnostics = _ } ->
-      let message =
-        match error with
-        | `Expected msg ->
-            msg
-        | `Unexpected_end_of_input ->
-            "unexpected end of input"
-        | `Failure msg ->
-            msg
-        | `Backtrack_window_exceeded { limit; oldest } ->
-            Printf.sprintf "backtrack window exceeded (limit=%d oldest=%d)"
-              limit oldest
-        | `Depth_limit_exceeded msg ->
-            msg
-      in
-      Printf.printf "error at %d: %s\n" pos message
+  | Error error ->
+      Printf.printf "error at %d: %s\n" error.Parseff.Error.span.start
+        (Parseff.Error.message error)

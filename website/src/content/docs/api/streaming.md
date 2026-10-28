@@ -19,9 +19,11 @@ The streaming API lets you parse input that isn't fully available upfront: files
 val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
+  ?consume:[ `All | `Prefix ] ->
+  ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input | `Backtrack_window_exceeded of Parseff.backtrack_window_error | `Depth_limit_exceeded of string ]) result
+  ('a, Error.t) Stdlib.result
 ```
 ```ocaml
   let ic = open_in "data.json" in
@@ -30,28 +32,26 @@ val parse_source :
   close_in ic;
   result
 ```
+Error positions are absolute offsets from the start of the stream, also after Parseff dropped old input to keep the buffer bounded. An error does not keep the dropped input alive: failures that are older than the buffered input still count for the position of the error, but the buffer does not grow for them.
+
 The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 
-## `parse_source_until_end`
+## Requiring the whole input
 
-`Parseff.parse_source_until_end` is the streaming equivalent of `Parseff.parse_until_end`. It enforces full input consumption and returns diagnostics in both cases. See [`diagnostics`](./diagnostics.md).
+Pass `~consume` as below to make `Parseff.parse_source` fail when input remains after the parser returns, as `Parseff.end_of_input` does:
 
 ```ocaml
-val parse_source_until_end :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  Source.t ->
-  (unit -> 'a) ->
-  ('a, [> `Expected of string | `Unexpected_end_of_input | `Backtrack_window_exceeded of Parseff.backtrack_window_error | `Depth_limit_exceeded of string ], 'd)
-  result_with_diagnostics
+Parseff.parse_source ~consume:`All source parser
 ```
+`~diagnostics` collects the diagnostics of the parse. See [`diagnostics`](./diagnostics.md).
+
 ```ocaml
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
-  let outcome = Parseff.parse_source_until_end source json in
+  let result = Parseff.parse_source ~consume:`All source json in
   close_in ic;
-  outcome
+  result
 ```
 
 ## The Source module
@@ -214,7 +214,7 @@ The parser doesn't know which one it's running under. The code is identical:
   let _ =
     Parseff.parse_source (Parseff.Source.of_string "42") number
 ```
-In Parseff, streaming is still transparent at the parser-function level: the same parser works against a fixed string or a streaming source. The runtime, however, now uses a bounded sliding buffer instead of an append-forever buffer.
+In Parseff, streaming is transparent at the parser-function level: the same parser works against a fixed string or a streaming source. The runtime uses a bounded sliding buffer, not an append-forever buffer.
 
 
 ## How backtracking works across chunks
@@ -228,14 +228,14 @@ Two things keep old bytes alive:
 
 ### General advice
 
-Most parsers become streaming parsers by changing only the runner: keep the same parser functions and switch from `Parseff.parse` to `Parseff.parse_source` or `Parseff.parse_source_until_end`. Start there, then tune the streaming behavior only if the grammar needs it.
+Most parsers become streaming parsers by changing only the runner: keep the same parser functions and switch from `Parseff.parse` to `Parseff.parse_source`. Start there, then tune the streaming behavior only if the grammar needs it.
 
 In practice:
 
 - Think of `~backtrack_window` as retained undo history, not as a chunk size.
 - Prefer grammars that dispatch early, so the runtime does not need to keep a long ambiguous prefix alive.
 - Call `Parseff.commit` only when a branch has become logically certain.
-- If you hit ``Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
+- If you hit `Error.Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
 The guides section includes a small CSV walkthrough that starts with a normal string parser and only changes the runner, plus a second guide that focuses on `commit` and `~backtrack_window` for grammars with long-lived ambiguity.
 
 A small example:
@@ -255,9 +255,11 @@ let http_method () =
 ```
 `commit ()` acts on the innermost frame only: the nearest `Parseff.or_`, `Parseff.one_of`, `Parseff.many`, `Parseff.sep_by`, `Parseff.optional` or `fold_*` frame. It does nothing outside any frame and inside `Parseff.look_ahead`. It does not release outer frames. In `many (fun () -> or_ a b ())`, a `commit ()` inside the `or_` does not let the `many` frame release older buffered input: `many` still keeps the input from the start of the current iteration. To release that input, call `commit ()` in the body of `many`, outside the `or_`.
 
+`Parseff.cut` seals every frame opened since the innermost enclosing `Parseff.context`, not only the nearest one. Use it when a whole construct becomes certain: after `cut ()`, none of those frames pins buffered input, and a failure of the construct is not retried by the frames outside it. With a small window, an `or_` whose left branch reads a long run of tokens fails with `Error.Backtrack_window_exceeded` until the branch calls `cut ()`.
+
 Before `commit ()`, Parseff must keep enough buffered input to rewind and try the other branch. After `commit ()`, that rewind point stops pinning the old prefix.
 
-If the retained region would exceed `~backtrack_window`, parsing fails with ``Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
+If the retained region would exceed `~backtrack_window`, parsing fails with `Error.Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
 
 
 ## Thread safety
@@ -277,6 +279,13 @@ If the retained region would exceed `~backtrack_window`, parsing fails with ``Ba
     |> List.map Domain.join
 ```
 The one constraint: do not share a single `Parseff.Source.t` across domains. Each source has mutable read state (buffer position, EOF flag), so concurrent access would race. Create a separate source per domain.
+
+A source is for one parse. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first parse read ahead are lost.
+
+
+### Concurrent parses on one domain
+
+Two parses can run at the same time on one domain, for example in two Eio fibers, when the only thing that suspends is the source `read` function. The parse state is stored per domain and Parseff installs it again each time `read` returns. A suspension inside a parser callback, such as a `satisfy` predicate or a `many` body, is not supported.
 
 
 ## Limitations
@@ -302,7 +311,7 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 
 ### Regex at chunk boundaries
 
-When a regex match extends to the end of the current buffer, the runtime refills and retries until the match no longer touches the boundary (or EOF). This is correct for typical patterns but may behave unexpectedly with zero-width matches at the end of input.
+Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input only, so a match cannot extend past the window. If the window is already full of rewind history and the source has not ended, the regex runs on what is buffered. A match that ends before the end of the buffer is returned. Otherwise, because more input could change the result, `Parseff.match_regex` fails with `Error.Backtrack_window_exceeded`. `~backtrack_window` must be at least `2`.
 
 
 ### No partial results

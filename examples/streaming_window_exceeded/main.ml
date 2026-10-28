@@ -49,16 +49,9 @@ let () =
       Printf.printf "unexpected success: GET %s\n" p
   | Ok (`POST, p) ->
       Printf.printf "unexpected success: POST %s\n" p
-  | Error { pos; error = `Backtrack_window_exceeded { limit; oldest } } ->
-      Printf.printf "backtrack window exceeded at %d: limit=%d oldest=%d\n" pos
-        limit oldest
-  | Error { pos; error = `Expected msg } ->
-      Printf.printf "parse error at %d: %s\n" pos msg
-  | Error { pos; error = `Unexpected_end_of_input } ->
-      Printf.printf "unexpected end of input at %d\n" pos
-  | Error { pos; error = `Failure msg } ->
-      Printf.printf "failure at %d: %s\n" pos msg
-  | Error { pos; error = `Depth_limit_exceeded msg } ->
-      Printf.printf "depth error at %d: %s\n" pos msg
-  | Error _ ->
-      print_endline "unexpected error"
+  | Error { kind = Backtrack_window_exceeded { limit; oldest }; span; _ } ->
+      Printf.printf "backtrack window exceeded at %d: limit=%d oldest=%d\n"
+        span.start limit oldest
+  | Error e ->
+      Printf.printf "parse error at %d: %s\n" e.Parseff.Error.span.start
+        (Parseff.Error.message e)

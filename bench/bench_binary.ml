@@ -38,12 +38,12 @@ let streaming_source_of_string ?(chunk_size = 1) s =
       n
   )
 
-let bench_be_any_uint8 () =
-  match Parseff.parse one_byte (fun () -> ignore (Parseff.BE.any_uint8 ())) with
+let bench_any_uint8 () =
+  match Parseff.parse one_byte (fun () -> ignore (Parseff.any_uint8 ())) with
   | Ok _ ->
       ()
   | Error _ ->
-      failwith "bench_be_any_uint8 failed"
+      failwith "bench_any_uint8 failed"
 
 let bench_be_any_int32 () =
   match
@@ -74,7 +74,7 @@ let bench_tlv_10x () =
   match
     Parseff.parse tlv_input (fun () ->
         for _ = 1 to 10 do
-          let _tag = Parseff.BE.any_uint8 () in
+          let _tag = Parseff.any_uint8 () in
           let len = Parseff.BE.any_uint16 () in
           let _value = Parseff.take len in
           ()
@@ -119,8 +119,8 @@ let run_section title benches =
 let () =
   let fixed_width_cases =
     [
-      Bench_case.make ~name:"BE.any_uint8 (1 byte)" ~iterations:20000000L
-        bench_be_any_uint8;
+      Bench_case.make ~name:"any_uint8 (1 byte)" ~iterations:20000000L
+        bench_any_uint8;
       Bench_case.make ~name:"BE.any_int32 (4 bytes)" ~iterations:20000000L
         bench_be_any_int32;
       Bench_case.make ~name:"BE.any_int64 (8 bytes)" ~iterations:20000000L
