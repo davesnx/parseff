@@ -2,10 +2,10 @@ type Parseff.custom_error += Cause_e
 
 let show_error (e : Parseff.error) =
   match e.kind with
-  | User Cause_e ->
+  | Custom Cause_e ->
       "E"
   | Expected _ ->
-      Printf.sprintf "Expected %S" (Parseff.message e)
+      Printf.sprintf "Expected %S" (Parseff.error_message e)
   | Failure s ->
       Printf.sprintf "Failure %S" s
   | _ ->
@@ -15,7 +15,7 @@ let show show_v = function
   | Ok v ->
       "Ok " ^ show_v v
   | Error e ->
-      Printf.sprintf "Error@%d %s" e.Parseff.span.start (show_error e)
+      Printf.sprintf "Error@%d %s" e.Parseff.range.start (show_error e)
 
 let chunked_source input =
   let pos = ref 0 in
@@ -162,7 +162,7 @@ let test_take_max_int_streaming () =
       Alcotest.(check string)
         "expected items"
         "expected 4611686018427387903 bytes, found only 2 (end of input)"
-        (Parseff.message e);
+        (Parseff.error_message e);
       ()
   | Error { kind = Backtrack_window_exceeded _; _ } ->
       ()
@@ -177,11 +177,11 @@ let test_take_while_huge_at_least () =
       )
     with
   | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      Alcotest.(check int) "position" 3 e.Parseff.span.start;
+      Alcotest.(check int) "position" 3 e.range.start;
       Alcotest.(check string)
         "message"
         ("expected at least " ^ huge ^ " characters, found end of input")
-        (Parseff.message e)
+        (Parseff.error_message e)
   | _ ->
       Alcotest.fail "expected an end of input error"
   );
@@ -191,11 +191,11 @@ let test_take_while_huge_at_least () =
       )
     with
   | Error ({ kind = Expected { found = Text "b"; _ }; _ } as e) ->
-      Alcotest.(check int) "position" 2 e.Parseff.span.start;
+      Alcotest.(check int) "position" 2 e.range.start;
       Alcotest.(check string)
         "message"
         ("expected at least " ^ huge ^ " characters, found 'b'")
-        (Parseff.message e)
+        (Parseff.error_message e)
   | _ ->
       Alcotest.fail "expected a mismatch"
   );
@@ -210,7 +210,7 @@ let test_take_while_huge_at_least () =
       Alcotest.(check string)
         "utf8 message"
         ("expected at least " ^ huge ^ " characters, found 'b'")
-        (Parseff.message e)
+        (Parseff.error_message e)
   | Ok _ ->
       Alcotest.fail "expected a failure"
 

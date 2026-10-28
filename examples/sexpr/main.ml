@@ -44,5 +44,5 @@ let () =
   | Ok result ->
       Printf.printf "%-15s -> [%s]\n" input (String.concat "; " result)
   | Error e ->
-      Printf.printf "%-15s -> Error at %d: %s\n" input e.Parseff.span.start
-        (Parseff.message e)
+      Printf.printf "%-15s -> Error at %d: %s\n" input e.range.start
+        (Parseff.error_message e)

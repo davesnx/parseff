@@ -139,10 +139,10 @@ Now callers can distinguish parsing failures from validation failures:
 match Parseff.parse "192.168.1.300" ip_address with
 | Ok (a, b, c, d) ->
     Printf.printf "%d.%d.%d.%d\n" a b c d
-| Error { kind = User (Out_of_range n); _ } ->
+| Error { kind = Custom (Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
 | Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.message e)
+    Printf.printf "Parse error: %s\n" (Parseff.error_message e)
 ]}
 
 [fail] is fine for errors shown directly to users.

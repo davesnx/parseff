@@ -48,5 +48,5 @@ let () =
   | Ok result ->
       Printf.printf "%-25s -> %s\n" input (route_to_string result)
   | Error e ->
-      Printf.printf "%-25s -> Error at %d: %s\n" input e.Parseff.span.start
-        (Parseff.message e)
+      Printf.printf "%-25s -> Error at %d: %s\n" input e.range.start
+        (Parseff.error_message e)

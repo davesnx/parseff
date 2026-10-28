@@ -2157,7 +2157,7 @@ type expected =
 
 type found = Text of string | End | Short of int | Value of string
 type range = range_data = { start : int; stop : int }
-type frame = { name : string; start : int; delimited : bool }
+type context = { name : string; start : int; delimited : bool }
 type note = note_data = { at : range option; text : string }
 
 type view = {
@@ -2168,25 +2168,24 @@ type view = {
   right_cut : bool;
 }
 
-type position = { location : location; code_point_col : int option }
-
 type excerpt = {
   views : view list;
   frame_locs : (int * int * int option) option list;
 }
 
-type kind =
+type error_kind =
   | Expected of { items : expected * expected list; found : found; more : int }
   | Failure of string
-  | User of custom_error
+  | Custom of custom_error
   | Depth_limit_exceeded of { limit : int }
   | Backtrack_window_exceeded of { limit : int; oldest : int }
 
 type error = {
-  kind : kind;
-  span : range;
-  position : position option;
-  frames : frame list;
+  kind : error_kind;
+  range : range;
+  location : location option;
+  char_column : int option;
+  contexts : context list;
   notes : note list;
   excerpt : excerpt;
 }
@@ -2377,18 +2376,18 @@ let found_text = function
       else
         "'" ^ escape_text s ^ "'"
 
-let message ?user e =
+let error_message ?custom e =
   match e.kind with
   | Expected { items = x, xs; found; more } ->
       "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
   | Failure m ->
       m
-  | User v -> (
-      match user with
+  | Custom v -> (
+      match custom with
       | Some f ->
           f v
       | None ->
-          "user error (no ~user printer given)"
+          "custom error (no ~custom printer given)"
     )
   | Depth_limit_exceeded { limit } ->
       Printf.sprintf "maximum nesting depth %d exceeded" limit
@@ -2552,29 +2551,29 @@ let add_text b text =
     Buffer.add_string b text
   end
 
-let render ?name ?source ?(columns = `Bytes) ?user e =
+let render ?name ?source ?(columns = `Bytes) ?custom e =
   let src =
     match source with Some s -> Some (s, source_line_starts s) | None -> None
   in
   let where =
-    match (src, e.position) with
+    match (src, e.location) with
     | Some (s, starts), _ ->
-        let l = location_of_position s e.span.start in
+        let l = location_of_position s e.range.start in
         Some
           ( l,
             Some
               (1
               + count_code_points s
                   starts.(l.line - 1)
-                  (imin e.span.start (String.length s))
+                  (imin e.range.start (String.length s))
               )
           )
-    | None, Some p ->
-        Some (p.location, p.code_point_col)
+    | None, Some l ->
+        Some (l, e.char_column)
     | None, None ->
         None
   in
-  let frame_loc i (f : frame) =
+  let frame_loc i (f : context) =
     match src with
     | Some (s, starts) ->
         let l = location_of_position s f.start in
@@ -2625,11 +2624,11 @@ let render ?name ?source ?(columns = `Bytes) ?user e =
         )
   | None ->
       Buffer.add_string b "byte ";
-      Buffer.add_string b (string_of_int e.span.start)
+      Buffer.add_string b (string_of_int e.range.start)
   );
   Buffer.add_string b ": [error]";
-  add_text b (message ?user e);
-  let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.frames in
+  add_text b (error_message ?custom e);
+  let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.contexts in
   let note_line (n : note) =
     match n.at with
     | None ->
@@ -2682,7 +2681,7 @@ let render ?name ?source ?(columns = `Bytes) ?user e =
         let line = error_view.number in
         let opener =
           List.find_map
-            (fun ((f : frame), loc) ->
+            (fun ((f : context), loc) ->
               match loc with
               | Some (l, c, _) when f.delimited && l < line ->
                   Some (l, c, f.start)
@@ -2805,10 +2804,10 @@ let render ?name ?source ?(columns = `Bytes) ?user e =
           Buffer.add_string b last
         in
         let carets (v : view) =
-          if e.span.start - v.first >= String.length v.text then
+          if e.range.start - v.first >= String.length v.text then
             1
           else
-            marks v e.span.start e.span.stop
+            marks v e.range.start e.range.stop
         in
         let add_carets v =
           for _ = 1 to carets v do
@@ -2824,11 +2823,11 @@ let render ?name ?source ?(columns = `Bytes) ?user e =
         in
         let caret_row (v : view) =
           if framed && !bar <> "" then begin
-            rule "\xe2\x95\xb0" "" e.span.start v;
+            rule "\xe2\x95\xb0" "" e.range.start v;
             add_carets v
           end else begin
             gutter ();
-            prefix_pad v e.span.start;
+            prefix_pad v e.range.start;
             add_carets v
           end
         in
@@ -2911,7 +2910,7 @@ let render ?name ?source ?(columns = `Bytes) ?user e =
     Buffer.add_string b " * "
   in
   List.iteri
-    (fun i ((f : frame), loc) ->
+    (fun i ((f : context), loc) ->
       if i < shown_frames then begin
         gutter_star ();
         Buffer.add_string b "while parsing ";
@@ -3134,24 +3133,23 @@ let build st ~pos ?(notes = []) kind span frames =
     end else
       None
   in
-  let position =
+  let location =
     Option.map
       (fun (_, line_start, line) ->
-        {
-          location = { offset = pos; line; col = pos - line_start + 1 };
-          code_point_col =
-            ( if line_start >= st.base then
-                Some
-                  (1
-                  + count_code_points st.input (line_start - st.base)
-                      (pos - st.base)
-                  )
-              else
-                None
-            );
-        }
+        { offset = pos; line; col = pos - line_start + 1 }
       )
       here
+  in
+  let char_column =
+    Option.bind here (fun (_, line_start, _) ->
+        if line_start >= st.base then
+          Some
+            (1
+            + count_code_points st.input (line_start - st.base) (pos - st.base)
+            )
+        else
+          None
+    )
   in
   let source_open =
     match st.source with Some src -> not src.eof | None -> false
@@ -3355,9 +3353,10 @@ let build st ~pos ?(notes = []) kind span frames =
   let views = with_middles views in
   {
     kind;
-    span;
-    position;
-    frames =
+    range = span;
+    location;
+    char_column;
+    contexts =
       List.map
         (fun (name, start, delimited) -> { name; start; delimited })
         frames;
@@ -3379,10 +3378,10 @@ let error_of_far st =
   let frames = far_chain st in
   match f.extra with
   | Payload e when f.special = special_user ->
-      build st ~pos (User e) { start = pos; stop = pos } frames
+      build st ~pos (Custom e) { start = pos; stop = pos } frames
   | Payload_ext (e, x) when f.special = special_user ->
       let span = extras_span pos x in
-      build st ~pos:span.start ~notes:x.notes (User e) span frames
+      build st ~pos:span.start ~notes:x.notes (Custom e) span frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->

@@ -70,7 +70,7 @@ type found = private
       (** An integer field that differs from the expected one, as the
           hexadecimal value read in the same width, for example [0x0002]. *)
 
-type frame = private { name : string; start : int; delimited : bool }
+type context = private { name : string; start : int; delimited : bool }
 (** A construct that was open at the failure, see {!val:context}. [start] is the
     byte offset where it started, [delimited] is true for constructs with an
     opening token. *)
@@ -81,12 +81,6 @@ type note = { at : range option; text : string }
     next to the underline. [at = None] adds a ["* note:"] line under the
     excerpt. *)
 
-type position = private { location : location; code_point_col : int option }
-(** Where an error is in the input, known only when the line is known.
-    [location] is the line and column of the error in bytes. [code_point_col] is
-    the column in code points, [None] if the start of the line is no longer
-    buffered (streaming). *)
-
 type excerpt
 (** Source lines kept with the error so that {!render_error} does not need the
     input. *)
@@ -94,9 +88,9 @@ type excerpt
 type custom_error = ..
 (** The type of the values given to {!val:error}. It is extensible: declare your
     own cases with [type Parseff.custom_error += Too_large of int] and match
-    them as [User (Too_large n)]. *)
+    them as [Custom (Too_large n)]. *)
 
-type kind = private
+type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
           furthest failure position, sorted and without duplicates, up to 64
@@ -106,7 +100,7 @@ type kind = private
       (** A failure raised with {!val:fail}, or ["no alternative matched"] when
           [one_of []] is the only failure at the furthest position. Failures of
           primitives are otherwise [Expected]. *)
-  | User of custom_error  (** A value given to {!val:error}. *)
+  | Custom of custom_error  (** A value given to {!val:error}. *)
   | Depth_limit_exceeded of { limit : int }
       (** {!val:rec_} nested deeper than [max_depth]. *)
   | Backtrack_window_exceeded of { limit : int; oldest : int }
@@ -116,15 +110,20 @@ type kind = private
           is the parser position when the overflow happened. *)
 
 type error = private {
-  kind : kind;
-  span : range;
+  kind : error_kind;
+  range : range;
       (** The bytes the error is about, never reversed, empty at the end of the
           input. *)
-  position : position option;
-      (** Line and column of [span.start]. [None] when the line is not known: in
-          streaming, when the position is older than the buffered input.
-          {!render_error} prints the byte offset then. *)
-  frames : frame list;  (** Open constructs, outermost first. *)
+  location : location option;
+      (** Line and column of [range.start], where [location.col] counts bytes.
+          [None] when the line is not known: in streaming, when the position is
+          older than the buffered input. {!render_error} prints the byte offset
+          then. *)
+  char_column : int option;
+      (** Column of [range.start] counted in Unicode characters (code points)
+          from the start of its line, 1-based. [None] when [location] is [None]
+          or when the start of the line is no longer buffered (streaming). *)
+  contexts : context list;  (** Open constructs, outermost first. *)
   notes : note list;
   excerpt : excerpt;
 }
@@ -133,11 +132,12 @@ type error = private {
     A failed parse returns one [error]. Match on its [kind] to react to the
     failure, or print it with {!render_error}. *)
 
-val message : ?user:(custom_error -> string) -> error -> string
-(** [message e] is the one-line message, for example
+val error_message : ?custom:(custom_error -> string) -> error -> string
+(** [error_message e] is the one-line message, for example
     [expected "else", "if", or "while", found 'xyz']. A message lists at most 8
-    expected items, then [, or N more alternatives]. [user] prints [User]
-    errors, without it the message is [user error (no ~user printer given)]. *)
+    expected items, then [, or N more alternatives]. [custom] prints [Custom]
+    errors, without it the message is [custom error (no ~custom printer given)].
+*)
 
 type columns = [ `Bytes | `Code_points ]
 
@@ -145,7 +145,7 @@ val render_error :
   ?name:string ->
   ?source:string ->
   ?columns:columns ->
-  ?user:(custom_error -> string) ->
+  ?custom:(custom_error -> string) ->
   error ->
   string
 (** [render_error e] prints the error with a source excerpt:
@@ -170,11 +170,11 @@ val render_error :
     the column unit of the header, [`Bytes] by default; it applies to the
     columns of [* while parsing] lines too. Carets count code points, and a
     control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
-    the escape [message] uses, such as [\x1B], with as many carets as the escape
-    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error ends with a [* help:] line. The rows the renderer adds never end with
-    a space, and source text is printed byte for byte. The result has no
-    trailing newline. *)
+    the escape {!val:error_message} uses, such as [\x1B], with as many carets as
+    the escape has characters. A [Depth_limit_exceeded] or
+    [Backtrack_window_exceeded] error ends with a [* help:] line. The rows the
+    renderer adds never end with a space, and source text is printed byte for
+    byte. The result has no trailing newline. *)
 
 (** {1 Diagnostics} *)
 
@@ -233,9 +233,9 @@ val parse :
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
     {!type:error}. [e.kind] is [Expected] for a mismatch, [Failure] for
-    {!val:fail}, [User] for {!val-error}, [Depth_limit_exceeded] when recursion
-    nested deeper than [max_depth], and [Backtrack_window_exceeded] for
-    streaming.
+    {!val:fail}, [Custom] for {!val-error}, [Depth_limit_exceeded] when
+    recursion nested deeper than [max_depth], and [Backtrack_window_exceeded]
+    for streaming.
 
     Example:
     {@ocaml[
@@ -419,8 +419,8 @@ val error : ?from:int -> ?notes:note list -> custom_error -> 'a
 (** [error ?from ?notes e] aborts parsing with a user-defined error value.
     [~from] and [~notes] work as in {!fail}.
 
-    The error is returned as [Error { kind = User e; _ }]. Declare the cases of
-    {!type:custom_error} for rich error reporting:
+    The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
+    of {!type:custom_error} for rich error reporting:
     {@ocaml[
       type custom_error += Out_of_range of int | Negative of int
 
@@ -432,21 +432,21 @@ val error : ?from:int -> ?notes:note list -> custom_error -> 'a
 
       match parse input number with
       | Ok n -> Printf.printf "Got %d\n" n
-      | Error { kind = User (Out_of_range n); _ } ->
+      | Error { kind = Custom (Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
-      | Error { kind = User (Negative n); _ } ->
+      | Error { kind = Custom (Negative n); _ } ->
           Printf.printf "%d is negative\n" n
       | Error _ -> Printf.printf "Parse error\n"
     ]}
 
-    {b Note:} User errors from [error] pass through {!val:expect} and
+    {b Note:} Custom errors from [error] pass through {!val:expect} and
     {!val:one_of_labeled} without being caught or relabeled. However,
     backtracking combinators ({!val:or_}, {!val:many}, {!val:one_of},
-    {!val:optional}, {!val:look_ahead}) will catch and absorb user errors just
-    like any other parse failure. An absorbed user error is still reported when
-    the parse fails and the error is at the furthest failure position. At the
-    same position, a user error wins over [Expected]. Between two user errors at
-    the same position, the first one wins.
+    {!val:optional}, {!val:look_ahead}) will catch and absorb custom errors just
+    like any other parse failure. An absorbed custom error is still reported
+    when the parse fails and the error is at the furthest failure position. At
+    the same position, a custom error wins over [Expected]. Between two custom
+    errors at the same position, the first one wins.
 
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
@@ -620,14 +620,14 @@ val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
 val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
-    opened since the innermost enclosing {!context}, so none of them backtracks
-    after the cut. It stops at a {!look_ahead}.
+    opened since the innermost enclosing {!val:context}, so none of them
+    backtracks after the cut. It stops at a {!look_ahead}.
 
-    When the enclosing {!context} then fails, the frames outside it are sealed
-    too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
+    When the enclosing {!val:context} then fails, the frames outside it are
+    sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
     failure. If the context ends without failing, the outer frames stay as they
-    were. Without an enclosing {!context}, [cut ()] seals every frame down to
-    the first {!look_ahead}.
+    were. Without an enclosing {!val:context}, [cut ()] seals every frame down
+    to the first {!look_ahead}.
 
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
@@ -675,7 +675,7 @@ val expect : string -> (unit -> 'a) -> 'a
     the end of the input keeps its expected items and says [found end of input].
 
     Failures from {!val:fail} propagate unchanged (there is no way to intercept
-    them). User errors raised via {!val-error} propagate unchanged — this lets
+    them). Custom errors raised via {!val-error} propagate unchanged — this lets
     you use [expect] around parsers that perform validation without losing the
     structured error:
 
@@ -691,7 +691,7 @@ val expect : string -> (unit -> 'a) -> 'a
             n
       )
     (* A non-digit input gives: "expected an octet (0-255)" *)
-    (* Input "300" gives: User (Out_of_range 300), not swallowed *)
+    (* Input "300" gives: Custom (Out_of_range 300), not swallowed *)
     ]}
 
     Example:
@@ -725,8 +725,8 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Each branch is wrapped by {!expect} with its label, so only failures at the
     position where [one_of_labeled] started are relabeled. A branch that fails
-    deeper keeps its own message. User errors raised via {!val-error} inside any
-    branch propagate unchanged.
+    deeper keeps its own message. Custom errors raised via {!val-error} inside
+    any branch propagate unchanged.
 
     Example:
     {@ocaml[

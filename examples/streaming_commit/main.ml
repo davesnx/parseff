@@ -51,9 +51,9 @@ let () =
       Printf.printf "method=GET path=%s\n" p
   | Ok (`POST, p) ->
       Printf.printf "method=POST path=%s\n" p
-  | Error { kind = Backtrack_window_exceeded { limit; oldest }; span; _ } ->
-      Printf.printf "window error at %d: limit=%d oldest=%d\n" span.start limit
+  | Error { kind = Backtrack_window_exceeded { limit; oldest }; range; _ } ->
+      Printf.printf "window error at %d: limit=%d oldest=%d\n" range.start limit
         oldest
   | Error e ->
-      Printf.printf "parse error at %d: %s\n" e.Parseff.span.start
-        (Parseff.message e)
+      Printf.printf "parse error at %d: %s\n" e.range.start
+        (Parseff.error_message e)

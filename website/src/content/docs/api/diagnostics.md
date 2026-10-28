@@ -95,8 +95,8 @@ let () =
   (match outcome with
   | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error error ->
-      Printf.printf "Parse error at %d: %s\n" error.Parseff.span.start
-        (Parseff.message error));
+      Printf.printf "Parse error at %d: %s\n" error.range.start
+        (Parseff.error_message error));
   List.iter
     (fun ({ pos; value } : validation Parseff.Diagnostics.entry) ->
       match value with

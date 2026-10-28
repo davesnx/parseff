@@ -232,10 +232,10 @@ The error flows through to the result type:
 {@ocaml skip[
 match Parseff.parse "port = 99999" typed_entry with
 | Ok _ -> ()
-| Error { kind = User (Port_out_of_range n); _ } ->
+| Error { kind = Custom (Port_out_of_range n); _ } ->
     Printf.printf "%d is not a valid port\n" n
 | Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.message e)
+    Printf.printf "Parse error: %s\n" (Parseff.error_message e)
 ]}
 
 {!val:Parseff.error} raises a typed error value. {!val:Parseff.fail} raises a string message (reported as [Failure]). Use [error] when callers need to distinguish different failure modes; use [fail] for simple messages shown directly to users.

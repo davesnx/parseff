@@ -10,13 +10,13 @@ let chunked_source ~chunk_size input =
 let kind (e : Parseff.error) =
   match e.kind with
   | Expected _ ->
-      "Expected " ^ Parseff.message e
+      "Expected " ^ Parseff.error_message e
   | Failure m ->
       "Failure " ^ m
-  | User _ ->
-      "User"
+  | Custom _ ->
+      "Custom"
   | Depth_limit_exceeded _ ->
-      "Depth_limit_exceeded " ^ Parseff.message e
+      "Depth_limit_exceeded " ^ Parseff.error_message e
   | Backtrack_window_exceeded _ ->
       "Backtrack_window_exceeded"
 
@@ -24,7 +24,7 @@ let norm = function
   | Ok v ->
       Ok v
   | Error e ->
-      Error (e.Parseff.span.start, kind e)
+      Error (e.Parseff.range.start, kind e)
 
 let show_result show_v = function
   | Ok v ->
@@ -189,7 +189,7 @@ let test_utf8_alphanum_rejects_non_ascii_digit () =
   List.iter
     (fun (name, parser) ->
       match Parseff.parse arabic_indic_three parser with
-      | Error e when e.Parseff.span.start = 0 ->
+      | Error e when e.range.start = 0 ->
           ()
       | _ ->
           Alcotest.failf "%s accepted U+0663" name

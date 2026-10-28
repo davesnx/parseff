@@ -91,7 +91,7 @@ let show_failure = function
   | Ok _ ->
       "ok"
   | Error e ->
-      Printf.sprintf "%d %s" e.Parseff.span.start (Parseff.message e)
+      Printf.sprintf "%d %s" e.Parseff.range.start (Parseff.error_message e)
 
 let test_interleaved_failures_keep_separate_groups () =
   let a = ref "unset" and b = ref "unset" in

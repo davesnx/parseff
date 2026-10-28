@@ -254,9 +254,9 @@ let validated_number () =
 let () =
   match Parseff.parse "300" validated_number with
   | Ok n -> Printf.printf "Got %d\n" n
-  | Error { kind = User (Out_of_range n); _ } ->
+  | Error { kind = Custom (Out_of_range n); _ } ->
       Printf.printf "%d is too large (max 255)\n" n
-  | Error { kind = User (Negative n); _ } ->
+  | Error { kind = Custom (Negative n); _ } ->
       Printf.printf "%d is negative\n" n
   | Error _ -> Printf.printf "Parse error\n"
 ```
@@ -337,9 +337,9 @@ let number () =
 let report_error input result =
   match result with
   | Error e ->
-      let loc = Parseff.location_of_position input e.Parseff.span.start in
+      let loc = Parseff.location_of_position input e.Parseff.range.start in
       Printf.printf "line %d, col %d: %s\n" loc.line loc.col
-        (Parseff.message e)
+        (Parseff.error_message e)
   | Ok _ -> ()
 ```
 **Tip:** Use `location` during parsing to attach source positions to AST nodes or other parsed structures. Use `location_of_position` after parsing to convert byte offsets from error results into line and column numbers for diagnostics.

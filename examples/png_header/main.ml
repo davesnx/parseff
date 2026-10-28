@@ -78,5 +78,5 @@ let () =
       Printf.printf "  %ldx%ld, %d-bit %s\n" hdr.width hdr.height hdr.bit_depth
         (color_type_to_string hdr.color_type)
   | Error e ->
-      Printf.printf "%s: error at byte %d: %s\n" path e.Parseff.span.start
-        (Parseff.message e)
+      Printf.printf "%s: error at byte %d: %s\n" path e.range.start
+        (Parseff.error_message e)

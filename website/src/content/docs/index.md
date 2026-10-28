@@ -101,8 +101,8 @@ let () =
   match Parseff.parse "192.168.1.1" ip_address with
   | Ok (a, b, c, d) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-  | Error { kind = User (Out_of_range n); span; _ } ->
-      Printf.printf "Error at %d: %d out of range (0-255)\n" span.start n
+  | Error { kind = Custom (Out_of_range n); range; _ } ->
+      Printf.printf "Error at %d: %d out of range (0-255)\n" range.start n
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
 ```

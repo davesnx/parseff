@@ -178,7 +178,7 @@ returns a byte offset.
 
 {1 Columns in error messages}
 
-The column in an error header counts bytes by default, like [position.location]. For
+The column in an error header counts bytes by default, like [location]. For
 text with multi-byte characters, [Parseff.render_error ~columns:`Code_points]
 prints the column in code points instead. The carets under the source line
 always count code points, so they line up in both modes:
@@ -190,10 +190,10 @@ input.json:1:6: [error] expected ',' or ']', found '"'     (code points)
   |      ^
 v}
 
-[Parseff.error] carries [position], with the line and column in bytes and
-[code_point_col]. [position] is [None] when the line is not known, and
-[code_point_col] is [None] when the start of the line is no longer buffered,
-which only happens when streaming; pass
+[Parseff.error] carries [location], with the line and column in bytes, and
+[char_column], the column in code points. [location] is [None] when the line is
+not known, and [char_column] is [None] when the start of the line is no longer
+buffered, which only happens when streaming; pass
 [~source] to [render_error] to get exact columns then. Wide characters and combining
 marks count as one column each: Parseff has no width tables.
 

@@ -182,7 +182,8 @@ let statements () =
     ()
 
 let format_error e =
-  Printf.sprintf "Error at pos %d: %s" e.Parseff.span.start (Parseff.message e)
+  Printf.sprintf "Error at pos %d: %s" e.Parseff.range.start
+    (Parseff.error_message e)
 
 let ws () = Parseff.skip_whitespace ()
 
@@ -258,10 +259,10 @@ let run_ip_custom input =
   match Parseff.parse input ip_address_with_custom_errors with
   | Ok (a, b, c, d) ->
       Printf.printf "%-20s -> %d.%d.%d.%d\n" input a b c d
-  | Error { kind = User (Out_of_range n); span; _ } ->
+  | Error { kind = Custom (Out_of_range n); range; _ } ->
       Printf.printf
         "%-20s -> Custom error at pos %d: octet %d out of range (0-255)\n" input
-        span.start n
+        range.start n
   | Error e ->
       Printf.printf "%-20s -> %s\n" input (format_error e)
 

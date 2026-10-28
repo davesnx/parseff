@@ -262,7 +262,7 @@ let test_deep_nesting_within_limit () =
   | Ok _ ->
       Alcotest.fail "Expected nested Array"
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let msg = Parseff.message e in
+      let msg = Parseff.error_message e in
       Alcotest.fail (Printf.sprintf "Unexpected parse error: %s" msg)
   | Error _ ->
       Alcotest.fail "Unexpected error"
@@ -273,7 +273,7 @@ let test_deep_nesting_exceeds_limit () =
   | Ok _ ->
       Alcotest.fail "Expected depth limit error, got success"
   | Error ({ kind = Depth_limit_exceeded _; _ } as e) ->
-      let msg = Parseff.message e in
+      let msg = Parseff.error_message e in
       let expected_msg = "maximum nesting depth 128 exceeded" in
       Alcotest.(check string) "depth error message" expected_msg msg
   | Error _ ->

@@ -110,8 +110,8 @@ let test title parser cases =
                 Format.asprintf "(expected [%a])" pp expected
             )
       | Error e ->
-          Printf.printf "✗ %-15s -> Error at %d: %s\n" input
-            e.Parseff.span.start (Parseff.message e)
+          Printf.printf "✗ %-15s -> Error at %d: %s\n" input e.range.start
+            (Parseff.error_message e)
     )
     cases
 

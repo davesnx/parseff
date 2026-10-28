@@ -21,5 +21,5 @@ let () =
   | Ok branch ->
       Printf.printf "matched %s branch\n" branch
   | Error error ->
-      Printf.printf "error at %d: %s\n" error.Parseff.span.start
-        (Parseff.message error)
+      Printf.printf "error at %d: %s\n" error.range.start
+        (Parseff.error_message error)
