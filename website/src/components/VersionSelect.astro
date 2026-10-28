@@ -1,7 +1,7 @@
 ---
 import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
 
-const version = process.env.DOCS_VERSION ?? 'main';
+const version = __DOCS_VERSION__;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 
@@ -16,7 +16,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 <ThemeSelect><slot /></ThemeSelect>
 
 <script>
-	const root = '/parseff';
+	const root = __DOCS_ROOT__;
 	const selects = document.querySelectorAll<HTMLSelectElement>('.version-select');
 
 	type Entry = { version: string; path: string; label: string };
@@ -48,7 +48,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		}
 	}
 
-	if (selects.length) load(selects).catch(() => {});
+	if (selects.length) load(selects).catch((error) => console.error('Could not load the version list', error));
 </script>
 
 <style>

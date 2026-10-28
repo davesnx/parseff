@@ -19,6 +19,17 @@ const { head, title, description } = Astro.locals.starlightRoute.entry
 	}
 	: { head: Astro.locals.starlightRoute.head, title: 'Parseff', description: '' };
 
+const canonicalRoot = `${Astro.site?.origin}${__DOCS_ROOT__}/`;
+const canonicalBase = `${Astro.site?.origin}${import.meta.env.BASE_URL.replace(/\/$/, '')}/`;
+const pageHead =
+	__DOCS_CHANNEL__ === 'alias'
+		? head.map((entry) =>
+				entry.tag === 'link' && entry.attrs?.rel === 'canonical' && typeof entry.attrs.href === 'string'
+					? { ...entry, attrs: { ...entry.attrs, href: entry.attrs.href.replace(canonicalBase, canonicalRoot) } }
+					: entry,
+			)
+		: head;
+
 const preloadFonts = [
 	instrumentSans400,
 	instrumentSans500,
@@ -77,4 +88,4 @@ const fontFaceCss = fontFaces
 	<link rel="preload" href={href} as="font" type="font/woff2" crossorigin />
 ))}
 <style is:inline set:html={fontFaceCss} />
-{head.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}
+{pageHead.map(({ tag: Tag, attrs, content }) => <Tag {...attrs} set:html={content} />)}

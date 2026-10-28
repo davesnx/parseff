@@ -1,15 +1,16 @@
 ---
-const channel = process.env.DOCS_CHANNEL ?? 'latest';
-const version = process.env.DOCS_VERSION ?? 'main';
+const root = __DOCS_ROOT__;
+const version = __DOCS_VERSION__;
+const channel = __DOCS_CHANNEL__;
 ---
 
 {
-	channel !== 'latest' && (
+	(channel === 'old' || channel === 'unreleased') && (
 		<div class="version-banner" data-pagefind-ignore>
 			{channel === 'unreleased'
 				? 'This is the documentation for the unreleased main branch. '
 				: `This is the documentation for an old version (${version}). `}
-			<a href="/parseff/">Go to the latest version.</a>
+			<a href={`${root}/`}>Go to the latest version.</a>
 		</div>
 	)
 }

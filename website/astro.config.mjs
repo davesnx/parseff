@@ -9,9 +9,7 @@ import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
+import { base, channel, contentDir, root, version } from './site.mjs';
 
 /** Wrap an integration so that any routes it injects are forced to prerender.
  *  This avoids the "no adapter installed" warning for purely-static sites. */
@@ -51,12 +49,9 @@ function fixOgImageBase(base) {
 	};
 }
 
-const base = process.env.DOCS_BASE ?? '/parseff';
-const channel = process.env.DOCS_CHANNEL ?? 'latest';
-
 const pageExists = (slug) =>
 	['md', 'mdx'].some((ext) =>
-		['', '/index'].some((suffix) => existsSync(`src/content/docs/${slug}${suffix}.${ext}`)),
+		['', '/index'].some((suffix) => existsSync(join(contentDir, `${slug}${suffix}.${ext}`))),
 	);
 
 /** Drop sidebar entries whose page is missing from the content being built. */
@@ -74,6 +69,13 @@ function existingPages(items) {
 export default defineConfig({
 	site: 'https://davesnx.github.io',
 	base,
+	vite: {
+		define: {
+			__DOCS_ROOT__: JSON.stringify(root),
+			__DOCS_VERSION__: JSON.stringify(version),
+			__DOCS_CHANNEL__: JSON.stringify(channel),
+		},
+	},
 	markdown: {
 		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base }]],
 	},
@@ -136,19 +138,25 @@ export default defineConfig({
 			fonts: [
 				{
 					name: 'Instrument Sans',
-					data: await readFile(require.resolve('@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff')),
+					data: await readFile(
+						'node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff',
+					),
 					style: 'normal',
 					weight: 400,
 				},
 			{
 				name: 'Instrument Sans',
-				data: await readFile(require.resolve('@fontsource/instrument-sans/files/instrument-sans-latin-700-normal.woff')),
+				data: await readFile(
+					'node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-700-normal.woff',
+				),
 				style: 'normal',
 				weight: 700,
 			},
 			{
 				name: 'IBM Plex Mono',
-				data: await readFile(require.resolve('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff')),
+				data: await readFile(
+					'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff',
+				),
 				style: 'normal',
 				weight: 400,
 			},
