@@ -19,7 +19,7 @@ The streaming API lets you parse input that isn't fully available upfront: files
 val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
@@ -37,19 +37,21 @@ Error positions are absolute offsets from the start of the stream, also after Pa
 The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 
-## Requiring the whole input
+## Reading the whole source
 
-Pass `~consume` as below to make `Parseff.parse_source` fail when input remains after the parser returns, as `Parseff.end_of_input` does:
+By default `Parseff.parse_source` fails with `Expected End_of_input` when input remains after the parser returns, as `Parseff.end_of_input` does. The check pulls one more byte from the source. It does not read the rest of the source: it stops at the first byte that remains.
+
+To parse a leading part of the source and leave the rest unread, pass `~consume:`Partial`:
 
 ```ocaml
-Parseff.parse_source ~consume:`All source parser
+Parseff.parse_source ~consume:`Partial source parser
 ```
 `~diagnostics` collects the diagnostics of the parse. See [`diagnostics`](./diagnostics.md).
 
 ```ocaml
   let ic = open_in "data.json" in
   let source = Parseff.Source.of_channel ic in
-  let result = Parseff.parse_source ~consume:`All source json in
+  let result = Parseff.parse_source source json in
   close_in ic;
   result
 ```

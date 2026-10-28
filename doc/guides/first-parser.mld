@@ -118,12 +118,11 @@ let config () =
   let lines =
     Parseff.sep_by line (fun () -> Parseff.char '\n') ()
   in
-  Parseff.end_of_input ();
   List.filter_map Fun.id lines
 ]}
 
-[end_of_input] ensures there's no trailing data. Without it,
-["host = localhost\ngarbage"] could partially succeed.
+[parse] requires all input to be consumed, so there is no trailing data.
+["host = localhost\ngarbage"] fails instead of partially succeeding.
 
 Running the full parser:
 

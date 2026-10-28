@@ -3434,7 +3434,7 @@ let with_diagnostics st thunk (c : _ diagnostics) =
 
 let run_slow st ~consume ~diagnostics parser =
   let thunk =
-    match consume with `Prefix -> parser | `All -> until_end parser
+    match consume with `Partial -> parser | `All -> until_end parser
   in
   match diagnostics with
   | None ->
@@ -3442,22 +3442,22 @@ let run_slow st ~consume ~diagnostics parser =
   | Some c ->
       with_diagnostics st thunk c
 
-let parse ?(max_depth = 128) ?(consume = `Prefix) ?diagnostics input
+let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
     (parser : unit -> 'a) =
   let st = State.for_input ~input ~max_depth in
   match (diagnostics, consume) with
-  | None, `Prefix ->
+  | None, `Partial ->
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
 
 let parse_source ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?(consume = `Prefix)
+    ?(backtrack_window = default_backtrack_window) ?(consume = `All)
     ?diagnostics (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window in
   match (diagnostics, consume) with
-  | None, `Prefix ->
+  | None, `Partial ->
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser

@@ -383,7 +383,7 @@ let test_le_int64_match_high_bits () =
 
 let test_take_exact () =
   match
-    Parseff.parse "abcdef" (fun () ->
+    Parseff.parse ~consume:`Partial "abcdef" (fun () ->
         let s = Parseff.take 4 in
         let pos = Parseff.position () in
         (s, pos)
@@ -397,7 +397,7 @@ let test_take_exact () =
 
 let test_take_zero () =
   match
-    Parseff.parse "abc" (fun () ->
+    Parseff.parse ~consume:`Partial "abc" (fun () ->
         let s = Parseff.take 0 in
         let pos = Parseff.position () in
         (s, pos)
@@ -474,7 +474,7 @@ let test_backtracking () =
       )
       ()
   in
-  match Parseff.parse input parser with
+  match Parseff.parse ~consume:`Partial input parser with
   | Ok s ->
       Alcotest.(check string) "backtracked" "got_0102" s
   | Error _ ->
@@ -512,7 +512,9 @@ let test_streaming_le_int64 () =
 
 let test_streaming_take () =
   let src = byte_at_a_time "hello world" in
-  match Parseff.parse_source src (fun () -> Parseff.take 5) with
+  match
+    Parseff.parse_source ~consume:`Partial src (fun () -> Parseff.take 5)
+  with
   | Ok v ->
       Alcotest.(check string) "taken" "hello" v
   | Error _ ->

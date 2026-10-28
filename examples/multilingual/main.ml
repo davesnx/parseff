@@ -31,7 +31,6 @@ let record () =
   let fields =
     Parseff.sep_by ~at_least:1 field (fun () -> Parseff.char '\n') ()
   in
-  Parseff.end_of_input ();
   fields
 
 let run input =

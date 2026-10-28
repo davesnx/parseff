@@ -42,7 +42,6 @@ let ip_address () =
   let c = number () in
   let _ = Parseff.char '.' in
   let d = number () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 ]}
 
@@ -53,8 +52,8 @@ number isn't in range, [Parseff.fail] reports it. This is the
 parse-then-validate pattern.
 
 The [ip_address] parser reads like the format itself: number, dot, number, dot,
-number, dot, number. [end_of_input] ensures there's no trailing data -- without
-it, ["1.2.3.4 extra"] would silently succeed.
+number, dot, number. [parse] requires all input to be consumed, so
+["1.2.3.4 extra"] fails instead of silently succeeding.
 
 {1 Running it}
 
@@ -79,7 +78,7 @@ Let's look at what happens with bad input:
 {b Incomplete}: ["1.2.3"] parses [1], [.], [2], [.], [3], then tries to match
 ['.'] and fails because the input is exhausted.
 
-{b Trailing data}: ["1.2.3.4 extra"] parses all four octets, then [end_of_input]
+{b Trailing data}: ["1.2.3.4 extra"] parses all four octets, then [parse]
 fails because there are characters remaining. The error is at position 7 and
 says [expected digit or end of input]: the last [many] stopped at the space
 because it needed another digit, and Parseff reports every failure at the
@@ -108,7 +107,6 @@ let ip_address () =
   let c = number_0_255 () in
   let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
   let d = number_0_255 () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 ]}
 

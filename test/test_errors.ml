@@ -123,7 +123,7 @@ let test_escaping_exception_leaves_context_source () =
 
 let test_nested_parse_exception_keeps_outer_state () =
   match
-    Parseff.parse "abcdef" (fun () ->
+    Parseff.parse ~consume:`Partial "abcdef" (fun () ->
         ignore (Parseff.char 'a');
         ( try
             ignore
@@ -144,7 +144,7 @@ let test_nested_parse_exception_keeps_outer_state () =
 
 let test_nested_parse_source_exception_keeps_outer_state () =
   match
-    Parseff.parse "abcdef" (fun () ->
+    Parseff.parse ~consume:`Partial "abcdef" (fun () ->
         ignore (Parseff.char 'a');
         ( try
             ignore
@@ -293,11 +293,14 @@ and json_member () =
 let both_runners show_v input parser expected =
   Alcotest.(check string)
     "parse" expected
-    (show_result show_v (Parseff.parse input parser));
+    (show_result show_v (Parseff.parse ~consume:`Partial input parser));
   Alcotest.(check string)
     "parse_source" expected
     (show_result show_v
-       (Parseff.parse_source (Parseff.Source.of_string input) parser)
+       (Parseff.parse_source ~consume:`Partial
+          (Parseff.Source.of_string input)
+          parser
+       )
     )
 
 let test_trailing_comma_reports_value () =
@@ -1906,7 +1909,7 @@ let test_diagnostics_carry_the_error () =
     ignore (Parseff.consume "ab");
     Parseff.consume "c"
   in
-  match Parseff.parse ~consume:`All ~diagnostics "abx" parser with
+  match Parseff.parse ~diagnostics "abx" parser with
   | Stdlib.Error error -> (
       Alcotest.(check string)
         "message" "expected \"c\", found 'x'"
@@ -2991,7 +2994,7 @@ let test_empty_one_of_adds_no_item () =
        [ "input.json:1:1: [error] no alternative matched"; "1 | x"; "  | ^" ]
     )
     (render_error "x" (Parseff.one_of []));
-  ( match Parseff.parse "x" (Parseff.one_of []) with
+  ( match Parseff.parse ~consume:`Partial "x" (Parseff.one_of []) with
   | Stdlib.Error { kind = Failure m; _ } ->
       Alcotest.(check string) "kind" "no alternative matched" m
   | _ ->
@@ -3025,7 +3028,7 @@ let test_empty_one_of_adds_no_item () =
   Alcotest.(check string)
     "still backtracks" "ok"
     ( match
-        Parseff.parse "x" (fun () ->
+        Parseff.parse ~consume:`Partial "x" (fun () ->
             Parseff.or_ (fun () -> Parseff.one_of [] ()) (fun () -> "ok") ()
         )
       with

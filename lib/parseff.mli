@@ -18,7 +18,6 @@
         let c = number () in
         let _ = Parseff.consume "." in
         let d = number () in
-        Parseff.end_of_input ();
         (a, b, c, d)
 
       match Parseff.parse "192.168.1.1" ip_address with
@@ -202,16 +201,20 @@ end
 
 val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
 (** [parse input parser] runs [parser] on [input].
 
-    [consume] is [`Prefix] by default: the parser may stop before the end of the
-    input. With [`All], parsing fails with an [Expected End_of_input] error when
-    input remains, as if the parser ended with {!end_of_input}.
+    [consume] is [`All] by default: parsing fails with an
+    [Expected End_of_input] error when input remains after the parser returns,
+    as if the parser ended with {!end_of_input}. The error is at the offset of
+    the first unconsumed byte. Pass [~consume:`Partial] to parse a leading part
+    of the input on purpose and ignore the rest, for example to read one record
+    from the start of a buffer. With [`Partial], the result does not say where
+    the parser stopped; call {!position} at the end of the parser to read it.
 
     [diagnostics] is the collector given to {!warn}. The runner empties it
     before the parser starts. Read it with {!Diagnostics.to_list} after the
@@ -476,7 +479,9 @@ val location_of_position : string -> int -> location
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only if no input remains. Use this to ensure the
-    entire input has been consumed.
+    input has been consumed at a given point, for example in a sub-parser.
+    {!parse} already does this at the end of the top-level parser unless you
+    pass [~consume:`Partial].
 
     Example:
     {@ocaml[
@@ -947,7 +952,7 @@ end
 val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
@@ -956,6 +961,12 @@ val parse_source :
     demand. Takes the same [consume] and [diagnostics] arguments as {!parse} and
     behaves identically, but the input does not need to be fully available up
     front.
+
+    With the default [`All], the check for remaining input pulls one more byte
+    from [source] after the parser returns. It succeeds when [source] is at its
+    end, and fails with [Expected End_of_input] as soon as one more byte exists.
+    It does not read the rest of [source]. With [`Partial], [source] is read
+    only as far as the parser needs.
 
     The same parsers work with both [parse] and [parse_source] — no changes
     required. Streaming backtracking is bounded by [backtrack_window] (default:

@@ -24,12 +24,10 @@ let simple_list () =
 
 let parse_atom () =
   let a = atom () in
-  Parseff.end_of_input ();
   [ a ]
 
 let parse_list () =
   let lst = simple_list () in
-  Parseff.end_of_input ();
   lst
 
 let () =

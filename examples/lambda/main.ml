@@ -119,7 +119,6 @@ let () =
   let parser () =
     let lst = parse_lambda () in
     let _ = ws () in
-    Parseff.end_of_input ();
     lst
   in
   test "Untyped Lambda Calculus Parser" parser naive_test_cases;
@@ -139,7 +138,6 @@ let () =
   let parser () =
     let lst = parse_lambda_sugared () in
     let _ = ws () in
-    Parseff.end_of_input ();
     lst
   in
   test "Untyped Lambda Calculus Parser" parser

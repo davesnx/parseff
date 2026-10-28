@@ -282,7 +282,7 @@ let number_checked () =
 {2 [end_of_input]}
 
 {!val:Parseff.end_of_input} succeeds only if no input remains. Use this to
-ensure the entire input has been consumed.
+ensure the entire input has been consumed at a given point.
 
 {@ocaml skip[val end_of_input : unit -> unit]}
 
@@ -296,13 +296,13 @@ let complete_number () =
 (* Matches: "5" -> 5 *)
 (* Fails: "52" -> Error: expected end of input *)
 
-(* Without end_of_input, "52" would succeed and return 5,
-   leaving "2" unparsed *)
+(* parse already requires all input by default. end_of_input is for
+   checks inside a parser, or when parsing with ~consume:`Partial *)
 ]}
 
-{b Caution:} Use {!val:Parseff.end_of_input} when you want to ensure all input
-is consumed. Without it, [parse] happily returns a result even if there's
-leftover input.
+{b Note:} {!val:Parseff.parse} and {!val:Parseff.parse_source} fail with
+[Expected End_of_input] when input remains, so a top-level parser does not need
+a final [end_of_input]. With [~consume:`Partial], leftover input is ignored.
 
 {2 [position]}
 

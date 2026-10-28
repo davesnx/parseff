@@ -56,7 +56,7 @@ let test_with_whitespace () =
     let _ = ws_may () in
     rule ()
   in
-  match Parseff.parse input rule_with_ws with
+  match Parseff.parse ~consume:`Partial input rule_with_ws with
   | Ok r ->
       Alcotest.(check string) "selector" "div" r.selector;
       Alcotest.(check int) "two declarations" 2 (List.length r.declarations)

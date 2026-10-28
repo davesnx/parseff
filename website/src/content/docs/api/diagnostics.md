@@ -49,16 +49,16 @@ The result of the parse is the usual `Parseff.error` result. Read the diagnostic
 ```ocaml
 val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Prefix ] ->
+  ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
 ```
 ```ocaml
-Parseff.parse ~consume:`All input parser
+Parseff.parse input parser
 ```
-This requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Without `~consume`, the parse may stop before the end of the input. `Parseff.parse_source` takes the same arguments.
+By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `~consume:`Partial` to let the parse stop before the end of the input. `Parseff.parse_source` takes the same arguments.
 
 
 ## Example
@@ -89,7 +89,7 @@ let () =
     Parseff.Diagnostics.create ()
   in
   let outcome =
-    Parseff.parse ~consume:`All ~diagnostics "999.2.3.256"
+    Parseff.parse ~diagnostics "999.2.3.256"
       (ip_address_lenient diagnostics)
   in
   (match outcome with

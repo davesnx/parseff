@@ -34,10 +34,12 @@ let both show_v input parser expected =
   let show_vp (v, p) = Printf.sprintf "(%s, %d)" (show_v v) p in
   Alcotest.(check string)
     "parse" expected
-    (show show_vp (Parseff.parse input with_pos));
+    (show show_vp (Parseff.parse ~consume:`Partial input with_pos));
   Alcotest.(check string)
     "parse_source" expected
-    (show show_vp (Parseff.parse_source (chunked_source input) with_pos))
+    (show show_vp
+       (Parseff.parse_source ~consume:`Partial (chunked_source input) with_pos)
+    )
 
 let show_string s = Printf.sprintf "%S" s
 let show_ints l = "[" ^ String.concat ";" (List.map string_of_int l) ^ "]"
@@ -116,7 +118,7 @@ let test_many_stops_after_consuming () =
 
 let test_many_at_least_non_consuming () =
   let r =
-    Parseff.parse "abc" (fun () ->
+    Parseff.parse ~consume:`Partial "abc" (fun () ->
         List.length
           (Parseff.many ~at_least:1 (fun () -> Parseff.peek_char ()) ())
     )

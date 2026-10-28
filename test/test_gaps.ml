@@ -35,7 +35,7 @@ let show_result show_v = function
 let check_all ?(chunk_sizes = [ 1; 2; 3 ]) name show_v input parser expected =
   Alcotest.(check string)
     (name ^ " parse") expected
-    (show_result show_v (norm (Parseff.parse input parser)));
+    (show_result show_v (norm (Parseff.parse ~consume:`Partial input parser)));
   List.iter
     (fun chunk_size ->
       Alcotest.(check string)
@@ -43,7 +43,10 @@ let check_all ?(chunk_sizes = [ 1; 2; 3 ]) name show_v input parser expected =
         expected
         (show_result show_v
            (norm
-              (Parseff.parse_source (chunked_source ~chunk_size input) parser)
+              (Parseff.parse_source ~consume:`Partial
+                 (chunked_source ~chunk_size input)
+                 parser
+              )
            )
         )
     )
@@ -120,7 +123,7 @@ let test_utf8_skip_while_then_char_split () =
     (fun (text, target, _) ->
       let expected =
         match
-          Parseff.parse text (fun () ->
+          Parseff.parse ~consume:`Partial text (fun () ->
               Parseff.Utf8.skip_while_then_char
                 (fun u -> not (Uchar.equal u target))
                 target;
@@ -278,7 +281,7 @@ let test_depth_restored_after_exception () =
 let test_count_zero () =
   let calls = ref 0 in
   match
-    Parseff.parse "abc" (fun () ->
+    Parseff.parse ~consume:`Partial "abc" (fun () ->
         Parseff.count 0
           (fun () ->
             incr calls;

@@ -56,7 +56,6 @@ let parse_repeated_record ~repetitions record () =
   for _ = 1 to repetitions do
     ignore (Parseff.consume record)
   done;
-  Parseff.end_of_input ();
   repetitions
 
 let run_streaming_case () =

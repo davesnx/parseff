@@ -121,7 +121,7 @@ messages below come from running the parser so that all input must be
 consumed:
 
 {v
-Parseff.parse ~consume:`All input expr
+Parseff.parse input expr
 v}
 
 Compare the error messages on ["1+x"]:

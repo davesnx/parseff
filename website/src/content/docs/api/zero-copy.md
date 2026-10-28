@@ -219,7 +219,6 @@ let json_array () =
       (fun c -> c >= '0' && c <= '9')
   in
   let _ = Parseff.char ']' in
-  Parseff.end_of_input ();
   List.map int_of_span spans
 
 let () =

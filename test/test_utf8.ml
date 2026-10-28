@@ -4,7 +4,7 @@ let uchar_testable =
     Uchar.equal
 
 let parse_with_pos input parser =
-  Parseff.parse input (fun () ->
+  Parseff.parse ~consume:`Partial input (fun () ->
       let value = parser () in
       (value, Parseff.position ())
   )
@@ -200,7 +200,7 @@ let test_take_while_unicode () =
 
 let test_take_while_empty () =
   match
-    Parseff.parse "123" (fun () ->
+    Parseff.parse ~consume:`Partial "123" (fun () ->
         Parseff.Utf8.take_while Uucp.Alpha.is_alphabetic
     )
   with
@@ -502,7 +502,11 @@ let test_alphanum_failure () =
       Alcotest.fail "Unexpected error type"
 
 let test_whitespace_ascii () =
-  match Parseff.parse "  \t\nX" (fun () -> Parseff.Utf8.whitespace ()) with
+  match
+    Parseff.parse ~consume:`Partial "  \t\nX" (fun () ->
+        Parseff.Utf8.whitespace ()
+    )
+  with
   | Ok s ->
       Alcotest.(check string) "whitespace" "  \t\n" s
   | Error _ ->
@@ -511,14 +515,18 @@ let test_whitespace_ascii () =
 let test_whitespace_unicode () =
   (* NBSP (U+00A0) + EM SPACE (U+2003) + ASCII space *)
   let input = "\xC2\xA0\xE2\x80\x83 X" in
-  match Parseff.parse input (fun () -> Parseff.Utf8.whitespace ()) with
+  match
+    Parseff.parse ~consume:`Partial input (fun () -> Parseff.Utf8.whitespace ())
+  with
   | Ok s ->
       Alcotest.(check string) "unicode whitespace" "\xC2\xA0\xE2\x80\x83 " s
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_whitespace_empty () =
-  match Parseff.parse "abc" (fun () -> Parseff.Utf8.whitespace ()) with
+  match
+    Parseff.parse ~consume:`Partial "abc" (fun () -> Parseff.Utf8.whitespace ())
+  with
   | Ok s ->
       Alcotest.(check string) "no whitespace" "" s
   | Error _ ->

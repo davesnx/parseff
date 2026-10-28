@@ -167,7 +167,6 @@ let tlv_message () =
   let version = Parseff.any_uint8 () in
   let count = Parseff.BE.any_uint16 () in
   let fields = Parseff.count count tlv_field in
-  Parseff.end_of_input ();
   (version, fields)
 ]}
 

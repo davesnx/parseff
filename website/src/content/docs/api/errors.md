@@ -172,7 +172,6 @@ let ip_address () =
   let c = number () in
   let _ = dot () in
   let d = number () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 ```
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.

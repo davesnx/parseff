@@ -94,7 +94,6 @@ let ip_address () =
   let c = number () in
   let _ = Parseff.char '.' in
   let d = number () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 
 let () =

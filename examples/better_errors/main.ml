@@ -19,7 +19,6 @@ let ip_address_simple () =
   let c = number_0_255_simple () in
   let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
   let d = number_0_255_simple () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 
 type Parseff.custom_error += Out_of_range of int
@@ -39,7 +38,6 @@ let ip_address_with_custom_errors () =
   let c = number_0_255_with_error () in
   let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
   let d = number_0_255_with_error () in
-  Parseff.end_of_input ();
   (a, b, c, d)
 
 type expr = Num of int | Add of expr * expr | Mul of expr * expr
@@ -137,7 +135,6 @@ let pairs () =
       (fun () -> Parseff.char ',')
       ()
   in
-  Parseff.end_of_input ();
   List.length items
 
 let ident () =
@@ -237,12 +234,7 @@ and json_string () =
   ignore (Parseff.char '"')
 
 let run_json input =
-  match
-    Parseff.parse input (fun () ->
-        json_value ();
-        Parseff.end_of_input ()
-    )
-  with
+  match Parseff.parse input (fun () -> json_value ()) with
   | Ok () ->
       print_endline "valid"
   | Error e ->

@@ -277,7 +277,6 @@ let json_array () =
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in
-  Parseff.end_of_input ();
   values
 
 let () =
