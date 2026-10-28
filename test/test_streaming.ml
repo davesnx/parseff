@@ -1387,8 +1387,16 @@ let test_excerpt_does_not_start_inside_a_code_point () =
   | Error e ->
       Alcotest.(check string)
         "excerpt"
-        "1:7: [error] expected 'y' or '\xc3\xa9', found 'x'\n1 | ...x\n  |    ^"
-        (Parseff.render_error e)
+        "byte 6: [error] expected 'y' or '\xc3\xa9', found 'x'\n\
+         1 | ...x\n\
+        \  |    ^"
+        (Parseff.render_error e);
+      Alcotest.(check string)
+        "excerpt with source"
+        "1:4: [error] expected 'y' or '\xc3\xa9', found 'x'\n\
+         1 | \xc3\xa9\xc3\xa9\xc3\xa9x\n\
+        \  |    ^"
+        (Parseff.render_error ~source:input e)
   | Ok _ ->
       Alcotest.fail "Expected an error"
 

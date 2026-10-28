@@ -209,9 +209,7 @@ type error = {
   kind : error_kind;
   range : range;  (** the bytes the error is about, empty at the end of the input *)
   location : location option;
-      (** line and column of [range.start] in bytes, [None] when the line is not known *)
-  char_column : int option;
-      (** column of [range.start] in Unicode characters (code points), [None] when [location] is [None] or the start of the line is not buffered *)
+      (** line and column of [range.start], [None] when the line is not known; [col] counts bytes, the column [render_error] prints counts Unicode characters *)
   contexts : context list;  (** open constructs, outermost first *)
   notes : note list;
   excerpt : excerpt;
@@ -260,11 +258,10 @@ input.json:4:5: [error] expected ',' or '}', found '"'
 - The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the context line then says `from byte N`. `Parseff.error_message` returns only the one-line message.
 
-`~columns` chooses the unit of the column in the header: bytes by default, or code points (see the UTF-8 page of the API documentation), also in the columns of the `* while parsing` lines. Carets always count code points.
+The columns of the header and of the `* while parsing` lines count Unicode characters (code points), like the carets, while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the character column is not known: the header is `input.json: byte N: [error] ...` and the context line says `from byte N`.
 
 ```
-input.json:1:7: [error] expected ',' or ']', found '"'   (bytes)
-input.json:1:6: [error] expected ',' or ']', found '"'   (code points)
+input.json:1:6: [error] expected ',' or ']', found '"'
 1 | ["é" "b"]
   |      ^
 ```

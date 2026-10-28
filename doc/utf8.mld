@@ -178,24 +178,23 @@ returns a byte offset.
 
 {1 Columns in error messages}
 
-The column in an error header counts bytes by default, like [location]. For
-text with multi-byte characters, [Parseff.render_error ~columns:`Code_points]
-prints the column in code points instead. The carets under the source line
-always count code points, so they line up in both modes:
+The column in an error header counts Unicode characters (code points), and so
+do the carets under the source line. [location.col] in [Parseff.error] counts
+bytes, because it indexes the input string. On a line with non-ASCII text the
+two differ:
 
 {v
-input.json:1:7: [error] expected ',' or ']', found '"'     (bytes)
-input.json:1:6: [error] expected ',' or ']', found '"'     (code points)
+input.json:1:6: [error] expected ',' or ']', found '"'
 1 | ["é" "b"]
   |      ^
 v}
 
-[Parseff.error] carries [location], with the line and column in bytes, and
-[char_column], the column in code points. [location] is [None] when the line is
-not known, and [char_column] is [None] when the start of the line is no longer
-buffered, which only happens when streaming; pass
-[~source] to [render_error] to get exact columns then. Wide characters and combining
-marks count as one column each: Parseff has no width tables.
+Here [location.col] is 7. [location] is [None] when the line is not known. When
+streaming, if the start of the line is no longer buffered, the character column
+is not known either, and [render_error] prints the byte form
+[input.json: byte N: [error] ...] and [from byte N] in [* while parsing] lines;
+pass [~source] to [render_error] to get the columns then. Wide characters and
+combining marks count as one column each: Parseff has no width tables.
 
 {1 Streaming support}
 

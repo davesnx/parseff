@@ -2171,6 +2171,7 @@ type view = {
 type excerpt = {
   views : view list;
   frame_locs : (int * int * int option) option list;
+  char_column : int option;
 }
 
 type error_kind =
@@ -2184,13 +2185,10 @@ type error = {
   kind : error_kind;
   range : range;
   location : location option;
-  char_column : int option;
   contexts : context list;
   notes : note list;
   excerpt : excerpt;
 }
-
-type columns = [ `Bytes | `Code_points ]
 
 let window_size = 240
 let max_frames = 5
@@ -2551,7 +2549,7 @@ let add_text b text =
     Buffer.add_string b text
   end
 
-let render ?name ?source ?(columns = `Bytes) ?custom e =
+let render ?name ?source ?custom e =
   let src =
     match source with Some s -> Some (s, source_line_starts s) | None -> None
   in
@@ -2569,7 +2567,7 @@ let render ?name ?source ?(columns = `Bytes) ?custom e =
               )
           )
     | None, Some l ->
-        Some (l, e.char_column)
+        Some (l, e.excerpt.char_column)
     | None, None ->
         None
   in
@@ -2578,25 +2576,16 @@ let render ?name ?source ?(columns = `Bytes) ?custom e =
     | Some (s, starts) ->
         let l = location_of_position s f.start in
         let shown =
-          match columns with
-          | `Bytes ->
-              l.col
-          | `Code_points ->
-              1
-              + count_code_points s
-                  starts.(l.line - 1)
-                  (imin f.start (String.length s))
+          Some
+            (1
+            + count_code_points s
+                starts.(l.line - 1)
+                (imin f.start (String.length s))
+            )
         in
         Some (l.line, l.col, shown)
     | None ->
-        Option.map
-          (fun (l, c, cp) ->
-            ( l,
-              c,
-              match (columns, cp) with `Code_points, Some cp -> cp | _ -> c
-            )
-          )
-          (List.nth e.excerpt.frame_locs i)
+        List.nth e.excerpt.frame_locs i
   in
   let get number focus =
     match src with
@@ -2605,23 +2594,23 @@ let render ?name ?source ?(columns = `Bytes) ?custom e =
     | None ->
         List.find_opt (fun v -> v.number = number) e.excerpt.views
   in
+  let header_column =
+    match where with Some (loc, Some c) -> Some (loc.line, c) | _ -> None
+  in
   let b = Buffer.create 256 in
   ( match name with
   | Some n ->
       Buffer.add_string b n;
       Buffer.add_char b ':';
-      if where = None then Buffer.add_char b ' '
+      if header_column = None then Buffer.add_char b ' '
   | None ->
       ()
   );
-  ( match where with
-  | Some (loc, cp) ->
-      Buffer.add_string b (string_of_int loc.line);
+  ( match header_column with
+  | Some (line, c) ->
+      Buffer.add_string b (string_of_int line);
       Buffer.add_char b ':';
-      Buffer.add_string b
-        (string_of_int
-           (match (columns, cp) with `Code_points, Some c -> c | _ -> loc.col)
-        )
+      Buffer.add_string b (string_of_int c)
   | None ->
       Buffer.add_string b "byte ";
       Buffer.add_string b (string_of_int e.range.start)
@@ -2917,11 +2906,11 @@ let render ?name ?source ?(columns = `Bytes) ?custom e =
         Buffer.add_string b f.name;
         Buffer.add_string b ", from ";
         match loc with
-        | Some (l, _, c) ->
+        | Some (l, _, Some c) ->
             Buffer.add_string b (string_of_int l);
             Buffer.add_char b ':';
             Buffer.add_string b (string_of_int c)
-        | None ->
+        | Some (_, _, None) | None ->
             Buffer.add_string b "byte ";
             Buffer.add_string b (string_of_int f.start)
       end else if i = shown_frames then begin
@@ -3355,13 +3344,12 @@ let build st ~pos ?(notes = []) kind span frames =
     kind;
     range = span;
     location;
-    char_column;
     contexts =
       List.map
         (fun (name, start, delimited) -> { name; start; delimited })
         frames;
     notes;
-    excerpt = { views; frame_locs };
+    excerpt = { views; frame_locs; char_column };
   }
 
 let extras_span pos (x : fail_extra) =

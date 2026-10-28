@@ -845,7 +845,7 @@ let test_cut_inside_nested_context_keeps_outer_open () =
 
 let lines l = String.concat "\n" l
 
-let render ?(name = "input.json") ?source ?columns input parser =
+let render ?(name = "input.json") ?source input parser =
   match
     Parseff.parse input (fun () ->
         let v = parser () in
@@ -856,7 +856,7 @@ let render ?(name = "input.json") ?source ?columns input parser =
   | Stdlib.Ok _ ->
       "ok"
   | Stdlib.Error (e : Parseff.error) ->
-      Parseff.render_error ~name ?source ?columns e
+      Parseff.render_error ~name ?source e
 
 let check_render label expected actual =
   Alcotest.(check string) label expected actual
@@ -998,7 +998,7 @@ let test_render_opener_utf8 () =
          "  | ╭───────╯";
          "2 | │ 2 3]]";
          "  | ╰───^";
-         "  * while parsing array, from 1:8";
+         "  * while parsing array, from 1:7";
          "  * while parsing array, from 1:1";
        ]
     )
@@ -1150,12 +1150,12 @@ let test_render_spans_and_columns () =
       "  * while parsing array, from 1:1";
     ]
   in
-  check_render "H bytes"
-    (lines ("input.json:1:7: [error] expected ',' or ']', found '\"'" :: body))
-    (render input ctx_json_parser);
-  check_render "H code points"
-    (lines ("input.json:1:6: [error] expected ',' or ']', found '\"'" :: body))
-    (render ~columns:`Code_points input ctx_json_parser)
+  let expected =
+    lines ("input.json:1:6: [error] expected ',' or ']', found '\"'" :: body)
+  in
+  check_render "H code points" expected (render input ctx_json_parser);
+  check_render "H code points with ~source" expected
+    (render ~source:input input ctx_json_parser)
 
 let let_stmt_parser () = ignore (let_statement_parser ())
 
@@ -1935,8 +1935,7 @@ let chunk_source ?(chunk = 100) input =
 
 let render_all e input =
   ignore (Parseff.render_error e);
-  ignore (Parseff.render_error ~source:input e);
-  ignore (Parseff.render_error ~columns:`Code_points e)
+  ignore (Parseff.render_error ~source:input e)
 
 let test_backtrack_window_error_renders () =
   let long = String.make 5000 'a' in
@@ -2504,16 +2503,6 @@ let test_context_column_in_code_points () =
         ignore (Parseff.char 'q')
     )
   in
-  check_render "bytes"
-    (lines
-       [
-         "input.json:1:8: [error] expected 'q', found 'x'";
-         "1 | \xCE\xBB\xCE\xBB\xCE\xBB[x";
-         "  |     ^";
-         "  * while parsing arr, from 1:7";
-       ]
-    )
-    (render input parser);
   let expected =
     lines
       [
@@ -2523,9 +2512,9 @@ let test_context_column_in_code_points () =
         "  * while parsing arr, from 1:4";
       ]
   in
-  check_render "code points" expected (render ~columns:`Code_points input parser);
+  check_render "code points" expected (render input parser);
   check_render "code points with ~source" expected
-    (render ~columns:`Code_points ~source:input input parser)
+    (render ~source:input input parser)
 
 let test_take_reports_what_is_left () =
   let take n () = ignore (Parseff.take n) in
@@ -2920,7 +2909,7 @@ let test_limits_keep_frames_and_give_help () =
          "input:3:1: [error] backtrack window of 16 bytes exceeded";
          "3 | line 3";
          "  | ^";
-         "  * while parsing block, from 2:1";
+         "  * while parsing block, from byte 7";
          "  * help: call commit or cut earlier, or raise ~backtrack_window";
        ]
     )
@@ -3059,8 +3048,9 @@ let test_position_is_known_or_absent () =
           Alcotest.(check (pair int int))
             "line and column" (2, 3)
             (location.line, location.col);
-          Alcotest.(check (option int))
-            "character column" (Some 2) e.char_column
+          Alcotest.(check string)
+            "the header column counts characters" "2:2: [error]"
+            (String.sub (Parseff.render_error e) 0 12)
       | None ->
           Alcotest.fail "expected a position"
     )
@@ -3206,7 +3196,7 @@ let test_excerpt_escapes_invisible_code_points () =
   check_render "zero width space before the error"
     (lines
        [
-         "input.json:1:4: [error] expected 'q', found 'x'";
+         "input.json:1:2: [error] expected 'q', found 'x'";
          "1 | \\u{200B}x";
          "  |         ^";
        ]
@@ -3228,7 +3218,7 @@ let test_excerpt_escapes_invisible_code_points () =
   check_render "combining mark after a base character stays"
     (lines
        [
-         "input.json:1:4: [error] expected 'q', found 'x'";
+         "input.json:1:3: [error] expected 'q', found 'x'";
          "1 | e\xCC\x81x";
          "  |   ^";
        ]

@@ -115,14 +115,12 @@ type error = private {
       (** The bytes the error is about, never reversed, empty at the end of the
           input. *)
   location : location option;
-      (** Line and column of [range.start], where [location.col] counts bytes.
-          [None] when the line is not known: in streaming, when the position is
-          older than the buffered input. {!render_error} prints the byte offset
-          then. *)
-  char_column : int option;
-      (** Column of [range.start] counted in Unicode characters (code points)
-          from the start of its line, 1-based. [None] when [location] is [None]
-          or when the start of the line is no longer buffered (streaming). *)
+      (** Line and column of [range.start], 1-based. [location.col] counts
+          bytes, while the column {!render_error} prints counts Unicode
+          characters, so the two differ on a line with non-ASCII text. [None]
+          when the line is not known: in streaming, when the position is older
+          than the buffered input. {!render_error} prints the byte offset then.
+      *)
   contexts : context list;  (** Open constructs, outermost first. *)
   notes : note list;
   excerpt : excerpt;
@@ -139,12 +137,9 @@ val error_message : ?custom:(custom_error -> string) -> error -> string
     errors, without it the message is [custom error (no ~custom printer given)].
 *)
 
-type columns = [ `Bytes | `Code_points ]
-
 val render_error :
   ?name:string ->
   ?source:string ->
-  ?columns:columns ->
   ?custom:(custom_error -> string) ->
   error ->
   string
@@ -166,15 +161,19 @@ val render_error :
     error line and the lines around it, and may miss old lines in streaming.
     When the line of the error is not known, which happens in streaming when the
     position is older than the buffered input, the header is
-    [input.json: byte N: [error] ...] and there is no excerpt. [columns] chooses
-    the column unit of the header, [`Bytes] by default; it applies to the
-    columns of [* while parsing] lines too. Carets count code points, and a
-    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
-    the escape {!val:error_message} uses, such as [\x1B], with as many carets as
-    the escape has characters. A [Depth_limit_exceeded] or
-    [Backtrack_window_exceeded] error ends with a [* help:] line. The rows the
-    renderer adds never end with a space, and source text is printed byte for
-    byte. The result has no trailing newline. *)
+    [input.json: byte N: [error] ...] and there is no excerpt. The columns of
+    the header and of the [* while parsing] lines count Unicode characters (code
+    points), while [location.col] counts bytes, so they differ on a line with
+    non-ASCII text. In streaming, when the start of a line is no longer buffered
+    and [source] is not given, the character column is not known: the header is
+    then [input.json: byte N: [error] ...] too, and a [* while parsing] line
+    says [from byte N]. Carets count code points, and a control byte, an invalid
+    UTF-8 byte or a C1 control prints in the excerpt as the escape
+    {!val:error_message} uses, such as [\x1B], with as many carets as the escape
+    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
+    error ends with a [* help:] line. The rows the renderer adds never end with
+    a space, and source text is printed byte for byte. The result has no
+    trailing newline. *)
 
 (** {1 Diagnostics} *)
 
