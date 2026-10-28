@@ -112,7 +112,8 @@ type source = {
   initial : string;
   read : bytes -> int -> int -> int;
   mutable eof : bool;
-  tmp : bytes;
+  mutable tmp : bytes;
+  tmp_cap : int;
   mutable window : int;
 }
 
@@ -183,6 +184,7 @@ let[@inline always] imax (a : int) b =
   else
     b
 let default_buf_size = 4096
+let young_buf_size = 2040
 let default_backtrack_window = 65_536
 
 let check_backtrack_window w =
@@ -192,21 +194,23 @@ let check_backtrack_window w =
 module Source = struct
   type t = source
 
-  let make ~initial ~read ~eof ~tmp : t =
-    { initial; read; eof; tmp; window = default_backtrack_window }
+  let make ~initial ~read ~eof ~tmp ~tmp_cap : t =
+    { initial; read; eof; tmp; tmp_cap; window = default_backtrack_window }
 
   let of_string s =
-    make ~initial:s ~read:(fun _ _ _ -> 0) ~eof:true ~tmp:Bytes.empty
+    make ~initial:s ~read:(fun _ _ _ -> 0) ~eof:true ~tmp:Bytes.empty ~tmp_cap:0
 
   let of_channel ?(buf_size = default_buf_size) ic =
     if buf_size < 1 then
       invalid_arg "Parseff.Source.of_channel: buf_size must be at least 1";
     make ~initial:""
       ~read:(fun buf off len -> input ic buf off len)
-      ~eof:false ~tmp:(Bytes.create buf_size)
+      ~eof:false ~tmp:(Bytes.create buf_size) ~tmp_cap:buf_size
 
   let of_function read =
-    make ~initial:"" ~read ~eof:false ~tmp:(Bytes.create default_buf_size)
+    make ~initial:"" ~read ~eof:false
+      ~tmp:(Bytes.create young_buf_size)
+      ~tmp_cap:default_buf_size
 
   let of_chunks read_chunk =
     let pending = ref "" in
@@ -286,8 +290,12 @@ module State = struct
   let cache : slot ref = ref { owner = -1; state = none }
 
   let[@inline always] install (t : t) =
-    Domain.DLS.set key t;
-    cache := { owner = (Domain.self () :> int); state = t }
+    let owner = (Domain.self () :> int) in
+    let slot = !cache in
+    if not (slot.owner = owner && slot.state == t) then begin
+      Domain.DLS.set key t;
+      cache := { owner; state = t }
+    end
 
   let[@inline always] current () =
     let slot = !cache in
@@ -308,18 +316,11 @@ module State = struct
           none
       )
 
-  let run (t : t) f =
+  let enter (t : t) =
     let previous = current () in
     install t;
     t.active <- true;
-    match f () with
-    | v ->
-        leave t previous;
-        v
-    | exception exn ->
-        let bt = Printexc.get_raw_backtrace () in
-        leave t previous;
-        Printexc.raise_with_backtrace exn bt
+    previous
 
   let[@inline always] diag_len (t : t) = t.diag_len
   let[@inline always] diag (t : t) = t.diag
@@ -599,6 +600,8 @@ let[@inline never] rec fill st ~keep_from need =
             false
           end else begin
             append st ~floor src.tmp n;
+            if n = Bytes.length src.tmp && n < src.tmp_cap then
+              src.tmp <- Bytes.create src.tmp_cap;
             fill st ~keep_from need
           end
 
@@ -1413,9 +1416,6 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
     fail_int st pos kind
   end
 
-let[@inline] turn_invalid_utf8_to_parse_error st f =
-  try f () with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
 
@@ -2060,22 +2060,24 @@ end
 module Utf8 = struct
   let[@inline] satisfy pred ~label =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error st (fun () ->
-        handle_satisfy_uchar st pred label
-    )
+    begin try handle_satisfy_uchar st pred label
+    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
+    end
 
   let[@inline] char u =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error st (fun () -> handle_char_uchar st u)
+    begin try handle_char_uchar st u
+    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
+    end
 
   let[@inline] any_char () = satisfy (fun _ -> true) ~label:"any character"
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
     let s =
-      turn_invalid_utf8_to_parse_error st (fun () ->
-          handle_take_while_uchar st pred
-      )
+      begin try handle_take_while_uchar st pred
+      with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
+      end
     in
     if at_least > 0 then begin
       let count = ref 0 in
@@ -2100,21 +2102,21 @@ module Utf8 = struct
 
   let[@inline] skip_while pred =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error st (fun () ->
-        handle_skip_while_uchar st pred
-    )
+    begin try handle_skip_while_uchar st pred
+    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
+    end
 
   let[@inline] take_while_span pred =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error st (fun () ->
-        handle_take_while_span_uchar st pred
-    )
+    begin try handle_take_while_span_uchar st pred
+    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
+    end
 
   let[@inline] skip_while_then_char pred u =
     let st = get_state () in
-    turn_invalid_utf8_to_parse_error st (fun () ->
-        handle_skip_while_then_uchar st pred u
-    )
+    begin try handle_skip_while_then_uchar st pred u
+    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
+    end
 
   let[@inline] is_whitespace u = Uucp.White.is_white_space u
 
@@ -3442,29 +3444,37 @@ let error_failure st pos msg (x : fail_extra) =
   build st ~pos:span.start ~notes:x.notes (Error.Failure msg) span x.chain
 
 let run_detailed st thunk =
-  State.run st @@ fun () ->
-  match thunk () with
-  | v ->
-      Stdlib.Ok v
-  | exception Fail ->
-      Stdlib.Error (error_of_far (State.current ()))
-  | exception User_failure (pos, msg, x) ->
-      Stdlib.Error (error_failure (State.current ()) pos msg x)
-  | exception Depth_limit_exceeded a ->
-      let st = State.current () in
-      Stdlib.Error
-        (error_plain st a.at
-           (Error.Depth_limit_exceeded { limit = st.max_depth })
-           a.open_frames
-        )
-  | exception Backtrack_window_exceeded (info, a) ->
-      Stdlib.Error
-        (error_plain (State.current ()) a.at
-           (Error.Backtrack_window_exceeded
-              { limit = info.limit; oldest = info.oldest }
-           )
-           a.open_frames
-        )
+  let previous = State.enter st in
+  match
+    match thunk () with
+    | v ->
+        Stdlib.Ok v
+    | exception Fail ->
+        Stdlib.Error (error_of_far st)
+    | exception User_failure (pos, msg, x) ->
+        Stdlib.Error (error_failure st pos msg x)
+    | exception Depth_limit_exceeded a ->
+        Stdlib.Error
+          (error_plain st a.at
+             (Error.Depth_limit_exceeded { limit = st.max_depth })
+             a.open_frames
+          )
+    | exception Backtrack_window_exceeded (info, a) ->
+        Stdlib.Error
+          (error_plain st a.at
+             (Error.Backtrack_window_exceeded
+                { limit = info.limit; oldest = info.oldest }
+             )
+             a.open_frames
+          )
+  with
+  | r ->
+      State.leave st previous;
+      r
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.leave st previous;
+      Printexc.raise_with_backtrace exn bt
 
 let until_end parser () =
   let v = parser () in
