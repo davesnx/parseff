@@ -83,6 +83,7 @@ jobs:
         with:
           ref: ${{ startsWith(github.ref, 'refs/tags/') && 'main' || github.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup OCaml and dependencies
         uses: ml-in-barcelona/gh-ci-action@v1.2.0
