@@ -15,9 +15,9 @@ This page focuses on the cross-library parser workloads in `bench/`: JSON, CSV, 
 
 ```
 Benchmark    Best Parseff result                     What it measures
-JSON         ~2.30M/s optimized                      Full JSON array parser vs Angstrom
-CSV          ~3.62M/s fused                          CSV field parser vs Angstrom and MParser
-Arithmetic   ~9.67M/s fused                          Expression parser/evaluator vs Angstrom and MParser
+JSON         ~2.47M/s optimized                      Full JSON array parser vs Angstrom
+CSV          ~3.93M/s fused                          CSV field parser vs Angstrom and MParser
+Arithmetic   ~11.86M/s fused                         Expression parser/evaluator vs Angstrom and MParser
 ```
 
 Those rows are useful for a high-level snapshot, but they are not directly comparable across rows because the workloads differ.
@@ -28,10 +28,10 @@ Benchmarked on a JSON array parser (`{[1, 2, 3, ..., 10]}`) over 1,000,000 itera
 
 ```
                         Parses/sec     vs. Angstrom (generic)   Minor allocs
-Parseff (optimized)     ~2,300,000     1.9x faster              1.3 GB
-Parseff (generic)       ~1,560,000     1.3x faster              800 MB
-Angstrom (optimized)    ~1,550,000     1.3x faster             11.1 GB
-Angstrom (generic)      ~1,190,000     baseline                 5.9 GB
+Parseff (optimized)     ~2,470,000     2.0x faster              1.4 GB
+Parseff (generic)       ~1,740,000     1.4x faster              1.4 GB
+Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
+Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 ```
 
 **Optimized** uses `sep_by_take_span` plus `List.map` over zero-copy spans. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.span_to_string`.
@@ -42,7 +42,7 @@ All parsers produce the same output (`float list`) from the same input and requi
 
 Minor allocation totals are the cumulative values reported by `Benchmark.latencyN` for the full 1,000,000-parse run.
 
-Against each library's best JSON parser, Parseff's optimized path is still ~1.5x faster, while the generic Parseff parser is roughly on par with Angstrom's optimized parser and still ~1.3x faster than Angstrom's generic baseline.
+Against each library's best JSON parser, Parseff's optimized path is still ~1.4x faster, while the generic Parseff parser is roughly on par with Angstrom's optimized parser and still ~1.4x faster than Angstrom's generic baseline.
 
 ### Other cross-library benchmarks
 
@@ -50,11 +50,11 @@ The other cross-library workloads in `bench/` show the same pattern:
 
 ```
                        Parseff best     Parseff generic   Angstrom best   MParser
-CSV                    ~3,620,000       ~2,500,000       ~2,290,000      ~1,340,000
-Arithmetic             ~9,670,000       ~2,080,000       ~4,490,000      ~1,170,000
+CSV                    ~3,930,000       ~2,790,000       ~2,550,000      ~1,490,000
+Arithmetic             ~11,860,000      ~2,960,000       ~5,360,000      ~1,510,000
 ```
 
-On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result, and the fused path is ~1.6x faster. On arithmetic, Parseff's generic parser is ~1.5x faster than Angstrom's generic baseline, and the fused evaluator is ~2.2x faster than Angstrom's optimized parser.
+On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result, and the fused path is ~1.5x faster. On arithmetic, Parseff's generic parser is ~1.8x faster than Angstrom's generic baseline, and the fused evaluator is ~2.2x faster than Angstrom's optimized parser.
 
 ### Why Parseff is faster
 
