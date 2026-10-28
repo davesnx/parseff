@@ -328,7 +328,9 @@ module State = struct
     let index = t.frames_top in
     let base = index * frame_stride in
     if base + frame_stride > Array.length t.frames then begin
-      let grown = Array.make (imax 12 (2 * Array.length t.frames)) 0 in
+      let grown =
+        Array.make (imax (4 * frame_stride) (2 * Array.length t.frames)) 0
+      in
       Array.blit t.frames 0 grown 0 base;
       t.frames <- grown
     end;

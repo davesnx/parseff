@@ -948,7 +948,7 @@ let test_key_value_duplicates_on_error () =
 
 type Parseff.custom_error += Bad_value of string
 
-let test_user_error_extensible () =
+let test_custom_error_extensible () =
   let parser () =
     ignore (Parseff.consume "ab");
     Parseff.error (Bad_value "ab")
@@ -980,7 +980,7 @@ let test_user_error_extensible () =
            (Parseff.render_error e)
         )
   | _ ->
-      Alcotest.fail "Expected a Bad_value user error"
+      Alcotest.fail "Expected a Bad_value custom error"
 
 let check_trailing_rejected name = function
   | Error
@@ -1106,7 +1106,7 @@ type Parseff.custom_error +=
   | Custom_error of string
   | Boom_msg of string
 
-let test_expect_user_error_passthrough () =
+let test_expect_custom_error_passthrough () =
   match
     Parseff.parse "5" (fun () ->
         Parseff.expect "a small number" (fun () ->
@@ -1123,9 +1123,9 @@ let test_expect_user_error_passthrough () =
   | Error ({ kind = Custom (Too_big n); _ } as e) ->
       let pos = e.range.start in
       Alcotest.(check int) "error position" 1 pos;
-      Alcotest.(check int) "user error value" 5 n
+      Alcotest.(check int) "custom error value" 5 n
   | Error { kind = Expected { found = Text _; _ }; _ } ->
-      Alcotest.fail "User error was swallowed by expect"
+      Alcotest.fail "Custom error was swallowed by expect"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -1190,7 +1190,7 @@ let test_one_of_labeled_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let test_one_of_labeled_user_error_passthrough () =
+let test_one_of_labeled_custom_error_passthrough () =
   match
     Parseff.parse "5"
       (Parseff.one_of_labeled
@@ -1209,9 +1209,9 @@ let test_one_of_labeled_user_error_passthrough () =
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { kind = Custom (Too_big n); _ } ->
-      Alcotest.(check int) "user error value" 5 n
+      Alcotest.(check int) "custom error value" 5 n
   | Error { kind = Expected { found = Text _; _ }; _ } ->
-      Alcotest.fail "User error was swallowed by one_of_labeled"
+      Alcotest.fail "Custom error was swallowed by one_of_labeled"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -2002,8 +2002,8 @@ let () =
           test_case "relabels parse error" `Quick
             test_expect_relabels_parse_error;
           test_case "success passthrough" `Quick test_expect_success;
-          test_case "user error passthrough" `Quick
-            test_expect_user_error_passthrough;
+          test_case "custom error passthrough" `Quick
+            test_expect_custom_error_passthrough;
           test_case "relabels or_ error" `Quick test_expect_relabels_or_error;
         ]
       );
@@ -2011,8 +2011,8 @@ let () =
         [
           test_case "success" `Quick test_one_of_labeled_success;
           test_case "failure message" `Quick test_one_of_labeled_failure;
-          test_case "user error passthrough" `Quick
-            test_one_of_labeled_user_error_passthrough;
+          test_case "custom error passthrough" `Quick
+            test_one_of_labeled_custom_error_passthrough;
         ]
       );
       ( "error combinator",
@@ -2111,8 +2111,8 @@ let () =
             test_key_value_duplicates_on_ok;
           test_case "key=value duplicates on Error" `Quick
             test_key_value_duplicates_on_error;
-          test_case "user error through an extensible variant" `Quick
-            test_user_error_extensible;
+          test_case "custom error through an extensible variant" `Quick
+            test_custom_error_extensible;
           test_case "consume default and Partial" `Quick
             test_consume_default_and_partial;
         ]

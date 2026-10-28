@@ -415,7 +415,7 @@ let test_fail_escapes_or_many_expect () =
     (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ] ()))
     {|Error@0 Failure "boom"|}
 
-let test_user_error_absorbed_by_or () =
+let test_custom_error_absorbed_by_or () =
   both_runners
     (fun s -> s)
     "x"
@@ -427,7 +427,7 @@ let test_user_error_absorbed_by_or () =
     )
     {|Ok x|}
 
-let test_user_error_reported_when_furthest () =
+let test_custom_error_reported_when_furthest () =
   let parser () =
     Parseff.or_
       (fun () ->
@@ -439,7 +439,7 @@ let test_user_error_reported_when_furthest () =
   in
   both_runners (fun s -> s) "abc" parser "Error@2 E"
 
-let test_user_error_beats_expected_at_tie () =
+let test_custom_error_beats_expected_at_tie () =
   let parser () =
     Parseff.or_
       (fun () -> Parseff.error Cause_e)
@@ -1618,7 +1618,7 @@ let test_error_from_and_notes () =
   ( match Parseff.parse "abcd" parser with
   | Stdlib.Error e ->
       Alcotest.(check string)
-        "user error"
+        "custom error"
         (lines
            [
              "1:1: [error] boom!";
@@ -1836,13 +1836,13 @@ let number_checked () =
   else
     n
 
-let test_user_errors_by_pattern () =
+let test_custom_errors_by_pattern () =
   ( match Parseff.parse "300" number_checked with
   | Stdlib.Error { kind = Parseff.Custom (Too_large n); range; _ } ->
       Alcotest.(check int) "payload" 300 n;
       Alcotest.(check int) "position" 3 range.start
   | _ ->
-      Alcotest.fail "expected a user error"
+      Alcotest.fail "expected a custom error"
   );
   ( match
       Parseff.parse "300" (fun () ->
@@ -1852,7 +1852,7 @@ let test_user_errors_by_pattern () =
   | Stdlib.Error { kind = Parseff.Custom (Too_large 300); _ } ->
       ()
   | _ ->
-      Alcotest.fail "expect must not relabel a user error"
+      Alcotest.fail "expect must not relabel a custom error"
   );
   ( match
       Parseff.parse "300" (fun () ->
@@ -1877,7 +1877,7 @@ let test_user_errors_by_pattern () =
   | Stdlib.Error { kind = Parseff.Custom (Too_large 300); _ } ->
       ()
   | _ ->
-      Alcotest.fail "the furthest user error is reported"
+      Alcotest.fail "the furthest custom error is reported"
   );
   match Parseff.parse "x" (fun () -> Parseff.fail "boom") with
   | Stdlib.Error { kind = Parseff.Failure "boom"; _ } ->
@@ -2497,6 +2497,37 @@ let test_unknown_line_has_byte_header () =
        )
     )
 
+let test_known_line_without_a_buffered_start () =
+  let input = String.make 60 'a' ^ "!" in
+  let parser () =
+    ignore
+      (Parseff.many
+         (fun () ->
+           ignore (Parseff.char 'a');
+           Parseff.cut ()
+         )
+         ()
+      );
+    ignore (Parseff.char 'b')
+  in
+  match
+    Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
+  with
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error (e : Parseff.error) ->
+      Alcotest.(check bool) "the line is known" true (e.location <> None);
+      Alcotest.(check string)
+        "byte header with the cut excerpt"
+        (lines
+           [
+             "input: byte 60: [error] expected 'a' or 'b', found '!'";
+             "1 | ...aaaaa!";
+             "  |         ^";
+           ]
+        )
+        (Parseff.render_error ~name:"input" e)
+
 let test_context_column_in_code_points () =
   let input = "\xCE\xBB\xCE\xBB\xCE\xBB[x" in
   let parser () =
@@ -2620,7 +2651,7 @@ let test_quote_escapes () =
       ignore (Parseff.consume "it's")
   )
 
-let test_user_error_without_printer () =
+let test_custom_error_without_printer () =
   match Parseff.parse "x" (fun () -> Parseff.error Boom) with
   | Stdlib.Error e ->
       Alcotest.(check string)
@@ -3345,12 +3376,12 @@ let () =
             test_commit_forgets_earlier_alternative;
           test_case "fail escapes or_, many, expect" `Quick
             test_fail_escapes_or_many_expect;
-          test_case "user error absorbed by or_" `Quick
-            test_user_error_absorbed_by_or;
-          test_case "user error reported when furthest" `Quick
-            test_user_error_reported_when_furthest;
-          test_case "user error beats expected at tie" `Quick
-            test_user_error_beats_expected_at_tie;
+          test_case "custom error absorbed by or_" `Quick
+            test_custom_error_absorbed_by_or;
+          test_case "custom error reported when furthest" `Quick
+            test_custom_error_reported_when_furthest;
+          test_case "custom error beats expected at tie" `Quick
+            test_custom_error_beats_expected_at_tie;
           test_case "behind failure ignored" `Quick test_behind_failure_ignored;
           test_case "item buffer overflow" `Quick test_item_buffer_overflow;
           test_case "item buffer overflow counts distinct" `Quick
@@ -3453,7 +3484,8 @@ let () =
           test_case "exhaustive kind match" `Quick test_exhaustive_kind_match;
           test_case "end of input keeps the expected set" `Quick
             test_end_of_input_keeps_expected_set;
-          test_case "user errors by pattern" `Quick test_user_errors_by_pattern;
+          test_case "custom errors by pattern" `Quick
+            test_custom_errors_by_pattern;
           test_case "migration pattern" `Quick test_migration_pattern;
           test_case "diagnostics carry the error" `Quick
             test_diagnostics_carry_the_error;
@@ -3490,6 +3522,8 @@ let () =
         [
           test_case "unknown line has a byte header" `Quick
             test_unknown_line_has_byte_header;
+          test_case "known line without a buffered start" `Quick
+            test_known_line_without_a_buffered_start;
           test_case "context column in code points" `Quick
             test_context_column_in_code_points;
           test_case "take reports what is left" `Quick
@@ -3497,8 +3531,8 @@ let () =
           test_case "int mismatch shows the value" `Quick
             test_int_mismatch_shows_the_value;
           test_case "quote escapes" `Quick test_quote_escapes;
-          test_case "user error without printer" `Quick
-            test_user_error_without_printer;
+          test_case "custom error without printer" `Quick
+            test_custom_error_without_printer;
           test_case "expected list is capped" `Quick
             test_expected_list_is_capped;
           test_case "excerpt escapes" `Quick test_excerpt_escapes;

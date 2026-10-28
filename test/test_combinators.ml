@@ -44,7 +44,7 @@ let both show_v input parser expected =
 let show_string s = Printf.sprintf "%S" s
 let show_ints l = "[" ^ String.concat ";" (List.map string_of_int l) ^ "]"
 
-let test_one_of_labeled_user_error () =
+let test_one_of_labeled_custom_error () =
   let r =
     Parseff.parse "x" (fun () ->
         Parseff.one_of_labeled
@@ -63,9 +63,9 @@ let test_one_of_labeled_user_error () =
           ()
     )
   in
-  Alcotest.(check string) "user error kept" "Error@1 E" (show show_string r)
+  Alcotest.(check string) "custom error kept" "Error@1 E" (show show_string r)
 
-let test_expect_user_error_through_or () =
+let test_expect_custom_error_through_or () =
   let r =
     Parseff.parse "x" (fun () ->
         Parseff.expect "thing" (fun () ->
@@ -82,7 +82,7 @@ let test_expect_user_error_through_or () =
         )
     )
   in
-  Alcotest.(check string) "user error kept" "Error@1 E" (show show_string r)
+  Alcotest.(check string) "custom error kept" "Error@1 E" (show show_string r)
 
 let test_many_non_consuming () =
   both show_ints "abc"
@@ -257,10 +257,10 @@ let () =
     [
       ( "error relabeling",
         [
-          test_case "one_of_labeled keeps user error" `Quick
-            test_one_of_labeled_user_error;
-          test_case "expect keeps user error through or_" `Quick
-            test_expect_user_error_through_or;
+          test_case "one_of_labeled keeps custom error" `Quick
+            test_one_of_labeled_custom_error;
+          test_case "expect keeps custom error through or_" `Quick
+            test_expect_custom_error_through_or;
         ]
       );
       ( "non-consuming loops",

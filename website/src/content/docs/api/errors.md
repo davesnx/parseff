@@ -257,7 +257,7 @@ input.json:4:5: [error] expected ',' or '}', found '"'
 - The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the context line then says `from byte N`. `Parseff.error_message` returns only the one-line message.
 
-The columns of the header and of the `* while parsing` lines count Unicode characters (code points), like the carets, while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the character column is not known: the header is `input.json: byte N: [error] ...` and the context line says `from byte N`.
+The columns of the header and of the `* while parsing` lines count Unicode characters (code points), like the carets, while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the character column is not known: the header is `input.json: byte N: [error] ...`, the excerpt of the error line is still printed and cut on the left with `...`, and the context line says `from byte N`.
 
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'

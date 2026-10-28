@@ -71,8 +71,7 @@ This is the 0.5.0 release.
 | `warn_at ~pos x` | `warn_at d ~pos x` |
 | `'d Parseff.diagnostic = { pos; diagnostic }` | `'d Parseff.Diagnostics.entry = { pos; value }` |
 | `` error (`Too_large n) `` | `type Parseff.custom_error += Too_large of int`, then `error (Too_large n)` |
-| `` Custom (`Too_large n) `` | `Custom (Too_large n)`, with a final `_` case |
-| `` render_error ~custom:(fun (`Too_large n) -> ...) `` | `render_error ~custom:(function Too_large n -> ... \| _ -> ...)` |
+| `` Error { pos; error = `Too_large n } `` | `Error { kind = Custom (Too_large n); _ }`, with a final `_` case |
 | `('a, 'e) Parseff.result` | `('a, Parseff.error) result` |
 
 ### Migrating from 0.4

@@ -344,7 +344,8 @@ The columns of the header and of the [* while parsing] lines count Unicode
 characters (code points), like the carets, while [location.col] counts bytes
 (see the UTF-8 page of the API documentation). When streaming has dropped the
 start of a line and [~source] is not given, the character column is not known:
-the header is [input.json: byte N: [error] ...] and the context line says
+the header is [input.json: byte N: [error] ...], the excerpt of the error line
+is still printed and cut on the left with [...], and the context line says
 [from byte N].
 
 {v
