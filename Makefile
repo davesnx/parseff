@@ -104,6 +104,14 @@ website-build: docs ## Build website (generates markdown from .mld then builds A
 	fi
 	cd website && npm run build
 
+.PHONY: website-build-versions
+website-build-versions: docs ## Build the website for main and every published tag into website/dist
+	./website/generate-changelog.sh
+	@if [ ! -d website/node_modules ]; then \
+		cd website && npm ci; \
+	fi
+	./website/build-versions.sh
+
 .PHONY: website-preview
 website-preview: ## Preview built website
 	cd website && npm run preview

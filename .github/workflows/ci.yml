@@ -20,8 +20,6 @@ env:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -75,15 +73,15 @@ jobs:
       - name: Save dune cache
         uses: ml-in-barcelona/gh-ci-action/dune-cache/save@v1.2.0
 
-  deploy:
-    name: Deploy website
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+  website:
+    name: Build website
     needs: build
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'main' || github.ref }}
           fetch-depth: 0
 
       - name: Setup OCaml and dependencies
@@ -94,9 +92,6 @@ jobs:
           with-doc: true
           with-dev-setup: true
 
-      - name: Generate documentation markdown
-        run: make docs
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -104,14 +99,31 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
 
-      - name: Build website
-        run: make website-build
+      - name: Build website for every version
+        run: make website-build-versions
 
       - name: Upload artifact
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         uses: actions/upload-pages-artifact@v3
         with:
           path: website/dist
 
+  deploy:
+    name: Deploy website
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    needs: website
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
