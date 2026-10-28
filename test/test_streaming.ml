@@ -914,12 +914,20 @@ let norm : (_, Parseff.error) Result.t -> _ = function
       in
       Error (e.range.start, kind)
 
+let norm_ignoring_found : (_, Parseff.error) Result.t -> _ = function
+  | Error ({ kind = Expected { items; more; _ }; _ } as e) ->
+      Error (e.range.start, "Expected " ^ Marshal.to_string (items, more) [])
+  | r ->
+      norm r
+
 let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
-  let expected = norm (Parseff.parse ~consume:`Partial input parser) in
+  let expected =
+    norm_ignoring_found (Parseff.parse ~consume:`Partial input parser)
+  in
   List.iter
     (fun chunk_size ->
       let actual =
-        norm
+        norm_ignoring_found
           (Parseff.parse_source ~consume:`Partial
              (chunked_source ~chunk_size input)
              parser
@@ -1377,6 +1385,37 @@ let test_context_in_streaming () =
   | _ ->
       Alcotest.fail "expected a failure"
 
+let test_error_does_not_read_more_input () =
+  let input = "ab" in
+  let pos = ref 0 in
+  let failed_at = ref false in
+  let src =
+    Parseff.Source.of_function (fun buf off len ->
+        if !pos >= String.length input then begin
+          if !failed_at then Alcotest.fail "source read after the error";
+          0
+        end else begin
+          let n = min len (String.length input - !pos) in
+          Bytes.blit_string input !pos buf off n;
+          pos := !pos + n;
+          n
+        end
+    )
+  in
+  let parser () =
+    ignore (Parseff.consume "a");
+    failed_at := true;
+    Parseff.consume "x"
+  in
+  match Parseff.parse_source src parser with
+  | Error e ->
+      Alcotest.(check string)
+        "found text comes from buffered data"
+        "1:2: [error] expected \"x\", found 'b'\n1 | ab...\n  |  ^"
+        (Parseff.render_error e)
+  | Ok _ ->
+      Alcotest.fail "expected a failure"
+
 let test_excerpt_does_not_start_inside_a_code_point () =
   let input = "\xc3\xa9\xc3\xa9\xc3\xa9x" in
   let parser () =
@@ -1390,7 +1429,7 @@ let test_excerpt_does_not_start_inside_a_code_point () =
       Alcotest.(check string)
         "excerpt"
         "byte 6: [error] expected 'y' or '\xc3\xa9', found 'x'\n\
-         1 | ...x\n\
+         1 | ...x...\n\
         \  |    ^"
         (Parseff.render_error e);
       Alcotest.(check string)
@@ -1533,6 +1572,8 @@ let () =
         [
           test_case "does not start inside a code point" `Quick
             test_excerpt_does_not_start_inside_a_code_point;
+          test_case "error does not read more input" `Quick
+            test_error_does_not_read_more_input;
         ]
       );
       ( "Source.of_seq",

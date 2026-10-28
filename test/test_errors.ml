@@ -1532,6 +1532,23 @@ let test_fail_from_after_position_is_normalized () =
     (lines [ "input.json:1:2: [error] short"; "1 | abcdef"; "  |  ^^" ])
     (render_error "abcdef" parser)
 
+let test_error_inside_a_code_point_points_at_it () =
+  let input = "\xce\xbb\xc3\xa9x" in
+  let parser () =
+    ignore (Parseff.take 3);
+    Parseff.char 'y'
+  in
+  match Parseff.parse input parser with
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error (e : Parseff.error) ->
+      Alcotest.(check string)
+        "column and caret use the character start"
+        "1:2: [error] expected 'y', found '\\xA9'\n\
+         1 | \xce\xbb\xc3\xa9x\n\
+        \  |  ^"
+        (Parseff.render_error ~source:input e)
+
 let test_loose_note () =
   let parser () =
     Parseff.fail
@@ -2490,7 +2507,7 @@ let test_unknown_line_has_byte_header () =
     ignore (Parseff.char 'q')
   in
   check_render "a known line is correct"
-    "input:3:1: [error] expected 'q', found 'ef'"
+    "input:3:1: [error] expected 'q', found 'e'"
     (List.hd
        (String.split_on_char '\n'
           (render_stream ~name:"input" ~window:4096 small small_parser)
@@ -2522,7 +2539,7 @@ let test_known_line_without_a_buffered_start () =
         (lines
            [
              "input: byte 60: [error] expected 'a' or 'b', found '!'";
-             "1 | ...aaaaa!";
+             "1 | ...aaaaa!...";
              "  |         ^";
            ]
         )
@@ -3469,6 +3486,8 @@ let () =
           test_case "span is normalized" `Quick
             test_fail_from_after_position_is_normalized;
           test_case "note line" `Quick test_loose_note;
+          test_case "error inside a code point" `Quick
+            test_error_inside_a_code_point_points_at_it;
           test_case "underline on the error line" `Quick
             test_secondary_underline_same_line;
           test_case "underline on earlier lines" `Quick

@@ -111,7 +111,7 @@ let test_interleaved_failures_keep_separate_groups () =
   go b "abxx";
   run ();
   Alcotest.(check string) "first" "3 expected \"d\", found 'x'" !a;
-  Alcotest.(check string) "second" "2 expected \"c\" or \"d\", found 'xx'" !b;
+  Alcotest.(check string) "second" "2 expected \"c\" or \"d\", found 'x'" !b;
   check_outside_parse ()
 
 let chunk_source ?(chunk = 3000) total line =

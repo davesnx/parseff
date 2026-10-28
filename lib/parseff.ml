@@ -2212,11 +2212,14 @@ let count_code_points s a b =
     n := !n + 8
   done;
   while !i < b do
-    if Char.code (String.unsafe_get s !i) < 0x80 then
-      incr i
-    else
-      i := !i + char_len s !i;
-    incr n
+    if Char.code (String.unsafe_get s !i) < 0x80 then begin
+      incr i;
+      incr n
+    end else begin
+      let len = char_len s !i in
+      if !i + len <= b then incr n;
+      i := !i + len
+    end
   done;
   !n
 
@@ -2509,19 +2512,6 @@ let add_display b text =
     i := !i + n
   done
 
-let add_padding b text upto =
-  let i = ref 0 in
-  while !i < upto do
-    let n, esc = display_unit text !i in
-    if String.unsafe_get text !i = '\t' then
-      Buffer.add_char b '\t'
-    else
-      for _ = 1 to unit_width esc do
-        Buffer.add_char b ' '
-      done;
-    i := !i + n
-  done
-
 let char_boundary text i =
   if i >= String.length text then
     i
@@ -2535,6 +2525,20 @@ let char_boundary text i =
       !j
     else
       i
+
+let add_padding b text upto =
+  let i = ref 0 in
+  let upto = char_boundary text upto in
+  while !i < upto do
+    let n, esc = display_unit text !i in
+    if String.unsafe_get text !i = '\t' then
+      Buffer.add_char b '\t'
+    else
+      for _ = 1 to unit_width esc do
+        Buffer.add_char b ' '
+      done;
+    i := !i + n
+  done
 
 let display_width text a z =
   let w = ref 0 and i = ref (char_boundary text a) in
@@ -2764,6 +2768,7 @@ let render ?name ?source ?custom e =
         let cols (v : view) upto =
           let text = v.text in
           let n = imax 0 (imin (upto - v.first) (String.length text)) in
+          let n = char_boundary text n in
           let col =
             ref
               (w + 5
@@ -3051,10 +3056,6 @@ let found_of st pos =
     (End, { start = pos; stop = pos })
   else begin
     let p = imax pos st.base in
-    ( if p + 33 > st.input_len && st.source <> None then
-        try ignore (fill st ~keep_from:p (p + 33))
-        with Backtrack_window_exceeded _ -> ()
-    );
     let rel = p - st.base in
     let len = String.length st.input in
     let c = String.unsafe_get st.input rel in

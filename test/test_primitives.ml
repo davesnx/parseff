@@ -982,14 +982,15 @@ let test_custom_error_extensible () =
   | _ ->
       Alcotest.fail "Expected a Bad_value custom error"
 
-let check_trailing_rejected name = function
+let check_trailing_rejected ~found:expected name = function
   | Error
       {
         Parseff.kind =
-          Expected { items = End_of_input, []; found = Text "XYZ"; _ };
+          Expected { items = End_of_input, []; found = Text found; _ };
         range;
         _;
       } ->
+      Alcotest.(check string) (name ^ " found") expected found;
       Alcotest.(check int) (name ^ " offset") 3 range.start
   | Error e ->
       Alcotest.failf "%s: unexpected error %s" name (Parseff.error_message e)
@@ -998,7 +999,7 @@ let check_trailing_rejected name = function
 
 let test_consume_default_and_partial () =
   let parser () = Parseff.consume "abc" in
-  check_trailing_rejected "parse" (Parseff.parse "abcXYZ" parser);
+  check_trailing_rejected ~found:"XYZ" "parse" (Parseff.parse "abcXYZ" parser);
   ( match Parseff.parse "abc" parser with
   | Ok s ->
       Alcotest.(check string) "all consumed" "abc" s
@@ -1014,7 +1015,7 @@ let test_consume_default_and_partial () =
   let source () =
     Parseff.Source.of_seq (List.to_seq [ "a"; "bc"; "X"; "YZ" ])
   in
-  check_trailing_rejected "parse_source"
+  check_trailing_rejected ~found:"X" "parse_source"
     (Parseff.parse_source (source ()) parser);
   match Parseff.parse_source ~consume:`Partial (source ()) parser with
   | Ok s ->
