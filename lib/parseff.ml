@@ -184,7 +184,11 @@ let[@inline always] imax (a : int) b =
   else
     b
 let default_buf_size = 4096
-let young_buf_size = 2040
+
+(* OCaml's Max_young_wosize is 256 words (runtime/caml/config.h); not exposed
+   by Stdlib. Largest word-multiple Bytes whose block stays on the minor heap. *)
+let max_young_wosize = 256
+let young_buf_size = (max_young_wosize - 1) * (Sys.word_size / 8)
 let default_backtrack_window = 65_536
 
 let check_backtrack_window w =
@@ -1269,8 +1273,6 @@ let[@inline never] handle_take st n =
   end else
     fail_bytes st n
 
-exception Invalid_utf8 of int
-
 let[@inline] utf8_sequence_length lead =
   if lead < 0xC2 then
     1
@@ -1303,7 +1305,7 @@ let[@inline never] handle_satisfy_uchar st pred label =
   fill_uchar st ~keep_from:p p;
   if p >= st.input_len then fail_str st p tag_label label;
   let d = String.get_utf_8_uchar st.input (p - st.base) in
-  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 p);
+  if not (Uchar.utf_decode_is_valid d) then fail_str st p tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if pred u then begin
     st.pos <- p + Uchar.utf_decode_length d;
@@ -1317,7 +1319,7 @@ let[@inline never] handle_char_uchar st expected =
   let kind = Uchar.to_int expected lsl 3 in
   if p >= st.input_len then fail_int st p kind;
   let d = String.get_utf_8_uchar st.input (p - st.base) in
-  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 p);
+  if not (Uchar.utf_decode_is_valid d) then fail_str st p tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u expected then begin
     st.pos <- p + Uchar.utf_decode_length d;
@@ -1325,7 +1327,7 @@ let[@inline never] handle_char_uchar st expected =
   end else
     fail_int st p kind
 
-let[@inline never] scan_uchars inp start limit pred =
+let[@inline never] scan_uchars st inp ~base start limit pred =
   let pos = ref start in
   let continue_loop = ref true in
   while !pos < limit && !continue_loop do
@@ -1338,7 +1340,8 @@ let[@inline never] scan_uchars inp start limit pred =
     end
     else begin
       let d = String.get_utf_8_uchar inp !pos in
-      if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !pos);
+      if not (Uchar.utf_decode_is_valid d) then
+        fail_str st (!pos + base) tag_label label_utf8;
       if pred (Uchar.utf_decode_uchar d) then
         pos := !pos + Uchar.utf_decode_length d
       else
@@ -1353,10 +1356,7 @@ let[@inline never] scan_while_uchar_refilling st ~keep_from start pred =
   while !continue_loop do
     let base = st.base in
     let limit = st.input_len - base - 3 in
-    let i =
-      try scan_uchars st.input (!p - base) limit pred
-      with Invalid_utf8 i -> raise (Invalid_utf8 (i + base))
-    in
+    let i = scan_uchars st st.input ~base (!p - base) limit pred in
     p := i + base;
     if i < limit then
       continue_loop := false
@@ -1364,7 +1364,8 @@ let[@inline never] scan_while_uchar_refilling st ~keep_from start pred =
       utf8_fill st keep_from !p;
       if !p < st.input_len then begin
         let d = String.get_utf_8_uchar st.input (!p - st.base) in
-        if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 !p);
+        if not (Uchar.utf_decode_is_valid d) then
+          fail_str st !p tag_label label_utf8;
         if pred (Uchar.utf_decode_uchar d) then
           p := !p + Uchar.utf_decode_length d
         else
@@ -1378,7 +1379,7 @@ let[@inline never] scan_while_uchar_refilling st ~keep_from start pred =
 let[@inline always] scan_while_uchar st ~keep_from start pred =
   match st.source with
   | None ->
-      scan_uchars st.input start st.input_len pred
+      scan_uchars st st.input ~base:0 start st.input_len pred
   | Some _ ->
       scan_while_uchar_refilling st ~keep_from start pred
 
@@ -1407,7 +1408,7 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
   fill_uchar st ~keep_from:pos pos;
   if pos >= st.input_len then fail_int st pos kind;
   let d = String.get_utf_8_uchar st.input (pos - st.base) in
-  if not (Uchar.utf_decode_is_valid d) then raise (Invalid_utf8 pos);
+  if not (Uchar.utf_decode_is_valid d) then fail_str st pos tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u term then
     st.pos <- pos + Uchar.utf_decode_length d
@@ -2060,25 +2061,17 @@ end
 module Utf8 = struct
   let[@inline] satisfy pred ~label =
     let st = get_state () in
-    begin try handle_satisfy_uchar st pred label
-    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-    end
+    handle_satisfy_uchar st pred label
 
   let[@inline] char u =
     let st = get_state () in
-    begin try handle_char_uchar st u
-    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-    end
+    handle_char_uchar st u
 
   let[@inline] any_char () = satisfy (fun _ -> true) ~label:"any character"
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
-    let s =
-      begin try handle_take_while_uchar st pred
-      with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-      end
-    in
+    let s = handle_take_while_uchar st pred in
     if at_least > 0 then begin
       let count = ref 0 in
       let i = ref 0 in
@@ -2102,21 +2095,15 @@ module Utf8 = struct
 
   let[@inline] skip_while pred =
     let st = get_state () in
-    begin try handle_skip_while_uchar st pred
-    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-    end
+    handle_skip_while_uchar st pred
 
   let[@inline] take_while_span pred =
     let st = get_state () in
-    begin try handle_take_while_span_uchar st pred
-    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-    end
+    handle_take_while_span_uchar st pred
 
   let[@inline] skip_while_then_char pred u =
     let st = get_state () in
-    begin try handle_skip_while_then_uchar st pred u
-    with Invalid_utf8 pos -> fail_str st pos tag_label label_utf8
-    end
+    handle_skip_while_then_uchar st pred u
 
   let[@inline] is_whitespace u = Uucp.White.is_white_space u
 
