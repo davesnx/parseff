@@ -3,10 +3,15 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightThemeFlexoki from 'starlight-theme-flexoki';
 import remarkBoldAsides from './src/plugins/remark-bold-asides.mjs';
+import remarkRebaseLinks from './src/plugins/remark-rebase-links.mjs';
 import opengraphImage from 'astro-opengraph-image';
 import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 /** Wrap an integration so that any routes it injects are forced to prerender.
  *  This avoids the "no adapter installed" warning for purely-static sites. */
@@ -49,12 +54,28 @@ function fixOgImageBase(base) {
 const base = process.env.DOCS_BASE ?? '/parseff';
 const channel = process.env.DOCS_CHANNEL ?? 'latest';
 
+const pageExists = (slug) =>
+	['md', 'mdx'].some((ext) =>
+		['', '/index'].some((suffix) => existsSync(`src/content/docs/${slug}${suffix}.${ext}`)),
+	);
+
+/** Drop sidebar entries whose page is missing from the content being built. */
+function existingPages(items) {
+	return items.flatMap((item) => {
+		if (item.items) {
+			const kept = existingPages(item.items);
+			return kept.length ? [{ ...item, items: kept }] : [];
+		}
+		return pageExists(item.slug) ? [item] : [];
+	});
+}
+
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://davesnx.github.io',
 	base,
 	markdown: {
-		remarkPlugins: [remarkBoldAsides],
+		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base }]],
 	},
 	integrations: [
 		starlight({
@@ -82,7 +103,7 @@ export default defineConfig({
 			customCss: [
 				'./src/styles/custom.css',
 			],
-			sidebar: [
+			sidebar: existingPages([
 				{ label: 'Quick start', slug: 'index' },
 				{ label: 'Primitives', slug: 'api/primitives' },
 				{ label: 'Combinators', slug: 'api/combinators' },
@@ -105,7 +126,7 @@ export default defineConfig({
 			{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
 			{ label: 'Changelog', slug: 'changelog' },
 			{ label: 'Credits', slug: 'credits' },
-			],
+			]),
 		}),
 		staticOnly(opengraphImage({
 			background: '#101014',
@@ -115,25 +136,19 @@ export default defineConfig({
 			fonts: [
 				{
 					name: 'Instrument Sans',
-					data: await readFile(
-						'node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff',
-					),
+					data: await readFile(require.resolve('@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff')),
 					style: 'normal',
 					weight: 400,
 				},
 			{
 				name: 'Instrument Sans',
-				data: await readFile(
-					'node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-700-normal.woff',
-				),
+				data: await readFile(require.resolve('@fontsource/instrument-sans/files/instrument-sans-latin-700-normal.woff')),
 				style: 'normal',
 				weight: 700,
 			},
 			{
 				name: 'IBM Plex Mono',
-				data: await readFile(
-					'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff',
-				),
+				data: await readFile(require.resolve('@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff')),
 				style: 'normal',
 				weight: 400,
 			},
