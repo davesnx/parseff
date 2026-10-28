@@ -16,6 +16,7 @@ $ opam install parseff -y
 ## Example
 
 ```ocaml
+(* Add our own error case to Parseff *)
 type Parseff.custom_error += Out_of_range of int
 
 let number () =

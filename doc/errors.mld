@@ -7,6 +7,37 @@ Parseff exposes four main APIs for error handling:
 - {!val:Parseff.expect}: relabel failures from another parser
 - {!val:Parseff.context} and {!val:Parseff.cut}: name a construct and decide it
 
+{1 Built-in errors and custom errors}
+
+A parse fails with one of two sorts of error.
+
+{b Built-in errors} come from Parseff itself: a primitive such as
+{!val:Parseff.char} does not match, {!val:Parseff.fail} stops with a message,
+or a limit such as [max_depth] is reached. Their [kind] is [Expected],
+[Failure], [Depth_limit_exceeded] or [Backtrack_window_exceeded]. You do not
+declare them, and {!val:Parseff.render_error} prints them with a full message.
+
+{b Custom errors} are cases you add to {!type:Parseff.custom_error}. You raise
+them with {!val:Parseff.error} and get them back in [kind] as [User]. Use them
+when the input has the right shape but a wrong value, such as a number out of
+range, and the caller must handle that case in code, not only print it. Give
+{!val:Parseff.render_error} a [~user] printer to print them.
+
+{@ocaml[
+type Parseff.custom_error += Out_of_range of int
+
+let rating () =
+  let n = Parseff.digit () in
+  if n < 1 || n > 5 then Parseff.error (Out_of_range n) else n
+
+let () =
+  match Parseff.parse "7" rating with
+  | Ok n -> Printf.printf "Got %d\n" n
+  | Error { kind = User (Out_of_range n); _ } ->
+      Printf.printf "%d is out of range\n" n
+  | Error e -> prerr_endline (Parseff.render_error e)
+]}
+
 {1 [fail]}
 
 Abort parsing with a message. The message is returned as

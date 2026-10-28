@@ -77,6 +77,7 @@ dune install
 Here's a small parser that validates IPv4 addresses `192.168.1.1` or `0.0.0.0`. A detailed explanation of the [IPv4 addresses parser](/parseff/guides/ip-address):
 
 ```ocaml
+(* Add our own error case to Parseff *)
 type Parseff.custom_error += Out_of_range of int
 
 let number () =
