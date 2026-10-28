@@ -44,7 +44,7 @@ val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
 
 Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. The parser must warn into the same collector. `warn` into a collector that the runner did not get does nothing.
 
-The result of the parse is the usual `Parseff.Error.t` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
+The result of the parse is the usual `Parseff.error` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
 
 ```ocaml
 val parse :
@@ -53,7 +53,7 @@ val parse :
   ?diagnostics:'d Diagnostics.t ->
   string ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result
+  ('a, error) Stdlib.result
 ```
 ```ocaml
 Parseff.parse ~consume:`All input parser
@@ -95,8 +95,8 @@ let () =
   (match outcome with
   | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error error ->
-      Printf.printf "Parse error at %d: %s\n" error.Parseff.Error.span.start
-        (Parseff.Error.message error));
+      Printf.printf "Parse error at %d: %s\n" error.Parseff.span.start
+        (Parseff.message error));
   List.iter
     (fun ({ pos; value } : validation Parseff.Diagnostics.entry) ->
       match value with

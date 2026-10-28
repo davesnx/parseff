@@ -89,7 +89,7 @@ the result.
 
 {2 [take_while_span]}
 
-{!val:Parseff.Utf8.take_while_span} returns a zero-copy {!Parseff.span} instead
+{!val:Parseff.Utf8.take_while_span} returns a zero-copy {!type:Parseff.span} instead
 of allocating a new string. Use {!val:Parseff.span_to_string} to materialize
 when needed.
 
@@ -190,7 +190,7 @@ input.json:1:6: [error] expected ',' or ']', found '"'     (code points)
   |      ^
 v}
 
-[Parseff.Error.t] carries [position], with the line and column in bytes and
+[Parseff.error] carries [position], with the line and column in bytes and
 [code_point_col]. [position] is [None] when the line is not known, and
 [code_point_col] is [None] when the start of the line is no longer buffered,
 which only happens when streaming; pass

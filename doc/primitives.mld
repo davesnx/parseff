@@ -217,7 +217,7 @@ let number () =
 
 {!val:Parseff.fail} aborts parsing with an error message.
 
-{@ocaml skip[val fail : ?from:int -> ?notes:Error.note list -> string -> 'a]}
+{@ocaml skip[val fail : ?from:int -> ?notes:note list -> string -> 'a]}
 
 {@ocaml[
 (* Validate range *)
@@ -240,10 +240,10 @@ let byte () =
 {!val:Parseff.error} aborts parsing with a user-defined error value. Custom
 errors are caught by {!val:Parseff.parse} and returned in the result.
 
-{@ocaml skip[val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a]}
+{@ocaml skip[val error : ?from:int -> ?notes:note list -> custom_error -> 'a]}
 
 {@ocaml[
-type Parseff.Error.user += Negative of int | Out_of_range of int
+type Parseff.custom_error += Negative of int | Out_of_range of int
 
 let validated_number () =
   let s =
@@ -267,7 +267,7 @@ let () =
 {b Tip:} Cases without a payload are quick error types:
 
 {@ocaml[
-type Parseff.Error.user += Too_large | Negative_number
+type Parseff.custom_error += Too_large | Negative_number
 
 let number_checked () =
   let s =
@@ -349,9 +349,9 @@ let number () =
 let report_error input result =
   match result with
   | Error e ->
-      let loc = Parseff.location_of_position input e.Parseff.Error.span.start in
+      let loc = Parseff.location_of_position input e.Parseff.span.start in
       Printf.printf "line %d, col %d: %s\n" loc.line loc.col
-        (Parseff.Error.message e)
+        (Parseff.message e)
   | Ok _ -> ()
 ]}
 

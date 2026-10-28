@@ -214,7 +214,7 @@ let number () =
 `Parseff.fail` aborts parsing with an error message.
 
 ```ocaml
-val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
+val fail : ?from:int -> ?notes:note list -> string -> 'a
 ```
 ```ocaml
 (* Validate range *)
@@ -237,10 +237,10 @@ let byte () =
 `Parseff.error` aborts parsing with a user-defined error value. Custom errors are caught by `Parseff.parse` and returned in the result.
 
 ```ocaml
-val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
+val error : ?from:int -> ?notes:note list -> custom_error -> 'a
 ```
 ```ocaml
-type Parseff.Error.user += Negative of int | Out_of_range of int
+type Parseff.custom_error += Negative of int | Out_of_range of int
 
 let validated_number () =
   let s =
@@ -263,7 +263,7 @@ let () =
 **Tip:** Cases without a payload are quick error types:
 
 ```ocaml
-type Parseff.Error.user += Too_large | Negative_number
+type Parseff.custom_error += Too_large | Negative_number
 
 let number_checked () =
   let s =
@@ -337,9 +337,9 @@ let number () =
 let report_error input result =
   match result with
   | Error e ->
-      let loc = Parseff.location_of_position input e.Parseff.Error.span.start in
+      let loc = Parseff.location_of_position input e.Parseff.span.start in
       Printf.printf "line %d, col %d: %s\n" loc.line loc.col
-        (Parseff.Error.message e)
+        (Parseff.message e)
   | Ok _ -> ()
 ```
 **Tip:** Use `location` during parsing to attach source positions to AST nodes or other parsed structures. Use `location_of_position` after parsing to convert byte offsets from error results into line and column numbers for diagnostics.

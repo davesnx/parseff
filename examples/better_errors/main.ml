@@ -22,7 +22,7 @@ let ip_address_simple () =
   Parseff.end_of_input ();
   (a, b, c, d)
 
-type Parseff.Error.user += Out_of_range of int
+type Parseff.custom_error += Out_of_range of int
 
 let number_0_255_with_error () =
   let n = accumulate_digits () in
@@ -182,8 +182,7 @@ let statements () =
     ()
 
 let format_error e =
-  Printf.sprintf "Error at pos %d: %s" e.Parseff.Error.span.start
-    (Parseff.Error.message e)
+  Printf.sprintf "Error at pos %d: %s" e.Parseff.span.start (Parseff.message e)
 
 let ws () = Parseff.skip_whitespace ()
 

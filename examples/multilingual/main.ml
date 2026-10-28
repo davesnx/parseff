@@ -39,7 +39,7 @@ let run input =
   | Ok fields ->
       List.iter (fun (k, v) -> Printf.printf "%s = %s\n" k v) fields
   | Error e ->
-      Printf.printf "Error at byte %d: %s\n" e.Parseff.Error.span.start
-        (Parseff.Error.message e)
+      Printf.printf "Error at byte %d: %s\n" e.Parseff.span.start
+        (Parseff.message e)
 
 let () = run Sys.argv.(1)

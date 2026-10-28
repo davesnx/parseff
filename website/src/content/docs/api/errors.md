@@ -20,7 +20,7 @@ Parseff exposes four main APIs for error handling:
 Abort parsing with a message. The message is returned as `Error { kind = Failure msg; ... }`.
 
 ```ocaml
-val fail : ?from:int -> ?notes:Error.note list -> string -> 'a
+val fail : ?from:int -> ?notes:note list -> string -> 'a
 ```
 ```ocaml
 let byte () =
@@ -56,7 +56,7 @@ let octet () =
   if n <= 255 then n
   else
     Parseff.fail ~from:start
-      ~notes:[ { Parseff.Error.at = None; text = "octets go from 0 to 255" } ]
+      ~notes:[ { Parseff.at = None; text = "octets go from 0 to 255" } ]
       "octet out of range"
 
 let () =
@@ -79,13 +79,13 @@ address:1:4: [error] octet out of range
 
 ## `error`
 
-Abort parsing with a custom error value. `Parseff.Error.user` is an extensible variant: declare your own cases and match them in `kind`.
+Abort parsing with a custom error value. `Parseff.custom_error` is an extensible variant: declare your own cases and match them in `kind`.
 
 ```ocaml
-val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a
+val error : ?from:int -> ?notes:note list -> custom_error -> 'a
 ```
 ```ocaml
-type Parseff.Error.user += Too_large of int | Negative of int
+type Parseff.custom_error += Too_large of int | Negative of int
 
 let number () =
   let s =
@@ -112,7 +112,7 @@ A typed error behaves like any other failure for backtracking: `Parseff.or_` and
 A case without a payload works too:
 
 ```ocaml
-type Parseff.Error.user += Too_large_quick | Negative_quick
+type Parseff.custom_error += Too_large_quick | Negative_quick
 
 let number_quick () =
   let s =
@@ -179,20 +179,20 @@ A failure at the end of the input keeps what was expected. On `"[1, 2"` the erro
 
 ## The error value
 
-A failed parse returns `Error e`, where `e` is a `Parseff.Error.t`:
+A failed parse returns `Error e`, where `e` is a `Parseff.error`:
 
 ```ocaml
-type Error.t = {
-  kind : Error.kind;
-  span : Error.range;  (** the bytes the error is about, empty at the end of the input *)
-  position : Error.position option;
+type error = {
+  kind : kind;
+  span : range;  (** the bytes the error is about, empty at the end of the input *)
+  position : position option;
       (** line and column of [span.start], [None] when the line is not known *)
-  frames : Error.frame list;  (** open constructs, outermost first *)
-  notes : Error.note list;
-  excerpt : Error.excerpt;
+  frames : frame list;  (** open constructs, outermost first *)
+  notes : note list;
+  excerpt : excerpt;
 }
 ```
-`Error.t` and the types it holds are `private`: you can read and match them, not build them. `Parseff.Error.note` and `Parseff.Error.range` stay buildable, for `~notes` of `Parseff.fail`.
+`error` and the types it holds are `private`: you can read and match them, not build them. `Parseff.note` and `Parseff.range` stay buildable, for `~notes` of `Parseff.fail`.
 
 `kind` says what happened:
 
@@ -201,7 +201,7 @@ type Error.t = {
 - `User e`: a value given to `Parseff.error`.
 - `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
 - `Backtrack_window_exceeded { limit; oldest }`: a streaming parser needed more rewind history than `~backtrack_window` allows.
-The match on `kind` is exhaustive: the compiler tells you when a case is missing. `User` holds an `Parseff.Error.user`, which is extensible, so match it with a final `_` case.
+The match on `kind` is exhaustive: the compiler tells you when a case is missing. `User` holds an `Parseff.custom_error`, which is extensible, so match it with a final `_` case.
 
 ```ocaml
 match Parseff.parse input parser with
@@ -231,9 +231,9 @@ input.json:4:5: [error] expected ',' or '}', found '"'
 - `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five; when only one more is hidden it is printed too. A construct made with `~delimited:true` that started on an earlier line is shown as a bar that joins its opening token to the caret: `╭─╯` under the opener, `│` on the lines in between and `╰──^` at the failure. A single hidden line between the opener and the failure is shown, longer gaps become a `...` row in the gutter.
 - Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
 - A `Parseff.rec_` nested deeper than `~max_depth` and a streaming parse that exceeds `~backtrack_window` keep the `* while parsing` lines that were open, and end with `* help: raise ~max_depth` or `* help: call commit or cut earlier, or raise ~backtrack_window`.
-- `~user` is a printer `Error.user -> string` for `User` errors. Without it, a user error prints `user error (no ~user printer given)`.
+- `~user` is a printer `custom_error -> string` for `User` errors. Without it, a user error prints `user error (no ~user printer given)`.
 - The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
-`~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.Error.message` returns only the one-line message.
+`~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the frame line then says `from byte N`. `Parseff.message` returns only the one-line message.
 
 `~columns` chooses the unit of the column in the header: bytes by default, or code points (see the UTF-8 page of the API documentation), also in the columns of the `* while parsing` lines. Carets always count code points.
 
@@ -254,7 +254,7 @@ input.json:1:6: [error] expected ',' or ']', found '"'   (code points)
 (* after *)
 | Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
 ```
-User errors move from the variant row into `kind`, with `type Parseff.Error.user += Too_large of int`. The built-in cases become cases of `kind` too:
+User errors move from the variant row into `kind`, with `type Parseff.custom_error += Too_large of int`. The built-in cases become cases of `kind` too:
 
 ```ocaml
 (* before *)

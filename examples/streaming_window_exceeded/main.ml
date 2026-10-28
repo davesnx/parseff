@@ -53,5 +53,5 @@ let () =
       Printf.printf "backtrack window exceeded at %d: limit=%d oldest=%d\n"
         span.start limit oldest
   | Error e ->
-      Printf.printf "parse error at %d: %s\n" e.Parseff.Error.span.start
-        (Parseff.Error.message e)
+      Printf.printf "parse error at %d: %s\n" e.Parseff.span.start
+        (Parseff.message e)

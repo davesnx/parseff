@@ -18,7 +18,7 @@ same parsers, same result type, same error handling.
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result]}
+  ('a, error) Stdlib.result]}
 
 {@ocaml skip[
   let ic = open_in "data.json" in
@@ -266,7 +266,7 @@ In practice:
 - Prefer grammars that dispatch early, so the runtime does not need to keep a
   long ambiguous prefix alive.
 - Call {!val:Parseff.commit} only when a branch has become logically certain.
-- If you hit [Error.Backtrack_window_exceeded], first try to commit earlier; only
+- If you hit [Backtrack_window_exceeded], first try to commit earlier; only
   increase [~backtrack_window] when the ambiguity is real.
 
 The guides section includes a small CSV walkthrough that starts with a normal
@@ -303,14 +303,14 @@ body of [many], outside the [or_].
 becomes certain: after [cut ()], none of those frames pins buffered input, and
 a failure of the construct is not retried by the frames outside it. With a
 small window, an [or_] whose left branch reads a long run of tokens fails with
-[Error.Backtrack_window_exceeded] until the branch calls [cut ()].
+[Backtrack_window_exceeded] until the branch calls [cut ()].
 
 Before [commit ()], Parseff must keep enough buffered input to rewind and try
 the other branch. After [commit ()], that rewind point stops pinning the old
 prefix.
 
 If the retained region would exceed [~backtrack_window], parsing fails with
-[Error.Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
+[Backtrack_window_exceeded]. This is a real contract, not a best-effort hint.
 
 {1 Thread safety}
 
@@ -380,7 +380,7 @@ extend past the window. If the window is already full of rewind history and
 the source has not ended, the regex runs on what is buffered. A match that ends
 before the end of the buffer is returned. Otherwise, because more input could
 change the result, {!val:Parseff.match_regex} fails with
-[Error.Backtrack_window_exceeded]. [~backtrack_window] must be at least [2].
+[Backtrack_window_exceeded]. [~backtrack_window] must be at least [2].
 
 {2 No partial results}
 

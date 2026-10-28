@@ -257,7 +257,7 @@ monadic/applicative operators.
     {td Manual (no built-in depth limit)}}
   {tr
     {td Custom errors}
-    {td [error] with an extensible variant ([Error.user])}
+    {td [error] with an extensible variant ([custom_error])}
     {td Limited (string-based)}}
   {tr
     {td Error labels}

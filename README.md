@@ -16,7 +16,7 @@ $ opam install parseff -y
 ## Example
 
 ```ocaml
-type Parseff.Error.user += Out_of_range of int
+type Parseff.custom_error += Out_of_range of int
 
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
@@ -44,7 +44,7 @@ let () =
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
 ```
-A failed parse returns one `Parseff.Error.t`. `Parseff.render_error` prints the message, the source line and a caret under the failure:
+A failed parse returns one `Parseff.error`. `Parseff.render_error` prints the message, the source line and a caret under the failure:
 
 ```
 address:1:11: [error] expected digit, found end of input

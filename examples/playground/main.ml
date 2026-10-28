@@ -15,5 +15,5 @@ let () =
   | Ok result ->
       Printf.printf "%s -> %s" input result
   | Error e ->
-      Printf.printf "%s -> Error at %d: %s" input e.Parseff.Error.span.start
-        (Parseff.Error.message e)
+      Printf.printf "%s -> Error at %d: %s" input e.Parseff.span.start
+        (Parseff.message e)

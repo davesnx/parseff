@@ -23,7 +23,7 @@ val parse_source :
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
-  ('a, Error.t) Stdlib.result
+  ('a, error) Stdlib.result
 ```
 ```ocaml
   let ic = open_in "data.json" in
@@ -235,7 +235,7 @@ In practice:
 - Think of `~backtrack_window` as retained undo history, not as a chunk size.
 - Prefer grammars that dispatch early, so the runtime does not need to keep a long ambiguous prefix alive.
 - Call `Parseff.commit` only when a branch has become logically certain.
-- If you hit `Error.Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
+- If you hit `Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
 The guides section includes a small CSV walkthrough that starts with a normal string parser and only changes the runner, plus a second guide that focuses on `commit` and `~backtrack_window` for grammars with long-lived ambiguity.
 
 A small example:
@@ -255,11 +255,11 @@ let http_method () =
 ```
 `commit ()` acts on the innermost frame only: the nearest `Parseff.or_`, `Parseff.one_of`, `Parseff.many`, `Parseff.sep_by`, `Parseff.optional` or `fold_*` frame. It does nothing outside any frame and inside `Parseff.look_ahead`. It does not release outer frames. In `many (fun () -> or_ a b ())`, a `commit ()` inside the `or_` does not let the `many` frame release older buffered input: `many` still keeps the input from the start of the current iteration. To release that input, call `commit ()` in the body of `many`, outside the `or_`.
 
-`Parseff.cut` seals every frame opened since the innermost enclosing `Parseff.context`, not only the nearest one. Use it when a whole construct becomes certain: after `cut ()`, none of those frames pins buffered input, and a failure of the construct is not retried by the frames outside it. With a small window, an `or_` whose left branch reads a long run of tokens fails with `Error.Backtrack_window_exceeded` until the branch calls `cut ()`.
+`Parseff.cut` seals every frame opened since the innermost enclosing `Parseff.context`, not only the nearest one. Use it when a whole construct becomes certain: after `cut ()`, none of those frames pins buffered input, and a failure of the construct is not retried by the frames outside it. With a small window, an `or_` whose left branch reads a long run of tokens fails with `Backtrack_window_exceeded` until the branch calls `cut ()`.
 
 Before `commit ()`, Parseff must keep enough buffered input to rewind and try the other branch. After `commit ()`, that rewind point stops pinning the old prefix.
 
-If the retained region would exceed `~backtrack_window`, parsing fails with `Error.Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
+If the retained region would exceed `~backtrack_window`, parsing fails with `Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
 
 
 ## Thread safety
@@ -311,7 +311,7 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 
 ### Regex at chunk boundaries
 
-Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input only, so a match cannot extend past the window. If the window is already full of rewind history and the source has not ended, the regex runs on what is buffered. A match that ends before the end of the buffer is returned. Otherwise, because more input could change the result, `Parseff.match_regex` fails with `Error.Backtrack_window_exceeded`. `~backtrack_window` must be at least `2`.
+Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input only, so a match cannot extend past the window. If the window is already full of rewind history and the source has not ended, the regex runs on what is buffered. A match that ends before the end of the buffer is returned. Otherwise, because more input could change the result, `Parseff.match_regex` fails with `Backtrack_window_exceeded`. `~backtrack_window` must be at least `2`.
 
 
 ### No partial results

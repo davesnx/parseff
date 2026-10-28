@@ -12,7 +12,7 @@ Parseff exposes four main APIs for error handling:
 Abort parsing with a message. The message is returned as
 [Error { kind = Failure msg; ... }].
 
-{@ocaml skip[val fail : ?from:int -> ?notes:Error.note list -> string -> 'a]}
+{@ocaml skip[val fail : ?from:int -> ?notes:note list -> string -> 'a]}
 
 {@ocaml[
 let byte () =
@@ -52,7 +52,7 @@ let octet () =
   if n <= 255 then n
   else
     Parseff.fail ~from:start
-      ~notes:[ { Parseff.Error.at = None; text = "octets go from 0 to 255" } ]
+      ~notes:[ { Parseff.at = None; text = "octets go from 0 to 255" } ]
       "octet out of range"
 
 let () =
@@ -76,13 +76,13 @@ v}
 
 {1 [error]}
 
-Abort parsing with a custom error value. {!type:Parseff.Error.user} is an
+Abort parsing with a custom error value. {!type:Parseff.custom_error} is an
 extensible variant: declare your own cases and match them in [kind].
 
-{@ocaml skip[val error : ?from:int -> ?notes:Error.note list -> Error.user -> 'a]}
+{@ocaml skip[val error : ?from:int -> ?notes:note list -> custom_error -> 'a]}
 
 {@ocaml[
-type Parseff.Error.user += Too_large of int | Negative of int
+type Parseff.custom_error += Too_large of int | Negative of int
 
 let number () =
   let s =
@@ -115,7 +115,7 @@ error that [parse] returns. At the same position a typed error wins over an
 A case without a payload works too:
 
 {@ocaml[
-type Parseff.Error.user += Too_large_quick | Negative_quick
+type Parseff.custom_error += Too_large_quick | Negative_quick
 
 let number_quick () =
   let s =
@@ -200,22 +200,22 @@ so a committed branch reports only what it expected itself.
 
 {1 The error value}
 
-A failed parse returns [Error e], where [e] is a {!type:Parseff.Error.t}:
+A failed parse returns [Error e], where [e] is a {!type:Parseff.error}:
 
 {@ocaml skip[
-type Error.t = {
-  kind : Error.kind;
-  span : Error.range;  (** the bytes the error is about, empty at the end of the input *)
-  position : Error.position option;
+type error = {
+  kind : kind;
+  span : range;  (** the bytes the error is about, empty at the end of the input *)
+  position : position option;
       (** line and column of [span.start], [None] when the line is not known *)
-  frames : Error.frame list;  (** open constructs, outermost first *)
-  notes : Error.note list;
-  excerpt : Error.excerpt;
+  frames : frame list;  (** open constructs, outermost first *)
+  notes : note list;
+  excerpt : excerpt;
 }
 ]}
 
-[Error.t] and the types it holds are [private]: you can read and match them,
-not build them. {!type:Parseff.Error.note} and {!type:Parseff.Error.range} stay
+[error] and the types it holds are [private]: you can read and match them,
+not build them. {!type:Parseff.note} and {!type:Parseff.range} stay
 buildable, for [~notes] of {!val:Parseff.fail}.
 
 [kind] says what happened:
@@ -243,7 +243,7 @@ buildable, for [~notes] of {!val:Parseff.fail}.
   history than [~backtrack_window] allows.
 
 The match on [kind] is exhaustive: the compiler tells you when a case is
-missing. [User] holds an {!type:Parseff.Error.user}, which is extensible, so
+missing. [User] holds an {!type:Parseff.custom_error}, which is extensible, so
 match it with a final [_] case.
 
 {@ocaml skip[
@@ -299,7 +299,7 @@ v}
   that exceeds [~backtrack_window] keep the [* while parsing] lines that were
   open, and end with [* help: raise ~max_depth] or
   [* help: call commit or cut earlier, or raise ~backtrack_window].
-- [~user] is a printer [Error.user -> string] for [User] errors. Without it, a user error prints [user error (no ~user printer given)].
+- [~user] is a printer [custom_error -> string] for [User] errors. Without it, a user error prints [user error (no ~user printer given)].
 - The rows the renderer adds never end with a space. Source text is printed
   byte for byte, so a source line with trailing spaces keeps them.
 
@@ -308,7 +308,7 @@ inside the error are used: the error line, the line before it and the line of
 the opener, each cut to 240 bytes around the failure. That is enough for
 in-memory and streaming parses; with a streaming source the old lines may be gone
 and the frame line then says [from byte N].
-[Parseff.Error.message] returns only the one-line message.
+[Parseff.message] returns only the one-line message.
 
 [~columns] chooses the unit of the column in the header: bytes by default, or
 code points (see the UTF-8 page of the API documentation), also in the columns of the
@@ -334,7 +334,7 @@ a record. The common migration is one line:
 ]}
 
 User errors move from the variant row into [kind], with
-[type Parseff.Error.user += Too_large of int]. The built-in cases become cases
+[type Parseff.custom_error += Too_large of int]. The built-in cases become cases
 of [kind] too:
 
 {@ocaml skip[

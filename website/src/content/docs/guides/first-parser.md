@@ -194,10 +194,10 @@ let typed_entry () =
 
 ## Step 5: validation with typed errors
 
-Suppose ports must be 0-65535. Use `Parseff.error` with a case of `Parseff.Error.user` to report a structured error:
+Suppose ports must be 0-65535. Use `Parseff.error` with a case of `Parseff.custom_error` to report a structured error:
 
 ```ocaml
-type Parseff.Error.user += Port_out_of_range of int
+type Parseff.custom_error += Port_out_of_range of int
 
 let port_value () =
   let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
@@ -214,7 +214,7 @@ match Parseff.parse "port = 99999" typed_entry with
 | Error { kind = User (Port_out_of_range n); _ } ->
     Printf.printf "%d is not a valid port\n" n
 | Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
+    Printf.printf "Parse error: %s\n" (Parseff.message e)
 ```
 
 `Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (reported as `Failure`). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.

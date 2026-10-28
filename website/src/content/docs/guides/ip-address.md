@@ -98,10 +98,10 @@ Now on `"192.168.1.x"`, instead of `expected digit`, the error says `expected a 
 
 ## Using typed errors
 
-For programmatic error handling, extend `Parseff.Error.user` with your own cases and pattern match on them:
+For programmatic error handling, extend `Parseff.custom_error` with your own cases and pattern match on them:
 
 ```ocaml
-type Parseff.Error.user += Out_of_range of int
+type Parseff.custom_error += Out_of_range of int
 
 let number_0_255_typed () =
   let digits = Parseff.many ~at_least:1 digit_val () in
@@ -119,7 +119,7 @@ match Parseff.parse "192.168.1.300" ip_address with
 | Error { kind = User (Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
 | Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.Error.message e)
+    Printf.printf "Parse error: %s\n" (Parseff.message e)
 ```
 
 `fail` is fine for errors shown directly to users. `error` is better when code needs to react differently to different failure modes.
