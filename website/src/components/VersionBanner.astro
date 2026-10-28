@@ -1,0 +1,30 @@
+---
+const root = __DOCS_ROOT__;
+const version = __DOCS_VERSION__;
+const channel = __DOCS_CHANNEL__;
+---
+
+{
+	(channel === 'old' || channel === 'unreleased') && (
+		<div class="version-banner" data-pagefind-ignore>
+			{channel === 'unreleased'
+				? 'This is the documentation for the unreleased main branch. '
+				: `This is the documentation for an old version (${version}). `}
+			<a href={`${root}/`}>Go to the latest version.</a>
+		</div>
+	)
+}
+
+<style>
+	.version-banner {
+		background: var(--sl-color-orange-low);
+		color: var(--sl-color-orange-high);
+		padding: 0.5rem var(--sl-content-pad-x);
+		text-align: center;
+		font-size: var(--sl-text-sm);
+	}
+	.version-banner a {
+		color: inherit;
+		text-decoration: underline;
+	}
+</style>

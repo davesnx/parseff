@@ -3,10 +3,13 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightThemeFlexoki from 'starlight-theme-flexoki';
 import remarkBoldAsides from './src/plugins/remark-bold-asides.mjs';
+import remarkRebaseLinks from './src/plugins/remark-rebase-links.mjs';
 import opengraphImage from 'astro-opengraph-image';
 import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { base, channel, contentDir, root, version } from './site.mjs';
 
 /** Wrap an integration so that any routes it injects are forced to prerender.
  *  This avoids the "no adapter installed" warning for purely-static sites. */
@@ -46,22 +49,51 @@ function fixOgImageBase(base) {
 	};
 }
 
+const pageExists = (slug) =>
+	['md', 'mdx'].some((ext) =>
+		['', '/index'].some((suffix) => existsSync(join(contentDir, `${slug}${suffix}.${ext}`))),
+	);
+
+/** Drop sidebar entries whose page is missing from the content being built. */
+function existingPages(items) {
+	return items.flatMap((item) => {
+		if (item.items) {
+			const kept = existingPages(item.items);
+			return kept.length ? [{ ...item, items: kept }] : [];
+		}
+		return pageExists(item.slug) ? [item] : [];
+	});
+}
+
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://davesnx.github.io',
-	base: '/parseff',
+	base,
+	vite: {
+		define: {
+			__DOCS_ROOT__: JSON.stringify(root),
+			__DOCS_VERSION__: JSON.stringify(version),
+			__DOCS_CHANNEL__: JSON.stringify(channel),
+		},
+	},
 	markdown: {
-		remarkPlugins: [remarkBoldAsides],
+		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base }]],
 	},
 	integrations: [
 		starlight({
 			plugins: [starlightThemeFlexoki()],
 			components: {
+				Banner: './src/components/VersionBanner.astro',
 				Head: './src/components/Head.astro',
 				PageSidebar: './src/components/PageSidebar.astro',
 				PageTitle: './src/components/PageTitle.astro',
+				ThemeSelect: './src/components/VersionSelect.astro',
 			},
 			title: 'Parseff',
+			head:
+				channel === 'latest'
+					? []
+					: [{ tag: 'meta', attrs: { name: 'robots', content: 'noindex' } }],
 			description: 'Parser combinators with OCaml 5 algebraic effects',
 			social: [
 				{
@@ -73,7 +105,7 @@ export default defineConfig({
 			customCss: [
 				'./src/styles/custom.css',
 			],
-			sidebar: [
+			sidebar: existingPages([
 				{ label: 'Quick start', slug: 'index' },
 				{ label: 'Primitives', slug: 'api/primitives' },
 				{ label: 'Combinators', slug: 'api/combinators' },
@@ -96,7 +128,7 @@ export default defineConfig({
 			{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
 			{ label: 'Changelog', slug: 'changelog' },
 			{ label: 'Credits', slug: 'credits' },
-			],
+			]),
 		}),
 		staticOnly(opengraphImage({
 			background: '#101014',
@@ -130,6 +162,6 @@ export default defineConfig({
 			},
 		],
 		})),
-		fixOgImageBase('/parseff'),
+		fixOgImageBase(base),
 	],
 });
