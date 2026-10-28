@@ -838,6 +838,53 @@ let test_of_chunks_backtrack () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_large_input_grows_read_buffer () =
+  let input =
+    String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  let check name src =
+    match
+      Parseff.parse_source ~consume:`All src (fun () ->
+          Parseff.take_while (fun _ -> true)
+      )
+    with
+    | Ok s ->
+        Alcotest.(check string) name input s
+    | Error _ ->
+        Alcotest.fail "Expected success"
+  in
+  let pos = ref 0 in
+  let lens = ref [] in
+  check "of_function"
+    (Parseff.Source.of_function (fun buf off len ->
+         lens := len :: !lens;
+         let n = min len (String.length input - !pos) in
+         Bytes.blit_string input !pos buf off n;
+         pos := !pos + n;
+         n
+     )
+    );
+  begin match List.rev !lens with
+  | first :: second :: _ ->
+      Alcotest.(check bool) "first read is smaller" true (first < 4096);
+      Alcotest.(check int) "second read" 4096 second
+  | _ ->
+      Alcotest.fail "Expected at least two reads"
+  end;
+  check "of_chunks"
+    (Parseff.Source.of_chunks
+       (let sent = ref false in
+        fun () ->
+          if !sent then
+            None
+          else (
+            sent := true;
+            Some input
+          )
+       )
+    );
+  check "of_seq" (Parseff.Source.of_seq (Seq.return input))
+
 let test_of_seq_basic () =
   let seq = List.to_seq [ "192."; "168."; "1.1"; "00" ] in
   let src = Parseff.Source.of_seq seq in
@@ -1531,6 +1578,8 @@ let () =
           test_case "json 2-byte chunks" `Quick test_of_seq_json;
           test_case "empty seq" `Quick test_of_seq_empty;
           test_case "take_while" `Quick test_of_seq_take_while;
+          test_case "large input grows the read buffer" `Quick
+            test_large_input_grows_read_buffer;
         ]
       );
     ]
