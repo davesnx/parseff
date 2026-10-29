@@ -932,6 +932,11 @@ let[@inline never] fail_at_least st n =
   else
     fail_str st st.pos ((1 lsl 3) lor tag_big) (string_of_int n)
 let none_kind = (8 lsl 3) lor tag_big
+let negative_count_payload = 9
+let negative_count_kind = (negative_count_payload lsl 3) lor tag_big
+
+let[@inline never] fail_negative_count st n =
+  fail_str st st.pos negative_count_kind (string_of_int n)
 let label_value = "value"
 let label_regex = "text matching the pattern"
 
@@ -1525,8 +1530,9 @@ let[@inline] commit () =
   if State.commit_nearest st && st.far.pos >= st.pos then far_commit_reset st
 
 let take n =
-  if n < 0 then invalid_arg "Parseff.take: count must be non-negative";
-  if n = 0 then
+  if n < 0 then
+    fail_negative_count (get_state ()) n
+  else if n = 0 then
     ""
   else begin
     let st = get_state () in
@@ -2328,6 +2334,12 @@ let int_mismatch payload s =
         8
       )
 
+let field_mismatch payload s =
+  if payload = negative_count_payload then
+    ("non-negative length", s, 0)
+  else
+    int_mismatch payload s
+
 let join_items = function
   | [ a ] ->
       a
@@ -2961,7 +2973,7 @@ let expected_of_far f =
             string_of_int payload ^ " bytes"
         )
     else if tag = tag_big && payload >= 2 then begin
-      let label, _, _ = int_mismatch payload s in
+      let label, _, _ = field_mismatch payload s in
       Label label
     end else if tag = tag_big then
       Label
@@ -3073,7 +3085,7 @@ let found_of_far st f pos =
       if not (tag = tag_bytes || (tag = tag_big && payload = 0)) then
         all_short := false;
       if tag = tag_big && payload >= 2 then begin
-        let ((_, found, _) as v) = int_mismatch payload (far_item_str f i) in
+        let ((_, found, _) as v) = field_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
             value := Some v

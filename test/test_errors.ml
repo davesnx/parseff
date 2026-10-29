@@ -2599,11 +2599,13 @@ let test_take_reports_what_is_left () =
     )
     (render_error "abc" (take 5));
   ( match Parseff.parse "abc" (take (-1)) with
-  | _ ->
-      Alcotest.fail "expected Invalid_argument"
-  | exception Invalid_argument msg ->
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+  | Error e ->
       Alcotest.(check string)
-        "negative count" "Parseff.take: count must be non-negative" msg
+        "negative count" "expected non-negative length, found -1"
+        (Parseff.error_message e);
+      Alcotest.(check int) "negative count offset" 0 e.range.start
   );
   Alcotest.(check string)
     "streaming" "expected 5 bytes, found only 3 (end of input)"

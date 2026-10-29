@@ -116,10 +116,11 @@ fields, and length-prefixed payloads.
 
 {@ocaml skip[val take : int -> string]}
 
-Returns [""] for [n = 0] without consuming input and raises [Invalid_argument]
-for a negative [n]. Fails if fewer than [n] bytes remain, with
-[expected 5 bytes, found only 3 (end of input)], or [found end of input] when
-none remain.
+Returns [""] for [n = 0] without consuming input. Fails if fewer than [n] bytes
+remain, with [expected 5 bytes, found only 3 (end of input)], or
+[found end of input] when none remain. A negative [n] fails with
+[expected non-negative length, found -1], an [Expected] error that [or_] and
+[optional] recover from.
 
 {@ocaml skip[
 (* Length-prefixed payload *)

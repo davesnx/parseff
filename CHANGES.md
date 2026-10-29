@@ -20,7 +20,6 @@ This is the 0.5.0 release.
   - `catch` is removed. It caught only `fail`, never `Expected`, and dropped `~from` and `~notes`. Check the condition before calling `fail`, or use `optional` and `or_` on parsers whose failure is an `Expected`.
   - `Utf8.digit` is removed. Use `digit`, which parses the same ASCII digits.
   - `BE.any_uint8`, `BE.any_int8`, `LE.any_uint8` and `LE.any_int8` become `any_uint8` and `any_int8` at the top level.
-- **Breaking: `take` with a negative count raises `Invalid_argument "Parseff.take: count must be non-negative"`** instead of failing the parse.
 - **`Backtrack_window_exceeded` reports the parser position.** Its error position, line and excerpt are those of the parser when the window was exceeded, not the end of the read that did not fit, and the open `* while parsing` lines follow the usual rule.
 - **Polish the error output.**
   - A streaming error whose line is not known, such as a `~from` older than the buffered input, prints `input: byte N: [error] ...` with no excerpt instead of a line and column computed from the partial buffer. `render_error` also indents the `*` rows by two spaces then.
@@ -56,7 +55,7 @@ This is the 0.5.0 release.
 - **Fix streaming documentation.** `span` is an owned copy in streaming, `match_regex` reads ahead half a window instead of retrying at chunk boundaries, and a source is for one parse.
 - **Fix `expect` and `one_of_labeled` relabeling custom errors.** A custom error raised through an `or_` or `one_of` with several branches was replaced by the `expect` or `one_of_labeled` message. It now passes through unchanged, as documented.
 - **Fix `many`, `sep_by`, `end_by` and `fold_left` looping forever on parsers that consume no input.** The loop now stops after an iteration that consumes nothing and drops that iteration's result and diagnostics. `~at_least` still applies to the kept results.
-- **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with an `Expected` error whose `found` is `Short` or `End`.
+- **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with an `Expected` error whose `found` is `Short` or `End`. A negative count also fails with `Expected`, `expected non-negative length, found -1`, as in 0.4, so `or_` recovers from it.
 - **Document the cost of `match_regex` failures.** `Re` searches forward when the regex does not match at the current position, so a failed match scans the rest of the input and a loop of failing matches takes quadratic time.
 
 ### Migrating runners, `error` and `warn`

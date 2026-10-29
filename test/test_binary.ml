@@ -423,11 +423,56 @@ let test_take_eof () =
 
 let test_take_negative () =
   match Parseff.parse "abc" (fun () -> Parseff.take (-1)) with
-  | _ ->
-      Alcotest.fail "Expected Invalid_argument for negative take"
-  | exception Invalid_argument msg ->
+  | Ok _ ->
+      Alcotest.fail "Expected an error for negative take"
+  | Error e -> (
       Alcotest.(check string)
-        "message" "Parseff.take: count must be non-negative" msg
+        "message" "expected non-negative length, found -1"
+        (Parseff.error_message e);
+      Alcotest.(check int) "offset" 0 e.range.start;
+      match e.kind with
+      | Parseff.Expected { found = Parseff.Value v; _ } ->
+          Alcotest.(check string) "found" "-1" v
+      | _ ->
+          Alcotest.fail "Expected Expected with found Value"
+    )
+
+let test_take_negative_recovers () =
+  let p () =
+    let v = Parseff.or_ (fun () -> Parseff.take (-1)) (fun () -> "x") () in
+    let rest = Parseff.take 3 in
+    (v, rest)
+  in
+  match Parseff.parse "abc" p with
+  | Ok (v, rest) ->
+      Alcotest.(check string) "alternative" "x" v;
+      Alcotest.(check string) "input kept" "abc" rest
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_take_negative_optional () =
+  let p () = Parseff.optional (fun () -> Parseff.take (-1)) () in
+  match Parseff.parse "abc" (fun () -> (p (), Parseff.take 3)) with
+  | Ok (None, "abc") ->
+      ()
+  | Ok _ ->
+      Alcotest.fail "Expected None and untouched input"
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_take_negative_untrusted_length () =
+  let parse_png_chunk () =
+    let length = Parseff.BE.any_int32 () in
+    Parseff.take (Int32.to_int length)
+  in
+  match Parseff.parse "\xFF\xFF\xFF\xFF" parse_png_chunk with
+  | Ok _ ->
+      Alcotest.fail "Expected an error"
+  | Error e ->
+      Alcotest.(check string)
+        "message" "expected non-negative length, found -1"
+        (Parseff.error_message e);
+      Alcotest.(check int) "offset" 4 e.range.start
 
 let test_tlv_header () =
   (* TLV: magic "TL", version u8, count u16-be, one field: tag u8, len u16-be, payload *)
@@ -643,6 +688,12 @@ let () =
           Alcotest.test_case "take zero" `Quick test_take_zero;
           Alcotest.test_case "take eof" `Quick test_take_eof;
           Alcotest.test_case "take negative" `Quick test_take_negative;
+          Alcotest.test_case "take negative recovers" `Quick
+            test_take_negative_recovers;
+          Alcotest.test_case "take negative optional" `Quick
+            test_take_negative_optional;
+          Alcotest.test_case "take negative untrusted length" `Quick
+            test_take_negative_untrusted_length;
         ]
       );
       ("composition", [ Alcotest.test_case "TLV header" `Quick test_tlv_header ]);

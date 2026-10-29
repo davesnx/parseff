@@ -67,7 +67,8 @@ type found = private
           many bytes were left. *)
   | Value of string
       (** An integer field that differs from the expected one, as the
-          hexadecimal value read in the same width, for example [0x0002]. *)
+          hexadecimal value read in the same width, for example [0x0002], or a
+          negative count given to {!val:take}, for example [-1]. *)
 
 type context = private { name : string; start : int; delimited : bool }
 (** A construct that was open at the failure, see {!val:context}. [start] is the
@@ -879,7 +880,9 @@ val take : int -> string
 (** [take n] reads exactly [n] bytes and returns them as a string. Fails if
     fewer than [n] bytes remain, with
     [expected 5 bytes, found only 3 (end of input)], or [found end of input]
-    when none remain. Raises [Invalid_argument] if [n] is negative.
+    when none remain. A negative [n] fails the parse with
+    [expected non-negative length, found -1], so [or_] and [optional] recover
+    from it and a length read from untrusted input cannot raise.
 
     Useful for length-prefixed binary fields and fixed-width text fields alike.
 
