@@ -1,6 +1,4 @@
-## Unreleased
-
-This is the 0.5.0 release.
+## 0.5.0
 
 - **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.error`: `{ kind; range; location; contexts; notes; excerpt }`, where `location` is the line and column in bytes. `location` is `None` when the line is not known (streaming, older than the buffered input). `kind : error_kind` is `Expected { items; found; more }`, `Failure`, `Custom`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. `found` is `Text`, `End`, `Short` or `Value`. The result type is `('a, error) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type `error` and its parts are `private`: you can read and match them, not build them. `note` and `range` stay buildable, for `fail ~notes`. See "Migrating from 0.4" below.
 - **Breaking: `error` takes an extensible variant.** `error` was `'e -> 'a` and the result carried a free `'e`, so a parser could raise an `int` and the caller could read a `string`: a segfault. `custom_error` is now an extensible variant, `error : ?from:int -> ?notes:note list -> custom_error -> 'a`, and `error_kind` has `Custom of custom_error`. `render_error ?custom` and `error_message ?custom` take a printer `custom_error -> string`. Declare your cases with `type Parseff.custom_error += Too_large of int` and match `Custom (Too_large n)`. A `Custom` match needs a final `_` case.
