@@ -1,7 +1,7 @@
 (** Parser combinator library with an imperative-style API.
 
-    Parseff is a parser combinator library that uses algebraic effects to allow
-    an imperative-style API for parsers.
+    Parseff is a parser combinator library where parsers are plain [unit -> 'a]
+    functions that run in direct style, without monads or effects.
 
     {1 Quick Start}
 

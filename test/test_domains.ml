@@ -1,9 +1,8 @@
 (* Tests for multi-domain (OCaml 5) safety.
 
-   Parseff uses algebraic effects internally and all mutable parser state is
-   local to each [parse] / [parse_source] call. These tests verify that
-   independent parses can run concurrently in separate domains without
-   interference. *)
+   All mutable parser state is local to each [parse] / [parse_source] call.
+   These tests verify that independent parses can run concurrently in separate
+   domains without interference. *)
 
 let num_domains = Domain.recommended_domain_count () |> min 8 |> max 2
 
@@ -313,7 +312,7 @@ let test_errors_isolated_across_domains () =
 
 let test_complex_combinators_across_domains () =
   (* Each domain exercises a different set of combinators to verify that the
-     full effect-handler machinery works correctly in parallel. *)
+     full combinator machinery works correctly in parallel. *)
   let results =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "%d,%d,%d" i (i + 1) (i + 2) in

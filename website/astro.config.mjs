@@ -94,7 +94,7 @@ export default defineConfig({
 				channel === 'latest'
 					? []
 					: [{ tag: 'meta', attrs: { name: 'robots', content: 'noindex' } }],
-			description: 'Parser combinators with OCaml 5 algebraic effects',
+			description: 'Direct-style parser combinator library for OCaml 5',
 			social: [
 				{
 					icon: 'github',

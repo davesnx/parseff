@@ -30,52 +30,52 @@ let test_fold_left_user_exception () =
   | exception _ ->
       ()
 
-let test_unhandled_effect_digit () =
+let test_outside_parse_digit () =
   match Parseff.digit () with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       check_parseff_error exn
 
-let test_unhandled_effect_consume () =
+let test_outside_parse_consume () =
   match Parseff.consume "hello" with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       check_parseff_error exn
 
-let test_unhandled_effect_position () =
+let test_outside_parse_position () =
   match Parseff.position () with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       check_parseff_error exn
 
-let test_unhandled_effect_many () =
+let test_outside_parse_many () =
   match Parseff.many Parseff.digit () with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       check_parseff_error exn
 
-let test_unhandled_effect_satisfy () =
+let test_outside_parse_satisfy () =
   match Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       check_parseff_error exn
 
-let test_unhandled_effect_end_of_input () =
+let test_outside_parse_end_of_input () =
   match Parseff.end_of_input () with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       check_parseff_error exn
 
-let test_unhandled_effect_message_content () =
+let test_outside_parse_message_content () =
   match Parseff.digit () with
   | _ ->
-      Alcotest.fail "Expected unhandled effect exception"
+      Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
       let msg = Printexc.to_string exn in
       Alcotest.(check bool)
@@ -3599,18 +3599,17 @@ let () =
             test_fold_left_user_exception;
         ]
       );
-      ( "unhandled effect message",
+      ( "outside parse message",
         [
-          test_case "digit outside parse" `Quick test_unhandled_effect_digit;
-          test_case "consume outside parse" `Quick test_unhandled_effect_consume;
-          test_case "position outside parse" `Quick
-            test_unhandled_effect_position;
-          test_case "many outside parse" `Quick test_unhandled_effect_many;
-          test_case "satisfy outside parse" `Quick test_unhandled_effect_satisfy;
+          test_case "digit outside parse" `Quick test_outside_parse_digit;
+          test_case "consume outside parse" `Quick test_outside_parse_consume;
+          test_case "position outside parse" `Quick test_outside_parse_position;
+          test_case "many outside parse" `Quick test_outside_parse_many;
+          test_case "satisfy outside parse" `Quick test_outside_parse_satisfy;
           test_case "end_of_input outside parse" `Quick
-            test_unhandled_effect_end_of_input;
+            test_outside_parse_end_of_input;
           test_case "message mentions runner functions" `Quick
-            test_unhandled_effect_message_content;
+            test_outside_parse_message_content;
         ]
       );
     ]
