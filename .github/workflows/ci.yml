@@ -147,7 +147,7 @@ jobs:
           extra-packages: dune-release
 
       - name: Release
-        uses: davesnx/dune-release-action@v0.4.0
+        uses: davesnx/dune-release-action@v0.6.0
         with:
           packages: 'parseff'
           changelog: './CHANGES.md'
