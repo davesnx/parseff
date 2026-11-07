@@ -2474,38 +2474,35 @@ let add_padded b width n =
   done;
   Buffer.add_string b (string_of_int n)
 
+let escaped esc = (esc, String.length esc)
+
 let display_unit text i =
   let c = String.unsafe_get text i in
   if Char.code c < 0x80 then
     begin if c <> '\t' && (c < ' ' || c = '\x7F') then
-      (1, escape_code (Char.code c))
+      (1, escaped (escape_code (Char.code c)))
     else
-      (1, "")
+      (1, ("", 1))
   end
   else begin
     let d = String.get_utf_8_uchar text i in
     if Uchar.utf_decode_is_valid d then begin
       let n = Uchar.utf_decode_length d in
-      let cp = Uchar.to_int (Uchar.utf_decode_uchar d) in
+      let u = Uchar.utf_decode_uchar d in
+      let cp = Uchar.to_int u in
       if invisible ~first:(i = 0) cp then
-        (n, Printf.sprintf "\\u{%04X}" cp)
+        (n, escaped (Printf.sprintf "\\u{%04X}" cp))
       else
-        (n, "")
+        (n, ("", Uucp.Break.tty_width_hint u))
     end else
-      (1, Printf.sprintf "\\x%02X" (Char.code c))
+      (1, escaped (Printf.sprintf "\\x%02X" (Char.code c)))
   end
-
-let unit_width esc =
-  if esc = "" then
-    1
-  else
-    String.length esc
 
 let add_display b text =
   let i = ref 0 in
   let len = String.length text in
   while !i < len do
-    let n, esc = display_unit text !i in
+    let n, (esc, _) = display_unit text !i in
     if esc = "" then
       Buffer.add_substring b text !i n
     else
@@ -2531,11 +2528,11 @@ let add_padding b text upto =
   let i = ref 0 in
   let upto = char_boundary text upto in
   while !i < upto do
-    let n, esc = display_unit text !i in
+    let n, (_, width) = display_unit text !i in
     if String.unsafe_get text !i = '\t' then
       Buffer.add_char b '\t'
     else
-      for _ = 1 to unit_width esc do
+      for _ = 1 to width do
         Buffer.add_char b ' '
       done;
     i := !i + n
@@ -2544,8 +2541,8 @@ let add_padding b text upto =
 let display_width text a z =
   let w = ref 0 and i = ref (char_boundary text a) in
   while !i < z do
-    let n, esc = display_unit text !i in
-    w := !w + unit_width esc;
+    let n, (_, width) = display_unit text !i in
+    w := !w + width;
     i := !i + n
   done;
   !w
@@ -2782,11 +2779,11 @@ let render ?name ?source ?custom e =
           in
           let i = ref 0 in
           while !i < n do
-            let len, esc = display_unit text !i in
+            let len, (_, width) = display_unit text !i in
             if String.unsafe_get text !i = '\t' then
               col := ((!col / 8) + 1) * 8
             else
-              col := !col + unit_width esc;
+              col := !col + width;
             i := !i + len
           done;
           if upto - v.first > String.length text then incr col;

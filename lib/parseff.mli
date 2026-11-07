@@ -168,7 +168,8 @@ val render_error :
     and [source] is not given, the character column is not known: the header is
     then [input.json: byte N: [error] ...] too, the excerpt of the error line is
     still printed, cut on the left with [...], and a [* while parsing] line says
-    [from byte N]. Carets count code points, and a control byte, an invalid
+    [from byte N]. Carets count terminal cells, so a wide character such as [名]
+    takes two and a combining mark takes none, and a control byte, an invalid
     UTF-8 byte or a C1 control prints in the excerpt as the escape
     {!val:error_message} uses, such as [\x1B], with as many carets as the escape
     has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
