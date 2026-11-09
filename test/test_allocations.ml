@@ -28,6 +28,49 @@ let check_words name maximum f =
       "%s allocated %.6f minor words per call, expected at most %.0f" name
       actual maximum
 
+let check_failed_parse name maximum input parser =
+  let actual =
+    words_per_call (fun () -> Parseff.parse ~consume:`Partial input parser)
+  in
+  if actual > maximum then
+    Alcotest.failf
+      "%s allocated %.6f minor words per call, expected at most %.0f" name
+      actual maximum
+
+let failed_error input parser =
+  match Parseff.parse ~consume:`Partial input parser with
+  | Ok _ ->
+      Alcotest.fail "expected a failed parse"
+  | Error error ->
+      error
+
+let test_failed_parses () =
+  check_failed_parse "char mismatch" 400. "y" (fun () -> Parseff.char 'x');
+  check_failed_parse "unexpected end" 400. "" (fun () -> Parseff.char 'x');
+  check_failed_parse "one_of alternatives" 640. "z" (fun () ->
+      Parseff.one_of
+        [
+          (fun () -> Parseff.char 'x');
+          (fun () -> Parseff.char 'y');
+          (fun () -> Parseff.char 'w');
+        ]
+        ()
+  )
+
+let test_render_error () =
+  let error =
+    failed_error "z" (fun () ->
+        Parseff.one_of
+          [ (fun () -> Parseff.char 'x'); (fun () -> Parseff.char 'y') ]
+          ()
+    )
+  in
+  let actual = words_per_call (fun () -> Parseff.render_error error) in
+  if actual > 390. then
+    Alcotest.failf
+      "render_error allocated %.6f minor words per call, expected at most 390"
+      actual
+
 let test_stopping_failures () =
   check_words "many" 0. (fun () -> Parseff.many (fun () -> Parseff.char 'x') ());
   check_words "sep_by" 0. (fun () ->
@@ -47,6 +90,10 @@ let () =
   Alcotest.run "Allocations"
     [
       ( "failure paths",
-        [ Alcotest.test_case "stopping failures" `Quick test_stopping_failures ]
+        [
+          Alcotest.test_case "stopping failures" `Quick test_stopping_failures;
+          Alcotest.test_case "failed parses" `Quick test_failed_parses;
+          Alcotest.test_case "render_error" `Quick test_render_error;
+        ]
       );
     ]
