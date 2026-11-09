@@ -1,3 +1,7 @@
+## Unreleased
+
+- **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
+
 ## 0.5.0
 
 - **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.error`: `{ kind; range; location; contexts; notes; excerpt }`, where `location` is the line and column in bytes. `location` is `None` when the line is not known (streaming, older than the buffered input). `kind : error_kind` is `Expected { items; found; more }`, `Failure`, `Custom`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. `found` is `Text`, `End`, `Short` or `Value`. The result type is `('a, error) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type `error` and its parts are `private`: you can read and match them, not build them. `note` and `range` stay buildable, for `fail ~notes`. See "Migrating from 0.4" below.

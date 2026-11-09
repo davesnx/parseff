@@ -3273,7 +3273,7 @@ let test_excerpt_escapes_invisible_code_points () =
        [
          "input.json:1:3: [error] expected 'q', found 'x'";
          "1 | e\xCC\x81x";
-         "  |   ^";
+         "  |  ^";
        ]
     )
     (render_error "e\xCC\x81x" (fun () ->
@@ -3281,6 +3281,45 @@ let test_excerpt_escapes_invisible_code_points () =
          ignore (Parseff.char 'q')
      )
     )
+
+let test_excerpt_counts_terminal_cells () =
+  check_render "wide characters before the error"
+    (lines
+       [
+         "input.json:1:8: [error] expected ';', found 'x'";
+         "1 | 名前 = 3 x";
+         "  |          ^";
+       ]
+    )
+    (render_error "名前 = 3 x" (fun () ->
+         ignore
+           (Parseff.Utf8.take_while ~at_least:1 (fun u -> Uchar.to_int u > 127));
+         Parseff.skip_whitespace ();
+         ignore (Parseff.char '=');
+         Parseff.skip_whitespace ();
+         ignore (Parseff.digit ());
+         Parseff.skip_whitespace ();
+         ignore (Parseff.char ';')
+     )
+    );
+  check_render "wide character found"
+    (lines
+       [ "input.json:1:1: [error] expected 'a', found '名'"; "1 | 名x"; "  | ^^" ]
+    )
+    (render_error "名x" (fun () -> ignore (Parseff.char 'a')));
+  check_render "wide characters before the opener"
+    (lines
+       [
+         "input.json:2:3: [error] expected ',' or ']', found '3'";
+         "1 |   [\"名前\", [1,";
+         "  | ╭──────────╯";
+         "2 | │ 2 3]]";
+         "  | ╰───^";
+         "  * while parsing array, from 1:8";
+         "  * while parsing array, from 1:1";
+       ]
+    )
+    (render "[\"名前\", [1,\n2 3]]" ctx_json_parser)
 
 let test_window_error_points_at_the_parser () =
   let input = numbered_lines 100 in
@@ -3583,6 +3622,8 @@ let () =
             test_source_and_user_text_keep_trailing_spaces;
           test_case "excerpt escapes invisible code points" `Quick
             test_excerpt_escapes_invisible_code_points;
+          test_case "excerpt counts terminal cells" `Quick
+            test_excerpt_counts_terminal_cells;
           test_case "window error points at the parser" `Quick
             test_window_error_points_at_the_parser;
           test_case "duplicates do not hide alternatives" `Quick
