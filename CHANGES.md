@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Add `State`, a cell that rolls back with the parser.** `State.create v` makes a `'a State.t`; `State.get` and `State.set` read and write it. A `set` in a branch that backtracks is undone with the branch, by the rule of diagnostics: `or_`, `one_of`, `optional`, the last iteration of `many`, `sep_by` and `fold_left`, and `look_ahead`. `commit` and `cut` keep the sets of the branch they seal. Use it for symbol tables, indentation stacks and counters; a `ref` keeps its value when a branch backtracks. Only the value is restored, not a mutable value inside it. The runner does not take the cell. `set` raises `Invalid_argument` when another running parse set the cell. An exception that a branch does not catch, including `fail` and `error`, skips the undo except in `look_ahead`, as for diagnostics. A `set` inside an open branch allocates 6 words, kept while an open branch can undo it; a parser that never calls `set` allocates nothing more, and a frame push and restore cost about 4 to 18 more instructions.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

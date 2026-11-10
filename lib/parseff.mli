@@ -200,6 +200,87 @@ module Diagnostics : sig
   (** Empties the collector. Raises [Invalid_argument] while a parse uses it. *)
 end
 
+(** {1 State} *)
+
+module State : sig
+  type 'a t
+  (** A mutable cell whose changes are undone when the parser backtracks. Use it
+      for state that a parser builds as it goes, such as a symbol table, an
+      indentation stack or a counter.
+
+      A {!set} in a branch that backtracks is undone with the branch, by the
+      same rule as diagnostics: the failed branch of {!or_} and {!one_of}, a
+      failed {!optional}, the last iteration of {!many}, {!sep_by} and
+      {!fold_left} (the one that fails or consumes nothing), and {!look_ahead},
+      also when it succeeds. A {!set} is kept when its branch succeeds. After
+      {!commit} or {!cut} seals a branch, a failure no longer undoes the {!set}s
+      in it, but an outer branch that backtracks still undoes them.
+
+      An exception that a branch does not catch skips the undo. A [fail], an
+      {!val-error} or an exception of your own raised inside {!or_},
+      {!optional}, {!many}, {!sep_by} or {!fold_left} leaves the cell with the
+      value it had when the exception was raised. {!look_ahead} restores it.
+      Diagnostics behave the same way.
+
+      Only the value in the cell is restored. A mutable value inside the cell,
+      such as a [Hashtbl.t] or an array, keeps its changes. Store immutable
+      values, such as a [Map] or a list.
+
+      The runner does not take the cell. Create it anywhere, inside or outside
+      the parser. The value at the end of a parse stays in the cell, also when
+      the parse fails, so set it before each parse to start again. Outside a
+      parse, {!get} and {!set} work as for a [ref].
+
+      Example:
+      {@ocaml[
+      let names = State.create []
+
+      let declare () =
+        let name = take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
+        State.set names (name :: State.get names)
+
+      let statement () =
+        or_
+          (fun () ->
+            declare ();
+            let _ = char '=' in
+            `Assign
+          )
+          (fun () ->
+            declare ();
+            let _ = char ';' in
+            `Declare
+          )
+          ()
+
+      let () =
+        State.set names [];
+        match parse "abc;" statement with
+        | Ok `Declare ->
+            assert (State.get names = [ "abc" ])
+        | _ ->
+            assert false
+      ]} *)
+
+  val create : 'a -> 'a t
+
+  val get : 'a t -> 'a
+
+  val set : 'a t -> 'a -> unit
+  (** [set cell v] stores [v] in [cell]. Inside a branch that can backtrack, it
+      allocates 6 words to remember the old value. The old value stays in memory
+      while a branch that is still open can undo it. A [set] in each iteration
+      of a {!many} at the top of the parser keeps one old value, but a grammar
+      inside one {!or_} keeps every old value until that {!or_} ends. A parser
+      that never calls [set] allocates nothing more.
+
+      Raises [Invalid_argument] when another parse that is still running set
+      [cell]. This happens with two parses interleaved on one domain, for
+      example by effects in a {!Source.of_function} reader, and with a {!parse}
+      called inside a parser. Give each parse its own cell. A cell is not safe
+      to share between domains. *)
+end
+
 (** {1 Runner} *)
 
 val parse :

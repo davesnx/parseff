@@ -113,3 +113,43 @@ Diagnostics are transactional with parser control flow:
 - `Parseff.many`: diagnostics from the final failing attempt are rolled back
 - `Parseff.look_ahead`: diagnostics are rolled back
 This prevents diagnostics from leaking out of speculative branches.
+
+
+## State that rolls back
+
+A `ref` that a parser changes keeps its new value when a branch backtracks. Use a `Parseff.State.t` cell instead when the value must follow the branch, as diagnostics do: a symbol table, an indentation stack, a counter.
+
+```ocaml
+module State : sig
+  type 'a t
+  val create : 'a -> 'a t
+  val get : 'a t -> 'a
+  val set : 'a t -> 'a -> unit
+end
+```
+A `Parseff.State.set` in a branch that backtracks is undone with the branch: the failed branch of `Parseff.or_` and `Parseff.one_of`, a failed `Parseff.optional`, the last iteration of `Parseff.many`, `Parseff.sep_by` and `Parseff.fold_left`, and `Parseff.look_ahead`, also when it succeeds. After `Parseff.commit` or `Parseff.cut` seals a branch, a failure no longer undoes the sets in it.
+
+```ocaml
+let depth = Parseff.State.create 0
+
+let open_paren () =
+  let _ = Parseff.char '(' in
+  Parseff.State.set depth (Parseff.State.get depth + 1)
+
+let () =
+  match
+    Parseff.parse "x"
+      (Parseff.or_
+         (fun () ->
+           open_paren ();
+           Parseff.char ')')
+         (fun () -> Parseff.char 'x'))
+  with
+  | Ok _ -> Printf.printf "depth = %d\n" (Parseff.State.get depth)
+  | Error _ -> ()
+```
+This prints `depth = 0`: the left branch failed before it set the cell. With input `(y`, the left branch sets `depth` to `1`, fails on `y`, and the set is undone before the right branch runs.
+
+An exception that a branch does not catch skips the undo. A `Parseff.fail`, an `Parseff.error` or an exception of your own raised inside `Parseff.or_`, `Parseff.optional`, `Parseff.many`, `Parseff.sep_by` or `Parseff.fold_left` leaves the cell with the value it had when the exception was raised. `Parseff.look_ahead` restores it. Diagnostics behave the same way.
+
+Only the value in the cell is restored. A mutable value inside the cell, such as a `Hashtbl.t`, keeps its changes, so store immutable values. The runner does not take the cell, and the value at the end of a parse stays in it. A `Parseff.State.set` raises `Invalid_argument` when another running parse set the same cell.
