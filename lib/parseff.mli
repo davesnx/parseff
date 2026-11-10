@@ -554,6 +554,105 @@ val look_ahead : (unit -> 'a) -> 'a
     (* position hasn't moved *)
     ]} *)
 
+val capture : (unit -> 'a) -> ('a, error) result
+(** [capture parser] runs [parser] and returns its failure as a value. Use it to
+    recover from an error and continue parsing.
+
+    If [parser] succeeds, [capture parser] returns [Ok v] and keeps the input
+    that [parser] consumed, as if [parser] had been called directly. Failures
+    that [parser] recorded on the way stay in the furthest failure, as they
+    would after {!or_}.
+
+    If [parser] fails, [capture parser] returns [Error e]. [e] is the furthest
+    failure inside [parser], built as {!parse} builds an error: with its
+    expected items, location, notes, excerpt, and the {!val:context}s, both
+    those opened inside [parser] and those open around [capture]. Failures
+    recorded before [capture] are not merged into [e], so {!parse} can report
+    more expected items at the same position. Failures from {!fail} and
+    {!val-error} are caught too. The position goes back to where [capture]
+    started, the diagnostics that [parser] recorded are removed, and the failure
+    is forgotten: it does not appear in a later error report.
+
+    [capture] stops {!cut} and {!commit} as {!look_ahead} does. A [cut ()] in
+    [parser] does not seal the frames outside [capture], so [capture] returns
+    [Error e] also for a construct that [cut] decided. In streaming, the input
+    from where [capture] started stays buffered until it returns.
+
+    [Depth_limit_exceeded] and [Backtrack_window_exceeded] are not caught. They
+    stop the parse as usual.
+
+    A parser that never calls [capture] pays nothing for it, except that each
+    {!val:context} call also stores its name and start for [capture].
+
+    Example:
+    {@ocaml[
+    let statement_or_hole errors () =
+      match capture statement with
+      | Ok s ->
+          s
+      | Error e ->
+          warn_at errors ~pos:e.range.start e;
+          skip_while (fun c -> c <> ';');
+          let _ = char ';' in
+          Hole
+    ]} *)
+
+val recover :
+  error Diagnostics.t ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (error -> 'a) ->
+  'a
+(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
+    [parser] succeeds, [recover] returns its value. If [parser] fails with the
+    error [e], [recover] records [e] in [errors] at the position of [e], calls
+    [sync ()] to skip to a point where parsing can continue, and returns
+    [hole e].
+
+    [recover] always consumes input when it recovers: if [sync] consumed
+    nothing, [recover] moves to the position of [e], or stays where it started
+    if [e] is before that, and skips the character there, if one is left. If the
+    input has already ended where [recover] starts, [recover] does not recover
+    and calls [parser] directly, so the parse fails as it would without
+    [recover]. To continue without consuming input, for example to insert a
+    missing item, use {!capture}.
+
+    The recorded error follows the rules of {!warn}: it is removed when an
+    enclosing branch backtracks, and it stays when the parse fails. A failure in
+    [sync] or [hole] is an ordinary failure at that point, and the runner
+    reports that failure, not [e]. [errors] must be the collector given to the
+    runner as [~diagnostics]; for any other collector [recover] raises
+    [Invalid_argument], so that no error is lost.
+
+    Example:
+    {@ocaml[
+    let statements errors () =
+      many
+        (fun () ->
+          skip_whitespace ();
+          recover errors
+            ~sync:(fun () ->
+              skip_while (fun c -> c <> ';');
+              ignore (optional (fun () -> char ';') ())
+            )
+            statement
+            (fun _ -> Hole)
+        )
+        ()
+
+    let () =
+      let errors = Diagnostics.create () in
+      match parse ~diagnostics:errors input (statements errors) with
+      | Ok _ ->
+          List.iter
+            (fun { Diagnostics.value = e; _ } ->
+              print_endline (render_error ~source:input e)
+            )
+            (Diagnostics.to_list errors)
+      | Error e ->
+          print_endline (render_error ~source:input e)
+    ]} *)
+
 val commit : unit -> unit
 (** [commit ()] seals the innermost active choice or repetition frame: the
     nearest enclosing {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} or

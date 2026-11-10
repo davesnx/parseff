@@ -166,6 +166,7 @@ type state = {
   mutable far : far;
   mutable ctx_top : int;
   mutable ctx : int array;
+  mutable ctx_names : string array;
   mutable line_index : line_index option;
   source : source option;
   mutable frames : int array;
@@ -272,6 +273,7 @@ module State = struct
       far = far_none;
       ctx_top = 0;
       ctx = [||];
+      ctx_names = [||];
       line_index = None;
       source;
       frames = [||];
@@ -1613,12 +1615,16 @@ let look_ahead p =
 
 let ctx_stride = 2
 let ctx_cut_bit = 1
+let ctx_delimited_bit = 2
 
 let[@inline never] ctx_grow st =
   let old = st.ctx in
   let meta = Array.make (imax 16 (2 * Array.length old)) 0 in
   Array.blit old 0 meta 0 (Array.length old);
-  st.ctx <- meta
+  st.ctx <- meta;
+  let names = Array.make (Array.length meta / ctx_stride) "" in
+  Array.blit st.ctx_names 0 names 0 (Array.length st.ctx_names);
+  st.ctx_names <- names
 
 let[@inline never] far_contribute f d name start delimited =
   if f.chain_pos <> f.pos then begin
@@ -1644,7 +1650,10 @@ let context ?(delimited = false) name p =
   let start = st.pos in
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
-  Array.unsafe_set st.ctx (m + 1) 0;
+  Array.unsafe_set st.ctx (m + 1)
+    ((start lsl 2) lor (Bool.to_int delimited * ctx_delimited_bit));
+  if Array.unsafe_get st.ctx_names d != name then
+    Array.unsafe_set st.ctx_names d name;
   st.ctx_top <- d + 1;
   match p () with
   | v ->
@@ -3359,12 +3368,12 @@ let extras_span pos (x : fail_extra) =
   else
     { start = imin x.from pos; stop = imax x.from pos }
 
-let error_of_far st =
+let error_of_far st outer =
   let f = st.far in
   let pos = f.pos in
   if pos < 0 then
     failwith "Parseff: internal error: failure without a recorded position";
-  let frames = far_chain st in
+  let frames = outer @ far_chain st in
   match f.extra with
   | Payload e when f.special = special_user ->
       build st ~pos (Custom e) { start = pos; stop = pos } frames
@@ -3385,9 +3394,77 @@ let error_of_far st =
 let error_plain st pos kind frames =
   build st ~pos kind { start = pos; stop = pos } frames
 
-let error_failure st pos msg (x : fail_extra) =
+let error_failure st pos msg (x : fail_extra) outer =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes (Failure msg) span x.chain
+  build st ~pos:span.start ~notes:x.notes (Failure msg) span (outer @ x.chain)
+
+let outer_contexts st pos =
+  let acc = ref [] in
+  for d = st.ctx_top - 1 downto 0 do
+    let m = d * ctx_stride in
+    let flags = Array.unsafe_get st.ctx (m + 1) in
+    let start = flags lsr 2 in
+    if pos > start then
+      acc :=
+        ( Array.unsafe_get st.ctx_names d,
+          start,
+          flags land ctx_delimited_bit <> 0
+        )
+        :: !acc
+  done;
+  !acc
+
+let capture_rewind st frame saved e =
+  restore_rewind_frame st frame;
+  State.pop_rewind_frame st frame;
+  st.far <- saved;
+  Stdlib.Error e
+
+let capture p =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      Stdlib.Ok v
+  | exception Fail ->
+      capture_rewind st frame saved
+        (error_of_far st (outer_contexts st st.far.pos))
+  | exception User_failure (pos, msg, x) ->
+      capture_rewind st frame saved
+        (error_failure st pos msg x (outer_contexts st pos))
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let recover errors ~sync parser hole =
+  let st = get_state () in
+  if st.diag != errors.self then
+    invalid_arg
+      "Parseff.recover: errors is not the collector given to the runner";
+  if not (have st 1) then
+    parser ()
+  else
+    let start = st.pos in
+    match capture parser with
+    | Ok v ->
+        v
+    | Error e ->
+        record_diagnostic errors st e.range.start e;
+        sync ();
+        if st.pos = start then begin
+          let p = imax start e.range.start in
+          st.pos <- p;
+          fill_uchar st ~keep_from:p p;
+          if p < st.input_len then
+            st.pos <-
+              p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+        end;
+        hole e
 
 let run_detailed st thunk =
   let previous = State.enter st in
@@ -3396,9 +3473,9 @@ let run_detailed st thunk =
     | v ->
         Stdlib.Ok v
     | exception Fail ->
-        Stdlib.Error (error_of_far st)
+        Stdlib.Error (error_of_far st [])
     | exception User_failure (pos, msg, x) ->
-        Stdlib.Error (error_failure st pos msg x)
+        Stdlib.Error (error_failure st pos msg x [])
     | exception Depth_limit_exceeded a ->
         Stdlib.Error
           (error_plain st a.at
