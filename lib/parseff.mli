@@ -1293,7 +1293,9 @@ val any_varint : unit -> int
     bytes and the 9th byte is at most [0x3F]. A longer or larger varint fails at
     its first byte with [expected varint up to max_int], and an encoding with
     extra [0x80] bytes is accepted while it fits. Input that ends inside the
-    varint fails with [expected 1 byte, found end of input] at the end.
+    varint fails with [expected 1 byte, found end of input] at the end. These
+    limits assume a 63-bit [int]. Where [int] has fewer than 63 bits, such as on
+    32-bit OCaml, a value above [max_int] wraps with no error.
 
     Example:
     {@ocaml[
