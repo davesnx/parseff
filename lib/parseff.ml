@@ -2008,6 +2008,9 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     let f = ref (op ()) in
     let rhs = ref (p ()) in
     while st.pos <> !start do
+      (* Lowering the top lets [!f] overwrite this frame's slots. That is safe:
+         [reset_repeat_frame] rewrites every slot below, and a [Fail] from [!f]
+         leaves without reading the frame. *)
       st.frames_top <- frame;
       acc := !f !acc !rhs;
       st.frames_top <- top;
