@@ -62,14 +62,10 @@ To parse a leading part of the source and leave the rest unread, pass
 {1 Many values from one source}
 
 {!val:Parseff.parse_source_each} parses a stream of values, such as NDJSON
-lines, log records or network frames, from one source. Each element of the
-sequence runs the parser once on the rest of the source. Memory is bounded by
-[~backtrack_window], not by the number of values. A parser that collects the
-values with {!val:Parseff.many} keeps all of them in a list.
-
-Use it instead of a loop inside one {!val:Parseff.parse_source} call when the
-consumer must suspend or pull values one at a time, or when [~diagnostics] must
-not grow with the stream. A loop collects diagnostics for the whole parse.
+lines or log records, from one source. Each element of the sequence runs the
+parser once on the rest of the source. Use it instead of one
+{!val:Parseff.parse_source} call with {!val:Parseff.many} when the consumer
+must get each value as it arrives.
 
 {@ocaml skip[val parse_source_each :
   ?max_depth:int ->
@@ -80,60 +76,25 @@ not grow with the stream. A loop collects diagnostics for the whole parse.
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t]}
 
-The parser reads one value and the separator after it. Here
-{!val:Parseff.char} consumes exactly the newline:
+The parser reads one value and the separator after it:
 
-{@ocaml skip[
-  let record () =
-    let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-    let _ = Parseff.char '\n' in
-    int_of_string id
+{@ocaml[
+let record () =
+  let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+  let _ = Parseff.char '\n' in
+  int_of_string id
 
-  let () =
-    let ic = open_in "ids.txt" in
-    Parseff.parse_source_each (Parseff.Source.of_channel ic) record
-    |> Seq.iter (function
-         | Ok id -> Printf.printf "%d\n" id
-         | Error e -> prerr_endline (Parseff.render_error e));
-    close_in ic
+let () =
+  Parseff.parse_source_each (Parseff.Source.of_string "1\n22\n333\n") record
+  |> Seq.iter (function
+       | Ok id -> Printf.printf "%d\n" id
+       | Error e -> prerr_endline (Parseff.render_error e))
 ]}
 
 A separator parser that reads past the value, such as
 {!val:Parseff.skip_whitespace}, holds that value back until more input or the
-end of input arrives.
-
-The rules:
-
-- Bytes that one value read ahead stay buffered for the next value. This
-  includes the read-ahead of {!val:Parseff.match_regex}.
-- The sequence ends when no input remains before a value. An empty source gives
-  an empty sequence.
-- The sequence reads to the end of the input, as [~consume:`All] would: bytes
-  the parser cannot read give an [Error] element, so there is no [~consume]
-  argument.
-- After an [Error] element the sequence ends.
-- When the parser succeeds without consuming input while input remains, the
-  element is an [Error] with kind [Failure "the parser consumed no input"], and
-  the sequence ends.
-- Positions are absolute offsets from the start of the source. Line numbers in
-  errors and in {!val:Parseff.render_error} count from the first line of the
-  stream.
-- [~diagnostics] is emptied each time an element is forced. Read it before you
-  force the next element.
-- [~trace] works as in {!val:Parseff.parse_source}. One callback receives the
-  events of the whole sequence, at absolute positions.
-- The sequence is ephemeral. Force each element once, in order. Forcing an
-  element again raises [Invalid_argument]. Use [Seq.memoize] to traverse it
-  more than once.
-- After the parser or the source's read function raises, the sequence cannot be
-  resumed. Forcing the same element again raises [Invalid_argument].
-- Inside the parser, only the source's read function may suspend, as with
-  {!val:Parseff.parse_source}. Between elements no parse state is installed, so
-  the consumer may suspend there: an effect-based scheduler such as Eio can run
-  other fibers, also other parses, between two elements. A loop inside one
-  {!val:Parseff.parse_source} call cannot do this, because the consumer then
-  runs inside the parser. Two sequences on two sources can be consumed in two
-  fibers on one domain.
+end of input arrives. The sequence is ephemeral: force each element once, in
+order.
 
 {1 The Source module}
 
@@ -468,4 +429,3 @@ change the result, {!val:Parseff.match_regex} fails with
 
 {!val:Parseff.parse_source} runs the parser to completion and returns a single
 result. To get each value as it arrives, use {!val:Parseff.parse_source_each}.
-See "Many values from one source" above.
