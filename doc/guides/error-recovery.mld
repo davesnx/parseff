@@ -127,9 +127,9 @@ let show = function
   | Let (name, value) -> Printf.sprintf "%s = %d" name value
   | Hole -> "<hole>"
 
-let run input =
+let run parser input =
   let errors = Parseff.Diagnostics.create () in
-  (match Parseff.parse ~diagnostics:errors input (statements errors) with
+  (match Parseff.parse ~diagnostics:errors input (parser errors) with
   | Ok stmts -> print_endline (String.concat "; " (List.map show stmts))
   | Error e -> print_endline (Parseff.render_error ~source:input e));
   List.iter
@@ -142,7 +142,7 @@ The parse now succeeds. The tree has a hole for each broken statement, and the
 collector holds both errors:
 
 {@ocaml[
-# run input;;
+# run statements input;;
 x = 1; <hole>; z = 3; <hole>
 1:20: [error] expected integer, found ';'
 1 | let x = 1; let y = ; let z = 3; let = 4;
@@ -163,10 +163,14 @@ consumes it, so the next statement starts clean.
 
 For an element of a list, the token after the element belongs to the list:
 [,] or [\]]. The skip must stop before it, so that {!val:Parseff.sep_by} reads
-it as usual. Use [capture] here, not [recover]: a hole in a list can be empty,
+it as usual. If an element can hold a list, as in [\[\[1\], 2\]], a skip to the
+first [\]] stops inside the inner list, so count the brackets as you skip, or
+recover at each level of nesting. Use [capture] here, not [recover]: a hole in a list can be empty,
 as in [\[1, , 3\]], and [recover] always consumes input, so it would skip the
 [,] itself. Record the error with {!val:Parseff.warn} [~pos] at the position of
-the error, which is the entry [recover] records. Because [capture] makes every
+the error, which is the entry [recover] records. At the end of the input, call
+the element parser directly, as [recover] does, so that a truncated array fails
+once and does not also record the same error. Because [capture] makes every
 element succeed, [sep_by] never returns an empty list, so check for [\]] with
 {!val:Parseff.look_ahead} first:
 
@@ -182,12 +186,14 @@ let array errors () =
             [])
           (Parseff.sep_by
              (fun () ->
-               match Parseff.capture (fun () -> Some (integer ())) with
-               | Ok x -> x
-               | Error e ->
-                   Parseff.warn ~pos:e.range.start errors e;
-                   Parseff.skip_while (fun c -> c <> ',' && c <> ']');
-                   None)
+               if Parseff.peek_char () = None then Some (integer ())
+               else
+                 match Parseff.capture (fun () -> Some (integer ())) with
+                 | Ok x -> x
+                 | Error e ->
+                     Parseff.warn ~pos:e.range.start errors e;
+                     Parseff.skip_while (fun c -> c <> ',' && c <> ']');
+                     None)
              (fun () ->
                ws ();
                let _ = Parseff.char ',' in
@@ -240,7 +246,72 @@ let run_array input =
   |    ^
   * while parsing array, from 1:1
 - : unit = ()
+# run_array "[1, ";;
+1:5: [error] expected integer, found end of input
+1 | [1,
+  |     ^
+  * while parsing array, from 1:1
+- : unit = ()
 ]}
+
+{1 A list with a closing token}
+
+Inside {!val:Parseff.many}, [recover] fails only at the end of the input. In a
+block such as [{ let x = 1; }], it reads the [}] as a broken statement and
+records an error, and [sync] skips the [}], so the block never closes. When a
+token closes the list, stop the loop at that token before you call [recover],
+and make [sync] stop before that token too:
+
+{@ocaml[
+let skip_in_block () =
+  Parseff.skip_while (fun c -> c <> ';' && c <> '}');
+  ignore (Parseff.optional (fun () -> Parseff.char ';') ())
+
+let block errors () =
+  let _ = Parseff.char '{' in
+  let stmts =
+    Parseff.many
+      (fun () ->
+        ws ();
+        let _ =
+          Parseff.look_ahead (fun () ->
+              Parseff.satisfy ~label:"statement" (fun c -> c <> '}'))
+        in
+        Parseff.recover errors ~sync:skip_in_block statement (fun _ -> Hole))
+      ()
+  in
+  ws ();
+  let _ = Parseff.char '}' in
+  stmts
+]}
+
+The look-ahead fails at [}], so [many] stops there and [char '}'] closes the
+block. A valid block gives the same result as without recovery, with no errors:
+
+{@ocaml[
+# run block "{ let x = 1; }";;
+x = 1
+- : unit = ()
+# run block "{ let x = ; let y = 2; }";;
+<hole>; y = 2
+1:11: [error] expected integer, found ';'
+1 | { let x = ; let y = 2; }
+  |           ^
+  * while parsing statement, from 1:3
+- : unit = ()
+# run block "{ let x = 1 }";;
+<hole>
+1:13: [error] expected ';', found '}'
+1 | { let x = 1 }
+  |             ^
+  * while parsing statement, from 1:3
+- : unit = ()
+# run block "{ }";;
+- : unit = ()
+]}
+
+If a block can hold blocks, a skip to the first [}] stops inside the inner
+block. As for arrays, count the braces as you skip.
 
 {1 Limits}
 
