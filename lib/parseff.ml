@@ -2346,7 +2346,10 @@ and expr_prefix_ops c frame start rest = function
   | Prefix f :: ops -> (
       match
         let g = f () in
-        if c.st.pos = start then raise_notrace Fail;
+        if c.st.pos = start then begin
+          State.set_frame_kind c.st frame frame_choice;
+          raise_notrace Fail
+        end;
         g (rec_ (fun () -> expr_climb c rest))
       with
       | v ->

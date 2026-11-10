@@ -296,6 +296,23 @@ let test_prefix_no_progress () =
   check Parseff.[ [ prefix empty; prefix (pre "-") ] ] "-1" "Ok (-1)";
   check Parseff.[ [ infix_left (bin "+") ]; [ prefix empty ] ] "1+2" "Ok (1+2)"
 
+let test_prefix_no_progress_sealed () =
+  let sealed seal () =
+    seal ();
+    fun a -> "<" ^ a ^ ">"
+  in
+  List.iter
+    (fun seal ->
+      check Parseff.[ [ prefix (sealed seal) ] ] "1" "Ok 1";
+      check
+        Parseff.[ [ prefix (sealed seal); prefix (pre "-") ] ]
+        "-1" "Ok (-1)";
+      check
+        Parseff.[ [ prefix (sealed seal) ] ]
+        "x" "Error@0 expected digit or \"(\", found 'x'"
+    )
+    [ Parseff.commit; Parseff.cut ]
+
 let int_op c f () =
   ignore (Parseff.char c);
   f
@@ -505,6 +522,8 @@ let () =
           test_case "depth limit" `Quick test_depth_limit;
           test_case "commit in atom" `Quick test_commit_in_atom;
           test_case "prefix without progress" `Quick test_prefix_no_progress;
+          test_case "prefix without progress, committed" `Quick
+            test_prefix_no_progress_sealed;
           test_case "long flat chain" `Quick test_long_flat;
           test_case "streaming window" `Quick test_streaming_window;
           test_case "doc example" `Quick test_doc_example;
