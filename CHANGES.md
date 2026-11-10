@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Add `int`, `float` and `hex_int`.** `int ()` parses an optional `-` and decimal digits, `float ()` adds an optional fraction and exponent (`-0.5`, `2.5E-3`), and `hex_int ()` parses hexadecimal digits without a prefix. None of them accepts `+`, `_` separators or OCaml prefixes such as `0x`. A failure is an `Expected` error that merges with the other alternatives: `expected integer`, `expected number`, `expected hexadecimal integer`, or `expected digit` after a `-`, `.` or exponent marker. A value outside the `int` range fails at the start of the number with `expected integer in int range`, so `or_` can try another branch; it never wraps or raises. `int` and `hex_int` read the input in place and do not allocate on success. A `float` too large for the type gives `infinity`. In `parse_source` a number must be shorter than `backtrack_window` bytes, as with `take_while`.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

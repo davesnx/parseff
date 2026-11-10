@@ -1953,6 +1953,145 @@ let digit () =
   let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
   Char.code c - Char.code '0'
 
+let[@inline always] byte_at st ~keep_from p =
+  if p < st.input_len || fill st ~keep_from (p + 1) then
+    Char.code (char_at st p)
+  else
+    -1
+
+let[@inline always] decimal_value b =
+  if b >= 0x30 && b <= 0x39 then
+    b - 0x30
+  else
+    -1
+
+let label_integer = "integer"
+let label_digit = "digit"
+let label_int_range = "integer in int range"
+let min_int_div_10 = min_int / 10
+let min_int_last = -(min_int mod 10)
+
+let[@inline never] handle_int st =
+  let start = st.pos in
+  let negative = byte_at st ~keep_from:start start = Char.code '-' in
+  let first =
+    if negative then
+      start + 1
+    else
+      start
+  in
+  let p = ref first in
+  let acc = ref 0 in
+  let d = ref (decimal_value (byte_at st ~keep_from:start first)) in
+  if !d < 0 then
+    if negative then
+      fail_str st first tag_label label_digit
+    else
+      fail_str st start tag_label label_integer;
+  while !d >= 0 do
+    if !acc < min_int_div_10 || (!acc = min_int_div_10 && !d > min_int_last)
+    then
+      fail_str st start tag_label label_int_range;
+    acc := (!acc * 10) - !d;
+    incr p;
+    d := decimal_value (byte_at st ~keep_from:start !p)
+  done;
+  if negative then begin
+    st.pos <- !p;
+    !acc
+  end else if !acc = min_int then
+    fail_str st start tag_label label_int_range
+  else begin
+    st.pos <- !p;
+    - !acc
+  end
+
+let int () =
+  let st = get_state () in
+  handle_int st
+
+let label_number = "number"
+
+let scan_digits st ~keep_from p =
+  let p = ref p in
+  while decimal_value (byte_at st ~keep_from !p) >= 0 do
+    incr p
+  done;
+  !p
+
+let require_digits st ~keep_from p =
+  if decimal_value (byte_at st ~keep_from p) < 0 then
+    fail_str st p tag_label label_digit;
+  scan_digits st ~keep_from (p + 1)
+
+let[@inline never] handle_float st =
+  let start = st.pos in
+  let keep_from = start in
+  let first =
+    if byte_at st ~keep_from start = Char.code '-' then
+      start + 1
+    else
+      start
+  in
+  if first = start && decimal_value (byte_at st ~keep_from start) < 0 then
+    fail_str st start tag_label label_number;
+  let p = require_digits st ~keep_from first in
+  let p =
+    if byte_at st ~keep_from p = Char.code '.' then
+      require_digits st ~keep_from (p + 1)
+    else
+      p
+  in
+  let p =
+    if byte_at st ~keep_from p lor 0x20 = Char.code 'e' then
+      let b = byte_at st ~keep_from (p + 1) in
+      if b = Char.code '+' || b = Char.code '-' then
+        require_digits st ~keep_from (p + 2)
+      else
+        require_digits st ~keep_from (p + 1)
+    else
+      p
+  in
+  let text = slice st start (p - start) in
+  st.pos <- p;
+  float_of_string text
+
+let float () =
+  let st = get_state () in
+  handle_float st
+
+let[@inline always] hex_value b =
+  if b >= 0x30 && b <= 0x39 then
+    b - 0x30
+  else
+    let l = b lor 0x20 in
+    if l >= 0x61 && l <= 0x66 then
+      l - 0x57
+    else
+      -1
+
+let label_hex = "hexadecimal integer"
+let label_hex_range = "hexadecimal integer in int range"
+
+let[@inline never] handle_hex_int st =
+  let start = st.pos in
+  let p = ref start in
+  let acc = ref 0 in
+  let d = ref (hex_value (byte_at st ~keep_from:start start)) in
+  if !d < 0 then fail_str st start tag_label label_hex;
+  while !d >= 0 do
+    if !acc > max_int lsr 4 then fail_str st start tag_label label_hex_range;
+    acc := (!acc lsl 4) lor !d;
+    incr p;
+    d := hex_value (byte_at st ~keep_from:start !p)
+  done;
+  st.pos <- !p;
+  !acc
+
+let hex_int () =
+  let st = get_state () in
+  handle_hex_int st
+
 let letter () =
   satisfy
     (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))

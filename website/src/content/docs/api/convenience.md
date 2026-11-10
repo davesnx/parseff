@@ -8,7 +8,7 @@ description: Common parsing patterns made easy
 
 # Convenience combinators
 
-Convenience combinators provide ready-to-use parsers for common patterns like digits, letters, and whitespace.
+Convenience combinators provide ready-to-use parsers for common patterns like digits, numbers, letters, and whitespace.
 
 
 ## Character classes
@@ -78,6 +78,63 @@ let skip_one () =
 
 (* Peek at the next character without consuming it *)
 let peek () = Parseff.look_ahead Parseff.any_char
+```
+
+## Numbers
+
+The number parsers read the bytes of a number directly from the input. They work across chunk boundaries in `Parseff.parse_source`. A failure is an `Expected` error at the start of the number, so `Parseff.or_` can try another branch, and its message merges with the other alternatives at that position. In streaming a number must be shorter than `backtrack_window` bytes, or the parse fails with `Backtrack_window_exceeded` at its start.
+
+
+### `int`
+
+`Parseff.int` parses an optional `-` and one or more decimal digits. It accepts leading zeros. It does not accept `+` or `_` separators. A value outside `min_int .. max_int` fails with `expected integer in int range`. On success it does not allocate.
+
+```ocaml
+val int : unit -> int
+```
+```ocaml
+let point () =
+  let x = Parseff.int () in
+  let _ = Parseff.char ',' in
+  let y = Parseff.int () in
+  (x, y)
+
+(* Matches "12,-7" -> (12, -7) *)
+(* Fails on "+1,2" with "expected integer" *)
+(* Fails on "99999999999999999999,0" with "expected integer in int range" *)
+```
+
+### `float`
+
+`Parseff.float` parses an optional `-`, one or more digits, an optional fraction, and an optional exponent. A `.` or an `e` must be followed by a digit. It does not accept `.5`, `inf` or `nan`. A value too large for a `float` gives `infinity`.
+
+```ocaml
+val float : unit -> float
+```
+```ocaml
+let measurement () =
+  let value = Parseff.float () in
+  let unit_ = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
+  (value, unit_)
+
+(* Matches "2.5kg" -> (2.5, "kg") *)
+(* Matches "6.02e23mol" -> (6.02e23, "mol") *)
+(* Fails on "1.kg" with "expected digit" *)
+```
+
+### `hex_int`
+
+`Parseff.hex_int` parses one or more hexadecimal digits (`0-9`, `a-f`, `A-F`). It does not accept a sign or a `0x` prefix. A value above `max_int` fails with `expected hexadecimal integer in int range`. On success it does not allocate.
+
+```ocaml
+val hex_int : unit -> int
+```
+```ocaml
+let color () =
+  let _ = Parseff.char '#' in
+  Parseff.hex_int ()
+
+(* Matches "#ff8800" -> 0xff8800 *)
 ```
 
 ## Whitespace

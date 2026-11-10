@@ -12,5 +12,6 @@
   test_allocations
   test_combinators
   test_streaming_robust
-  test_gaps)
+  test_gaps
+  test_numbers)
  (libraries parseff alcotest re uucp))
