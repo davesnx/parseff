@@ -523,6 +523,73 @@ let test_concurrent_parses () =
   Alcotest.(check string) "a later parse can use the cell" "ok" !a;
   Alcotest.(check int) "value of the later parse" 3 (State.get c)
 
+let test_set_while_parse_suspended () =
+  let free = State.create 0 and owned = State.create 0 in
+  let result = ref "unset" and other = ref "unset" in
+  let parser () =
+    or_
+      (fun () ->
+        State.set owned 1;
+        char 'a'
+      )
+      (fun () -> char 'b')
+      ()
+  in
+  let suspended () =
+    result :=
+      match parse_source (yielding_source "b") parser with
+      | Ok _ ->
+          "ok"
+      | Error e ->
+          error_message e
+  in
+  let outside () =
+    State.set free 42;
+    other :=
+      match State.set owned 7 with
+      | () ->
+          "set"
+      | exception Invalid_argument m ->
+          m
+  in
+  run_fibers [ suspended; outside ];
+  Alcotest.(check string) "suspended parse" "ok" !result;
+  Alcotest.(check int) "set outside the parse kept" 42 (State.get free);
+  Alcotest.(check string)
+    "cell of the suspended parse"
+    "Parseff.State.set: another running parse uses this cell" !other;
+  Alcotest.(check int)
+    "cell of the suspended parse rolled back" 0 (State.get owned)
+
+let test_parse_continues_after_read_raises () =
+  let c = State.create 0 in
+  let raised = ref false in
+  let src =
+    Source.of_function (fun buf off _ ->
+        if !raised then begin
+          Bytes.set buf off 'b';
+          1
+        end else begin
+          raised := true;
+          raise Exit
+        end
+    )
+  in
+  let parser () =
+    (try ignore (char 'a') with Exit -> ());
+    or_
+      (fun () ->
+        State.set c 1;
+        char 'a'
+      )
+      (fun () -> char 'b')
+      ()
+  in
+  Alcotest.(check char)
+    "parse after the exception" 'b'
+    (ok_exn (parse_source ~consume:`Partial src parser));
+  Alcotest.(check int) "set rolled back" 0 (State.get c)
+
 let a_source n =
   let sent = ref 0 in
   Source.of_function (fun buf off len ->
@@ -706,6 +773,10 @@ let () =
           Alcotest.test_case "across parses" `Quick test_across_parses;
           Alcotest.test_case "outside a parse" `Quick test_outside_parse;
           Alcotest.test_case "concurrent parses" `Quick test_concurrent_parses;
+          Alcotest.test_case "set while a parse is suspended" `Quick
+            test_set_while_parse_suspended;
+          Alcotest.test_case "parse continues after a read raises" `Quick
+            test_parse_continues_after_read_raises;
           Alcotest.test_case "nested parse" `Quick test_nested_parse;
           Alcotest.test_case "undo log bounded in many" `Quick test_log_bounded;
           Alcotest.test_case "many after dropped log" `Quick

@@ -644,7 +644,16 @@ let[@inline never] append st ~floor chunk n =
   st.input_len <- st.input_len + n
 
 let[@inline never] read_source st src buf off len =
-  let n = src.read buf off len in
+  Parse_state.install Parse_state.none;
+  let n =
+    match src.read buf off len with
+    | n ->
+        n
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Parse_state.install st;
+        Printexc.raise_with_backtrace exn bt
+  in
   Parse_state.install st;
   if n < 0 || n > len then
     invalid_arg

@@ -276,9 +276,10 @@ module State : sig
 
       Raises [Invalid_argument] when another parse that is still running set
       [cell]. This happens with two parses interleaved on one domain, for
-      example by effects in a {!Source.of_function} reader, and with a {!parse}
-      called inside a parser. Give each parse its own cell. A cell is not safe
-      to share between domains. *)
+      example by effects in a {!Source.of_function} reader, with a [set] outside
+      a parse while such a reader waits, and with a {!parse} called inside a
+      parser. Give each parse its own cell. A cell is not safe to share between
+      domains. *)
 end
 
 (** {1 Trace} *)
