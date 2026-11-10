@@ -289,45 +289,50 @@ module State = struct
 
   let none = for_input ~input:"" ~max_depth:0
 
-  let key : t Domain.DLS.key = Domain.DLS.new_key (fun () -> none)
+  type slot = { owner : int; mutable state : t; peer : slot }
 
-  type slot = { owner : int; state : t }
+  let key : slot Domain.DLS.key =
+    Domain.DLS.new_key (fun () ->
+        let owner = (Domain.self () :> int) in
+        let rec active = { owner; state = none; peer = idle }
+        and idle = { owner = lnot owner; state = none; peer = active } in
+        active
+    )
 
-  let cache : slot ref = ref { owner = min_int; state = none }
+  let cache : slot ref =
+    let rec unset = { owner = min_int; state = none; peer = unset } in
+    ref unset
 
-  let[@inline always] install (t : t) =
+  let[@inline always] own_slot () =
     let owner = (Domain.self () :> int) in
     let slot = !cache in
-    if not (slot.owner = owner && slot.state == t) then begin
-      Domain.DLS.set key t;
-      cache :=
-        if t == none then
-          { owner = lnot owner; state = none }
-        else
-          { owner; state = t }
-    end
+    if slot.owner = owner then
+      slot
+    else if slot.owner = lnot owner then
+      slot.peer
+    else
+      Domain.DLS.get key
+
+  let[@inline always] activate slot (t : t) =
+    slot.state <- t;
+    if !cache != slot then cache := slot
+
+  let install (t : t) = activate (own_slot ()) t
 
   let leave (t : t) (previous : t) =
     t.active <- false;
-    install
-      ( if previous.active then
-          previous
-        else
-          none
-      )
+    let slot = own_slot () in
+    if previous.active then
+      activate slot previous
+    else begin
+      slot.state <- none;
+      cache := slot.peer
+    end
 
   let enter (t : t) =
-    let owner = (Domain.self () :> int) in
-    let slot = !cache in
-    let previous =
-      if slot.owner = owner then
-        slot.state
-      else if slot.owner = lnot owner then
-        none
-      else
-        Domain.DLS.get key
-    in
-    install t;
+    let slot = own_slot () in
+    let previous = slot.state in
+    activate slot t;
     t.active <- true;
     previous
 
@@ -446,9 +451,10 @@ let () =
     )
 
 let[@inline never] get_state_slow () =
-  let st = Domain.DLS.get State.key in
+  let slot = Domain.DLS.get State.key in
+  let st = slot.state in
   if st == State.none then raise Not_in_parse_context;
-  State.cache := { owner = (Domain.self () :> int); state = st };
+  State.cache := slot;
   st
 
 let[@inline always] get_state () =
@@ -3556,10 +3562,14 @@ let recover errors ~sync parser hole =
         end;
         hole e
 
-let run_detailed st thunk =
+let run_detailed st ~all thunk =
   let previous = State.enter st in
   match
-    match thunk () with
+    match
+      let v = thunk () in
+      if all then end_of_input ();
+      v
+    with
     | v ->
         Stdlib.Ok v
     | exception Fail ->
@@ -3589,17 +3599,12 @@ let run_detailed st thunk =
       State.leave st previous;
       Printexc.raise_with_backtrace exn bt
 
-let until_end parser () =
-  let v = parser () in
-  end_of_input ();
-  v
-
-let with_diagnostics st thunk (c : _ diagnostics) =
+let with_diagnostics st ~all thunk (c : _ diagnostics) =
   if not (Atomic.compare_and_set c.busy false true) then
     invalid_arg "Parseff: these diagnostics are in use by another parse";
   diagnostics_reset c;
   st.diag <- c.self;
-  match run_detailed st thunk with
+  match run_detailed st ~all thunk with
   | r ->
       Atomic.set c.busy false;
       r
@@ -3608,32 +3613,22 @@ let with_diagnostics st thunk (c : _ diagnostics) =
       Atomic.set c.busy false;
       Printexc.raise_with_backtrace exn bt
 
-let run_slow st ~consume ~diagnostics parser =
-  let thunk =
-    match consume with `Partial -> parser | `All -> until_end parser
-  in
+let run st ~consume ~diagnostics parser =
+  let all = match consume with `Partial -> false | `All -> true in
   match diagnostics with
   | None ->
-      run_detailed st thunk
+      run_detailed st ~all parser
   | Some c ->
-      with_diagnostics st thunk c
+      with_diagnostics st ~all parser c
 
 let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
     (parser : unit -> 'a) =
-  let st = State.for_input ~input ~max_depth in
-  match (diagnostics, consume) with
-  | None, `Partial ->
-      run_detailed st parser
-  | _ ->
-      run_slow st ~consume ~diagnostics parser
+  run (State.for_input ~input ~max_depth) ~consume ~diagnostics parser
 
 let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?(consume = `All)
     ?diagnostics (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window in
-  match (diagnostics, consume) with
-  | None, `Partial ->
-      run_detailed st parser
-  | _ ->
-      run_slow st ~consume ~diagnostics parser
+  run
+    (State.for_source ~src ~max_depth ~backtrack_window)
+    ~consume ~diagnostics parser
