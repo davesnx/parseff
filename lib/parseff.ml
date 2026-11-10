@@ -102,6 +102,7 @@ let frame_barrier = 2
 let frame_last_branch = 3
 let frame_kind_mask = 3
 let frame_committed_bit = 4
+let frame_pin_bit = 8
 let frame_stride = 3
 
 type backtrack_window_error = { limit : int; oldest : int }
@@ -150,6 +151,11 @@ let far_none =
     chain = [];
   }
 
+type trace_event =
+  | Enter of { name : string; pos : int }
+  | Exit of { name : string; start : int; stop : int }
+  | Fail of { name : string; start : int; pos : int }
+
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
    [base, input_len) are buffered. [input] is never mutated, only replaced, so
    slices taken from it stay valid after a refill. Memory input has
@@ -171,6 +177,7 @@ type state = {
   mutable frames : int array;
   mutable frames_top : int;
   mutable active : bool;
+  trace : (trace_event -> unit) option;
 }
 
 let[@inline always] imin (a : int) b =
@@ -259,7 +266,7 @@ end
 module State = struct
   type t = state
 
-  let make ~input ~max_depth ~source : t =
+  let make ~input ~max_depth ~source ~trace : t =
     {
       input;
       pos = 0;
@@ -277,15 +284,17 @@ module State = struct
       frames = [||];
       frames_top = 0;
       active = false;
+      trace;
     }
 
-  let for_input ~input ~max_depth = make ~input ~max_depth ~source:None
+  let for_input ~input ~max_depth ~trace =
+    make ~input ~max_depth ~source:None ~trace
 
-  let for_source ~(src : source) ~max_depth ~backtrack_window =
+  let for_source ~(src : source) ~max_depth ~backtrack_window ~trace =
     src.window <- backtrack_window;
-    make ~input:src.initial ~max_depth ~source:(Some src)
+    make ~input:src.initial ~max_depth ~source:(Some src) ~trace
 
-  let none = for_input ~input:"" ~max_depth:0
+  let none = for_input ~input:"" ~max_depth:0 ~trace:None
 
   let key : t Domain.DLS.key = Domain.DLS.new_key (fun () -> none)
 
@@ -374,17 +383,21 @@ module State = struct
       t.diag_len <- saved
     end
 
-  let commit_nearest (t : t) =
-    let top = t.frames_top in
-    top > 0
+  let rec commit_nearest_from (t : t) i =
+    i >= 0
     &&
-    let slot = ((top - 1) * frame_stride) + 1 in
+    let slot = (i * frame_stride) + 1 in
     let flags = Array.unsafe_get t.frames slot in
-    flags land frame_kind_mask <> frame_barrier
-    && begin
-      Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
-      true
-    end
+    if flags land frame_pin_bit <> 0 then
+      commit_nearest_from t (i - 1)
+    else
+      flags land frame_kind_mask <> frame_barrier
+      && begin
+        Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+        true
+      end
+
+  let commit_nearest (t : t) = commit_nearest_from t (t.frames_top - 1)
 
   let seal_frames (t : t) ~floor =
     let i = ref (t.frames_top - 1) in
@@ -412,6 +425,7 @@ module State = struct
       if
         (kind = frame_barrier
         || (kind <> frame_last_branch && flags land frame_committed_bit = 0)
+        || flags land frame_pin_bit <> 0
         )
         && start < !floor
       then
@@ -1450,6 +1464,38 @@ let[@inline] position () =
   let st = get_state () in
   st.pos
 
+let with_range p =
+  let st = get_state () in
+  let start = st.pos in
+  let v = p () in
+  (v, { start; stop = st.pos })
+
+let[@inline never] run_pinned st p =
+  let frame =
+    State.push_rewind_frame st (frame_last_branch lor frame_pin_bit)
+  in
+  match p () with
+  | _ ->
+      State.pop_rewind_frame st frame
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let[@inline always] run_keeping_input st p =
+  match st.source with None -> ignore (p ()) | Some _ -> run_pinned st p
+
+let recognize p =
+  let st = get_state () in
+  let start = st.pos in
+  run_keeping_input st p;
+  slice st start (st.pos - start)
+
+let recognize_span p =
+  let st = get_state () in
+  let start = st.pos in
+  run_keeping_input st p;
+  span st start (st.pos - start)
+
 let[@inline] location () =
   let st = get_state () in
   handle_location st
@@ -1637,8 +1683,7 @@ let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
     ignore (State.seal_frames st ~floor:0)
 
-let context ?(delimited = false) name p =
-  let st = get_state () in
+let[@inline always] context_run st delimited name p =
   let d = st.ctx_top in
   if (d + 1) * ctx_stride > Array.length st.ctx then ctx_grow st;
   let start = st.pos in
@@ -1667,6 +1712,55 @@ let context ?(delimited = false) name p =
       );
       context_exit st d name start delimited;
       raise exn
+
+let[@inline never] trace_emit st f event =
+  State.install State.none;
+  match f event with
+  | () ->
+      State.install st
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.install st;
+      Printexc.raise_with_backtrace exn bt
+
+let[@inline never] context_traced st f delimited name p =
+  let start = st.pos in
+  trace_emit st f (Enter { name; pos = start });
+  match context_run st delimited name p with
+  | v ->
+      trace_emit st f (Exit { name; start; stop = st.pos });
+      v
+  | exception Fail ->
+      trace_emit st f (Fail { name; start; pos = st.pos });
+      raise_notrace Fail
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      trace_emit st f (Fail { name; start; pos = st.pos });
+      Printexc.raise_with_backtrace exn bt
+
+let context ?(delimited = false) name p =
+  let st = get_state () in
+  match st.trace with
+  | None ->
+      context_run st delimited name p
+  | Some f ->
+      context_traced st f delimited name p
+
+let print_trace ppf =
+  let depth = ref 0 in
+  let line fmt =
+    Format.fprintf ppf ("%s" ^^ fmt ^^ "@.") (String.make (2 * !depth) ' ')
+  in
+  function
+  | Enter { name; pos } ->
+      line "%s @%d" name pos;
+      incr depth
+  | Exit { name; start; stop } ->
+      decr depth;
+      line "%s ok @%d..%d" name start stop
+  | Fail { name; start; pos } ->
+      decr depth;
+      line "%s failed @%d (from @%d)" name pos start
 
 let cut () =
   let st = get_state () in
@@ -1892,6 +1986,162 @@ let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
   | Some d ->
       or_ (fold_right_one_or_more p op) (fun () -> d) ()
 
+type 'a operator =
+  | Infix_left of (unit -> 'a -> 'a -> 'a)
+  | Infix_right of (unit -> 'a -> 'a -> 'a)
+  | Prefix of (unit -> 'a -> 'a)
+  | Postfix of (unit -> 'a -> 'a)
+
+let infix_left op = Infix_left op
+let infix_right op = Infix_right op
+let prefix op = Prefix op
+let postfix op = Postfix op
+
+let rec has_prefix_op = function
+  | [] ->
+      false
+  | Prefix _ :: _ ->
+      true
+  | _ :: ops ->
+      has_prefix_op ops
+
+let rec has_prefix = function
+  | [] ->
+      false
+  | ops :: rest ->
+      has_prefix_op ops || has_prefix rest
+
+type 'a expression = {
+  st : State.t;
+  atom : unit -> 'a;
+  table : 'a operator list list;
+  prefixed : bool;
+}
+
+let rec expr_climb c levels = expr_loop c levels (expr_operand c)
+
+and expr_operand c =
+  if not c.prefixed then
+    c.atom ()
+  else begin
+    let st = c.st in
+    let frame = State.push_rewind_frame st frame_choice in
+    match expr_prefix_levels c frame st.pos c.table with
+    | v ->
+        State.pop_rewind_frame st frame;
+        v
+    | exception Fail ->
+        State.pop_rewind_frame st frame;
+        if State.frame_committed st frame then raise_notrace Fail;
+        restore_rewind_frame st frame;
+        c.atom ()
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        raise exn
+  end
+
+and expr_prefix_levels c frame start = function
+  | [] ->
+      raise_notrace Fail
+  | ops :: rest ->
+      expr_prefix_ops c frame start rest ops
+
+and expr_prefix_ops c frame start rest = function
+  | [] ->
+      expr_prefix_levels c frame start rest
+  | Prefix f :: ops -> (
+      match
+        let g = f () in
+        if c.st.pos = start then raise_notrace Fail;
+        g (rec_ (fun () -> expr_climb c rest))
+      with
+      | v ->
+          v
+      | exception Fail ->
+          if State.frame_committed c.st frame then raise_notrace Fail;
+          restore_rewind_frame c.st frame;
+          expr_prefix_ops c frame start rest ops
+    )
+  | _ :: ops ->
+      expr_prefix_ops c frame start rest ops
+
+and expr_loop c levels lhs =
+  match levels with
+  | [] ->
+      lhs
+  | _ :: _ -> (
+      let st = c.st in
+      let frame = State.push_rewind_frame st frame_repeat in
+      let start = st.pos in
+      match expr_try_levels c frame lhs levels with
+      | v ->
+          State.pop_rewind_frame st frame;
+          if st.pos = start then begin
+            restore_rewind_frame st frame;
+            lhs
+          end else
+            expr_loop c levels v
+      | exception Fail ->
+          State.pop_rewind_frame st frame;
+          if State.frame_committed st frame then raise_notrace Fail;
+          restore_rewind_frame st frame;
+          lhs
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
+    )
+
+and expr_try_levels c frame lhs = function
+  | [] ->
+      raise_notrace Fail
+  | ops :: rest as here ->
+      expr_try_ops c frame lhs here rest ops
+
+and expr_try_ops c frame lhs here rest = function
+  | [] ->
+      expr_try_levels c frame lhs rest
+  | Prefix _ :: ops ->
+      expr_try_ops c frame lhs here rest ops
+  | Infix_left f :: ops -> (
+      match
+        let g = f () in
+        g lhs (expr_climb c rest)
+      with
+      | v ->
+          v
+      | exception Fail ->
+          expr_next c frame lhs here rest ops
+    )
+  | Infix_right f :: ops -> (
+      match
+        let g = f () in
+        g lhs (rec_ (fun () -> expr_climb c here))
+      with
+      | v ->
+          v
+      | exception Fail ->
+          expr_next c frame lhs here rest ops
+    )
+  | Postfix f :: ops -> (
+      match
+        let g = f () in
+        g lhs
+      with
+      | v ->
+          v
+      | exception Fail ->
+          expr_next c frame lhs here rest ops
+    )
+
+and expr_next c frame lhs here rest ops =
+  if State.frame_committed c.st frame then raise_notrace Fail;
+  restore_rewind_frame c.st frame;
+  expr_try_ops c frame lhs here rest ops
+
+let expression ~atom table () =
+  let c = { st = get_state (); atom; table; prefixed = has_prefix table } in
+  expr_climb c table
+
 let optional (p : unit -> 'a) () : 'a option =
   or_ (fun () -> Some (p ())) (fun () -> None) ()
 
@@ -1964,6 +2214,35 @@ let[@inline always] is_whitespace c =
 let whitespace ?(at_least = 0) () =
   take_while ~at_least ~label:"whitespace" is_whitespace
 let[@inline] skip_whitespace () = skip_while is_whitespace
+
+let lexeme ?(skip = skip_whitespace) p =
+  let v = p () in
+  skip ();
+  v
+
+let is_ident_byte c =
+  (c >= 'a' && c <= 'z')
+  || (c >= 'A' && c <= 'Z')
+  || (c >= '0' && c <= '9')
+  || c = '_'
+
+let rec literal_at st pos s i =
+  i >= String.length s
+  || char_at st (pos + i) = String.unsafe_get s i
+     && literal_at st pos s (i + 1)
+
+let keyword ?(is_ident = is_ident_byte) s =
+  let len = String.length s in
+  if len = 0 then invalid_arg "Parseff.keyword: empty keyword";
+  let st = get_state () in
+  let pos = st.pos in
+  if
+    have st len && literal_at st pos s 0
+    && not (have st (len + 1) && is_ident (char_at st (pos + len)))
+  then
+    st.pos <- pos + len
+  else
+    fail_str_cold st pos tag_literal s
 
 let alphanum () =
   satisfy
@@ -3043,12 +3322,6 @@ let expected_of_far f =
     List.length items - List.length kept
   )
 
-let is_ident_byte c =
-  (c >= 'a' && c <= 'z')
-  || (c >= 'A' && c <= 'Z')
-  || (c >= '0' && c <= '9')
-  || c = '_'
-
 let found_of st pos =
   if pos >= st.input_len then
     (End, { start = pos; stop = pos })
@@ -3451,9 +3724,9 @@ let run_slow st ~consume ~diagnostics parser =
   | Some c ->
       with_diagnostics st thunk c
 
-let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
+let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics ?trace input
     (parser : unit -> 'a) =
-  let st = State.for_input ~input ~max_depth in
+  let st = State.for_input ~input ~max_depth ~trace in
   match (diagnostics, consume) with
   | None, `Partial ->
       run_detailed st parser
@@ -3462,9 +3735,9 @@ let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
 
 let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?(consume = `All)
-    ?diagnostics (src : Source.t) (parser : unit -> 'a) =
+    ?diagnostics ?trace (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window in
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   match (diagnostics, consume) with
   | None, `Partial ->
       run_detailed st parser
@@ -3475,7 +3748,7 @@ let parse_source_seq ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics (src : Source.t)
     (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window in
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace:None in
   let element () =
     if have st 1 then
       Some (parser ())
