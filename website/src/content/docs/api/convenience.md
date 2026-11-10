@@ -243,3 +243,63 @@ parse_value ()
 Parseff.skip_whitespace ();
 parse_value ()
 ```
+
+## Tokens
+
+
+### `lexeme`
+
+`Parseff.lexeme` runs a parser, then skips what follows the token, and returns the result of the parser. By default it skips whitespace with `Parseff.skip_whitespace`. Pass `~skip` when the grammar also has comments.
+
+```ocaml
+val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
+```
+```ocaml
+let skip_space_and_comments () =
+  Parseff.skip_whitespace ();
+  while Parseff.peek_char () = Some '#' do
+    Parseff.skip_while (fun c -> c <> '\n');
+    Parseff.skip_whitespace ()
+  done
+
+let token p = Parseff.lexeme ~skip:skip_space_and_comments p
+
+let pair () =
+  let a = token Parseff.digit in
+  let _ = token (fun () -> Parseff.char ',') in
+  let b = token Parseff.digit in
+  (a, b)
+
+(* Matches "1 , 2" -> (1, 2) *)
+(* Matches "1 # first\n, 2" -> (1, 2) *)
+```
+
+### `keyword`
+
+`Parseff.keyword` matches a literal only when the next byte cannot continue an identifier. Use it for reserved words, so that `"let"` does not match the start of `"letter"`. By default ASCII letters, digits and `_` continue an identifier. Pass `~is_ident` to change that set. `~is_ident` receives one byte, not a UTF-8 character. At the end of the input the keyword matches. An empty keyword raises `Invalid_argument`.
+
+In streaming, `keyword` reads the byte after the keyword, so it needs a backtrack window of one byte more than the keyword.
+
+```ocaml
+val keyword : ?is_ident:(char -> bool) -> string -> unit
+```
+```ocaml
+let binding () =
+  Parseff.keyword "let";
+  Parseff.skip_whitespace ();
+  Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"name"
+
+(* Matches "let x" -> "x" *)
+(* Fails on "letter x" at offset 0, expecting "let" *)
+```
+A failure is reported at the start of the keyword and expects the keyword, so it merges with the other alternatives at that position. The comment shows the message of `parse`. In streaming, the `found` text holds only the bytes already read.
+
+```ocaml
+let statement () =
+  Parseff.or_
+    (fun () -> Parseff.keyword "let")
+    (fun () -> Parseff.keyword "in")
+    ()
+
+(* parse fails on "inx": expected "in" or "let", found 'inx' *)
+```
