@@ -150,6 +150,11 @@ let far_none =
     chain = [];
   }
 
+type trace_event =
+  | Enter of { name : string; pos : int }
+  | Exit of { name : string; start : int; stop : int }
+  | Fail of { name : string; start : int; pos : int }
+
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
    [base, input_len) are buffered. [input] is never mutated, only replaced, so
    slices taken from it stay valid after a refill. Memory input has
@@ -171,6 +176,7 @@ type state = {
   mutable frames : int array;
   mutable frames_top : int;
   mutable active : bool;
+  trace : (trace_event -> unit) option;
 }
 
 let[@inline always] imin (a : int) b =
@@ -259,7 +265,7 @@ end
 module State = struct
   type t = state
 
-  let make ~input ~max_depth ~source : t =
+  let make ~input ~max_depth ~source ~trace : t =
     {
       input;
       pos = 0;
@@ -277,15 +283,17 @@ module State = struct
       frames = [||];
       frames_top = 0;
       active = false;
+      trace;
     }
 
-  let for_input ~input ~max_depth = make ~input ~max_depth ~source:None
+  let for_input ~input ~max_depth ~trace =
+    make ~input ~max_depth ~source:None ~trace
 
-  let for_source ~(src : source) ~max_depth ~backtrack_window =
+  let for_source ~(src : source) ~max_depth ~backtrack_window ~trace =
     src.window <- backtrack_window;
-    make ~input:src.initial ~max_depth ~source:(Some src)
+    make ~input:src.initial ~max_depth ~source:(Some src) ~trace
 
-  let none = for_input ~input:"" ~max_depth:0
+  let none = for_input ~input:"" ~max_depth:0 ~trace:None
 
   let key : t Domain.DLS.key = Domain.DLS.new_key (fun () -> none)
 
@@ -1637,8 +1645,7 @@ let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
     ignore (State.seal_frames st ~floor:0)
 
-let context ?(delimited = false) name p =
-  let st = get_state () in
+let[@inline always] context_run st delimited name p =
   let d = st.ctx_top in
   if (d + 1) * ctx_stride > Array.length st.ctx then ctx_grow st;
   let start = st.pos in
@@ -1667,6 +1674,55 @@ let context ?(delimited = false) name p =
       );
       context_exit st d name start delimited;
       raise exn
+
+let[@inline never] trace_emit st f event =
+  State.install State.none;
+  match f event with
+  | () ->
+      State.install st
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.install st;
+      Printexc.raise_with_backtrace exn bt
+
+let[@inline never] context_traced st f delimited name p =
+  let start = st.pos in
+  trace_emit st f (Enter { name; pos = start });
+  match context_run st delimited name p with
+  | v ->
+      trace_emit st f (Exit { name; start; stop = st.pos });
+      v
+  | exception Fail ->
+      trace_emit st f (Fail { name; start; pos = st.pos });
+      raise_notrace Fail
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      trace_emit st f (Fail { name; start; pos = st.pos });
+      Printexc.raise_with_backtrace exn bt
+
+let context ?(delimited = false) name p =
+  let st = get_state () in
+  match st.trace with
+  | None ->
+      context_run st delimited name p
+  | Some f ->
+      context_traced st f delimited name p
+
+let print_trace ppf =
+  let depth = ref 0 in
+  let line fmt =
+    Format.fprintf ppf ("%s" ^^ fmt ^^ "@.") (String.make (2 * !depth) ' ')
+  in
+  function
+  | Enter { name; pos } ->
+      line "%s @%d" name pos;
+      incr depth
+  | Exit { name; start; stop } ->
+      decr depth;
+      line "%s ok @%d..%d" name start stop
+  | Fail { name; start; pos } ->
+      decr depth;
+      line "%s failed @%d (from @%d)" name pos start
 
 let cut () =
   let st = get_state () in
@@ -3451,9 +3507,9 @@ let run_slow st ~consume ~diagnostics parser =
   | Some c ->
       with_diagnostics st thunk c
 
-let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
+let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics ?trace input
     (parser : unit -> 'a) =
-  let st = State.for_input ~input ~max_depth in
+  let st = State.for_input ~input ~max_depth ~trace in
   match (diagnostics, consume) with
   | None, `Partial ->
       run_detailed st parser
@@ -3462,9 +3518,9 @@ let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics input
 
 let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?(consume = `All)
-    ?diagnostics (src : Source.t) (parser : unit -> 'a) =
+    ?diagnostics ?trace (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window in
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   match (diagnostics, consume) with
   | None, `Partial ->
       run_detailed st parser

@@ -200,12 +200,65 @@ module Diagnostics : sig
   (** Empties the collector. Raises [Invalid_argument] while a parse uses it. *)
 end
 
+(** {1 Trace} *)
+
+(** An event of a traced parse, see the [trace] argument of {!val:parse}.
+
+    Each {!val:context} call gives one [Enter], then the events of the
+    constructs nested in it, then one [Exit] or [Fail]. Events also come from
+    branches that {!or_}, {!many} or {!optional} later abandon, and from inside
+    {!look_ahead}. A backtrack shows as an [Enter] at a position before the end
+    of the previous event. Positions are absolute byte offsets, so {!parse} and
+    {!parse_source} give the same events for the same input. *)
+type trace_event = private
+  | Enter of { name : string; pos : int }
+      (** A {!val:context} named [name] started at byte offset [pos]. *)
+  | Exit of { name : string; start : int; stop : int }
+      (** The construct returned. It read the bytes from [start] to [stop]. *)
+  | Fail of { name : string; start : int; pos : int }
+      (** The construct failed or raised. [pos] is the parser position when it
+          ended. The position of the failure that the parse reports is in the
+          {!type:error}. *)
+
+val print_trace : Format.formatter -> trace_event -> unit
+(** [print_trace ppf] is a [trace] callback that prints each event on its own
+    line of [ppf], indented by two spaces for each open construct. Apply it once
+    for each parse, because it counts the open constructs.
+
+    Example:
+    {@ocaml[
+    let number () =
+      context "number" (fun () ->
+          take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+      )
+
+    let list () =
+      context ~delimited:true "list" (fun () ->
+          let _ = char '[' in
+          let xs = sep_by number (fun () -> char ',') () in
+          let _ = char ']' in
+          xs
+      )
+
+    let _ = parse ~trace:(print_trace Format.std_formatter) "[1,x]" list
+    ]}
+    prints
+    {v
+    list @0
+      number @1
+      number ok @1..2
+      number @3
+      number failed @3 (from @3)
+    list failed @2 (from @0)
+    v} *)
+
 (** {1 Runner} *)
 
 val parse :
   ?max_depth:int ->
   ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
@@ -223,6 +276,13 @@ val parse :
     before the parser starts. Read it with {!Diagnostics.to_list} after the
     parse, whether the result is [Ok] or [Error]. {!warn} into any other
     collector does nothing.
+
+    [trace] receives a {!type:trace_event} when a {!val:context} starts, returns
+    and fails. Without [trace], tracing adds one check to each {!val:context}
+    call and no allocation. The callback runs outside the parse: a parser it
+    calls raises as it would outside {!parse}. An exception from the callback
+    stops the parse, and [parse] raises it again. Use {!print_trace} to print
+    the events as a tree.
 
     When a parse fails, the error is the furthest failure: the failure of any
     primitive that happened at the highest input position, including primitives
@@ -959,13 +1019,14 @@ val parse_source :
   ?backtrack_window:int ->
   ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
 (** [parse_source source parser] runs [parser] pulling input from [source] on
-    demand. Takes the same [consume] and [diagnostics] arguments as {!parse} and
-    behaves identically, but the input does not need to be fully available up
-    front.
+    demand. Takes the same [consume], [diagnostics] and [trace] arguments as
+    {!parse} and behaves identically, but the input does not need to be fully
+    available up front.
 
     With the default [`All], the check for remaining input pulls one more byte
     from [source] after the parser returns. It succeeds when [source] is at its

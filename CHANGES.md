@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Add trace mode.** `parse ~trace` and `parse_source ~trace` call a function with a `trace_event` for each `context`: `Enter { name; pos }` when it starts, `Exit { name; start; stop }` when it returns and `Fail { name; start; pos }` when it fails, where `pos` is the parser position when it failed. Events also come from branches that `or_`, `many` or `optional` abandon and from inside `look_ahead`, and streaming gives the same events as `parse`. `print_trace ppf` prints them as an indented tree, for example `list @0`, `  number ok @1..2`, `list failed @2 (from @0)`. The callback runs outside the parse state: a parser it calls raises as outside `parse`, and an exception from it stops the parse and is raised again. The grammar needs no change. Without `~trace`, `context` does one more check and allocates nothing.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0
