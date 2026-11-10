@@ -115,6 +115,7 @@ type source = {
   mutable tmp : bytes;
   tmp_cap : int;
   mutable window : int;
+  mutable rx : bytes;
 }
 
 type far = {
@@ -200,7 +201,15 @@ module Source = struct
   type t = source
 
   let make ~initial ~read ~eof ~tmp ~tmp_cap : t =
-    { initial; read; eof; tmp; tmp_cap; window = default_backtrack_window }
+    {
+      initial;
+      read;
+      eof;
+      tmp;
+      tmp_cap;
+      window = default_backtrack_window;
+      rx = Bytes.empty;
+    }
 
   let of_string s =
     make ~initial:s ~read:(fun _ _ _ -> 0) ~eof:true ~tmp:Bytes.empty ~tmp_cap:0
@@ -524,6 +533,40 @@ let find_line idx offset =
   done;
   !lo
 
+let count_newlines s from limit =
+  let n = ref 0 in
+  let i = ref from in
+  while !i + 8 <= limit do
+    let x = Int64.logxor (String.get_int64_ne s !i) 0x0A0A0A0A0A0A0A0AL in
+    let y =
+      Int64.logor
+        (Int64.add (Int64.logand x 0x7F7F7F7F7F7F7F7FL) 0x7F7F7F7F7F7F7F7FL)
+        x
+    in
+    let z =
+      Int64.shift_right_logical
+        (Int64.logand (Int64.lognot y) 0x8080808080808080L)
+        7
+    in
+    n :=
+      !n
+      + Int64.to_int
+          (Int64.shift_right_logical (Int64.mul z 0x0101010101010101L) 56);
+    i := !i + 8
+  done;
+  while !i < limit do
+    if String.unsafe_get s !i = '\n' then incr n;
+    incr i
+  done;
+  !n
+
+let last_newline s from limit =
+  let i = ref (limit - 1) in
+  while !i >= from && String.unsafe_get s !i <> '\n' do
+    decr i
+  done;
+  !i
+
 let ensure_line_index_preserved_through st up_to =
   if up_to > 0 then begin
     let idx =
@@ -546,17 +589,12 @@ let ensure_line_index_preserved_through st up_to =
       let input = st.input in
       let base = st.base in
       let stop = imin (up_to - base) (String.length input) in
-      let newlines = ref 0 and last = ref (-1) in
-      for rel = imax 0 (idx.scanned_up_to - base) to stop - 1 do
-        if String.unsafe_get input rel = '\n' then begin
-          incr newlines;
-          last := rel
-        end
-      done;
-      idx.line_base <- idx.line_base + idx.count - 1 + !newlines;
+      let start = imax 0 (idx.scanned_up_to - base) in
+      let newlines = count_newlines input start stop in
+      idx.line_base <- idx.line_base + idx.count - 1 + newlines;
       idx.starts.(0) <-
-        ( if !newlines > 0 then
-            base + !last + 1
+        ( if newlines > 0 then
+            base + last_newline input start stop + 1
           else
             idx.starts.(idx.count - 1)
         );
@@ -1191,7 +1229,8 @@ let[@inline never] buffer_for_regex st =
       if room <= 0 then
         Some (st.pos + (src.window / 2), { limit = src.window; oldest = floor })
       else begin
-        let chunk = Bytes.create room in
+        if Bytes.length src.rx < room then src.rx <- Bytes.create room;
+        let chunk = src.rx in
         let got = ref 0 in
         let want = imin room ((src.window / 2) - (st.input_len - st.pos)) in
         while !got < want && not src.eof do
