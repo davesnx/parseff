@@ -41,7 +41,7 @@ The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack
 
 By default `Parseff.parse_source` fails with `Expected End_of_input` when input remains after the parser returns, as `Parseff.end_of_input` does. The check pulls one more byte from the source. It does not read the rest of the source: it stops at the first byte that remains.
 
-To parse a leading part of the source and leave the rest unread, pass `~consume:`Partial`:
+To parse a leading part of the source and leave the rest unread, pass `` ~consume:`Partial ``:
 
 ```ocaml
 Parseff.parse_source ~consume:`Partial source parser
@@ -94,7 +94,7 @@ The rules:
 
 - Bytes that one value read ahead stay buffered for the next value. This includes the read-ahead of `Parseff.match_regex`.
 - The sequence ends when no input remains before a value. An empty source gives an empty sequence.
-- The sequence reads to the end of the input, as `~consume:`All` would: bytes the parser cannot read give an `Error` element, so there is no `~consume` argument.
+- The sequence reads to the end of the input, as `` ~consume:`All `` would: bytes the parser cannot read give an `Error` element, so there is no `~consume` argument.
 - After an `Error` element the sequence ends.
 - When the parser succeeds without consuming input while input remains, the element is an `Error` with kind `Failure "the parser consumed no input"`, and the sequence ends.
 - Positions are absolute offsets from the start of the source. Line numbers in errors and in `Parseff.render_error` count from the first line of the stream.
