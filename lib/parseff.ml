@@ -3470,3 +3470,49 @@ let parse_source ?(max_depth = 128)
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
+
+let parse_source_seq ?(max_depth = 128)
+    ?(backtrack_window = default_backtrack_window) ?diagnostics (src : Source.t)
+    (parser : unit -> 'a) =
+  check_backtrack_window backtrack_window;
+  let st = State.for_source ~src ~max_depth ~backtrack_window in
+  let element () =
+    if have st 1 then
+      Some (parser ())
+    else
+      None
+  in
+  let forced = ref 0 in
+  let ended = ref false in
+  let rec node i () =
+    if !forced <> i then
+      invalid_arg "Parseff.parse_source_seq: a node was forced twice";
+    forced := i + 1;
+    if !ended then begin
+      Option.iter diagnostics_clear diagnostics;
+      Seq.Nil
+    end else begin
+      st.far <- far_none;
+      st.diag_len <- 0;
+      let start = st.pos in
+      match run_slow st ~consume:`Partial ~diagnostics element with
+      | Ok None ->
+          ended := true;
+          Seq.Nil
+      | Ok (Some _) when st.pos = start ->
+          ended := true;
+          Seq.Cons
+            ( Error
+                (error_plain st start (Failure "the parser consumed no input")
+                   []
+                ),
+              node (i + 1)
+            )
+      | Ok (Some v) ->
+          Seq.Cons (Ok v, node (i + 1))
+      | Error e ->
+          ended := true;
+          Seq.Cons (Error e, node (i + 1))
+    end
+  in
+  node 0

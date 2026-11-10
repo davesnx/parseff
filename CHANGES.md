@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Add `parse_source_seq`.** `parse_source_seq ?max_depth ?backtrack_window ?diagnostics source parser` returns a `('a, error) result Seq.t` with one element for each value in `source`, such as NDJSON lines or log records. Each element runs `parser` once on the rest of `source`, as `` ~consume:`Partial `` does, and keeps the bytes that the last run read ahead. Memory is bounded by `backtrack_window`, not by the number of values. The sequence ends at the end of input, after an `Error`, and after a parser that succeeds without consuming input, which gives an `Error` with `Failure "the parser consumed no input"`. Positions and line numbers are absolute in the stream. Forcing an element empties `diagnostics`. The sequence is ephemeral: forcing an element twice raises `Invalid_argument`.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

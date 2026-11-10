@@ -901,9 +901,10 @@ val take : int -> string
     The parser pulls data on demand by calling the source's read function;
     existing parser code works unchanged.
 
-    A source is for one parse. [of_string] starts again from the beginning, but
-    the other sources continue where the last read stopped, and bytes that the
-    first parse read ahead are lost. *)
+    A source is for one call of {!parse_source} or {!parse_source_seq}.
+    [of_string] starts again from the beginning, but the other sources continue
+    where the last read stopped, and bytes that the first call read ahead are
+    lost. To parse many values from one source, use {!parse_source_seq}. *)
 module Source : sig
   type t
 
@@ -995,6 +996,58 @@ val parse_source :
     close_in ic;
     result
     ]} *)
+
+val parse_source_seq :
+  ?max_depth:int ->
+  ?backtrack_window:int ->
+  ?diagnostics:'d Diagnostics.t ->
+  Source.t ->
+  (unit -> 'a) ->
+  ('a, error) Stdlib.result Seq.t
+(** [parse_source_seq source parser] parses a stream of values from [source],
+    for example NDJSON lines, log records or network frames. Each element of the
+    sequence runs [parser] once on the rest of [source], as {!parse_source} with
+    [~consume:`Partial] does. Bytes that one run read ahead stay buffered for
+    the next run. Memory is bounded by [backtrack_window], not by the number of
+    values.
+
+    - The sequence ends when no input remains before a run. An empty source
+      gives an empty sequence.
+    - After an [Error] element the sequence ends.
+    - When [parser] succeeds without consuming input while input remains, the
+      element is an [Error] with kind [Failure "the parser consumed no input"],
+      and the sequence ends.
+    - Bytes between values, such as a newline, are the job of [parser]. Make
+      [parser] consume the separator after each value, as in the example.
+
+    Positions are absolute offsets from the start of [source]: {!position},
+    {!val:location}, [range] and [location] in an error count all the values
+    before. {!render_error} without [~source] prints the line numbers of the
+    whole stream.
+
+    [diagnostics] is emptied each time an element is forced, also the element
+    that ends the sequence. Read it before you force the next element.
+
+    The sequence is ephemeral. Force each element once, in order; forcing one
+    again raises [Invalid_argument]. Use [Seq.memoize] to traverse it more than
+    once.
+
+    [max_depth], [backtrack_window] and the rule on suspension are as in
+    {!parse_source}: only the source's read function may suspend.
+
+    Example:
+    {@ocaml[
+    let record () =
+      let id = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+      skip_whitespace ();
+      int_of_string id
+
+    let ids text =
+      parse_source_seq (Source.of_string text) record
+      |> Seq.filter_map Result.to_option
+      |> List.of_seq
+    ]}
+    Here [ids "1\n22\n\n333\n"] is [[1; 22; 333]]. *)
 
 (** {1 Binary Parsing}
 

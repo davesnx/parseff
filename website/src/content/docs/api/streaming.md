@@ -56,6 +56,46 @@ Parseff.parse_source ~consume:`Partial source parser
   result
 ```
 
+## Many values from one source
+
+`Parseff.parse_source_seq` parses a stream of values, such as NDJSON lines, log records or network frames, from one source. Each element of the sequence runs the parser once on the rest of the source. Memory is bounded by `~backtrack_window`, not by the number of values. A parser that collects the values with `Parseff.many` keeps all of them in a list.
+
+```ocaml
+val parse_source_seq :
+  ?max_depth:int ->
+  ?backtrack_window:int ->
+  ?diagnostics:'d Diagnostics.t ->
+  Source.t ->
+  (unit -> 'a) ->
+  ('a, error) Stdlib.result Seq.t
+```
+The parser reads one value and the separator after it. Here `Parseff.skip_whitespace` consumes the newline and any blank lines:
+
+```ocaml
+  let record () =
+    let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+    Parseff.skip_whitespace ();
+    int_of_string id
+
+  let () =
+    let ic = open_in "ids.txt" in
+    Parseff.parse_source_seq (Parseff.Source.of_channel ic) record
+    |> Seq.iter (function
+         | Ok id -> Printf.printf "%d\n" id
+         | Error e -> prerr_endline (Parseff.render_error e));
+    close_in ic
+```
+The rules:
+
+- Bytes that one value read ahead stay buffered for the next value. This includes the read-ahead of `Parseff.match_regex`.
+- The sequence ends when no input remains before a value. An empty source gives an empty sequence.
+- After an `Error` element the sequence ends.
+- When the parser succeeds without consuming input while input remains, the element is an `Error` with kind `Failure "the parser consumed no input"`, and the sequence ends.
+- Positions are absolute offsets from the start of the source. Line numbers in errors and in `Parseff.render_error` count from the first line of the stream.
+- `~diagnostics` is emptied each time an element is forced. Read it before you force the next element.
+- The sequence is ephemeral. Force each element once, in order. Forcing an element again raises `Invalid_argument`. Use `Seq.memoize` to traverse it more than once.
+- Only the source's read function may suspend, as with `Parseff.parse_source`. Two sequences on two sources can be consumed in two fibers on one domain.
+
 ## The Source module
 
 `Parseff.Source` wraps a readable byte stream behind a uniform interface. Five constructors cover the common cases, ordered here from simplest to most low-level.
@@ -282,7 +322,7 @@ If the retained region would exceed `~backtrack_window`, parsing fails with `Bac
 ```
 The one constraint: do not share a single `Parseff.Source.t` across domains. Each source has mutable read state (buffer position, EOF flag), so concurrent access would race. Create a separate source per domain.
 
-A source is for one parse. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first parse read ahead are lost.
+A source is for one call of `Parseff.parse_source` or `Parseff.parse_source_seq`. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first call read ahead are lost.
 
 
 ### Concurrent parses on one domain
@@ -316,21 +356,6 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input only, so a match cannot extend past the window. If the window is already full of rewind history and the source has not ended, the regex runs on what is buffered. A match that ends before the end of the buffer is returned. Otherwise, because more input could change the result, `Parseff.match_regex` fails with `Backtrack_window_exceeded`. `~backtrack_window` must be at least `2`.
 
 
-### No partial results
+### One parse returns one result
 
-`Parseff.parse_source` runs the parser to completion and returns a single result. There's no way to get partial results as data arrives. For incremental processing (e.g., streaming JSON objects from a newline-delimited file), parse one unit at a time:
-
-```ocaml
-  let parse_jsonl ic =
-    let results = ref [] in
-    try
-      while true do
-        let line = input_line ic in
-        match Parseff.parse line json with
-        | Ok v -> results := v :: !results
-        | Error _ -> ()
-      done;
-      List.rev !results
-    with End_of_file ->
-      List.rev !results
-```
+`Parseff.parse_source` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.parse_source_seq`. See "Many values from one source" above.
