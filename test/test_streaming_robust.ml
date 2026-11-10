@@ -290,10 +290,14 @@ let test_small_window_rejected () =
       (fun () -> Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
     )
   with
+  | Error
+      { kind = Backtrack_window_exceeded { limit = 2; oldest = 0 }; range; _ }
+    ->
+      Alcotest.(check int) "error position" 0 range.start
   | Ok s ->
-      Alcotest.(check bool) "matched a prefix" true (String.length s >= 1)
-  | Error _ ->
-      Alcotest.fail "window 2 should not report end of input"
+      Alcotest.failf "unexpected Ok %s" s
+  | Error e ->
+      Alcotest.failf "wrong error: %s" (Parseff.error_message e)
 
 let test_buf_size_rejected () =
   List.iter

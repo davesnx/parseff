@@ -478,16 +478,21 @@ val match_regex : ?label:string -> Re.re -> string
     expected at the same position like any other primitive. Without [~label] the
     label is ["text matching the pattern"].
 
-    In streaming mode, the parser keeps at least half of the backtrack window
-    buffered ahead of the current position, unless the source has ended. A match
-    is cut at the end of the buffered input, so it can be shorter than the match
-    that [parse] finds on the same input. The byte before the current position
+    In streaming mode, the parser reads ahead until half of the backtrack window
+    is buffered ahead of the current position, or the source ends, and runs the
+    regex on the buffered input. A match that ends before the end of the buffer
+    is returned. A match that reaches the end of the buffer, or a failure that
+    more input could turn into a match, is not final while the source has more
+    input: the parser reads more and runs the regex again. When the window has
+    no room left, the parse fails with [Backtrack_window_exceeded] at the
+    current position. So the match and the byte after it must fit in the window,
+    unless the source ends after the match. The byte before the current position
     stays visible to [Re.bol] and word boundaries.
 
-    If the window is full of rewind history, the regex runs on the buffered
-    input. A match that ends before the end of the buffer is returned. A failed
-    match, or one that reaches the end of the buffer, fails with
-    [Backtrack_window_exceeded], because more input could change the result.
+    [Re] can choose a match that ends before the end of the buffer by reading
+    bytes after the match. If the regex needs bytes past the buffer to choose a
+    longer match, the result can be shorter than the match that [parse] finds:
+    [a(bc)?] on ["abc"] can return ["a"] with a window smaller than [6].
 
     The match must start at the current position, but [Re] searches forward when
     it does not. A failed match therefore scans the rest of the input, and a
