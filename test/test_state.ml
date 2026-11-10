@@ -323,6 +323,37 @@ let test_kept_after_cut () =
      )
     )
 
+let test_commit_after_set () =
+  let c = State.create 0 in
+  let result =
+    parse ~consume:`Partial "ac" (fun () ->
+        or_
+          (fun () ->
+            State.set c 1;
+            or_
+              (fun () ->
+                let _ = char 'a' in
+                commit ();
+                let _ = char 'b' in
+                `Inner_left
+              )
+              (fun () -> `Inner_right)
+              ()
+          )
+          (fun () -> `Outer_right)
+          ()
+    )
+  in
+  match result with
+  | Ok `Outer_right ->
+      Alcotest.(check int) "set undone" 0 (State.get c)
+  | Ok `Inner_right ->
+      Alcotest.fail "commit sealed the outer or_, not the inner one"
+  | Ok `Inner_left ->
+      Alcotest.fail "unexpected success"
+  | Error e ->
+      Alcotest.fail (render_error e)
+
 let test_nested () =
   let seen = ref [] in
   let make () =
@@ -667,6 +698,7 @@ let () =
           Alcotest.test_case "on success" `Quick test_kept_on_success;
           Alcotest.test_case "after commit" `Quick test_kept_after_commit;
           Alcotest.test_case "after cut" `Quick test_kept_after_cut;
+          Alcotest.test_case "commit after set" `Quick test_commit_after_set;
         ]
       );
       ( "lifetime",
