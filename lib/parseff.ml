@@ -907,7 +907,6 @@ let[@inline always] fail_str st p k s =
     far_first_str st p k s;
   raise_notrace Fail
 
-let[@inline never] fail_int_cold st p k = fail_int st p k
 let[@inline never] fail_str_cold st p k s = fail_str st p k s
 
 let special_user = 2
@@ -996,15 +995,11 @@ let[@inline never] handle_consume st s =
       else
         st.input_len - pos
     in
-    let rec check i =
-      if i >= avail then
-        i
-      else if char_at st (pos + i) = String.unsafe_get s i then
-        check (i + 1)
-      else
-        i
-    in
-    let matched = check 0 in
+    let i = ref 0 in
+    while !i < avail && char_at st (pos + !i) = String.unsafe_get s !i do
+      incr i
+    done;
+    let matched = !i in
     if matched < avail || not complete then
       begin if matched = 0 then
         fail_str st pos tag_literal s
@@ -1017,7 +1012,7 @@ let[@inline never] handle_consume st s =
     end
   end
 
-let[@inline] handle_satisfy st pred label =
+let[@inline never] satisfy_slow st pred label =
   if have st 1 then
     let c = char_at st st.pos in
     if pred c then begin
@@ -1028,17 +1023,35 @@ let[@inline] handle_satisfy st pred label =
   else
     fail_str st st.pos tag_label label
 
-(* dedicated char handler it avoids closure + String.make allocation *)
-let[@inline] handle_match_char st c =
-  if have st 1 then
-    let ch = char_at st st.pos in
-    if ch = c then begin
+let[@inline] handle_satisfy st pred label =
+  if st.pos < st.input_len then
+    let c = char_at st st.pos in
+    if pred c then begin
       st.pos <- st.pos + 1;
       c
     end else
-      fail_int st st.pos (char_kind c)
+      fail_str st st.pos tag_label label
   else
+    satisfy_slow st pred label
+
+let[@inline never] match_char_slow st c =
+  if have st 1 && char_at st st.pos = c then begin
+    st.pos <- st.pos + 1;
+    c
+  end else
     fail_int st st.pos (char_kind c)
+
+(* dedicated char handler it avoids closure + String.make allocation *)
+let[@inline] handle_match_char st c =
+  let p = st.pos in
+  if p < st.input_len then
+    if char_at st p = c then begin
+      st.pos <- p + 1;
+      c
+    end else
+      fail_int st p (char_kind c)
+  else
+    match_char_slow st c
 
 let[@inline never] scan_while_refilling st ~keep_from start pred =
   let p = ref start in
@@ -1072,12 +1085,6 @@ let[@inline always] scan_while st ~keep_from start pred =
         !i + base
     | Some _ ->
         scan_while_refilling st ~keep_from (!i + base) pred
-
-let[@inline always] handle_take_while st pred =
-  let start = st.pos in
-  let end_pos = scan_while st ~keep_from:start start pred in
-  st.pos <- end_pos;
-  slice st start (end_pos - start)
 
 let[@inline always] handle_take_while_span st pred =
   let start = st.pos in
@@ -1453,12 +1460,23 @@ let[@inline] char c =
   let st = get_state () in
   handle_match_char st c
 
-let[@inline] peek_char () =
-  let st = get_state () in
+let some_chars = Array.init 256 (fun i -> Some (Char.chr i))
+
+let[@inline always] some_char c = Array.unsafe_get some_chars (Char.code c)
+
+let[@inline never] peek_char_slow st =
   if have st 1 then
-    Some (char_at st st.pos)
+    some_char (char_at st st.pos)
   else
     None
+
+let[@inline] peek_char () =
+  let st = get_state () in
+  let p = st.pos in
+  if p < st.input_len then
+    some_char (char_at st p)
+  else
+    peek_char_slow st
 
 let[@inline] position () =
   let st = get_state () in
@@ -1468,23 +1486,29 @@ let[@inline] location () =
   let st = get_state () in
   handle_location st
 
+let[@inline never] end_of_input_slow st =
+  ignore (have st 1);
+  if st.pos <> st.input_len then fail_int st st.pos tag_end_of_input
+
 let[@inline] end_of_input () =
   let st = get_state () in
-  ignore (have st 1);
-  if st.pos <> st.input_len then fail_int_cold st st.pos tag_end_of_input
+  if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
 let take_while ?(at_least = 0) ?label pred =
   let st = get_state () in
-  let s = handle_take_while st pred in
-  if at_least > 0 && String.length s < at_least then
+  let start = st.pos in
+  let end_pos = scan_while st ~keep_from:start start pred in
+  st.pos <- end_pos;
+  let n = end_pos - start in
+  if n < at_least then
     begin match label with
     | Some l ->
-        fail_str_cold st st.pos tag_label l
+        fail_str_cold st end_pos tag_label l
     | None ->
         fail_at_least st at_least
   end
   else
-    s
+    slice st start n
 
 let[@inline] skip_while pred =
   let st = get_state () in
@@ -1988,8 +2012,22 @@ let one_of parsers () =
 let one_of_labeled labeled_parsers () =
   one_of (List.map (fun (label, p) () -> expect label p) labeled_parsers) ()
 
-let digit () =
-  let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
+let[@inline always] is_digit_char c = c >= '0' && c <= '9'
+let label_digit = "digit"
+
+let[@inline] digit () =
+  let st = get_state () in
+  let c =
+    if st.pos < st.input_len then
+      let c = char_at st st.pos in
+      if is_digit_char c then begin
+        st.pos <- st.pos + 1;
+        c
+      end else
+        fail_str st st.pos tag_label label_digit
+    else
+      satisfy_slow st is_digit_char label_digit
+  in
   Char.code c - Char.code '0'
 
 let letter () =
@@ -1998,11 +2036,24 @@ let letter () =
     ~label:"letter"
 
 let[@inline always] is_whitespace c =
-  c = ' ' || c = '\t' || c = '\n' || c = '\r'
+  c <= ' ' && (c = ' ' || c = '\t' || c = '\n' || c = '\r')
 
 let whitespace ?(at_least = 0) () =
   take_while ~at_least ~label:"whitespace" is_whitespace
-let[@inline] skip_whitespace () = skip_while is_whitespace
+let[@inline] skip_whitespace () =
+  let st = get_state () in
+  let base = st.base in
+  let inp = st.input in
+  let len = st.input_len - base in
+  let i = ref (st.pos - base) in
+  while !i < len && is_whitespace (String.unsafe_get inp !i) do
+    incr i
+  done;
+  if !i < len || st.source == None then
+    st.pos <- !i + base
+  else
+    st.pos <-
+      scan_while_refilling st ~keep_from:no_keep (!i + base) is_whitespace
 
 let alphanum () =
   satisfy
@@ -2011,7 +2062,16 @@ let alphanum () =
     )
     ~label:"alphanumeric"
 
-let any_char () = satisfy (fun _ -> true) ~label:"any character"
+let label_any_char = "any character"
+
+let[@inline] any_char () =
+  let st = get_state () in
+  let p = st.pos in
+  if p < st.input_len then begin
+    st.pos <- p + 1;
+    char_at st p
+  end else
+    satisfy_slow st (fun _ -> true) label_any_char
 
 let[@inline] any_uint8 () =
   let st = get_state () in
