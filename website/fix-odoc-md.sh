@@ -12,6 +12,8 @@
 #  5. Add blank line after bullet lists before paragraphs
 #  6. Collapse runs of 3+ newlines to exactly 2
 
+set -e
+
 FILE="$1"
 
 # Portable sed -i: BSD sed (macOS) requires -i '' while GNU sed does not.

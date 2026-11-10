@@ -7,6 +7,7 @@ and fenced code blocks stay unchanged.
   > Already fixed: `` `All ``.
   > ```ocaml
   > Parseff.parse ~consume:`Partial "a" p
+  > Kept: `~consume:`Partial`.
   > ```
   > MD
   $ ./fix-code-spans.sh in.md
@@ -16,4 +17,5 @@ and fenced code blocks stay unchanged.
   Already fixed: `` `All ``.
   ```ocaml
   Parseff.parse ~consume:`Partial "a" p
+  Kept: `~consume:`Partial`.
   ```
