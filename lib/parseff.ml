@@ -293,24 +293,18 @@ module State = struct
 
   type slot = { owner : int; state : t }
 
-  let cache : slot ref = ref { owner = -1; state = none }
+  let cache : slot ref = ref { owner = min_int; state = none }
 
   let[@inline always] install (t : t) =
     let owner = (Domain.self () :> int) in
     let slot = !cache in
     if not (slot.owner = owner && slot.state == t) then begin
       Domain.DLS.set key t;
-      cache := { owner; state = t }
-    end
-
-  let[@inline always] current () =
-    let slot = !cache in
-    if slot.owner = (Domain.self () :> int) then
-      slot.state
-    else begin
-      let t = Domain.DLS.get key in
-      cache := { owner = (Domain.self () :> int); state = t };
-      t
+      cache :=
+        if t == none then
+          { owner = lnot owner; state = none }
+        else
+          { owner; state = t }
     end
 
   let leave (t : t) (previous : t) =
@@ -323,7 +317,16 @@ module State = struct
       )
 
   let enter (t : t) =
-    let previous = current () in
+    let owner = (Domain.self () :> int) in
+    let slot = !cache in
+    let previous =
+      if slot.owner = owner then
+        slot.state
+      else if slot.owner = lnot owner then
+        none
+      else
+        Domain.DLS.get key
+    in
     install t;
     t.active <- true;
     previous
@@ -442,10 +445,18 @@ let () =
         None
     )
 
-let[@inline always] get_state () =
-  let st = State.current () in
+let[@inline never] get_state_slow () =
+  let st = Domain.DLS.get State.key in
   if st == State.none then raise Not_in_parse_context;
+  State.cache := { owner = (Domain.self () :> int); state = st };
   st
+
+let[@inline always] get_state () =
+  let slot = !State.cache in
+  if slot.owner <> (Domain.self () :> int) then
+    get_state_slow ()
+  else
+    slot.state
 
 let create_line_index () =
   let starts = Array.make 64 0 in
