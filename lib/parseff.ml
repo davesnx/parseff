@@ -104,6 +104,7 @@ let frame_kind_mask = 3
 let frame_committed_bit = 4
 let frame_pin_bit = 8
 let frame_stride = 3
+let frame_trail_shift = 4
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -156,6 +157,41 @@ type trace_event =
   | Exit of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
+type 'a cell = { mutable value : 'a; mutable owner : bool ref }
+
+type trail =
+  | Undo : {
+      cell : 'a cell;
+      old : 'a;
+      depth : int;
+      token : bool ref;
+      mutable next : trail;
+    }
+      -> trail
+
+let idle_token = ref false
+let dummy_cell = { value = (); owner = idle_token }
+
+let rec not_running =
+  Undo
+    {
+      cell = dummy_cell;
+      old = ();
+      depth = 0;
+      token = idle_token;
+      next = not_running;
+    }
+
+let rec running_empty =
+  Undo
+    {
+      cell = dummy_cell;
+      old = ();
+      depth = 0;
+      token = idle_token;
+      next = running_empty;
+    }
+
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
    [base, input_len) are buffered. [input] is never mutated, only replaced, so
    slices taken from it stay valid after a refill. Memory input has
@@ -177,7 +213,7 @@ type state = {
   source : source option;
   mutable frames : int array;
   mutable frames_top : int;
-  mutable active : bool;
+  mutable trail : trail;
   trace : (trace_event -> unit) option;
 }
 
@@ -285,7 +321,7 @@ module State = struct
       source;
       frames = [||];
       frames_top = 0;
-      active = false;
+      trail = not_running;
       trace;
     }
 
@@ -302,7 +338,8 @@ module State = struct
 
   type slot = { owner : int; state : t }
 
-  let cache : slot ref = ref { owner = -1; state = none }
+  let no_slot = { owner = -1; state = none }
+  let cache : slot ref = ref no_slot
 
   let[@inline always] install (t : t) =
     let owner = (Domain.self () :> int) in
@@ -322,10 +359,25 @@ module State = struct
       t
     end
 
+  let suspend () =
+    let slot = !cache in
+    Domain.DLS.set key none;
+    cache := no_slot;
+    slot
+
+  let resume (t : t) slot =
+    if slot.owner = (Domain.self () :> int) && slot.state == t then begin
+      Domain.DLS.set key t;
+      cache := slot
+    end else
+      install t
+
   let leave (t : t) (previous : t) =
-    t.active <- false;
+    let (Undo top) = t.trail in
+    if top.token != idle_token then top.token := false;
+    t.trail <- not_running;
     install
-      ( if previous.active then
+      ( if previous.trail != not_running then
           previous
         else
           none
@@ -334,11 +386,25 @@ module State = struct
   let enter (t : t) =
     let previous = current () in
     install t;
-    t.active <- true;
+    t.trail <- running_empty;
     previous
 
   let[@inline always] diag_len (t : t) = t.diag_len
   let[@inline always] diag (t : t) = t.diag
+
+  let[@inline always] trail_depth (t : t) =
+    let (Undo u) = t.trail in
+    u.depth
+
+  let[@inline never] undo_trail (t : t) saved =
+    let rec go (Undo u as node) =
+      if u.depth > saved then begin
+        u.cell.value <- u.old;
+        go u.next
+      end else
+        t.trail <- node
+    in
+    go t.trail
 
   let push_rewind_frame (t : t) kind =
     let index = t.frames_top in
@@ -352,7 +418,8 @@ module State = struct
     end;
     let frames = t.frames in
     Array.unsafe_set frames base t.pos;
-    Array.unsafe_set frames (base + 1) kind;
+    Array.unsafe_set frames (base + 1)
+      (kind lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) (diag_len t);
     t.frames_top <- index + 1;
     index
@@ -369,7 +436,10 @@ module State = struct
     <> 0
 
   let[@inline always] set_frame_kind (t : t) frame kind =
-    Array.unsafe_set t.frames ((frame * frame_stride) + 1) kind
+    let slot = (frame * frame_stride) + 1 in
+    let flags = Array.unsafe_get t.frames slot in
+    Array.unsafe_set t.frames slot
+      (flags land lnot (frame_kind_mask lor frame_committed_bit) lor kind)
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
@@ -383,7 +453,9 @@ module State = struct
           ()
       );
       t.diag_len <- saved
-    end
+    end;
+    let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
+    if trail_depth t > saved then undo_trail t saved
 
   let rec commit_nearest_from (t : t) i =
     i >= 0
@@ -588,8 +660,17 @@ let[@inline never] append st ~floor chunk n =
   st.input_len <- st.input_len + n
 
 let[@inline never] read_source st src buf off len =
-  let n = src.read buf off len in
-  State.install st;
+  let slot = State.suspend () in
+  let n =
+    match src.read buf off len with
+    | n ->
+        n
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        State.resume st slot;
+        Printexc.raise_with_backtrace exn bt
+  in
+  State.resume st slot;
   if n < 0 || n > len then
     invalid_arg
       (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);
@@ -3818,3 +3899,53 @@ let parse_source ?(max_depth = 128)
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
+
+module Ref = struct
+  type 'a t = 'a cell
+
+  let create value = { value; owner = idle_token }
+  let get c = c.value
+
+  let set c value =
+    let st = State.current () in
+    let (Undo top) = st.trail in
+    let token =
+      if top.token != idle_token || st.trail == not_running then
+        top.token
+      else begin
+        let token = ref true in
+        st.trail <-
+          Undo
+            {
+              cell = dummy_cell;
+              old = ();
+              depth = top.depth;
+              token;
+              next = running_empty;
+            };
+        token
+      end
+    in
+    let owner = c.owner in
+    if owner != token then begin
+      if !owner then
+        invalid_arg "Parseff.Ref.set: another running parse uses this cell";
+      c.owner <- token
+    end;
+    if st.frames_top > 0 then begin
+      let next = st.trail in
+      let (Undo u) = next in
+      if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
+        u.next <- running_empty;
+      st.trail <-
+        Undo
+          {
+            cell = c;
+            old = c.value;
+            depth = State.trail_depth st + 1;
+            token;
+            next;
+          }
+    end;
+    c.value <- value
+end

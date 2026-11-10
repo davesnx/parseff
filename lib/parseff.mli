@@ -200,6 +200,125 @@ module Diagnostics : sig
   (** Empties the collector. Raises [Invalid_argument] while a parse uses it. *)
 end
 
+(** {1 Ref} *)
+
+(** A [ref] whose changes are undone when the parser backtracks.
+
+    Use it for a value that the parser builds as it reads, such as a symbol
+    table, an indentation stack or a counter. A plain [ref] is wrong for this.
+    When a branch fails, the parser goes back and tries the next branch, but the
+    [ref] keeps the changes of the failed branch.
+
+    In this example both branches of [statement] call [declare]. On ["abc;"],
+    the first branch reads [abc] and fails on [;], then the second branch reads
+    [abc] again. The [ref] holds the name twice. The {!Ref.t} holds it once,
+    because the parser undid the [set] of the failed branch.
+
+    {@ocaml[
+    let plain = ref []
+    let names = Ref.create []
+
+    let declare () =
+      let name = take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
+      plain := name :: !plain;
+      Ref.set names (name :: Ref.get names)
+
+    let statement () =
+      or_
+        (fun () ->
+          declare ();
+          let _ = char '=' in
+          `Assign
+        )
+        (fun () ->
+          declare ();
+          let _ = char ';' in
+          `Declare
+        )
+        ()
+
+    let () =
+      plain := [];
+      Ref.set names [];
+      match parse "abc;" statement with
+      | Ok `Declare ->
+          assert (!plain = [ "abc"; "abc" ]);
+          assert (Ref.get names = [ "abc" ])
+      | _ ->
+          assert false
+    ]}
+
+    {2 When a set is undone}
+
+    A {!Ref.set} is undone when its branch backtracks. The rule is the same as
+    for diagnostics:
+
+    - the failed branch of {!or_} and {!one_of};
+    - a failed {!optional};
+    - the last iteration of {!many}, {!sep_by} and {!fold_left}, the one that
+      fails or consumes nothing;
+    - {!look_ahead}, also when it succeeds.
+
+    A [set] is kept when its branch succeeds. After {!commit} or {!cut} seals a
+    branch, a failure no longer undoes the [set]s in that branch. An outer
+    branch that backtracks still undoes them.
+
+    An {!val-error} is a failure like a failed {!char}, so a branch that
+    backtracks on it undoes its [set]s. A {!fail} or an exception of your own
+    escapes {!or_}, {!optional}, {!many}, {!sep_by} and {!fold_left}, and skips
+    the undo. The cell keeps the value it had when the exception was raised,
+    also when a [try ... with] in the parser catches the exception.
+    {!look_ahead} restores the value in every case. Diagnostics behave the same
+    way.
+
+    Only the value in the cell is restored. A mutable value inside the cell,
+    such as a [Hashtbl.t] or an array, keeps its changes. Store immutable
+    values, such as a [Map] or a list.
+
+    {2 Lifetime}
+
+    Create a cell anywhere, inside or outside the parser. A parse does not reset
+    the cell. The value at the end of a parse stays in it, also when the parse
+    fails, so set the start value before each parse. Outside a parse, {!Ref.get}
+    and {!Ref.set} work as for a [ref].
+
+    {2 Cost}
+
+    A [set] inside a branch that can backtrack allocates 6 words to keep the old
+    value. The old value stays in memory while an open branch can undo it. A
+    [set] in each iteration of a {!many} at the top of the parser keeps one old
+    value. A grammar inside one {!or_} keeps every old value until that {!or_}
+    ends. A parser that never calls [set] allocates nothing more.
+
+    {2 Errors}
+
+    {!Ref.set} raises [Invalid_argument] when another parse that is still
+    running set the same cell. This happens when:
+
+    - two parses run interleaved on one domain, for example through effects in a
+      {!Source.of_function} reader;
+    - you call [set] outside a parse while such a reader waits, on a cell that
+      the waiting parse set;
+    - you call {!parse} inside a parser, and both parses set the cell.
+
+    Give each parse its own cell. A cell is not safe to share between domains.
+*)
+module Ref : sig
+  type 'a t
+  (** A cell that holds a value of type ['a]. *)
+
+  val create : 'a -> 'a t
+  (** [create v] is a new cell that holds [v]. *)
+
+  val get : 'a t -> 'a
+  (** [get cell] is the value in [cell]. *)
+
+  val set : 'a t -> 'a -> unit
+  (** [set cell v] stores [v] in [cell]. The parser undoes it when the branch
+      that called it backtracks. Raises [Invalid_argument] when another running
+      parse set [cell]. *)
+end
+
 (** {1 Trace} *)
 
 (** An event of a traced parse, see the [trace] argument of {!val:parse}.
