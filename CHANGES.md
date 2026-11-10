@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Fix `span_to_string` reading outside its buffer.** A span with a length of 1 whose offset is outside the buffer returned a byte from outside the string. It now raises `Invalid_argument`, as other invalid spans do.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0
