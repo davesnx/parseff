@@ -115,6 +115,6 @@ let () =
 | [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace` |
 | [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `render_error` |
-| [Diagnostics](/parseff/api/diagnostics) | `warn`, `warn_at`, `Diagnostics`, `parse ~consume ~diagnostics` |
+| [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics` |
 | [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char` |
 | [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source` |

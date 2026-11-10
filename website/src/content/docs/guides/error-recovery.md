@@ -152,7 +152,7 @@ x = 1; <hole>; z = 3; <hole>
 
 `sync` decides where parsing continues. A good sync point is a token that ends the broken construct. For a statement it is the `;`, and `skip_statement` consumes it, so the next statement starts clean.
 
-For an element of a list, the token after the element belongs to the list: `,` or `]`. The skip must stop before it, so that `Parseff.sep_by` reads it as usual. Use `capture` here, not `recover`: a hole in a list can be empty, as in `[1, , 3]`, and `recover` always consumes input, so it would skip the `,` itself. Record the error with `Parseff.warn_at` at the position of the error, which is the entry `recover` records:
+For an element of a list, the token after the element belongs to the list: `,` or `]`. The skip must stop before it, so that `Parseff.sep_by` reads it as usual. Use `capture` here, not `recover`: a hole in a list can be empty, as in `[1, , 3]`, and `recover` always consumes input, so it would skip the `,` itself. Record the error with `Parseff.warn` `~pos` at the position of the error, which is the entry `recover` records:
 
 ```ocaml
 let array errors () =
@@ -165,7 +165,7 @@ let array errors () =
             match Parseff.capture (fun () -> Some (integer ())) with
             | Ok x -> x
             | Error e ->
-                Parseff.warn_at errors ~pos:e.range.start e;
+                Parseff.warn ~pos:e.range.start errors e;
                 Parseff.skip_while (fun c -> c <> ',' && c <> ']');
                 None)
           (fun () ->

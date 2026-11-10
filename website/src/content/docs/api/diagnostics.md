@@ -32,14 +32,9 @@ A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Its type parame
 ## Emitting diagnostics
 
 ```ocaml
-val warn : 'd Diagnostics.t -> 'd -> unit
+val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 ```
-`Parseff.warn` records a non-fatal diagnostic at the current parser position.
-
-```ocaml
-val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
-```
-`Parseff.warn_at` records a non-fatal diagnostic at an explicit position.
+`Parseff.warn` records a non-fatal diagnostic at the current parser position, or at the byte offset `~pos` when it is given.
 
 
 ## Collecting diagnostics
@@ -73,7 +68,7 @@ let number_lenient diagnostics () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n > 255 then
-    Parseff.warn_at diagnostics ~pos:start (`Octet_out_of_range n);
+    Parseff.warn ~pos:start diagnostics (`Octet_out_of_range n);
   n
 
 let ip_address_lenient diagnostics () =

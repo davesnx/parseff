@@ -1521,11 +1521,9 @@ let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     st.diag_len <- st.diag_len + 1
   end
 
-let[@inline] warn_at c ~pos value = record_diagnostic c (get_state ()) pos value
-
-let[@inline] warn c value =
+let[@inline] warn ?pos c value =
   let st = get_state () in
-  record_diagnostic c st st.pos value
+  record_diagnostic c st (match pos with Some p -> p | None -> st.pos) value
 
 let[@inline] commit () =
   let st = get_state () in

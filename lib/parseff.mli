@@ -456,16 +456,14 @@ val error : ?from:int -> ?notes:note list -> custom_error -> 'a
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
 
-val warn : 'd Diagnostics.t -> 'd -> unit
+val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
-    parsing. [diagnostics] must be the collector given to the runner as
-    [~diagnostics]; for any other collector [warn] does nothing. A diagnostic
-    recorded in a branch that backtracks is removed with the branch. This
-    includes a successful {!look_ahead}, and a repetition iteration that
-    succeeds without consuming input. *)
-
-val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
-(** [warn_at diagnostics ~pos d] is {!warn} at the byte offset [pos]. *)
+    parsing. [warn ~pos diagnostics d] records it at the byte offset [pos].
+    [diagnostics] must be the collector given to the runner as [~diagnostics];
+    for any other collector [warn] does nothing. A diagnostic recorded in a
+    branch that backtracks is removed with the branch. This includes a
+    successful {!look_ahead}, and a repetition iteration that succeeds without
+    consuming input. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -591,7 +589,7 @@ val capture : (unit -> 'a) -> ('a, error) result
       | Ok s ->
           s
       | Error e ->
-          warn_at errors ~pos:e.range.start e;
+          warn ~pos:e.range.start errors e;
           skip_while (fun c -> c <> ';');
           let _ = char ';' in
           Hole

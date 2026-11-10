@@ -91,7 +91,7 @@ let capture_elem d () =
   | Ok v ->
       v
   | Error e ->
-      warn_at d ~pos:e.range.start e;
+      warn ~pos:e.range.start d e;
       skip_elem ();
       Hole
 
