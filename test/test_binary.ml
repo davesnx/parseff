@@ -607,6 +607,219 @@ let test_streaming_composition () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let check_ok testable name expected (result : (_, Parseff.error) Stdlib.result)
+    =
+  match result with
+  | Ok v ->
+      Alcotest.check testable name expected v
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let check_failure ~pos msg (result : (_, Parseff.error) Stdlib.result) =
+  match result with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error ({ kind = Expected _; _ } as e) ->
+      Alcotest.(check string) "message" msg (Parseff.error_message e);
+      Alcotest.(check int) "position" pos e.range.start
+  | Error e ->
+      Alcotest.failf "Expected an Expected error, got %s"
+        (Parseff.error_message e)
+
+let both input parser =
+  [
+    Parseff.parse input parser;
+    Parseff.parse_source (byte_at_a_time input) parser;
+  ]
+
+let test_any_uint32 () =
+  List.iter
+    (check_ok Alcotest.int "BE.any_uint32" 0xFFFFFFFE)
+    (both "\xFF\xFF\xFF\xFE" Parseff.BE.any_uint32);
+  List.iter
+    (check_ok Alcotest.int "LE.any_uint32" 0xFFFFFFFE)
+    (both "\xFE\xFF\xFF\xFF" Parseff.LE.any_uint32);
+  List.iter
+    (check_ok Alcotest.int "BE.any_uint32 small" 0x01020304)
+    (both "\x01\x02\x03\x04" Parseff.BE.any_uint32)
+
+let test_any_uint32_truncated () =
+  List.iter
+    (check_failure ~pos:0 "expected 4 bytes, found only 3 (end of input)")
+    (both "\x01\x02\x03" Parseff.BE.any_uint32);
+  List.iter
+    (check_failure ~pos:0 "expected 4 bytes, found end of input")
+    (both "" Parseff.LE.any_uint32)
+
+let test_take_span_zero_copy () =
+  let input = "abcdef" in
+  match
+    Parseff.parse ~consume:`Partial input (fun () ->
+        ignore (Parseff.take 1);
+        let s = Parseff.take_span 3 in
+        (s, Parseff.position ())
+    )
+  with
+  | Ok (s, pos) ->
+      Alcotest.(check bool) "shares the input" true (s.buf == input);
+      Alcotest.(check int) "off" 1 s.off;
+      Alcotest.(check int) "len" 3 s.len;
+      Alcotest.(check string) "text" "bcd" (Parseff.span_to_string s);
+      Alcotest.(check int) "position" 4 pos
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_take_span_streaming () =
+  match
+    Parseff.parse_source ~consume:`Partial (byte_at_a_time "abcdef") (fun () ->
+        ignore (Parseff.take 1);
+        let s = Parseff.take_span 3 in
+        (s, Parseff.position ())
+    )
+  with
+  | Ok (s, pos) ->
+      Alcotest.(check string) "buf" "bcd" s.buf;
+      Alcotest.(check int) "off" 0 s.off;
+      Alcotest.(check int) "len" 3 s.len;
+      Alcotest.(check int) "position" 4 pos
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_take_span_zero () =
+  List.iter
+    (check_ok Alcotest.string "empty" "")
+    (both "" (fun () -> Parseff.span_to_string (Parseff.take_span 0)))
+
+let test_take_span_truncated () =
+  List.iter
+    (check_failure ~pos:0 "expected 10 bytes, found only 3 (end of input)")
+    (both "abc" (fun () -> Parseff.take_span 10));
+  List.iter
+    (check_failure ~pos:0 "expected 2 bytes, found end of input")
+    (both "" (fun () -> Parseff.take_span 2))
+
+let test_take_span_negative () =
+  List.iter
+    (check_failure ~pos:0 "expected non-negative length, found -1")
+    (both "abc" (fun () -> Parseff.take_span (-1)));
+  let p () =
+    let v =
+      Parseff.or_
+        (fun () -> Parseff.span_to_string (Parseff.take_span (-1)))
+        (fun () -> "x")
+        ()
+    in
+    (v, Parseff.take 3)
+  in
+  List.iter
+    (check_ok Alcotest.(pair string string) "recovers" ("x", "abc"))
+    (both "abc" p)
+
+let same_as_take name run n msg =
+  let as_take = run (fun () -> Parseff.take n) in
+  let as_span = run (fun () -> Parseff.span_to_string (Parseff.take_span n)) in
+  match (as_take, as_span) with
+  | Error a, Error b ->
+      Alcotest.(check string) (name ^ " take") msg (Parseff.error_message a);
+      Alcotest.(check string) (name ^ " take_span") msg (Parseff.error_message b);
+      Alcotest.(check int) (name ^ " position") a.range.start b.range.start
+  | _ ->
+      Alcotest.failf "%s: expected take and take_span to fail" name
+
+let test_take_span_like_take () =
+  same_as_take "huge" (Parseff.parse "abc") max_int
+    "expected 4611686018427387903 bytes, found only 3 (end of input)";
+  same_as_take "huge streaming"
+    (fun p -> Parseff.parse_source (byte_at_a_time "abc") p)
+    max_int "expected 4611686018427387903 bytes, found only 3 (end of input)";
+  same_as_take "past the window"
+    (fun p ->
+      Parseff.parse_source ~backtrack_window:16
+        (byte_at_a_time (String.make 64 'a'))
+        p
+    )
+    40 "backtrack window of 16 bytes exceeded"
+
+let varint_after_prefix () =
+  ignore (Parseff.any_uint8 ());
+  Parseff.any_varint ()
+
+let test_any_varint () =
+  List.iter
+    (fun (input, expected) ->
+      List.iter
+        (check_ok Alcotest.(pair int int) (String.escaped input) expected)
+        (both input (fun () ->
+             let v = Parseff.any_varint () in
+             (v, Parseff.position ())
+         )
+        )
+    )
+    [
+      ("\x00", (0, 1));
+      ("\x7F", (127, 1));
+      ("\x80\x01", (128, 2));
+      ("\xAC\x02", (300, 2));
+      ("\x80\x00", (0, 2));
+      ("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x3F", (max_int, 9));
+    ]
+
+let test_any_varint_too_large () =
+  List.iter
+    (fun (input, msg) ->
+      List.iter (check_failure ~pos:1 msg) (both input varint_after_prefix)
+    )
+    [
+      ( "\x00\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x40",
+        "expected varint up to max_int, found '\\xFF'"
+      );
+      ( "\x00\x80\x80\x80\x80\x80\x80\x80\x80\x80\x00",
+        "expected varint up to max_int, found '\\x80'"
+      );
+    ]
+
+let test_any_varint_never_ends () =
+  let input = "\x00" ^ String.make 100 '\x80' in
+  List.iter
+    (function
+      | Ok _ ->
+          Alcotest.fail "Expected failure"
+      | Error (e : Parseff.error) ->
+          Alcotest.(check int) "position" 1 e.range.start
+      )
+    (both input varint_after_prefix)
+
+let test_any_varint_truncated () =
+  List.iter
+    (check_failure ~pos:3 "expected 1 byte, found end of input")
+    (both "\x00\x80\x80" varint_after_prefix);
+  List.iter
+    (check_failure ~pos:0 "expected 1 byte, found end of input")
+    (both "" Parseff.any_varint)
+
+let test_any_varint_combinators () =
+  List.iter
+    (check_ok Alcotest.(list int) "many" [ 1; 300; 0 ])
+    (both "\x01\xAC\x02\x00" (Parseff.many Parseff.any_varint));
+  let too_large = "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x40" in
+  List.iter
+    (check_ok Alcotest.int "or_ rewinds" 0xFF)
+    (both too_large (fun () ->
+         let v = Parseff.or_ Parseff.any_varint Parseff.any_uint8 () in
+         ignore (Parseff.take 8);
+         v
+     )
+    );
+  List.iter
+    (check_ok Alcotest.(pair int int) "look_ahead" (300, 0))
+    (both "\xAC\x02" (fun () ->
+         let v = Parseff.look_ahead Parseff.any_varint in
+         let pos = Parseff.position () in
+         ignore (Parseff.take 2);
+         (v, pos)
+     )
+    )
+
 let () =
   Alcotest.run "binary"
     [
@@ -632,6 +845,13 @@ let () =
           Alcotest.test_case "BE.any_int32" `Quick test_be_any_int32;
           Alcotest.test_case "LE.any_int32" `Quick test_le_any_int32;
           Alcotest.test_case "int32 eof" `Quick test_int32_eof;
+        ]
+      );
+      ( "unsigned 32-bit reads",
+        [
+          Alcotest.test_case "any_uint32" `Quick test_any_uint32;
+          Alcotest.test_case "any_uint32 truncated" `Quick
+            test_any_uint32_truncated;
         ]
       );
       ( "64-bit reads",
@@ -694,6 +914,27 @@ let () =
             test_take_negative_optional;
           Alcotest.test_case "take negative untrusted length" `Quick
             test_take_negative_untrusted_length;
+        ]
+      );
+      ( "varint",
+        [
+          Alcotest.test_case "values" `Quick test_any_varint;
+          Alcotest.test_case "too large" `Quick test_any_varint_too_large;
+          Alcotest.test_case "never ends" `Quick test_any_varint_never_ends;
+          Alcotest.test_case "truncated" `Quick test_any_varint_truncated;
+          Alcotest.test_case "in combinators" `Quick test_any_varint_combinators;
+        ]
+      );
+      ( "take_span",
+        [
+          Alcotest.test_case "zero-copy in parse" `Quick
+            test_take_span_zero_copy;
+          Alcotest.test_case "owned copy in parse_source" `Quick
+            test_take_span_streaming;
+          Alcotest.test_case "zero length" `Quick test_take_span_zero;
+          Alcotest.test_case "truncated" `Quick test_take_span_truncated;
+          Alcotest.test_case "negative" `Quick test_take_span_negative;
+          Alcotest.test_case "same as take" `Quick test_take_span_like_take;
         ]
       );
       ("composition", [ Alcotest.test_case "TLV header" `Quick test_tlv_header ]);
