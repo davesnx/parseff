@@ -306,6 +306,56 @@ let complete_number () =
 val position : unit -> int
 ```
 
+### `with_range`
+
+`Parseff.with_range` runs a parser and returns its result with the `Parseff.range` of bytes it consumed. `start` is the position before the parser and `stop` the position after it. Use it to point an error or a note at a whole construct without calling `position` two times.
+
+```ocaml
+val with_range : (unit -> 'a) -> 'a * range
+```
+```ocaml
+let octet () =
+  let n, range =
+    Parseff.with_range (fun () ->
+        int_of_string
+          (Parseff.take_while ~at_least:1
+             (fun c -> c >= '0' && c <= '9')
+             ~label:"digit"))
+  in
+  if n > 255 then
+    Parseff.fail
+      ~notes:[ { at = Some range; text = "octets are 0 to 255" } ]
+      "octet out of range";
+  n
+```
+
+### `recognize` and `recognize_span`
+
+`Parseff.recognize` runs a parser, drops its result, and returns the input text the parser consumed. `Parseff.recognize_span` returns the same text as a `Parseff.span`: zero-copy with `Parseff.parse`, an owned copy with `Parseff.parse_source`.
+
+```ocaml
+val recognize : (unit -> 'a) -> string
+val recognize_span : (unit -> 'a) -> span
+```
+```ocaml
+let identifier () =
+  Parseff.recognize (fun () ->
+      ignore (Parseff.letter ());
+      ignore
+        (Parseff.many
+           (fun () -> Parseff.or_ Parseff.alphanum (fun () -> Parseff.char '_') ())
+           ()))
+
+let () =
+  match Parseff.parse ~consume:`Partial "foo_1 = 2" identifier with
+  | Ok name -> assert (name = "foo_1")
+  | Error _ -> assert false
+```
+If the parser fails, `with_range`, `recognize` and `recognize_span` fail with the same error. `Parseff.commit` and `Parseff.cut` inside the parser act as if the wrapper were not there: `commit` seals the nearest frame, also when that frame is outside the wrapper.
+
+**Streaming:** with `Parseff.parse_source`, `recognize` and `recognize_span` keep the input from the start of the parser buffered until the parser returns, also after a `commit`. A match longer than `~backtrack_window` fails with `Backtrack_window_exceeded`. `with_range` keeps nothing buffered.
+
+
 ### `location`
 
 `Parseff.location` returns the current position as a `Parseff.location` record with byte offset, line number, and column. Lines and columns are 1-based. Columns count bytes, not characters (relevant for multibyte UTF-8 input).

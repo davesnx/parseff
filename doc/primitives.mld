@@ -311,6 +311,68 @@ start of the input.
 
 {@ocaml skip[val position : unit -> int]}
 
+{2 [with_range]}
+
+{!val:Parseff.with_range} runs a parser and returns its result with the
+{!type:Parseff.range} of bytes it consumed. [start] is the position before the
+parser and [stop] the position after it. Use it to point an error or a note at
+a whole construct without calling [position] two times.
+
+{@ocaml skip[val with_range : (unit -> 'a) -> 'a * range]}
+
+{@ocaml[
+let octet () =
+  let n, range =
+    Parseff.with_range (fun () ->
+        int_of_string
+          (Parseff.take_while ~at_least:1
+             (fun c -> c >= '0' && c <= '9')
+             ~label:"digit"))
+  in
+  if n > 255 then
+    Parseff.fail
+      ~notes:[ { at = Some range; text = "octets are 0 to 255" } ]
+      "octet out of range";
+  n
+]}
+
+{2 [recognize] and [recognize_span]}
+
+{!val:Parseff.recognize} runs a parser, drops its result, and returns the input
+text the parser consumed. {!val:Parseff.recognize_span} returns the same text as
+a {!type:Parseff.span}: zero-copy with {!val:Parseff.parse}, an owned copy with
+{!val:Parseff.parse_source}.
+
+{@ocaml skip[
+val recognize : (unit -> 'a) -> string
+val recognize_span : (unit -> 'a) -> span
+]}
+
+{@ocaml[
+let identifier () =
+  Parseff.recognize (fun () ->
+      ignore (Parseff.letter ());
+      ignore
+        (Parseff.many
+           (fun () -> Parseff.or_ Parseff.alphanum (fun () -> Parseff.char '_') ())
+           ()))
+
+let () =
+  match Parseff.parse ~consume:`Partial "foo_1 = 2" identifier with
+  | Ok name -> assert (name = "foo_1")
+  | Error _ -> assert false
+]}
+
+If the parser fails, [with_range], [recognize] and [recognize_span] fail with
+the same error. {!val:Parseff.commit} and {!val:Parseff.cut} inside the parser
+act as if the wrapper were not there: [commit] seals the nearest frame, also
+when that frame is outside the wrapper.
+
+{b Streaming:} with {!val:Parseff.parse_source}, [recognize] and
+[recognize_span] keep the input from the start of the parser buffered until the
+parser returns, also after a [commit]. A match longer than [~backtrack_window]
+fails with [Backtrack_window_exceeded]. [with_range] keeps nothing buffered.
+
 {2 [location]}
 
 {!val:Parseff.location} returns the current position as a

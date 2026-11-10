@@ -79,6 +79,15 @@ let () =
   | Error e -> prerr_endline (Parseff.render_error ~name:"payload" e)
 ]}
 
+{2 [recognize_span]}
+
+{!val:Parseff.recognize_span} returns the input text that any parser consumed,
+as a {!type:Parseff.span}. With {!val:Parseff.parse_source} the span is an owned
+copy, and the input from the start of the parser stays buffered until it
+returns. See {!val:Parseff.recognize}.
+
+{@ocaml skip[val recognize_span : (unit -> 'a) -> span]}
+
 {2 [sep_by_take_span]}
 
 {!val:Parseff.sep_by_take_span} is like {!val:Parseff.sep_by_take} but returns
