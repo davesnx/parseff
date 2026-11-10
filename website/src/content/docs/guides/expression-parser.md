@@ -180,6 +180,64 @@ and factor () =
 
 For right-associative operators (like exponentiation), use `fold_right` instead.
 
+## An operator table: `expression`
+
+`Parseff.expression` builds the levels from one table, so you do not write one function for each level. Each level is a list of operators, and the table lists the levels from the lowest to the highest precedence. This is the same grammar as above:
+
+```ocaml
+let add () =
+  Parseff.skip_whitespace ();
+  let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
+  fun a b -> Add (a, b)
+
+let mul () =
+  Parseff.skip_whitespace ();
+  let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
+  fun a b -> Mul (a, b)
+
+let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
+
+let rec expr () = Parseff.expression ~atom:factor table ()
+
+and factor () =
+  Parseff.skip_whitespace ();
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(') in
+      Parseff.skip_whitespace ();
+      let e = Parseff.rec_ expr in
+      Parseff.skip_whitespace ();
+      let _ = Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')') in
+      e)
+    (fun () ->
+      let d = Parseff.expect "a number" Parseff.digit in
+      Num d)
+    ()
+```
+
+The operator parsers are the `op` arguments of `fold_left`: each one parses the token and returns the function that builds the node. `factor` is the `~atom` argument, and it calls `expr` again for parentheses. The errors are the same as with the hand-written levels: `"1+x"` gives `expected a number or an opening parenthesis`.
+
+A table also takes the operators that `fold_left` and `fold_right` cannot express in one place:
+
+- `Parseff.infix_right` for right-associative operators, such as `^`.
+- `Parseff.prefix` for operators before the operand, such as unary `-`. They can repeat: `- - 1` is `-(-1)`.
+- `Parseff.postfix` for operators after the operand, such as `!`.
+
+A table with all four kinds of operator:
+
+```ocaml
+let table =
+  [
+    [ Parseff.infix_left add; Parseff.infix_left sub ];
+    [ Parseff.infix_left mul; Parseff.infix_left div ];
+    [ Parseff.prefix neg ];
+    [ Parseff.infix_right pow ];
+    [ Parseff.postfix factorial ];
+  ]
+```
+
+The operators are tried in table order. When one token starts another, such as `!` and `!=`, put the longer token first. A shorter token that leaves a valid expression wins: with `!` first, `1!=2` parses `1!` and fails at `=`.
+
 ## Printing the AST
 
 For debugging, a simple `to_string` function:
