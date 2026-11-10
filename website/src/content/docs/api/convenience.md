@@ -82,7 +82,7 @@ let peek () = Parseff.look_ahead Parseff.any_char
 
 ## Numbers
 
-The number parsers read the bytes of a number directly from the input. They work across chunk boundaries in `Parseff.parse_source`. A failure is an `Expected` error at the start of the number, so `Parseff.or_` can try another branch, and its message merges with the other alternatives at that position. In streaming a number must be shorter than `backtrack_window` bytes, or the parse fails with `Backtrack_window_exceeded` at its start.
+The number parsers read the bytes of a number directly from the input. They work across chunk boundaries in `Parseff.parse_source`. A failure is an `Expected` error. A missing number fails at its start, so `Parseff.or_` can try another branch, and its message merges with the other alternatives at that position. A `-`, `.` or exponent marker with no digit after it fails with `expected digit` after the marker: `"-x"` fails at offset 1, and `"1."` and `"1e"` fail at offset 2\. In streaming a number must be shorter than `backtrack_window` bytes, or the parse fails with `Backtrack_window_exceeded` at its start.
 
 
 ### `int`

@@ -72,13 +72,13 @@ let test_int_range () =
   check string_of_int max_text Parseff.int ("Ok " ^ max_text);
   check string_of_int min_text Parseff.int ("Ok " ^ min_text);
   check string_of_int (bump max_text) Parseff.int
-    "Error@0 Expected expected integer in int range, found \
-     '4611686018427387904'";
+    ("Error@0 Expected expected integer in int range, found '" ^ bump max_text
+   ^ "'"
+    );
   check string_of_int (bump min_text) Parseff.int
     "Error@0 Expected expected integer in int range, found '-'";
   check string_of_int (max_text ^ "0") Parseff.int
-    "Error@0 Expected expected integer in int range, found \
-     '46116860184273879030'";
+    ("Error@0 Expected expected integer in int range, found '" ^ max_text ^ "0'");
   check ~chunk_sizes:[] string_of_int
     ("1" ^ String.make 40 '0')
     Parseff.int
@@ -106,7 +106,7 @@ let show_option = function None -> "None" | Some n -> string_of_int n
 let show_list l = String.concat ";" (List.map string_of_int l)
 
 let test_int_composition () =
-  check Fun.id (bump max_text) int_or_text "Ok text 4611686018427387904";
+  check Fun.id (bump max_text) int_or_text ("Ok text " ^ bump max_text);
   check Fun.id "12" int_or_text "Ok 12";
   check show_option "x" int_or_null
     {|Error@0 Expected expected integer or "null", found 'x'|};
@@ -133,9 +133,12 @@ let hex_rest () =
 let test_hex_int () =
   check string_of_int "0" Parseff.hex_int "Ok 0";
   check string_of_int "ff" Parseff.hex_int "Ok 255";
-  check string_of_int "DeadBeef" Parseff.hex_int "Ok 3735928559";
+  if Sys.int_size = 63 then
+    check string_of_int "DeadBeef" Parseff.hex_int "Ok 3735928559";
   check string_of_int "00A" Parseff.hex_int "Ok 10";
-  check string_of_int "3FFFFFFFFFFFFFFF" Parseff.hex_int ("Ok " ^ max_text);
+  check string_of_int
+    (Printf.sprintf "%X" max_int)
+    Parseff.hex_int ("Ok " ^ max_text);
   check show_int_rest "1fg" hex_rest {|Ok 31 "g"|};
   check show_int_rest "0x1f" hex_rest {|Ok 0 "x1f"|};
   check string_of_int "g" Parseff.hex_int
@@ -144,9 +147,13 @@ let test_hex_int () =
     "Error@0 Expected expected hexadecimal integer, found '-'";
   check string_of_int "" Parseff.hex_int
     "Error@0 Expected expected hexadecimal integer, found end of input";
-  check string_of_int "4000000000000000" Parseff.hex_int
-    "Error@0 Expected expected hexadecimal integer in int range, found \
-     '4000000000000000'";
+  check string_of_int
+    (Printf.sprintf "%X" min_int)
+    Parseff.hex_int
+    (Printf.sprintf
+       "Error@0 Expected expected hexadecimal integer in int range, found '%X'"
+       min_int
+    );
   check string_of_int "00000000000000001" Parseff.hex_int "Ok 1"
 
 let show_float = Printf.sprintf "%.17g"
@@ -273,8 +280,8 @@ let test_no_allocation () =
         Alcotest.failf "%s allocated %.3f minor words per call" name words
     )
     [
-      ("int", "-4611686018427387904", Parseff.int);
-      ("hex_int", "DeadBeef1234", Parseff.hex_int);
+      ("int", min_text, Parseff.int);
+      ("hex_int", Printf.sprintf "%x" max_int, Parseff.hex_int);
     ]
 
 let windowed ~window input parser =
