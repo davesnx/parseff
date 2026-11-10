@@ -660,6 +660,8 @@ let test_cell_does_not_keep_input () =
   Alcotest.(check bool) "input collected" false (Weak.check w 0);
   Alcotest.(check int) "cell still reachable" 1 (Ref.get c)
 
+type custom_error += Escaping
+
 let test_escaping_exceptions () =
   let run wrap raise_it =
     let c = Ref.create 0 in
@@ -685,6 +687,8 @@ let test_escaping_exceptions () =
   in
   let raise_exit () = raise Exit in
   let call_fail () = fail "stop" in
+  let call_error () = error Escaping in
+  let custom = "error custom error (no ~custom printer given)" in
   let check name wrap raise_it expected =
     Alcotest.(check (triple string int int)) name expected (run wrap raise_it)
   in
@@ -703,6 +707,8 @@ let test_escaping_exceptions () =
   in
   check "or_ Exit" in_or raise_exit ("Exit", 1, 1);
   check "or_ fail" in_or call_fail ("error stop", 1, 1);
+  check "or_ error" in_or call_error (custom, 0, 0);
+  check "optional error" in_optional call_error (custom, 0, 0);
   check "optional Exit" in_optional raise_exit ("Exit", 1, 1);
   check "many Exit" in_many raise_exit ("Exit", 1, 1);
   check "sep_by Exit" in_sep_by raise_exit ("Exit", 1, 1);

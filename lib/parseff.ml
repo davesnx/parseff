@@ -336,7 +336,8 @@ module State = struct
 
   type slot = { owner : int; state : t }
 
-  let cache : slot ref = ref { owner = -1; state = none }
+  let no_slot = { owner = -1; state = none }
+  let cache : slot ref = ref no_slot
 
   let[@inline always] install (t : t) =
     let owner = (Domain.self () :> int) in
@@ -355,6 +356,19 @@ module State = struct
       cache := { owner = (Domain.self () :> int); state = t };
       t
     end
+
+  let suspend () =
+    let slot = !cache in
+    Domain.DLS.set key none;
+    cache := no_slot;
+    slot
+
+  let resume (t : t) slot =
+    if slot.owner = (Domain.self () :> int) && slot.state == t then begin
+      Domain.DLS.set key t;
+      cache := slot
+    end else
+      install t
 
   let leave (t : t) (previous : t) =
     let (Undo top) = t.trail in
@@ -644,17 +658,17 @@ let[@inline never] append st ~floor chunk n =
   st.input_len <- st.input_len + n
 
 let[@inline never] read_source st src buf off len =
-  State.install State.none;
+  let slot = State.suspend () in
   let n =
     match src.read buf off len with
     | n ->
         n
     | exception exn ->
         let bt = Printexc.get_raw_backtrace () in
-        State.install st;
+        State.resume st slot;
         Printexc.raise_with_backtrace exn bt
   in
-  State.install st;
+  State.resume st slot;
   if n < 0 || n > len then
     invalid_arg
       (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);

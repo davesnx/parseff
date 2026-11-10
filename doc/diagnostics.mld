@@ -187,12 +187,14 @@ A [set] is kept when its branch succeeds. After {!val:Parseff.commit} or
 {!val:Parseff.cut} seals a branch, a failure no longer undoes the [set]s in
 that branch. An outer branch that backtracks still undoes them.
 
-An exception that escapes a branch skips the undo. A {!val:Parseff.fail}, an
-{!val:Parseff.error} or an exception of your own raised inside
-{!val:Parseff.or_}, {!val:Parseff.optional}, {!val:Parseff.many},
-{!val:Parseff.sep_by} or {!val:Parseff.fold_left} leaves the cell with the value
-it had when the exception was raised. {!val:Parseff.look_ahead} restores the
-value also in this case. Diagnostics behave the same way.
+An {!val:Parseff.error} is a failure like a failed {!val:Parseff.char}, so a
+branch that backtracks on it undoes its [set]s. A {!val:Parseff.fail} or an
+exception of your own escapes {!val:Parseff.or_}, {!val:Parseff.optional},
+{!val:Parseff.many}, {!val:Parseff.sep_by} and {!val:Parseff.fold_left}, and
+skips the undo. The cell keeps the value it had when the exception was raised,
+also when a [try ... with] in the parser catches the exception.
+{!val:Parseff.look_ahead} restores the value in every case. Diagnostics behave
+the same way.
 
 Only the value in the cell is restored. A mutable value inside the cell, such
 as a [Hashtbl.t] or an array, keeps its changes. Store immutable values, such

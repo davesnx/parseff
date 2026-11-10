@@ -174,7 +174,7 @@ A `Parseff.Ref.set` is undone when its branch backtracks. The rule is the same a
 - `Parseff.look_ahead`, also when it succeeds.
 A `set` is kept when its branch succeeds. After `Parseff.commit` or `Parseff.cut` seals a branch, a failure no longer undoes the `set`s in that branch. An outer branch that backtracks still undoes them.
 
-An exception that escapes a branch skips the undo. A `Parseff.fail`, an `Parseff.error` or an exception of your own raised inside `Parseff.or_`, `Parseff.optional`, `Parseff.many`, `Parseff.sep_by` or `Parseff.fold_left` leaves the cell with the value it had when the exception was raised. `Parseff.look_ahead` restores the value also in this case. Diagnostics behave the same way.
+An `Parseff.error` is a failure like a failed `Parseff.char`, so a branch that backtracks on it undoes its `set`s. A `Parseff.fail` or an exception of your own escapes `Parseff.or_`, `Parseff.optional`, `Parseff.many`, `Parseff.sep_by` and `Parseff.fold_left`, and skips the undo. The cell keeps the value it had when the exception was raised, also when a `try ... with` in the parser catches the exception. `Parseff.look_ahead` restores the value in every case. Diagnostics behave the same way.
 
 Only the value in the cell is restored. A mutable value inside the cell, such as a `Hashtbl.t` or an array, keeps its changes. Store immutable values, such as a `Map` or a list.
 

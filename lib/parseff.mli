@@ -263,11 +263,13 @@ end
     branch, a failure no longer undoes the [set]s in that branch. An outer
     branch that backtracks still undoes them.
 
-    An exception that escapes a branch skips the undo. A {!fail}, an
-    {!val-error} or an exception of your own raised inside {!or_}, {!optional},
-    {!many}, {!sep_by} or {!fold_left} leaves the cell with the value it had
-    when the exception was raised. {!look_ahead} restores the value also in this
-    case. Diagnostics behave the same way.
+    An {!val-error} is a failure like a failed {!char}, so a branch that
+    backtracks on it undoes its [set]s. A {!fail} or an exception of your own
+    escapes {!or_}, {!optional}, {!many}, {!sep_by} and {!fold_left}, and skips
+    the undo. The cell keeps the value it had when the exception was raised,
+    also when a [try ... with] in the parser catches the exception.
+    {!look_ahead} restores the value in every case. Diagnostics behave the same
+    way.
 
     Only the value in the cell is restored. A mutable value inside the cell,
     such as a [Hashtbl.t] or an array, keeps its changes. Store immutable
