@@ -1892,6 +1892,162 @@ let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
   | Some d ->
       or_ (fold_right_one_or_more p op) (fun () -> d) ()
 
+type 'a operator =
+  | Infix_left of (unit -> 'a -> 'a -> 'a)
+  | Infix_right of (unit -> 'a -> 'a -> 'a)
+  | Prefix of (unit -> 'a -> 'a)
+  | Postfix of (unit -> 'a -> 'a)
+
+let infix_left op = Infix_left op
+let infix_right op = Infix_right op
+let prefix op = Prefix op
+let postfix op = Postfix op
+
+let rec has_prefix_op = function
+  | [] ->
+      false
+  | Prefix _ :: _ ->
+      true
+  | _ :: ops ->
+      has_prefix_op ops
+
+let rec has_prefix = function
+  | [] ->
+      false
+  | ops :: rest ->
+      has_prefix_op ops || has_prefix rest
+
+type 'a expression = {
+  st : State.t;
+  atom : unit -> 'a;
+  table : 'a operator list list;
+  prefixed : bool;
+}
+
+let rec expr_climb c levels = expr_loop c levels (expr_operand c)
+
+and expr_operand c =
+  if not c.prefixed then
+    c.atom ()
+  else begin
+    let st = c.st in
+    let frame = State.push_rewind_frame st frame_choice in
+    match expr_prefix_levels c frame st.pos c.table with
+    | v ->
+        State.pop_rewind_frame st frame;
+        v
+    | exception Fail ->
+        State.pop_rewind_frame st frame;
+        if State.frame_committed st frame then raise_notrace Fail;
+        restore_rewind_frame st frame;
+        c.atom ()
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        raise exn
+  end
+
+and expr_prefix_levels c frame start = function
+  | [] ->
+      raise_notrace Fail
+  | ops :: rest ->
+      expr_prefix_ops c frame start rest ops
+
+and expr_prefix_ops c frame start rest = function
+  | [] ->
+      expr_prefix_levels c frame start rest
+  | Prefix f :: ops -> (
+      match
+        let g = f () in
+        if c.st.pos = start then raise_notrace Fail;
+        g (rec_ (fun () -> expr_climb c rest))
+      with
+      | v ->
+          v
+      | exception Fail ->
+          if State.frame_committed c.st frame then raise_notrace Fail;
+          restore_rewind_frame c.st frame;
+          expr_prefix_ops c frame start rest ops
+    )
+  | _ :: ops ->
+      expr_prefix_ops c frame start rest ops
+
+and expr_loop c levels lhs =
+  match levels with
+  | [] ->
+      lhs
+  | _ :: _ -> (
+      let st = c.st in
+      let frame = State.push_rewind_frame st frame_repeat in
+      let start = st.pos in
+      match expr_try_levels c frame lhs levels with
+      | v ->
+          State.pop_rewind_frame st frame;
+          if st.pos = start then begin
+            restore_rewind_frame st frame;
+            lhs
+          end else
+            expr_loop c levels v
+      | exception Fail ->
+          State.pop_rewind_frame st frame;
+          if State.frame_committed st frame then raise_notrace Fail;
+          restore_rewind_frame st frame;
+          lhs
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
+    )
+
+and expr_try_levels c frame lhs = function
+  | [] ->
+      raise_notrace Fail
+  | ops :: rest as here ->
+      expr_try_ops c frame lhs here rest ops
+
+and expr_try_ops c frame lhs here rest = function
+  | [] ->
+      expr_try_levels c frame lhs rest
+  | Prefix _ :: ops ->
+      expr_try_ops c frame lhs here rest ops
+  | Infix_left f :: ops -> (
+      match
+        let g = f () in
+        g lhs (expr_climb c rest)
+      with
+      | v ->
+          v
+      | exception Fail ->
+          expr_next c frame lhs here rest ops
+    )
+  | Infix_right f :: ops -> (
+      match
+        let g = f () in
+        g lhs (rec_ (fun () -> expr_climb c here))
+      with
+      | v ->
+          v
+      | exception Fail ->
+          expr_next c frame lhs here rest ops
+    )
+  | Postfix f :: ops -> (
+      match
+        let g = f () in
+        g lhs
+      with
+      | v ->
+          v
+      | exception Fail ->
+          expr_next c frame lhs here rest ops
+    )
+
+and expr_next c frame lhs here rest ops =
+  if State.frame_committed c.st frame then raise_notrace Fail;
+  restore_rewind_frame c.st frame;
+  expr_try_ops c frame lhs here rest ops
+
+let expression ~atom table () =
+  let c = { st = get_state (); atom; table; prefixed = has_prefix table } in
+  expr_climb c table
+
 let optional (p : unit -> 'a) () : 'a option =
   or_ (fun () -> Some (p ())) (fun () -> None) ()
 

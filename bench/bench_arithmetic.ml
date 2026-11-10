@@ -147,6 +147,44 @@ module Parseff_Arith_Generic = struct
         None
 end
 
+module Parseff_Arith_Table = struct
+  open Parseff_Arith_Generic
+
+  let table = Parseff.[ [ infix_left add_op ]; [ infix_left mul_op ] ]
+  let expr () = Parseff.expression ~atom:number table ()
+
+  let parse input =
+    match Parseff.parse input expr with
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
+end
+
+module Parseff_Arith_Table_Split = struct
+  open Parseff_Arith_Generic
+
+  let op c f () =
+    let _ = Parseff.char c in
+    f
+
+  let table =
+    Parseff.
+      [
+        [ infix_left (op '+' ( + )); infix_left (op '-' ( - )) ];
+        [ infix_left (op '*' ( * )); infix_left (op '/' ( / )) ];
+      ]
+
+  let expr () = Parseff.expression ~atom:number table ()
+
+  let parse input =
+    match Parseff.parse input expr with
+    | Ok result ->
+        Some result
+    | Error _ ->
+        None
+end
+
 module Parseff_Arith_Fused = struct
   let[@inline always] is_digit c = c >= '0' && c <= '9'
 
@@ -228,6 +266,12 @@ let () =
       );
       Bench_case.make ~name:"Parseff (generic)" ~iterations:5000000L (fun () ->
           ignore (Parseff_Arith_Generic.parse arith_input)
+      );
+      Bench_case.make ~name:"Parseff (table)" ~iterations:5000000L (fun () ->
+          ignore (Parseff_Arith_Table.parse arith_input)
+      );
+      Bench_case.make ~name:"Parseff (table, 4 ops)" ~iterations:5000000L
+        (fun () -> ignore (Parseff_Arith_Table_Split.parse arith_input)
       );
       Bench_case.make ~name:"Angstrom" ~iterations:5000000L (fun () ->
           ignore (Angstrom_Arith.parse arith_input)

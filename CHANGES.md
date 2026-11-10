@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **Add `expression`, an operator table.** `expression ~atom table` parses operands with `atom`, joined by the operators of `table`, by precedence climbing. `table` lists the precedence levels from the lowest to the highest, and a level is a list of `infix_left`, `infix_right`, `prefix` and `postfix` operators. Each takes a token parser that returns the function to apply, as the `op` of `fold_left`. Prefix and postfix operators can repeat, so `- - 1` is `-(-1)`. Operators are tried in table order, so put a longer token such as `!=` before `!`. Errors are the same as with one `fold_left` for each level: `1 + * 2` reports `expected digit or "("` at the `*`.
+
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

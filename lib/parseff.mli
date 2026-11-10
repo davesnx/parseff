@@ -822,6 +822,101 @@ val fold_right :
     When [~otherwise] is specified, returns [otherwise] if there are zero
     [element] values instead of failing. *)
 
+type 'a operator
+(** An operator for {!expression}. Each constructor takes a parser for the
+    operator token. The parser returns the function that builds the result, as
+    the [op] argument of {!fold_left} does. *)
+
+val infix_left : (unit -> 'a -> 'a -> 'a) -> 'a operator
+(** [infix_left op] is a left-associative binary operator: [1-2-3] is [(1-2)-3].
+*)
+
+val infix_right : (unit -> 'a -> 'a -> 'a) -> 'a operator
+(** [infix_right op] is a right-associative binary operator: [2^3^2] is
+    [2^(3^2)]. *)
+
+val prefix : (unit -> 'a -> 'a) -> 'a operator
+(** [prefix op] is a unary operator before its operand. It can repeat: [- - 1]
+    is [-(-1)]. Its operand holds only operators of higher precedence, so with
+    [-] below [^], [-2^2] is [-(2^2)]. A prefix operator is accepted wherever an
+    operand starts, also after an operator of higher precedence: [2*-3] is
+    [2*(-3)]. A token parser that consumes no input does not count as the
+    operator, and the next operator or [atom] is tried. *)
+
+val postfix : (unit -> 'a -> 'a) -> 'a operator
+(** [postfix op] is a unary operator after its operand. It can repeat: [3!!] is
+    [(3!)!]. *)
+
+val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+(** [expression ~atom table] parses operands with [atom], joined by the
+    operators of [table].
+
+    [table] lists the precedence levels from the lowest to the highest
+    precedence: the first level binds the loosest. The operators of one level
+    have the same precedence. An empty [table] parses one [atom].
+
+    [atom] parses an operand: a literal, a name or a group. For parentheses,
+    make [atom] call the expression parser again, inside {!rec_}.
+
+    At each position, the operators are tried in table order, and inside a level
+    in list order. A token parser that fails, or whose operand fails,
+    backtracks, and the next operator is tried. When the parse after a shorter
+    token also succeeds, the shorter token wins: with postfix [!] before infix
+    [!=], [1!=2] parses [1!] and stops at [=]. List the operator with the longer
+    token first.
+
+    When no operator continues the expression, the parse stops before the token,
+    as {!fold_left} does, and the error is the furthest failure: on ["1 + * 2"]
+    it is [expected digit or "("] at the [*]. A {!commit} after an operator
+    token makes a broken right operand an error instead of an end of the
+    expression. Prefix operators and right-associative operators go through
+    {!rec_}, so [max_depth] limits how many of them nest.
+
+    [expression] skips no whitespace: skip it in the token parsers and in
+    [atom].
+
+    Example:
+    {@ocaml[
+    type expr = Num of int | Neg of expr | Bin of char * expr * expr
+
+    let token c () =
+      skip_whitespace ();
+      ignore (char c)
+
+    let bin c () =
+      token c ();
+      fun a b -> Bin (c, a, b)
+
+    let neg () =
+      token '-' ();
+      fun a -> Neg a
+
+    let table =
+      [
+        [ infix_left (bin '+'); infix_left (bin '-') ];
+        [ infix_left (bin '*'); infix_left (bin '/') ];
+        [ prefix neg ];
+        [ infix_right (bin '^') ];
+      ]
+
+    let rec expr () = expression ~atom table ()
+
+    and atom () =
+      skip_whitespace ();
+      or_
+        (fun () ->
+          token '(' ();
+          let e = rec_ expr in
+          token ')' ();
+          e
+        )
+        (fun () -> Num (digit ()))
+        ()
+
+    (* "1+2*3"  -> Bin ('+', Num 1, Bin ('*', Num 2, Num 3)) *)
+    (* "-2^2"   -> Neg (Bin ('^', Num 2, Num 2)) *)
+    ]} *)
+
 val optional : (unit -> 'a) -> unit -> 'a option
 (** [optional parser] tries to apply [parser]. Returns [Some result] if it
     succeeds, or [None] if it fails (without consuming input).
