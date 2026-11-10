@@ -67,6 +67,20 @@
  (mode
   (promote (until-clean)))
  (deps
+  %{workspace_root}/_doc/_markdown/parseff/error-recovery.md
+  %{workspace_root}/website/fix-odoc-md.sh)
+ (targets error-recovery.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: Error Recovery' 'description: Report every error in the input, not only the first' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/error-recovery.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+
+(rule
+ (alias generate-markdown)
+ (enabled_if
+  (= %{env:PARSEFF_GENERATE_MARKDOWN=false} "true"))
+ (mode
+  (promote (until-clean)))
+ (deps
   %{workspace_root}/_doc/_markdown/parseff/optimization.md
   %{workspace_root}/website/fix-odoc-md.sh)
  (targets optimization.md)
