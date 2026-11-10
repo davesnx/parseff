@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Add `lexeme` and `keyword`.** `lexeme ?skip p` runs `p`, then `skip` (default `skip_whitespace`), and returns the result of `p`; pass a `~skip` that also skips comments. `keyword ?is_ident s` matches `s` only when the next byte cannot continue an identifier, so `keyword "let"` on `letter` fails. `is_ident` receives one byte, not a UTF-8 character; the default accepts ASCII letters, digits and `_`. The failure is at the start of `s` and expects `s`, so it merges with the other alternatives there: `parse` reports `expected "in" or "let", found 'inx'`. At the end of the input the keyword matches. In streaming the check pulls the next byte from the source, so `keyword` needs a backtrack window of `String.length s + 1` bytes, one more than `consume`. `keyword ""` raises `Invalid_argument`. `keyword` does not allocate on success.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

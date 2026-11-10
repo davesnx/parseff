@@ -1965,6 +1965,35 @@ let whitespace ?(at_least = 0) () =
   take_while ~at_least ~label:"whitespace" is_whitespace
 let[@inline] skip_whitespace () = skip_while is_whitespace
 
+let lexeme ?(skip = skip_whitespace) p =
+  let v = p () in
+  skip ();
+  v
+
+let is_ident_byte c =
+  (c >= 'a' && c <= 'z')
+  || (c >= 'A' && c <= 'Z')
+  || (c >= '0' && c <= '9')
+  || c = '_'
+
+let rec literal_at st pos s i =
+  i >= String.length s
+  || char_at st (pos + i) = String.unsafe_get s i
+     && literal_at st pos s (i + 1)
+
+let keyword ?(is_ident = is_ident_byte) s =
+  let len = String.length s in
+  if len = 0 then invalid_arg "Parseff.keyword: empty keyword";
+  let st = get_state () in
+  let pos = st.pos in
+  if
+    have st len && literal_at st pos s 0
+    && not (have st (len + 1) && is_ident (char_at st (pos + len)))
+  then
+    st.pos <- pos + len
+  else
+    fail_str_cold st pos tag_literal s
+
 let alphanum () =
   satisfy
     (fun c ->
@@ -3042,12 +3071,6 @@ let expected_of_far f =
   ( List.sort (fun a b -> compare (key a) (key b)) kept,
     List.length items - List.length kept
   )
-
-let is_ident_byte c =
-  (c >= 'a' && c <= 'z')
-  || (c >= 'A' && c <= 'Z')
-  || (c >= '0' && c <= '9')
-  || c = '_'
 
 let found_of st pos =
   if pos >= st.input_len then
