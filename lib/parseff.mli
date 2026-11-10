@@ -1376,9 +1376,10 @@ val take_span : int -> span
     The parser pulls data on demand by calling the source's read function;
     existing parser code works unchanged.
 
-    A source is for one parse. [of_string] starts again from the beginning, but
-    the other sources continue where the last read stopped, and bytes that the
-    first parse read ahead are lost. *)
+    A source is for one call of {!parse_source} or {!parse_source_each}.
+    [of_string] starts again from the beginning, but the other sources continue
+    where the last read stopped, and bytes that the first call read ahead are
+    lost. To parse many values from one source, use {!parse_source_each}. *)
 module Source : sig
   type t
 
@@ -1471,6 +1472,78 @@ val parse_source :
     close_in ic;
     result
     ]} *)
+
+val parse_source_each :
+  ?max_depth:int ->
+  ?backtrack_window:int ->
+  ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
+  Source.t ->
+  (unit -> 'a) ->
+  ('a, error) Stdlib.result Seq.t
+(** [parse_source_each source parser] parses a stream of values from [source],
+    for example NDJSON lines, log records or network frames. Each element of the
+    sequence runs [parser] once on the rest of [source], as {!parse_source} with
+    [~consume:`Partial] does. Bytes that one run read ahead stay buffered for
+    the next run. Memory is bounded by [backtrack_window], not by the number of
+    values.
+
+    Use it instead of a loop inside one {!parse_source} call when the consumer
+    must suspend or pull values one at a time, or when [diagnostics] must not
+    grow with the stream. A loop collects diagnostics for the whole parse.
+
+    - The sequence ends when no input remains before a run. An empty source
+      gives an empty sequence.
+    - The sequence reads to the end of the input, as [~consume:`All] would:
+      bytes that [parser] cannot read give an [Error] element, so there is no
+      [consume] argument.
+    - After an [Error] element the sequence ends.
+    - When [parser] succeeds without consuming input while input remains, the
+      element is an [Error] with kind [Failure "the parser consumed no input"],
+      and the sequence ends.
+    - Bytes between values, such as a newline, are the job of [parser]. Make
+      [parser] consume the separator after each value, as in the example. A
+      separator parser that reads past the value, such as {!skip_whitespace},
+      holds that value back until more input or the end of input arrives.
+
+    Positions are absolute offsets from the start of [source]: {!position},
+    {!val:location}, [range] and [location] in an error count all the values
+    before. {!render_error} without [~source] prints the line numbers of the
+    whole stream.
+
+    [diagnostics] is emptied each time an element is forced, also the element
+    that ends the sequence. Read it before you force the next element.
+
+    [trace] works as in {!parse_source}. One callback receives the events of the
+    whole sequence, at absolute positions.
+
+    The sequence is ephemeral. Force each element once, in order; forcing one
+    again raises [Invalid_argument]. Use [Seq.memoize] to traverse it more than
+    once. After [parser] or the source's read function raises, the sequence
+    cannot be resumed: forcing the same element again raises [Invalid_argument].
+
+    [max_depth] and [backtrack_window] are as in {!parse_source}. Inside
+    [parser], only the source's read function may suspend. Between elements no
+    parse state is installed, so the consumer may suspend there: an effect-based
+    scheduler such as Eio can run other fibers, also other parses, between two
+    elements. A loop inside one {!parse_source} call cannot do this, because the
+    consumer then runs inside the parser.
+
+    Example:
+    {@ocaml[
+    let record () =
+      let id = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+      let _ = char '\n' in
+      int_of_string id
+
+    let ids text =
+      parse_source_each (Source.of_string text) record
+      |> Seq.filter_map Result.to_option
+      |> List.of_seq
+    ]}
+    Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. This example drops the [Error]
+    element, so [ids "1\n22\n333"] is [[1; 22]]. The example on the streaming
+    page handles it. *)
 
 (** {1 Binary Parsing}
 

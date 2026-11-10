@@ -238,9 +238,9 @@ let max_young_wosize = 256
 let young_buf_size = (max_young_wosize - 1) * (Sys.word_size / 8)
 let default_backtrack_window = 65_536
 
-let check_backtrack_window w =
+let check_backtrack_window ?(name = "parse_source") w =
   if w < 2 then
-    invalid_arg "Parseff.parse_source: backtrack_window must be at least 2"
+    invalid_arg ("Parseff." ^ name ^ ": backtrack_window must be at least 2")
 
 module Source = struct
   type t = source
@@ -3961,6 +3961,58 @@ let parse_source ?(max_depth = 128)
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
+
+let parse_source_each ?(max_depth = 128)
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    (src : Source.t) (parser : unit -> 'a) =
+  check_backtrack_window ~name:"parse_source_each" backtrack_window;
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let element () =
+    if have st 1 then
+      Some (parser ())
+    else
+      None
+  in
+  let forced = ref 0 in
+  let ended = ref false in
+  let raised = ref false in
+  let rec node i () =
+    if !raised then
+      invalid_arg
+        "Parseff.parse_source_each: the sequence stopped after an exception";
+    if !forced <> i then
+      invalid_arg "Parseff.parse_source_each: a node was forced twice";
+    forced := i + 1;
+    if !ended then begin
+      Option.iter diagnostics_clear diagnostics;
+      Seq.Nil
+    end else begin
+      st.far <- far_none;
+      let start = st.pos in
+      raised := true;
+      let r = run_slow st ~consume:`Partial ~diagnostics element in
+      raised := false;
+      match r with
+      | Ok None ->
+          ended := true;
+          Seq.Nil
+      | Ok (Some _) when st.pos = start ->
+          ended := true;
+          Seq.Cons
+            ( Error
+                (error_plain st start (Failure "the parser consumed no input")
+                   []
+                ),
+              node (i + 1)
+            )
+      | Ok (Some v) ->
+          Seq.Cons (Ok v, node (i + 1))
+      | Error e ->
+          ended := true;
+          Seq.Cons (Error e, node (i + 1))
+    end
+  in
+  node 0
 
 module Ref = struct
   type 'a t = 'a cell
