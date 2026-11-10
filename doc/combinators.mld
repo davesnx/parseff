@@ -275,6 +275,54 @@ and [statements] returns [[]] without reading the rest of the input. With
 [cut] also helps streaming: sealed frames no longer pin buffered input. See
 {!page:streaming}.
 
+{2 Tracing}
+
+Pass [~trace] to {!val:Parseff.parse} or {!val:Parseff.parse_source} to see
+which constructs the parser entered, where each one returned or failed, and
+where it went back. The grammar needs no change: every [context] call is a
+traced construct.
+
+{@ocaml skip[val print_trace : Format.formatter -> Parseff.trace_event -> unit]}
+
+{!val:Parseff.print_trace} prints the events as an indented tree:
+
+{@ocaml[
+let number () =
+  Parseff.context "number" (fun () ->
+      Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
+
+let list () =
+  Parseff.context ~delimited:true "list" (fun () ->
+      let _ = Parseff.char '[' in
+      let xs = Parseff.sep_by number (fun () -> Parseff.char ',') () in
+      let _ = Parseff.char ']' in
+      xs)
+
+let _ = Parseff.parse ~trace:(Parseff.print_trace Format.std_formatter) "[1,x]" list
+]}
+
+{v
+list @0
+  number @1
+  number ok @1..2
+  number @3
+  number failed @3 (from @3)
+list failed @2 (from @0)
+v}
+
+Each construct prints a line when it starts. It prints a second line with
+[ok] and the bytes it read when it returns, or with [failed] and the parser
+position when it failed. The error of the parse can be further: in the example,
+[list] fails at [@2], and the error is at offset 3. Events also come from branches that [or_], [many] or
+[optional] later abandon, and from inside [look_ahead]. A backtrack shows as a
+construct that starts before the end of the previous line.
+
+To process the events yourself, pass a function of type
+[Parseff.trace_event -> unit]. The callback runs outside the parse, so a parser
+that it calls raises as it would outside [parse]. An exception from the
+callback stops the parse, and [parse] raises it again. Without [~trace],
+tracing adds one check to each [context] call and no allocation.
+
 {1 Recursion}
 
 {2 [rec_]}

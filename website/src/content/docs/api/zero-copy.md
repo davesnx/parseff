@@ -62,6 +62,14 @@ let fast_integer () =
   int_of_span digits
 ```
 
+### `recognize_span`
+
+`Parseff.recognize_span` returns the input text that any parser consumed, as a `Parseff.span`. With `Parseff.parse_source` the span is an owned copy, and the input from the start of the parser stays buffered until it returns. See `Parseff.recognize`.
+
+```ocaml
+val recognize_span : (unit -> 'a) -> span
+```
+
 ### `sep_by_take_span`
 
 `Parseff.sep_by_take_span` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.span`s. No `String.sub` allocations per element in the in-memory runner. Under `Parseff.parse_source`, spans may be copied so the runtime can discard older chunks safely.
