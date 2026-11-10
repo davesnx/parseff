@@ -28,12 +28,12 @@ let test_values_one_byte_chunks () =
   Alcotest.(check (list string))
     "values"
     [ "ok 1"; "ok 22"; "ok 333" ]
-    (collect (Parseff.parse_source_seq (bytes_src "1\n22\n333\n") line))
+    (collect (Parseff.parse_source_each (bytes_src "1\n22\n333\n") line))
 
 let test_empty_source () =
   Alcotest.(check (list string))
     "no values" []
-    (collect (Parseff.parse_source_seq (bytes_src "") line))
+    (collect (Parseff.parse_source_each (bytes_src "") line))
 
 let test_error_of_each_value () =
   let parser () =
@@ -44,7 +44,7 @@ let test_error_of_each_value () =
   Alcotest.(check (list string))
     "own error"
     [ "ok 12"; "error 2 expected digit, found 'x'" ]
-    (collect (Parseff.parse_source_seq (bytes_src "12x") parser))
+    (collect (Parseff.parse_source_each (bytes_src "12x") parser))
 
 let test_doc_example () =
   let record () =
@@ -53,7 +53,7 @@ let test_doc_example () =
     int_of_string id
   in
   let ids source =
-    Parseff.parse_source_seq source record
+    Parseff.parse_source_each source record
     |> Seq.filter_map Result.to_option
     |> List.of_seq
   in
@@ -73,7 +73,7 @@ let raises_invalid name f =
       ()
 
 let test_force_twice () =
-  let seq = Parseff.parse_source_seq (bytes_src "1\n2\n") line in
+  let seq = Parseff.parse_source_each (bytes_src "1\n2\n") line in
   match seq () with
   | Seq.Cons (Ok "1", rest) -> (
       raises_invalid "head again" seq;
@@ -92,7 +92,7 @@ let test_no_progress () =
   Alcotest.(check (list string))
     "stops with an error"
     [ "ok 12"; "error 2 the parser consumed no input" ]
-    (collect (Seq.take 3 (Parseff.parse_source_seq (bytes_src "12x") parser)))
+    (collect (Seq.take 3 (Parseff.parse_source_each (bytes_src "12x") parser)))
 
 let error_input = "1\n22\nx3\n4\n"
 
@@ -109,7 +109,7 @@ let test_error_location () =
     "absolute"
     [ "ok 1"; "ok 22"; "error 5 3:1 expected digit, found 'x'" ]
     (List.map show_loc
-       (List.of_seq (Parseff.parse_source_seq (bytes_src error_input) line))
+       (List.of_seq (Parseff.parse_source_each (bytes_src error_input) line))
     )
 
 let test_render_error () =
@@ -126,7 +126,9 @@ let test_render_error () =
     | Ok _ ->
         Alcotest.fail "memory parse succeeded"
   in
-  match List.of_seq (Parseff.parse_source_seq (bytes_src error_input) line) with
+  match
+    List.of_seq (Parseff.parse_source_each (bytes_src error_input) line)
+  with
   | [ Ok _; Ok _; Error e ] ->
       Alcotest.(check string)
         "with source"
@@ -146,7 +148,7 @@ let test_location_after_compaction () =
   match
     List.of_seq
       (Seq.drop 1000
-         (Parseff.parse_source_seq ~backtrack_window:16
+         (Parseff.parse_source_each ~backtrack_window:16
             (bytes_src ~chunk:7 input) line
          )
       )
@@ -182,7 +184,7 @@ let test_read_ahead_kept () =
         (Printf.sprintf "window %d chunk %d" window chunk)
         [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
         (collect
-           (Parseff.parse_source_seq ~backtrack_window:window
+           (Parseff.parse_source_each ~backtrack_window:window
               (bytes_src ~chunk input) regex_value
            )
         )
@@ -192,7 +194,7 @@ let test_read_ahead_kept () =
     "of_string"
     [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
     (collect
-       (Parseff.parse_source_seq (Parseff.Source.of_string input) regex_value)
+       (Parseff.parse_source_each (Parseff.Source.of_string input) regex_value)
     )
 
 let test_diagnostics_per_value () =
@@ -235,7 +237,7 @@ let test_diagnostics_per_value () =
       ("end", []);
     ]
     (walk []
-       (Parseff.parse_source_seq ~diagnostics:diags
+       (Parseff.parse_source_each ~diagnostics:diags
           (bytes_src "1\n22\n333\n55x")
           parser
        )
@@ -278,7 +280,7 @@ let test_memory_bounded () =
         n
       )
       0
-      (Parseff.parse_source_seq ~backtrack_window:4096
+      (Parseff.parse_source_each ~backtrack_window:4096
          (repeated_chunks ~count:2000 block)
          line
       )
@@ -338,7 +340,7 @@ let test_interleaved () =
     spawn (fun () ->
         Seq.iter
           (fun v -> r := show v :: !r)
-          (Parseff.parse_source_seq (yielding_src data) line)
+          (Parseff.parse_source_each (yielding_src data) line)
     )
   in
   go a "1\n22\n333\n";

@@ -1146,10 +1146,10 @@ val take : int -> string
     The parser pulls data on demand by calling the source's read function;
     existing parser code works unchanged.
 
-    A source is for one call of {!parse_source} or {!parse_source_seq}.
+    A source is for one call of {!parse_source} or {!parse_source_each}.
     [of_string] starts again from the beginning, but the other sources continue
     where the last read stopped, and bytes that the first call read ahead are
-    lost. To parse many values from one source, use {!parse_source_seq}. *)
+    lost. To parse many values from one source, use {!parse_source_each}. *)
 module Source : sig
   type t
 
@@ -1243,14 +1243,14 @@ val parse_source :
     result
     ]} *)
 
-val parse_source_seq :
+val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?diagnostics:'d Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
-(** [parse_source_seq source parser] parses a stream of values from [source],
+(** [parse_source_each source parser] parses a stream of values from [source],
     for example NDJSON lines, log records or network frames. Each element of the
     sequence runs [parser] once on the rest of [source], as {!parse_source} with
     [~consume:`Partial] does. Bytes that one run read ahead stay buffered for
@@ -1292,7 +1292,7 @@ val parse_source_seq :
       int_of_string id
 
     let ids text =
-      parse_source_seq (Source.of_string text) record
+      parse_source_each (Source.of_string text) record
       |> Seq.filter_map Result.to_option
       |> List.of_seq
     ]}

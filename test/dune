@@ -17,5 +17,5 @@
   test_trace
   test_expression
   test_range
-  test_source_seq)
+  test_source_each)
  (libraries parseff alcotest re uucp))

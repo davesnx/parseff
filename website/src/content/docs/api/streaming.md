@@ -58,10 +58,10 @@ Parseff.parse_source ~consume:`Partial source parser
 
 ## Many values from one source
 
-`Parseff.parse_source_seq` parses a stream of values, such as NDJSON lines, log records or network frames, from one source. Each element of the sequence runs the parser once on the rest of the source. Memory is bounded by `~backtrack_window`, not by the number of values. A parser that collects the values with `Parseff.many` keeps all of them in a list.
+`Parseff.parse_source_each` parses a stream of values, such as NDJSON lines, log records or network frames, from one source. Each element of the sequence runs the parser once on the rest of the source. Memory is bounded by `~backtrack_window`, not by the number of values. A parser that collects the values with `Parseff.many` keeps all of them in a list.
 
 ```ocaml
-val parse_source_seq :
+val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?diagnostics:'d Diagnostics.t ->
@@ -79,7 +79,7 @@ The parser reads one value and the separator after it. Here `Parseff.char` consu
 
   let () =
     let ic = open_in "ids.txt" in
-    Parseff.parse_source_seq (Parseff.Source.of_channel ic) record
+    Parseff.parse_source_each (Parseff.Source.of_channel ic) record
     |> Seq.iter (function
          | Ok id -> Printf.printf "%d\n" id
          | Error e -> prerr_endline (Parseff.render_error e));
@@ -325,7 +325,7 @@ If the retained region would exceed `~backtrack_window`, parsing fails with `Bac
 ```
 The one constraint: do not share a single `Parseff.Source.t` across domains. Each source has mutable read state (buffer position, EOF flag), so concurrent access would race. Create a separate source per domain.
 
-A source is for one call of `Parseff.parse_source` or `Parseff.parse_source_seq`. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first call read ahead are lost.
+A source is for one call of `Parseff.parse_source` or `Parseff.parse_source_each`. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first call read ahead are lost.
 
 
 ### Concurrent parses on one domain
@@ -361,4 +361,4 @@ Before `Parseff.match_regex` runs, the runtime reads ahead until about half of t
 
 ### One parse returns one result
 
-`Parseff.parse_source` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.parse_source_seq`. See "Many values from one source" above.
+`Parseff.parse_source` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.parse_source_each`. See "Many values from one source" above.

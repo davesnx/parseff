@@ -3744,7 +3744,7 @@ let parse_source ?(max_depth = 128)
   | _ ->
       run_slow st ~consume ~diagnostics parser
 
-let parse_source_seq ?(max_depth = 128)
+let parse_source_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics (src : Source.t)
     (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
@@ -3759,7 +3759,7 @@ let parse_source_seq ?(max_depth = 128)
   let ended = ref false in
   let rec node i () =
     if !forced <> i then
-      invalid_arg "Parseff.parse_source_seq: a node was forced twice";
+      invalid_arg "Parseff.parse_source_each: a node was forced twice";
     forced := i + 1;
     if !ended then begin
       Option.iter diagnostics_clear diagnostics;
