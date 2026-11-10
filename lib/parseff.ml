@@ -2,6 +2,29 @@ type span = { buf : string; off : int; len : int }
 
 let one_char_strings = Array.init 256 (fun i -> String.make 1 (Char.chr i))
 
+let short_sub inp off len =
+  let b = Bytes.create len in
+  Bytes.unsafe_set b 0 (String.unsafe_get inp off);
+  Bytes.unsafe_set b 1 (String.unsafe_get inp (off + 1));
+  if len > 2 then begin
+    Bytes.unsafe_set b 2 (String.unsafe_get inp (off + 2));
+    if len > 3 then begin
+      Bytes.unsafe_set b 3 (String.unsafe_get inp (off + 3));
+      if len > 4 then begin
+        Bytes.unsafe_set b 4 (String.unsafe_get inp (off + 4));
+        if len > 5 then begin
+          Bytes.unsafe_set b 5 (String.unsafe_get inp (off + 5));
+          if len > 6 then begin
+            Bytes.unsafe_set b 6 (String.unsafe_get inp (off + 6));
+            if len > 7 then
+              Bytes.unsafe_set b 7 (String.unsafe_get inp (off + 7))
+          end
+        end
+      end
+    end
+  end;
+  Bytes.unsafe_to_string b
+
 let[@inline always] string_slice inp off len total_len =
   if len = 0 then
     ""
@@ -9,6 +32,8 @@ let[@inline always] string_slice inp off len total_len =
     Array.unsafe_get one_char_strings (Char.code (String.unsafe_get inp off))
   else if off = 0 && len = total_len then
     inp
+  else if len <= 8 then
+    short_sub inp off len
   else
     String.sub inp off len
 
@@ -1272,7 +1297,7 @@ let[@inline never] handle_match_regex st re label =
       end else begin
         if match_end >= st.input_len then raise_if_pinned st pinned;
         st.pos <- match_end;
-        Re.Group.get groups 0
+        slice st match_start (match_end - match_start)
       end
   | exception Not_found ->
       raise_if_pinned st pinned;
