@@ -1,0 +1,1 @@
+luac: 10-long-bracket-wrong-level.lua:2: unfinished long string (starting at line 1) near <eof>

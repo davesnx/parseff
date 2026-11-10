@@ -1,0 +1,1 @@
+luac: 03-if-assign.lua:1: 'then' expected near '='

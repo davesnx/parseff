@@ -1,0 +1,1 @@
+luac: 02-missing-then.lua:3: 'then' expected near 'print'

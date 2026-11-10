@@ -1,0 +1,1 @@
+luac: 01-missing-end.lua:5: 'end' expected (to close 'function' at line 1) near <eof>

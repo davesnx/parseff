@@ -1,0 +1,1 @@
+luac: 12-duplicate-label.lua:5: label 'top' already defined on line 2
