@@ -1900,7 +1900,23 @@ let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
       or_ (fold_right_one_or_more p op) (fun () -> d) ()
 
 let optional (p : unit -> 'a) () : 'a option =
-  or_ (fun () -> Some (p ())) (fun () -> None) ()
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_choice in
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      Some v
+  | exception Fail ->
+      if State.frame_committed st frame then begin
+        State.pop_rewind_frame st frame;
+        raise_notrace Fail
+      end;
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      None
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
 
 let count n (p : unit -> 'a) () : 'a list =
   let rec loop acc i =
@@ -1941,17 +1957,54 @@ let expect label p =
       end;
       raise_notrace Fail
 
+let one_of_last st frame p =
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception Fail ->
+      State.pop_rewind_frame st frame;
+      raise_notrace Fail
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let rec one_of_loop st frame p rest =
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception Fail -> (
+      if State.frame_committed st frame then begin
+        State.pop_rewind_frame st frame;
+        raise_notrace Fail
+      end;
+      restore_rewind_frame st frame;
+      match rest with
+      | [ q ] ->
+          State.set_frame_kind st frame frame_last_branch;
+          one_of_last st frame q
+      | q :: rest ->
+          one_of_loop st frame q rest
+      | [] ->
+          State.pop_rewind_frame st frame;
+          raise_notrace Fail
+    )
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
 let one_of parsers () =
-  let rec try_all = function
-    | [] ->
-        let st = get_state () in
-        fail_str st st.pos none_kind ""
-    | [ p ] ->
-        p ()
-    | p :: rest ->
-        or_ p (fun () -> try_all rest) ()
-  in
-  try_all parsers
+  match parsers with
+  | [] ->
+      let st = get_state () in
+      fail_str st st.pos none_kind ""
+  | [ p ] ->
+      p ()
+  | p :: rest ->
+      let st = get_state () in
+      let frame = State.push_rewind_frame st frame_choice in
+      one_of_loop st frame p rest
 
 let one_of_labeled labeled_parsers () =
   one_of (List.map (fun (label, p) () -> expect label p) labeled_parsers) ()
