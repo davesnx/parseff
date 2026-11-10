@@ -38,7 +38,10 @@ let[@inline always] string_slice inp off len total_len =
     String.sub inp off len
 
 let[@inline always] span_to_string s =
-  string_slice s.buf s.off s.len (String.length s.buf)
+  let total_len = String.length s.buf in
+  if s.off < 0 || s.len < 0 || s.off > total_len - s.len then
+    invalid_arg "Parseff.span_to_string";
+  string_slice s.buf s.off s.len total_len
 
 type location = { offset : int; line : int; col : int }
 type range_data = { start : int; stop : int }

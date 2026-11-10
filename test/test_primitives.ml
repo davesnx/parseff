@@ -1758,6 +1758,49 @@ let test_take_while_span_empty () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_span_to_string_valid () =
+  let buf = "abcdefghijk" in
+  List.iter
+    (fun (off, len, expected) ->
+      Alcotest.(check string)
+        (Printf.sprintf "off %d len %d" off len)
+        expected
+        (Parseff.span_to_string { buf; off; len })
+    )
+    [
+      (3, 0, "");
+      (11, 0, "");
+      (4, 1, "e");
+      (1, 2, "bc");
+      (2, 8, "cdefghij");
+      (1, 9, "bcdefghij");
+      (0, 11, buf);
+    ];
+  Alcotest.(check string)
+    "empty span at the end" ""
+    (Parseff.span_to_string { buf = "abc"; off = 3; len = 0 })
+
+let test_span_to_string_invalid () =
+  List.iter
+    (fun (off, len) ->
+      Alcotest.check_raises (Printf.sprintf "off %d len %d" off len)
+        (Invalid_argument "Parseff.span_to_string") (fun () ->
+          ignore (Parseff.span_to_string { buf = "abc"; off; len })
+      )
+    )
+    [
+      (2, 2);
+      (5, 1);
+      (3, 1);
+      (-1, 1);
+      (-8, 8);
+      (0, -1);
+      (100, 8);
+      (1 lsl 40, 8);
+      (max_int, 2);
+      (1, max_int);
+    ]
+
 let check_location msg expected actual =
   Alcotest.(check int)
     (msg ^ " offset") expected.Parseff.offset actual.Parseff.offset;
@@ -2081,6 +2124,8 @@ let () =
             test_fused_sep_take_missing_value;
           test_case "take_while_span" `Quick test_take_while_span;
           test_case "take_while_span empty" `Quick test_take_while_span_empty;
+          test_case "span_to_string valid" `Quick test_span_to_string_valid;
+          test_case "span_to_string invalid" `Quick test_span_to_string_invalid;
         ]
       );
       ( "diagnostics",
