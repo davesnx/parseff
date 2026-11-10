@@ -157,10 +157,6 @@ type trace_event =
   | Exit of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
-(* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
-   [base, input_len) are buffered. [input] is never mutated, only replaced, so
-   slices taken from it stay valid after a refill. Memory input has
-   [base = 0] and no source. *)
 type 'a cell = { mutable value : 'a; mutable owner : bool ref }
 
 type trail =
@@ -196,6 +192,10 @@ let rec running_empty =
       next = running_empty;
     }
 
+(* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
+   [base, input_len) are buffered. [input] is never mutated, only replaced, so
+   slices taken from it stay valid after a refill. Memory input has
+   [base = 0] and no source. *)
 type state = {
   mutable input : string;
   mutable pos : int;
@@ -299,7 +299,7 @@ module Source = struct
     )
 end
 
-module Parse_state = struct
+module State = struct
   type t = state
 
   let make ~input ~max_depth ~source ~trace : t =
@@ -412,7 +412,7 @@ module Parse_state = struct
     if t.frames_top - 1 = frame then
       t.frames_top <- frame
     else
-      invalid_arg "Parseff.Parse_state.pop_rewind_frame"
+      invalid_arg "Parseff.State.pop_rewind_frame"
 
   let[@inline always] frame_committed (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 1)
@@ -506,8 +506,8 @@ let () =
     )
 
 let[@inline always] get_state () =
-  let st = Parse_state.current () in
-  if st == Parse_state.none then raise Not_in_parse_context;
+  let st = State.current () in
+  if st == State.none then raise Not_in_parse_context;
   st
 
 let create_line_index () =
@@ -644,17 +644,17 @@ let[@inline never] append st ~floor chunk n =
   st.input_len <- st.input_len + n
 
 let[@inline never] read_source st src buf off len =
-  Parse_state.install Parse_state.none;
+  State.install State.none;
   let n =
     match src.read buf off len with
     | n ->
         n
     | exception exn ->
         let bt = Printexc.get_raw_backtrace () in
-        Parse_state.install st;
+        State.install st;
         Printexc.raise_with_backtrace exn bt
   in
-  Parse_state.install st;
+  State.install st;
   if n < 0 || n > len then
     invalid_arg
       (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);
@@ -670,7 +670,7 @@ let[@inline never] rec fill st ~keep_from need =
       else if src.eof then
         false
       else
-        let floor = Parse_state.reclaim_floor st ~keep_from in
+        let floor = State.reclaim_floor st ~keep_from in
         let limit = src.window in
         let max_bytes =
           imin (limit - (st.input_len - floor)) (Bytes.length src.tmp)
@@ -1240,7 +1240,7 @@ let label_utf8 = "valid UTF-8"
 let[@inline never] buffer_for_regex st =
   match st.source with
   | Some src when (not src.eof) && st.input_len - st.pos < src.window / 2 ->
-      let floor = Parse_state.reclaim_floor st ~keep_from:st.pos in
+      let floor = State.reclaim_floor st ~keep_from:st.pos in
       let room = src.window - (st.input_len - floor) in
       if room <= 0 then
         Some (st.pos + (src.window / 2), { limit = src.window; oldest = floor })
@@ -1506,7 +1506,7 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
   end
 
 let[@inline always] restore_rewind_frame st frame =
-  Parse_state.restore_rewind_frame st frame
+  State.restore_rewind_frame st frame
 
 let[@inline] consume s =
   let st = get_state () in
@@ -1539,13 +1539,13 @@ let with_range p =
 
 let[@inline never] run_pinned st p =
   let frame =
-    Parse_state.push_rewind_frame st (frame_last_branch lor frame_pin_bit)
+    State.push_rewind_frame st (frame_last_branch lor frame_pin_bit)
   in
   match p () with
   | _ ->
-      Parse_state.pop_rewind_frame st frame
+      State.pop_rewind_frame st frame
   | exception exn ->
-      Parse_state.pop_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
       raise exn
 
 let[@inline always] run_keeping_input st p =
@@ -1640,8 +1640,7 @@ let[@inline] warn c value =
 
 let[@inline] commit () =
   let st = get_state () in
-  if Parse_state.commit_nearest st && st.far.pos >= st.pos then
-    far_commit_reset st
+  if State.commit_nearest st && st.far.pos >= st.pos then far_commit_reset st
 
 let take n =
   if n < 0 then
@@ -1655,31 +1654,31 @@ let take n =
 
 let or_ left right () =
   let st = get_state () in
-  let frame = Parse_state.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_choice in
   match left () with
   | v ->
-      Parse_state.pop_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
       v
   | exception Fail -> (
-      if Parse_state.frame_committed st frame then begin
-        Parse_state.pop_rewind_frame st frame;
+      if State.frame_committed st frame then begin
+        State.pop_rewind_frame st frame;
         raise_notrace Fail
       end;
       restore_rewind_frame st frame;
-      Parse_state.set_frame_kind st frame frame_last_branch;
+      State.set_frame_kind st frame frame_last_branch;
       match right () with
       | v ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           v
       | exception Fail ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           raise_notrace Fail
       | exception exn ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           raise exn
     )
   | exception exn ->
-      Parse_state.pop_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
       raise exn
 
 let[@inline never] far_merge st saved =
@@ -1710,18 +1709,18 @@ let[@inline never] far_merge st saved =
 
 let look_ahead p =
   let st = get_state () in
-  let frame = Parse_state.push_rewind_frame st frame_barrier in
+  let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
   match p () with
   | v ->
       restore_rewind_frame st frame;
-      Parse_state.pop_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
       if st.far != saved then st.far <- saved;
       v
   | exception exn ->
       restore_rewind_frame st frame;
-      Parse_state.pop_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
       far_merge st saved;
       raise exn
 
@@ -1749,7 +1748,7 @@ let[@inline always] context_exit st d name start delimited =
 
 let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
-    ignore (Parse_state.seal_frames st ~floor:0)
+    ignore (State.seal_frames st ~floor:0)
 
 let[@inline always] context_run st delimited name p =
   let d = st.ctx_top in
@@ -1782,13 +1781,13 @@ let[@inline always] context_run st delimited name p =
       raise exn
 
 let[@inline never] trace_emit st f event =
-  Parse_state.install Parse_state.none;
+  State.install State.none;
   match f event with
   | () ->
-      Parse_state.install st
+      State.install st
   | exception exn ->
       let bt = Printexc.get_raw_backtrace () in
-      Parse_state.install st;
+      State.install st;
       Printexc.raise_with_backtrace exn bt
 
 let[@inline never] context_traced st f delimited name p =
@@ -1834,11 +1833,11 @@ let cut () =
   let st = get_state () in
   let d = st.ctx_top in
   if d = 0 then
-    ignore (Parse_state.seal_frames st ~floor:0)
+    ignore (State.seal_frames st ~floor:0)
   else begin
     let m = (d - 1) * ctx_stride in
     let ctx = st.ctx in
-    if Parse_state.seal_frames st ~floor:(Array.unsafe_get ctx m) then
+    if State.seal_frames st ~floor:(Array.unsafe_get ctx m) then
       Array.unsafe_set ctx (m + 1) (Array.unsafe_get ctx (m + 1) lor ctx_cut_bit)
   end
 
@@ -1861,26 +1860,26 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
     let acc = ref [] in
     let continue_ref = ref true in
     while !continue_ref do
-      let frame = Parse_state.push_rewind_frame st frame_repeat in
+      let frame = State.push_rewind_frame st frame_repeat in
       let start = st.pos in
       match p () with
       | v ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           if st.pos = start then begin
             restore_rewind_frame st frame;
             continue_ref := false
           end else
             acc := v :: !acc
       | exception Fail ->
-          Parse_state.pop_rewind_frame st frame;
-          if Parse_state.frame_committed st frame then
+          State.pop_rewind_frame st frame;
+          if State.frame_committed st frame then
             raise_notrace Fail
           else begin
             restore_rewind_frame st frame;
             continue_ref := false
           end
       | exception exn ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           raise exn
     done;
     List.rev !acc
@@ -1896,26 +1895,26 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
     let acc = ref [] in
     let continue_ref = ref true in
     while !continue_ref do
-      let frame = Parse_state.push_rewind_frame st frame_repeat in
+      let frame = State.push_rewind_frame st frame_repeat in
       let start = st.pos in
       match p () with
       | v ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           if st.pos = start then begin
             restore_rewind_frame st frame;
             continue_ref := false
           end else
             acc := v :: !acc
       | exception Fail ->
-          Parse_state.pop_rewind_frame st frame;
-          if Parse_state.frame_committed st frame then
+          State.pop_rewind_frame st frame;
+          if State.frame_committed st frame then
             raise_notrace Fail
           else begin
             restore_rewind_frame st frame;
             continue_ref := false
           end
       | exception exn ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           raise exn
     done;
     List.rev_append required_rev (List.rev !acc)
@@ -1924,19 +1923,19 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
 let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   let st = get_state () in
   if at_least <= 0 then (
-    let start_frame = Parse_state.push_rewind_frame st frame_repeat in
+    let start_frame = State.push_rewind_frame st frame_repeat in
     match p () with
     | first ->
-        Parse_state.pop_rewind_frame st start_frame;
+        State.pop_rewind_frame st start_frame;
         let acc = ref [ first ] in
         let continue_ref = ref true in
         while !continue_ref do
-          let frame = Parse_state.push_rewind_frame st frame_repeat in
+          let frame = State.push_rewind_frame st frame_repeat in
           let start = st.pos in
           try
             let _ = sep () in
             let v = p () in
-            Parse_state.pop_rewind_frame st frame;
+            State.pop_rewind_frame st frame;
             if st.pos = start then begin
               restore_rewind_frame st frame;
               continue_ref := false
@@ -1944,28 +1943,28 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
               acc := v :: !acc
           with
           | Fail ->
-              Parse_state.pop_rewind_frame st frame;
-              if Parse_state.frame_committed st frame then
+              State.pop_rewind_frame st frame;
+              if State.frame_committed st frame then
                 raise_notrace Fail
               else begin
                 restore_rewind_frame st frame;
                 continue_ref := false
               end
           | exn ->
-              Parse_state.pop_rewind_frame st frame;
+              State.pop_rewind_frame st frame;
               raise exn
         done;
         List.rev !acc
     | exception Fail ->
-        Parse_state.pop_rewind_frame st start_frame;
-        if Parse_state.frame_committed st start_frame then
+        State.pop_rewind_frame st start_frame;
+        if State.frame_committed st start_frame then
           raise_notrace Fail
         else begin
           restore_rewind_frame st start_frame;
           []
         end
     | exception exn ->
-        Parse_state.pop_rewind_frame st start_frame;
+        State.pop_rewind_frame st start_frame;
         raise exn
   ) else
     let first = p () in
@@ -1998,12 +1997,12 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
   let acc = ref (p ()) in
   let continue_ref = ref true in
   while !continue_ref do
-    let frame = Parse_state.push_rewind_frame st frame_repeat in
+    let frame = State.push_rewind_frame st frame_repeat in
     let start = st.pos in
     match
       let f = op () in
       let rhs = p () in
-      Parse_state.pop_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
       (f, rhs)
     with
     | f, rhs ->
@@ -2013,15 +2012,15 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
         end else
           acc := f !acc rhs
     | exception Fail ->
-        Parse_state.pop_rewind_frame st frame;
-        if Parse_state.frame_committed st frame then
+        State.pop_rewind_frame st frame;
+        if State.frame_committed st frame then
           raise_notrace Fail
         else begin
           restore_rewind_frame st frame;
           continue_ref := false
         end
     | exception exn ->
-        Parse_state.pop_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
         raise exn
   done;
   !acc
@@ -2080,7 +2079,7 @@ let rec has_prefix = function
       has_prefix_op ops || has_prefix rest
 
 type 'a expression = {
-  st : Parse_state.t;
+  st : State.t;
   atom : unit -> 'a;
   table : 'a operator list list;
   prefixed : bool;
@@ -2093,18 +2092,18 @@ and expr_operand c =
     c.atom ()
   else begin
     let st = c.st in
-    let frame = Parse_state.push_rewind_frame st frame_choice in
+    let frame = State.push_rewind_frame st frame_choice in
     match expr_prefix_levels c frame st.pos c.table with
     | v ->
-        Parse_state.pop_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
         v
     | exception Fail ->
-        Parse_state.pop_rewind_frame st frame;
-        if Parse_state.frame_committed st frame then raise_notrace Fail;
+        State.pop_rewind_frame st frame;
+        if State.frame_committed st frame then raise_notrace Fail;
         restore_rewind_frame st frame;
         c.atom ()
     | exception exn ->
-        Parse_state.pop_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
         raise exn
   end
 
@@ -2126,7 +2125,7 @@ and expr_prefix_ops c frame start rest = function
       | v ->
           v
       | exception Fail ->
-          if Parse_state.frame_committed c.st frame then raise_notrace Fail;
+          if State.frame_committed c.st frame then raise_notrace Fail;
           restore_rewind_frame c.st frame;
           expr_prefix_ops c frame start rest ops
     )
@@ -2139,23 +2138,23 @@ and expr_loop c levels lhs =
       lhs
   | _ :: _ -> (
       let st = c.st in
-      let frame = Parse_state.push_rewind_frame st frame_repeat in
+      let frame = State.push_rewind_frame st frame_repeat in
       let start = st.pos in
       match expr_try_levels c frame lhs levels with
       | v ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           if st.pos = start then begin
             restore_rewind_frame st frame;
             lhs
           end else
             expr_loop c levels v
       | exception Fail ->
-          Parse_state.pop_rewind_frame st frame;
-          if Parse_state.frame_committed st frame then raise_notrace Fail;
+          State.pop_rewind_frame st frame;
+          if State.frame_committed st frame then raise_notrace Fail;
           restore_rewind_frame st frame;
           lhs
       | exception exn ->
-          Parse_state.pop_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           raise exn
     )
 
@@ -2202,7 +2201,7 @@ and expr_try_ops c frame lhs here rest = function
     )
 
 and expr_next c frame lhs here rest ops =
-  if Parse_state.frame_committed c.st frame then raise_notrace Fail;
+  if State.frame_committed c.st frame then raise_notrace Fail;
   restore_rewind_frame c.st frame;
   expr_try_ops c frame lhs here rest ops
 
@@ -3731,7 +3730,7 @@ let error_failure st pos msg (x : fail_extra) =
   build st ~pos:span.start ~notes:x.notes (Failure msg) span x.chain
 
 let run_detailed st thunk =
-  let previous = Parse_state.enter st in
+  let previous = State.enter st in
   match
     match thunk () with
     | v ->
@@ -3756,11 +3755,11 @@ let run_detailed st thunk =
           )
   with
   | r ->
-      Parse_state.leave st previous;
+      State.leave st previous;
       r
   | exception exn ->
       let bt = Printexc.get_raw_backtrace () in
-      Parse_state.leave st previous;
+      State.leave st previous;
       Printexc.raise_with_backtrace exn bt
 
 let until_end parser () =
@@ -3794,7 +3793,7 @@ let run_slow st ~consume ~diagnostics parser =
 
 let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics ?trace input
     (parser : unit -> 'a) =
-  let st = Parse_state.for_input ~input ~max_depth ~trace in
+  let st = State.for_input ~input ~max_depth ~trace in
   match (diagnostics, consume) with
   | None, `Partial ->
       run_detailed st parser
@@ -3805,21 +3804,21 @@ let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?(consume = `All)
     ?diagnostics ?trace (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  let st = Parse_state.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   match (diagnostics, consume) with
   | None, `Partial ->
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
 
-module State = struct
+module Ref = struct
   type 'a t = 'a cell
 
   let create value = { value; owner = idle_token }
   let get c = c.value
 
   let set c value =
-    let st = Parse_state.current () in
+    let st = State.current () in
     let (Undo top) = st.trail in
     let token =
       if top.token != idle_token || st.trail == not_running then
@@ -3841,7 +3840,7 @@ module State = struct
     let owner = c.owner in
     if owner != token then begin
       if !owner then
-        invalid_arg "Parseff.State.set: another running parse uses this cell";
+        invalid_arg "Parseff.Ref.set: another running parse uses this cell";
       c.owner <- token
     end;
     if st.frames_top > 0 then begin
@@ -3854,7 +3853,7 @@ module State = struct
           {
             cell = c;
             old = c.value;
-            depth = Parse_state.trail_depth st + 1;
+            depth = State.trail_depth st + 1;
             token;
             next;
           }

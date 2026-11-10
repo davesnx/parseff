@@ -17,5 +17,5 @@
   test_trace
   test_expression
   test_range
-  test_state)
+  test_ref)
  (libraries parseff alcotest re uucp))

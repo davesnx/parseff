@@ -62,18 +62,18 @@ let test_ref_kept_after_backtrack () =
   Alcotest.(check int) "ref kept after look_ahead" 1 !r
 
 let test_or_rolls_back () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let v =
     ok_exn
       (parse "b"
          (or_
             (fun () ->
-              State.set c 1;
+              Ref.set c 1;
               let _ = char 'a' in
               -1
             )
             (fun () ->
-              let seen = State.get c in
+              let seen = Ref.get c in
               let _ = char 'b' in
               seen
             )
@@ -81,7 +81,7 @@ let test_or_rolls_back () =
       )
   in
   Alcotest.(check int) "right branch sees the old value" 0 v;
-  Alcotest.(check int) "value after the parse" 0 (State.get c)
+  Alcotest.(check int) "value after the parse" 0 (Ref.get c)
 
 let chunked_source input =
   let pos = ref 0 in
@@ -101,19 +101,17 @@ let check_final name input expected_outcome expected make =
     Alcotest.(check string)
       (name ^ " " ^ label ^ " outcome")
       expected_outcome (outcome result);
-    Alcotest.(check int)
-      (name ^ " " ^ label ^ " value")
-      expected (State.get cell)
+    Alcotest.(check int) (name ^ " " ^ label ^ " value") expected (Ref.get cell)
   in
   run "parse" (fun p -> parse ~consume:`Partial input p);
   run "parse_source" (fun p ->
       parse_source ~consume:`Partial (chunked_source input) p
   )
 
-let incr_cell c = State.set c (State.get c + 1)
+let incr_cell c = Ref.set c (Ref.get c + 1)
 
 let with_cell f () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   (c, f c)
 
 let test_one_of () =
@@ -123,15 +121,15 @@ let test_one_of () =
            (one_of
               [
                 (fun () ->
-                  State.set c 1;
+                  Ref.set c 1;
                   char 'a'
                 );
                 (fun () ->
-                  State.set c 2;
+                  Ref.set c 2;
                   char 'b'
                 );
                 (fun () ->
-                  if State.get c <> 0 then fail "not rolled back";
+                  if Ref.get c <> 0 then fail "not rolled back";
                   char 'c'
                 );
               ]
@@ -172,7 +170,7 @@ let test_optional () =
          ignore
            (optional
               (fun () ->
-                State.set c 1;
+                Ref.set c 1;
                 char 'a'
               )
               ()
@@ -185,7 +183,7 @@ let test_look_ahead () =
     (with_cell (fun c () ->
          ignore
            (look_ahead (fun () ->
-                State.set c 1;
+                Ref.set c 1;
                 char 'a'
             )
            )
@@ -197,7 +195,7 @@ let test_look_ahead () =
            (optional
               (fun () ->
                 look_ahead (fun () ->
-                    State.set c 1;
+                    Ref.set c 1;
                     char 'a'
                 )
               )
@@ -255,7 +253,7 @@ let test_kept_on_success () =
          ignore
            (or_
               (fun () ->
-                State.set c 1;
+                Ref.set c 1;
                 char 'a'
               )
               (fun () -> char 'b')
@@ -265,7 +263,7 @@ let test_kept_on_success () =
     );
   check_final "set outside any branch" "a" "ok" 1
     (with_cell (fun c () ->
-         State.set c 1;
+         Ref.set c 1;
          ignore (optional (fun () -> char 'b') ());
          ignore (char 'a')
      )
@@ -277,7 +275,7 @@ let test_kept_after_commit () =
          ignore
            (or_
               (fun () ->
-                State.set c 1;
+                Ref.set c 1;
                 let _ = char 'a' in
                 commit ();
                 char 'b'
@@ -293,7 +291,7 @@ let test_kept_after_commit () =
            (optional
               (or_
                  (fun () ->
-                   State.set c 1;
+                   Ref.set c 1;
                    let _ = char 'a' in
                    commit ();
                    char 'b'
@@ -312,7 +310,7 @@ let test_kept_after_cut () =
            (optional
               (fun () ->
                 context "item" (fun () ->
-                    State.set c 1;
+                    Ref.set c 1;
                     let _ = char 'a' in
                     cut ();
                     char 'b'
@@ -324,12 +322,12 @@ let test_kept_after_cut () =
     )
 
 let test_commit_after_set () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let result =
     parse ~consume:`Partial "ac" (fun () ->
         or_
           (fun () ->
-            State.set c 1;
+            Ref.set c 1;
             or_
               (fun () ->
                 let _ = char 'a' in
@@ -346,7 +344,7 @@ let test_commit_after_set () =
   in
   match result with
   | Ok `Outer_right ->
-      Alcotest.(check int) "set undone" 0 (State.get c)
+      Alcotest.(check int) "set undone" 0 (Ref.get c)
   | Ok `Inner_right ->
       Alcotest.fail "commit sealed the outer or_, not the inner one"
   | Ok `Inner_left ->
@@ -358,20 +356,20 @@ let test_nested () =
   let seen = ref [] in
   let make () =
     seen := [];
-    let c = State.create 0 in
+    let c = Ref.create 0 in
     let parser () =
       ignore
         (or_
            (fun () ->
-             State.set c 1;
+             Ref.set c 1;
              ignore
                (or_
                   (fun () ->
-                    State.set c 2;
+                    Ref.set c 2;
                     char 'a'
                   )
                   (fun () ->
-                    seen := State.get c :: !seen;
+                    seen := Ref.get c :: !seen;
                     char 'x'
                   )
                   ()
@@ -379,7 +377,7 @@ let test_nested () =
              char 'z'
            )
            (fun () ->
-             seen := State.get c :: !seen;
+             seen := Ref.get c :: !seen;
              char 'a'
            )
            ()
@@ -393,16 +391,16 @@ let test_nested () =
   Alcotest.(check (list int)) "inner and outer backtrack" [ 0; 1 ] !seen
 
 let test_two_cells () =
-  let names = State.create [] in
+  let names = Ref.create [] in
   let make () =
-    State.set names [];
-    let count = State.create 0 in
+    Ref.set names [];
+    let count = Ref.create 0 in
     let parser () =
-      State.set names [ "kept" ];
+      Ref.set names [ "kept" ];
       ignore
         (optional
            (fun () ->
-             State.set names ("dropped" :: State.get names);
+             Ref.set names ("dropped" :: Ref.get names);
              incr_cell count;
              char 'a'
            )
@@ -413,42 +411,42 @@ let test_two_cells () =
     (count, parser)
   in
   check_final "two cells" "b" "ok" 1 make;
-  Alcotest.(check (list string)) "list cell" [ "kept" ] (State.get names)
+  Alcotest.(check (list string)) "list cell" [ "kept" ] (Ref.get names)
 
 let test_across_parses () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let set_then_backtrack v () =
-    State.set c v;
+    Ref.set c v;
     ignore
       (optional
          (fun () ->
-           State.set c (v * 10);
+           Ref.set c (v * 10);
            char 'a'
          )
          ()
       )
   in
   ignore (ok_exn (parse "" (set_then_backtrack 5)));
-  Alcotest.(check int) "kept after first parse" 5 (State.get c);
+  Alcotest.(check int) "kept after first parse" 5 (Ref.get c);
   ignore
     (ok_exn
        (parse ""
           (optional (fun () ->
-               State.set c 7;
+               Ref.set c 7;
                char 'a'
            )
           )
        )
     );
-  Alcotest.(check int) "second parse restores the first value" 5 (State.get c)
+  Alcotest.(check int) "second parse restores the first value" 5 (Ref.get c)
 
 let test_outside_parse () =
-  let c = State.create "a" in
-  State.set c "b";
-  Alcotest.(check string) "set and get work outside a parse" "b" (State.get c);
-  ignore (ok_exn (parse "" (fun () -> State.set c "c")));
-  State.set c "d";
-  Alcotest.(check string) "after a parse" "d" (State.get c)
+  let c = Ref.create "a" in
+  Ref.set c "b";
+  Alcotest.(check string) "set and get work outside a parse" "b" (Ref.get c);
+  ignore (ok_exn (parse "" (fun () -> Ref.set c "c")));
+  Ref.set c "d";
+  Alcotest.(check string) "after a parse" "d" (Ref.get c)
 
 open Effect
 open Effect.Deep
@@ -495,14 +493,14 @@ let yielding_source data =
   )
 
 let test_concurrent_parses () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let a = ref "unset" and b = ref "unset" in
   let go r v () =
     r :=
       match
         parse_source (yielding_source "xx") (fun () ->
             let _ = char 'x' in
-            State.set c v;
+            Ref.set c v;
             char 'x'
         )
       with
@@ -516,20 +514,20 @@ let test_concurrent_parses () =
   run_fibers [ go a 1; go b 2 ];
   Alcotest.(check string) "first parse" "ok" !a;
   Alcotest.(check string)
-    "second parse" "Parseff.State.set: another running parse uses this cell" !b;
-  Alcotest.(check int) "value of the first parse" 1 (State.get c);
+    "second parse" "Parseff.Ref.set: another running parse uses this cell" !b;
+  Alcotest.(check int) "value of the first parse" 1 (Ref.get c);
   a := "unset";
   run_fibers [ go a 3 ];
   Alcotest.(check string) "a later parse can use the cell" "ok" !a;
-  Alcotest.(check int) "value of the later parse" 3 (State.get c)
+  Alcotest.(check int) "value of the later parse" 3 (Ref.get c)
 
 let test_set_while_parse_suspended () =
-  let free = State.create 0 and owned = State.create 0 in
+  let free = Ref.create 0 and owned = Ref.create 0 in
   let result = ref "unset" and other = ref "unset" in
   let parser () =
     or_
       (fun () ->
-        State.set owned 1;
+        Ref.set owned 1;
         char 'a'
       )
       (fun () -> char 'b')
@@ -544,9 +542,9 @@ let test_set_while_parse_suspended () =
           error_message e
   in
   let outside () =
-    State.set free 42;
+    Ref.set free 42;
     other :=
-      match State.set owned 7 with
+      match Ref.set owned 7 with
       | () ->
           "set"
       | exception Invalid_argument m ->
@@ -554,15 +552,15 @@ let test_set_while_parse_suspended () =
   in
   run_fibers [ suspended; outside ];
   Alcotest.(check string) "suspended parse" "ok" !result;
-  Alcotest.(check int) "set outside the parse kept" 42 (State.get free);
+  Alcotest.(check int) "set outside the parse kept" 42 (Ref.get free);
   Alcotest.(check string)
     "cell of the suspended parse"
-    "Parseff.State.set: another running parse uses this cell" !other;
+    "Parseff.Ref.set: another running parse uses this cell" !other;
   Alcotest.(check int)
-    "cell of the suspended parse rolled back" 0 (State.get owned)
+    "cell of the suspended parse rolled back" 0 (Ref.get owned)
 
 let test_parse_continues_after_read_raises () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let raised = ref false in
   let src =
     Source.of_function (fun buf off _ ->
@@ -579,7 +577,7 @@ let test_parse_continues_after_read_raises () =
     (try ignore (char 'a') with Exit -> ());
     or_
       (fun () ->
-        State.set c 1;
+        Ref.set c 1;
         char 'a'
       )
       (fun () -> char 'b')
@@ -588,7 +586,7 @@ let test_parse_continues_after_read_raises () =
   Alcotest.(check char)
     "parse after the exception" 'b'
     (ok_exn (parse_source ~consume:`Partial src parser));
-  Alcotest.(check int) "set rolled back" 0 (State.get c)
+  Alcotest.(check int) "set rolled back" 0 (Ref.get c)
 
 let a_source n =
   let sent = ref 0 in
@@ -600,14 +598,14 @@ let a_source n =
   )
 
 let live_words_after_many n =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let parser () =
     let items =
       many
         (fun () ->
           or_
             (fun () ->
-              State.set c (State.get c + 1);
+              Ref.set c (Ref.get c + 1);
               char 'a'
             )
             (fun () -> char 'b')
@@ -622,7 +620,7 @@ let live_words_after_many n =
   in
   match parse_source ~backtrack_window:64 (a_source n) parser with
   | Ok live ->
-      Alcotest.(check int) "every set kept" n (State.get c);
+      Alcotest.(check int) "every set kept" n (Ref.get c);
       live
   | Error e ->
       Alcotest.fail (render_error e)
@@ -639,7 +637,7 @@ let test_many_after_dropped_log () =
                     char 'a'
                   )
                   (fun () ->
-                    State.set c 100;
+                    Ref.set c 100;
                     char 'z'
                   )
                   ()
@@ -652,25 +650,25 @@ let test_many_after_dropped_log () =
 let[@inline never] parse_and_forget_input c w =
   let input = String.make 100_000 'a' in
   Weak.set w 0 (Some input);
-  ignore (parse ~consume:`Partial input (fun () -> State.set c 1))
+  ignore (parse ~consume:`Partial input (fun () -> Ref.set c 1))
 
 let test_cell_does_not_keep_input () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let w = Weak.create 1 in
   parse_and_forget_input c w;
   Gc.full_major ();
   Alcotest.(check bool) "input collected" false (Weak.check w 0);
-  Alcotest.(check int) "cell still reachable" 1 (State.get c)
+  Alcotest.(check int) "cell still reachable" 1 (Ref.get c)
 
 let test_escaping_exceptions () =
   let run wrap raise_it =
-    let c = State.create 0 in
+    let c = Ref.create 0 in
     let d = Diagnostics.create () in
     let outcome =
       match
         parse ~diagnostics:d "a" (fun () ->
             wrap (fun () ->
-                State.set c 1;
+                Ref.set c 1;
                 warn d "w";
                 raise_it ()
             )
@@ -683,7 +681,7 @@ let test_escaping_exceptions () =
       | exception Exit ->
           "Exit"
     in
-    (outcome, State.get c, Diagnostics.length d)
+    (outcome, Ref.get c, Diagnostics.length d)
   in
   let raise_exit () = raise Exit in
   let call_fail () = fail "stop" in
@@ -723,11 +721,11 @@ let test_log_bounded () =
       per_iteration
 
 let test_nested_parse () =
-  let c = State.create 0 in
+  let c = Ref.create 0 in
   let result =
     parse "" (fun () ->
-        State.set c 1;
-        match parse "" (fun () -> State.set c 2) with
+        Ref.set c 1;
+        match parse "" (fun () -> Ref.set c 2) with
         | _ ->
             "no error"
         | exception Invalid_argument m ->
@@ -735,11 +733,11 @@ let test_nested_parse () =
     )
   in
   Alcotest.(check string)
-    "inner parse" "Parseff.State.set: another running parse uses this cell"
+    "inner parse" "Parseff.Ref.set: another running parse uses this cell"
     (ok_exn result)
 
 let () =
-  Alcotest.run "State"
+  Alcotest.run "Ref"
     [
       ( "ref",
         [
