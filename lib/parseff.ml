@@ -676,60 +676,41 @@ let tag_big = 7
 let max_small_count = max_int lsr 3
 let far_max_capacity = 62
 
-let[@inline never] far_advance_int st p k =
-  let f = st.far in
-  if f == far_none then
-    st.far <-
-      {
-        pos = p;
-        n = 1;
-        k0 = k;
-        s0 = "";
-        k1 = 0;
-        s1 = "";
-        kinds = [||];
-        strs = [||];
-        special = 0;
-        extra = No_extra;
-        fctx = st.ctx_top;
-        chain_pos = min_int;
-        chain = [];
-      }
-  else begin
-    f.pos <- p;
-    f.fctx <- st.ctx_top;
-    f.special <- 0;
-    f.k0 <- k;
-    f.n <- 1
-  end
+let[@inline never] far_first_int st p k =
+  st.far <-
+    {
+      pos = p;
+      n = 1;
+      k0 = k;
+      s0 = "";
+      k1 = 0;
+      s1 = "";
+      kinds = [||];
+      strs = [||];
+      special = 0;
+      extra = No_extra;
+      fctx = st.ctx_top;
+      chain_pos = min_int;
+      chain = [];
+    }
 
-let[@inline never] far_advance_str st p k s =
-  let f = st.far in
-  if f == far_none then
-    st.far <-
-      {
-        pos = p;
-        n = 1;
-        k0 = k;
-        s0 = s;
-        k1 = 0;
-        s1 = "";
-        kinds = [||];
-        strs = [||];
-        special = 0;
-        extra = No_extra;
-        fctx = st.ctx_top;
-        chain_pos = min_int;
-        chain = [];
-      }
-  else begin
-    f.pos <- p;
-    f.fctx <- st.ctx_top;
-    f.special <- 0;
-    f.k0 <- k;
-    if f.s0 != s then f.s0 <- s;
-    f.n <- 1
-  end
+let[@inline never] far_first_str st p k s =
+  st.far <-
+    {
+      pos = p;
+      n = 1;
+      k0 = k;
+      s0 = s;
+      k1 = 0;
+      s1 = "";
+      kinds = [||];
+      strs = [||];
+      special = 0;
+      extra = No_extra;
+      fctx = st.ctx_top;
+      chain_pos = min_int;
+      chain = [];
+    }
 
 let[@inline never] far_advance_special st p =
   let f = st.far in
@@ -848,7 +829,7 @@ let[@inline always] far_push_int f k =
     f.n <- 2
   end else begin
     let i = n - 2 in
-    if i >= 0 && i < Array.length f.kinds then begin
+    if i < Array.length f.kinds then begin
       Array.unsafe_set f.kinds i k;
       f.n <- n + 1
     end else
@@ -863,7 +844,7 @@ let[@inline always] far_push_str f k s =
     f.n <- 2
   end else begin
     let i = n - 2 in
-    if i >= 0 && i < Array.length f.kinds then begin
+    if i < Array.length f.kinds then begin
       Array.unsafe_set f.kinds i k;
       if Array.unsafe_get f.strs i != s then Array.unsafe_set f.strs i s;
       f.n <- n + 1
@@ -899,8 +880,14 @@ let[@inline always] fail_int st p k =
   if p < fp then raise_notrace Fail;
   if p = fp then
     far_push_int f k
-  else
-    far_advance_int st p k;
+  else if f != far_none then begin
+    f.pos <- p;
+    f.fctx <- st.ctx_top;
+    f.special <- 0;
+    f.k0 <- k;
+    f.n <- 1
+  end else
+    far_first_int st p k;
   raise_notrace Fail
 
 let[@inline always] fail_str st p k s =
@@ -909,8 +896,15 @@ let[@inline always] fail_str st p k s =
   if p < fp then raise_notrace Fail;
   if p = fp then
     far_push_str f k s
-  else
-    far_advance_str st p k s;
+  else if f != far_none then begin
+    f.pos <- p;
+    f.fctx <- st.ctx_top;
+    f.special <- 0;
+    f.k0 <- k;
+    if f.s0 != s then f.s0 <- s;
+    f.n <- 1
+  end else
+    far_first_str st p k s;
   raise_notrace Fail
 
 let[@inline never] fail_int_cold st p k = fail_int st p k
