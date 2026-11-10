@@ -86,6 +86,41 @@ let test_stopping_failures () =
       Parseff.or_ (fun () -> Parseff.char 'x') (fun () -> 'y') ()
   )
 
+let reads = 100_000
+
+let one_byte_source () =
+  let sent = ref 0 in
+  Parseff.Source.of_function (fun buf off _ ->
+      if !sent = reads then
+        0
+      else begin
+        Bytes.set buf off 'a';
+        incr sent;
+        1
+      end
+  )
+
+let skip_source () =
+  Parseff.parse_source ~consume:`Partial (one_byte_source ()) (fun () ->
+      Parseff.skip_while (fun _ -> true)
+  )
+
+let test_source_reads () =
+  ignore (skip_source ());
+  Gc.full_major ();
+  let before = Gc.minor_words () in
+  ( match skip_source () with
+  | Ok () ->
+      ()
+  | Error error ->
+      Alcotest.fail (Parseff.render_error error)
+  );
+  let actual = (Gc.minor_words () -. before) /. Float.of_int reads in
+  if actual > 3. then
+    Alcotest.failf
+      "parse_source allocated %.6f minor words per read, expected at most 3"
+      actual
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -95,5 +130,8 @@ let () =
           Alcotest.test_case "failed parses" `Quick test_failed_parses;
           Alcotest.test_case "render_error" `Quick test_render_error;
         ]
+      );
+      ( "source reads",
+        [ Alcotest.test_case "one byte per read" `Quick test_source_reads ]
       );
     ]

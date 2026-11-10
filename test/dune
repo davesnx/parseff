@@ -16,5 +16,7 @@
   test_lexeme
   test_trace
   test_expression
-  test_range)
+  test_range
+  test_capture
+  test_ref)
  (libraries parseff alcotest re uucp))

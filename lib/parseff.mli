@@ -34,7 +34,8 @@ type span = { buf : string; off : int; len : int }
 
 val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
-    actually need the string value. *)
+    actually need the string value. Raises [Invalid_argument] if the span is not
+    a valid range of its buffer. *)
 
 (** {1 Location Type} *)
 
@@ -198,6 +199,125 @@ module Diagnostics : sig
 
   val clear : 'd t -> unit
   (** Empties the collector. Raises [Invalid_argument] while a parse uses it. *)
+end
+
+(** {1 Ref} *)
+
+(** A [ref] whose changes are undone when the parser backtracks.
+
+    Use it for a value that the parser builds as it reads, such as a symbol
+    table, an indentation stack or a counter. A plain [ref] is wrong for this.
+    When a branch fails, the parser goes back and tries the next branch, but the
+    [ref] keeps the changes of the failed branch.
+
+    In this example both branches of [statement] call [declare]. On ["abc;"],
+    the first branch reads [abc] and fails on [;], then the second branch reads
+    [abc] again. The [ref] holds the name twice. The {!Ref.t} holds it once,
+    because the parser undid the [set] of the failed branch.
+
+    {@ocaml[
+    let plain = ref []
+    let names = Ref.create []
+
+    let declare () =
+      let name = take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
+      plain := name :: !plain;
+      Ref.set names (name :: Ref.get names)
+
+    let statement () =
+      or_
+        (fun () ->
+          declare ();
+          let _ = char '=' in
+          `Assign
+        )
+        (fun () ->
+          declare ();
+          let _ = char ';' in
+          `Declare
+        )
+        ()
+
+    let () =
+      plain := [];
+      Ref.set names [];
+      match parse "abc;" statement with
+      | Ok `Declare ->
+          assert (!plain = [ "abc"; "abc" ]);
+          assert (Ref.get names = [ "abc" ])
+      | _ ->
+          assert false
+    ]}
+
+    {2 When a set is undone}
+
+    A {!Ref.set} is undone when its branch backtracks. The rule is the same as
+    for diagnostics:
+
+    - the failed branch of {!or_} and {!one_of};
+    - a failed {!optional};
+    - the last iteration of {!many}, {!sep_by} and {!fold_left}, the one that
+      fails or consumes nothing;
+    - {!look_ahead}, also when it succeeds.
+
+    A [set] is kept when its branch succeeds. After {!commit} or {!cut} seals a
+    branch, a failure no longer undoes the [set]s in that branch. An outer
+    branch that backtracks still undoes them.
+
+    An {!val-error} is a failure like a failed {!char}, so a branch that
+    backtracks on it undoes its [set]s. A {!fail} or an exception of your own
+    escapes {!or_}, {!optional}, {!many}, {!sep_by} and {!fold_left}, and skips
+    the undo. The cell keeps the value it had when the exception was raised,
+    also when a [try ... with] in the parser catches the exception.
+    {!look_ahead} restores the value in every case. Diagnostics behave the same
+    way.
+
+    Only the value in the cell is restored. A mutable value inside the cell,
+    such as a [Hashtbl.t] or an array, keeps its changes. Store immutable
+    values, such as a [Map] or a list.
+
+    {2 Lifetime}
+
+    Create a cell anywhere, inside or outside the parser. A parse does not reset
+    the cell. The value at the end of a parse stays in it, also when the parse
+    fails, so set the start value before each parse. Outside a parse, {!Ref.get}
+    and {!Ref.set} work as for a [ref].
+
+    {2 Cost}
+
+    A [set] inside a branch that can backtrack allocates 6 words to keep the old
+    value. The old value stays in memory while an open branch can undo it. A
+    [set] in each iteration of a {!many} at the top of the parser keeps one old
+    value. A grammar inside one {!or_} keeps every old value until that {!or_}
+    ends. A parser that never calls [set] allocates nothing more.
+
+    {2 Errors}
+
+    {!Ref.set} raises [Invalid_argument] when another parse that is still
+    running set the same cell. This happens when:
+
+    - two parses run interleaved on one domain, for example through effects in a
+      {!Source.of_function} reader;
+    - you call [set] outside a parse while such a reader waits, on a cell that
+      the waiting parse set;
+    - you call {!parse} inside a parser, and both parses set the cell.
+
+    Give each parse its own cell. A cell is not safe to share between domains.
+*)
+module Ref : sig
+  type 'a t
+  (** A cell that holds a value of type ['a]. *)
+
+  val create : 'a -> 'a t
+  (** [create v] is a new cell that holds [v]. *)
+
+  val get : 'a t -> 'a
+  (** [get cell] is the value in [cell]. *)
+
+  val set : 'a t -> 'a -> unit
+  (** [set cell v] stores [v] in [cell]. The parser undoes it when the branch
+      that called it backtracks. Raises [Invalid_argument] when another running
+      parse set [cell]. *)
 end
 
 (** {1 Trace} *)
@@ -516,16 +636,14 @@ val error : ?from:int -> ?notes:note list -> custom_error -> 'a
     For a simpler string-based alternative that also escapes backtracking, see
     {!val:fail}. *)
 
-val warn : 'd Diagnostics.t -> 'd -> unit
+val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
-    parsing. [diagnostics] must be the collector given to the runner as
-    [~diagnostics]; for any other collector [warn] does nothing. A diagnostic
-    recorded in a branch that backtracks is removed with the branch. This
-    includes a successful {!look_ahead}, and a repetition iteration that
-    succeeds without consuming input. *)
-
-val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit
-(** [warn_at diagnostics ~pos d] is {!warn} at the byte offset [pos]. *)
+    parsing. [warn ~pos diagnostics d] records it at the byte offset [pos].
+    [diagnostics] must be the collector given to the runner as [~diagnostics];
+    for any other collector [warn] does nothing. A diagnostic recorded in a
+    branch that backtracks is removed with the branch. This includes a
+    successful {!look_ahead}, and a repetition iteration that succeeds without
+    consuming input. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -661,6 +779,105 @@ val look_ahead : (unit -> 'a) -> 'a
     {@ocaml[
     let check_next_is_digit () = look_ahead digit
     (* position hasn't moved *)
+    ]} *)
+
+val capture : (unit -> 'a) -> ('a, error) result
+(** [capture parser] runs [parser] and returns its failure as a value. Use it to
+    recover from an error and continue parsing.
+
+    If [parser] succeeds, [capture parser] returns [Ok v] and keeps the input
+    that [parser] consumed, as if [parser] had been called directly. Failures
+    that [parser] recorded on the way stay in the furthest failure, as they
+    would after {!or_}.
+
+    If [parser] fails, [capture parser] returns [Error e]. [e] is the furthest
+    failure inside [parser], built as {!parse} builds an error: with its
+    expected items, location, notes, excerpt, and the {!val:context}s, both
+    those opened inside [parser] and those open around [capture]. Failures
+    recorded before [capture] are not merged into [e], so {!parse} can report
+    more expected items at the same position. Failures from {!fail} and
+    {!val-error} are caught too. The position goes back to where [capture]
+    started, the diagnostics that [parser] recorded are removed, and the failure
+    is forgotten: it does not appear in a later error report.
+
+    [capture] stops {!cut} and {!commit} as {!look_ahead} does. A [cut ()] in
+    [parser] does not seal the frames outside [capture], so [capture] returns
+    [Error e] also for a construct that [cut] decided. In streaming, the input
+    from where [capture] started stays buffered until it returns.
+
+    [Depth_limit_exceeded] and [Backtrack_window_exceeded] are not caught. They
+    stop the parse as usual.
+
+    A parser that never calls [capture] pays nothing for it, except that each
+    {!val:context} call also stores its name and start for [capture].
+
+    Example:
+    {@ocaml[
+    let statement_or_hole errors () =
+      match capture statement with
+      | Ok s ->
+          s
+      | Error e ->
+          warn ~pos:e.range.start errors e;
+          skip_while (fun c -> c <> ';');
+          let _ = char ';' in
+          Hole
+    ]} *)
+
+val recover :
+  error Diagnostics.t ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (error -> 'a) ->
+  'a
+(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
+    [parser] succeeds, [recover] returns its value. If [parser] fails with the
+    error [e], [recover] records [e] in [errors] at the position of [e], calls
+    [sync ()] to skip to a point where parsing can continue, and returns
+    [hole e].
+
+    [recover] always consumes input when it recovers: if [sync] consumed
+    nothing, [recover] moves to the position of [e], or stays where it started
+    if [e] is before that, and skips the character there, if one is left. If the
+    input has already ended where [recover] starts, [recover] does not recover
+    and calls [parser] directly, so the parse fails as it would without
+    [recover]. To continue without consuming input, for example to insert a
+    missing item, use {!capture}.
+
+    The recorded error follows the rules of {!warn}: it is removed when an
+    enclosing branch backtracks, and it stays when the parse fails. A failure in
+    [sync] or [hole] is an ordinary failure at that point, and the runner
+    reports that failure, not [e]. [errors] must be the collector given to the
+    runner as [~diagnostics]; for any other collector [recover] raises
+    [Invalid_argument], so that no error is lost.
+
+    Example:
+    {@ocaml[
+    let statements errors () =
+      many
+        (fun () ->
+          skip_whitespace ();
+          recover errors
+            ~sync:(fun () ->
+              skip_while (fun c -> c <> ';');
+              ignore (optional (fun () -> char ';') ())
+            )
+            statement
+            (fun _ -> Hole)
+        )
+        ()
+
+    let () =
+      let errors = Diagnostics.create () in
+      match parse ~diagnostics:errors input (statements errors) with
+      | Ok _ ->
+          List.iter
+            (fun { Diagnostics.value = e; _ } ->
+              print_endline (render_error ~source:input e)
+            )
+            (Diagnostics.to_list errors)
+      | Error e ->
+          print_endline (render_error ~source:input e)
     ]} *)
 
 val commit : unit -> unit

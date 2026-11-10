@@ -295,7 +295,7 @@ let complete_number () =
 (* parse already requires all input by default. end_of_input is for
    checks inside a parser, or when parsing with ~consume:`Partial *)
 ```
-**Note:** `Parseff.parse` and `Parseff.parse_source` fail with `Expected End_of_input` when input remains, so a top-level parser does not need a final `end_of_input`. With `~consume:`Partial`, leftover input is ignored.
+**Note:** `Parseff.parse` and `Parseff.parse_source` fail with `Expected End_of_input` when input remains, so a top-level parser does not need a final `end_of_input`. With `` ~consume:`Partial ``, leftover input is ignored.
 
 
 ### `position`
