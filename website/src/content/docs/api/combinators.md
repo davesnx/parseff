@@ -252,12 +252,7 @@ With `commit ()` in place of `cut ()`, only the `or_` is sealed, `many` stops an
 
 ### Tracing
 
-Pass `~trace` to `Parseff.parse` or `Parseff.parse_source` to see which constructs the parser entered, where each one returned or failed, and where it went back. The grammar needs no change: every `context` call is a traced construct.
-
-```ocaml
-val print_trace : Format.formatter -> Parseff.trace_event -> unit
-```
-`Parseff.print_trace` prints the events as an indented tree:
+Pass `~trace` to `Parseff.parse` or `Parseff.parse_source` to see which `context` constructs the parser entered, and where each one returned or failed. `Parseff.print_trace` prints the events as an indented tree:
 
 ```ocaml
 let number () =
@@ -281,9 +276,7 @@ list @0
   number failed @3 (from @3)
 list failed @2 (from @0)
 ```
-Each construct prints a line when it starts. It prints a second line with `ok` and the bytes it read when it returns, or with `failed` and the parser position when it failed. The error of the parse can be further: in the example, `list` fails at `@2`, and the error is at offset 3\. Events also come from branches that `or_`, `many` or `optional` later abandon, and from inside `look_ahead`. A backtrack shows as a construct that starts before the end of the previous line.
-
-To process the events yourself, pass a function of type `Parseff.trace_event -> unit`. The callback runs outside the parse, so a parser that it calls raises as it would outside `parse`. An exception from the callback stops the parse, and `parse` raises it again. Without `~trace`, tracing adds one check to each `context` call and no allocation.
+A `failed` line shows the parser position, not the error: here `list` fails at `@2`, and the error is at offset 3\.
 
 
 ## Recursion

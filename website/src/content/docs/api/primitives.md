@@ -308,7 +308,7 @@ val position : unit -> int
 
 ### `with_range`
 
-`Parseff.with_range` runs a parser and returns its result with the `Parseff.range` of bytes it consumed. `start` is the position before the parser and `stop` the position after it. Use it to point an error or a note at a whole construct without calling `position` two times.
+`Parseff.with_range` runs a parser and returns its result with the `Parseff.range` of bytes it consumed. Use it to point an error or a note at a whole construct.
 
 ```ocaml
 val with_range : (unit -> 'a) -> 'a * range
@@ -331,7 +331,7 @@ let octet () =
 
 ### `recognize` and `recognize_span`
 
-`Parseff.recognize` runs a parser, drops its result, and returns the input text the parser consumed. `Parseff.recognize_span` returns the same text as a `Parseff.span`: zero-copy with `Parseff.parse`, an owned copy with `Parseff.parse_source`.
+`Parseff.recognize` runs a parser, drops its result, and returns the input text the parser consumed. `Parseff.recognize_span` returns it as a `Parseff.span`.
 
 ```ocaml
 val recognize : (unit -> 'a) -> string
@@ -351,10 +351,6 @@ let () =
   | Ok name -> assert (name = "foo_1")
   | Error _ -> assert false
 ```
-If the parser fails, `with_range`, `recognize` and `recognize_span` fail with the same error. `Parseff.commit` and `Parseff.cut` inside the parser act as if the wrapper were not there: `commit` seals the nearest frame, also when that frame is outside the wrapper.
-
-**Streaming:** with `Parseff.parse_source`, `recognize` and `recognize_span` keep the input from the start of the parser buffered until the parser returns, also after a `commit`. A match longer than `~backtrack_window` fails with `Backtrack_window_exceeded`. `with_range` keeps nothing buffered.
-
 
 ### `location`
 
