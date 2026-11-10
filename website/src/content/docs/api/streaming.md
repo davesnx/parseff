@@ -58,9 +58,7 @@ Parseff.parse_source ~consume:`Partial source parser
 
 ## Many values from one source
 
-`Parseff.parse_source_each` parses a stream of values, such as NDJSON lines, log records or network frames, from one source. Each element of the sequence runs the parser once on the rest of the source. Memory is bounded by `~backtrack_window`, not by the number of values. A parser that collects the values with `Parseff.many` keeps all of them in a list.
-
-Use it instead of a loop inside one `Parseff.parse_source` call when the consumer must suspend or pull values one at a time, or when `~diagnostics` must not grow with the stream. A loop collects diagnostics for the whole parse.
+`Parseff.parse_source_each` parses a stream of values, such as NDJSON lines or log records, from one source. Each element of the sequence runs the parser once on the rest of the source. Use it instead of one `Parseff.parse_source` call with `Parseff.many` when the consumer must get each value as it arrives.
 
 ```ocaml
 val parse_source_each :
@@ -72,37 +70,22 @@ val parse_source_each :
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
 ```
-The parser reads one value and the separator after it. Here `Parseff.char` consumes exactly the newline:
+The parser reads one value and the separator after it:
 
 ```ocaml
-  let record () =
-    let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-    let _ = Parseff.char '\n' in
-    int_of_string id
+let record () =
+  let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+  let _ = Parseff.char '\n' in
+  int_of_string id
 
-  let () =
-    let ic = open_in "ids.txt" in
-    Parseff.parse_source_each (Parseff.Source.of_channel ic) record
-    |> Seq.iter (function
-         | Ok id -> Printf.printf "%d\n" id
-         | Error e -> prerr_endline (Parseff.render_error e));
-    close_in ic
+let () =
+  Parseff.parse_source_each (Parseff.Source.of_string "1\n22\n333\n") record
+  |> Seq.iter (function
+       | Ok id -> Printf.printf "%d\n" id
+       | Error e -> prerr_endline (Parseff.render_error e))
 ```
-A separator parser that reads past the value, such as `Parseff.skip_whitespace`, holds that value back until more input or the end of input arrives.
+A separator parser that reads past the value, such as `Parseff.skip_whitespace`, holds that value back until more input or the end of input arrives. The sequence is ephemeral: force each element once, in order.
 
-The rules:
-
-- Bytes that one value read ahead stay buffered for the next value. This includes the read-ahead of `Parseff.match_regex`.
-- The sequence ends when no input remains before a value. An empty source gives an empty sequence.
-- The sequence reads to the end of the input, as `` ~consume:`All `` would: bytes the parser cannot read give an `Error` element, so there is no `~consume` argument.
-- After an `Error` element the sequence ends.
-- When the parser succeeds without consuming input while input remains, the element is an `Error` with kind `Failure "the parser consumed no input"`, and the sequence ends.
-- Positions are absolute offsets from the start of the source. Line numbers in errors and in `Parseff.render_error` count from the first line of the stream.
-- `~diagnostics` is emptied each time an element is forced. Read it before you force the next element.
-- `~trace` works as in `Parseff.parse_source`. One callback receives the events of the whole sequence, at absolute positions.
-- The sequence is ephemeral. Force each element once, in order. Forcing an element again raises `Invalid_argument`. Use `Seq.memoize` to traverse it more than once.
-- After the parser or the source's read function raises, the sequence cannot be resumed. Forcing the same element again raises `Invalid_argument`.
-- Inside the parser, only the source's read function may suspend, as with `Parseff.parse_source`. Between elements no parse state is installed, so the consumer may suspend there: an effect-based scheduler such as Eio can run other fibers, also other parses, between two elements. A loop inside one `Parseff.parse_source` call cannot do this, because the consumer then runs inside the parser. Two sequences on two sources can be consumed in two fibers on one domain.
 
 ## The Source module
 
@@ -361,11 +344,11 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 
 ### Regex at chunk boundaries
 
-Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input. A match that ends before the end of the buffer is returned. A match that reaches the end of the buffer, or a failure that more input could turn into a match, is not final while the source has more input, so the runtime reads more and runs the regex again. When the window is full, `Parseff.match_regex` fails with `Backtrack_window_exceeded` at the current position. A match and the byte after it must fit in the window, unless the source ends after the match. `~backtrack_window` must be at least `2`.
+`Parseff.match_regex` reads more input when a match reaches the end of the buffered input, because more input could change the result. A match and the byte after it must fit in the `~backtrack_window`, unless the source ends after the match. Otherwise the parse fails with `Backtrack_window_exceeded`.
 
-A regex that needs bytes after its match to choose between a short and a long match can return the short match when those bytes are not buffered yet. `a(bc)?` on `"abc;"` can return `"a"` with a window smaller than `6`, because the runtime buffers only half of the window before it runs the regex.
+A regex that needs later bytes to choose a longer match can return the shorter one when the window is small: `a(bc)?` on `"abc;"` can return `"a"` with a window below `6`.
 
 
 ### One parse returns one result
 
-`Parseff.parse_source` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.parse_source_each`. See "Many values from one source" above.
+`Parseff.parse_source` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.parse_source_each`.
