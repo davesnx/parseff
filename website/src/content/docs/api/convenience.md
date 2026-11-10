@@ -82,21 +82,23 @@ let peek () = Parseff.look_ahead Parseff.any_char
 
 ## Numbers
 
-The number parsers read the bytes of a number directly from the input. They work across chunk boundaries in `Parseff.parse_source`. A failure is an `Expected` error. A missing number fails at its start, so `Parseff.or_` can try another branch, and its message merges with the other alternatives at that position. A `-`, `.` or exponent marker with no digit after it fails with `expected digit` after the marker: `"-x"` fails at offset 1, and `"1."` and `"1e"` fail at offset 2\. In streaming a number must be shorter than `backtrack_window` bytes, or the parse fails with `Backtrack_window_exceeded` at its start.
+The number parsers read the bytes of a number directly from the input. They work across chunk boundaries in `Parseff.parse_source`. A failure is an `Expected` error. A missing number fails at its start, so `Parseff.or_` can try another branch, and its message merges with the other alternatives at that position. A `-`, `.` or exponent marker with no digit after it fails with `expected digit` after the marker: `"-x"` fails at offset 1, and `"5."` and `"1e"` fail at offset 2\. In streaming a number must be shorter than `backtrack_window` bytes, or the parse fails with `Backtrack_window_exceeded` at its start.
+
+A number parser stops at the first byte that does not fit its syntax and leaves that byte for the next parser. On `"0x1F"` each of them reads `"0"` and leaves `"x1F"`.
 
 
-### `int`
+### `integer`
 
-`Parseff.int` parses an optional `-` and one or more decimal digits. It accepts leading zeros. It does not accept `+` or `_` separators. A value outside `min_int .. max_int` fails with `expected integer in int range`. On success it does not allocate.
+`Parseff.integer` parses an optional `-` and one or more decimal digits. It accepts leading zeros. It does not accept a leading `+`, `_` separators, a fraction or an exponent: on `"1e5"` it returns `1` and leaves `"e5"`. A value outside `min_int .. max_int` fails with `expected integer in int range`. On success it does not allocate.
 
 ```ocaml
-val int : unit -> int
+val integer : unit -> int
 ```
 ```ocaml
 let point () =
-  let x = Parseff.int () in
+  let x = Parseff.integer () in
   let _ = Parseff.char ',' in
-  let y = Parseff.int () in
+  let y = Parseff.integer () in
   (x, y)
 
 (* Matches "12,-7" -> (12, -7) *)
@@ -104,37 +106,69 @@ let point () =
 (* Fails on "99999999999999999999,0" with "expected integer in int range" *)
 ```
 
-### `float`
+### `number`
 
-`Parseff.float` parses an optional `-`, one or more digits, an optional fraction, and an optional exponent. A `.` or an `e` must be followed by a digit. It does not accept `.5`, `inf` or `nan`. A value too large for a `float` gives `infinity`.
+`Parseff.number` parses a number with the JSON number grammar: an optional `-`, one or more digits, an optional fraction (`.` and digits), and an optional exponent (`e` or `E`, an optional `+` or `-`, and digits). `"-0.5"`, `"1E5"` and `"1e+5"` match. A `.` or an `e` must be followed by a digit, so `"5."` and `"1e"` fail. It does not accept a leading `+`, `.5`, `_` separators, `inf` or `nan`. A value too large for a `float` gives `infinity`.
+
+An `e` or `E` after the number always starts an exponent. So `"2em"` and `"1.5eV"` fail with `expected digit` after the `e`. To read a number followed by a unit, see Other number formats below.
 
 ```ocaml
-val float : unit -> float
+val number : unit -> float
 ```
 ```ocaml
-let measurement () =
-  let value = Parseff.float () in
-  let unit_ = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
-  (value, unit_)
+let coordinates () =
+  let lat = Parseff.number () in
+  let _ = Parseff.char ',' in
+  let lon = Parseff.number () in
+  (lat, lon)
 
-(* Matches "2.5kg" -> (2.5, "kg") *)
-(* Matches "6.02e23mol" -> (6.02e23, "mol") *)
-(* Fails on "1.kg" with "expected digit" *)
+(* Matches "48.85,-2.35e0" -> (48.85, -2.35) *)
+(* Fails on "48.,2" with "expected digit" *)
 ```
 
-### `hex_int`
+### `hex_integer`
 
-`Parseff.hex_int` parses one or more hexadecimal digits (`0-9`, `a-f`, `A-F`). It does not accept a sign or a `0x` prefix. A value above `max_int` fails with `expected hexadecimal integer in int range`. On success it does not allocate.
+`Parseff.hex_integer` parses one or more hexadecimal digits (`0-9`, `a-f`, `A-F`). It does not accept a sign or a `0x` prefix. A value above `max_int` fails with `expected hexadecimal integer in int range`. On success it does not allocate.
 
 ```ocaml
-val hex_int : unit -> int
+val hex_integer : unit -> int
 ```
 ```ocaml
 let color () =
   let _ = Parseff.char '#' in
-  Parseff.hex_int ()
+  Parseff.hex_integer ()
 
 (* Matches "#ff8800" -> 0xff8800 *)
+```
+
+### Other number formats
+
+The number parsers follow the JSON number grammar. They do not read a leading `+`, a bare `.5` or `5.`, digit separators such as `1_000`, a `0x` prefix, `inf` or `nan`, or locale formats such as `1,5`. They also do not read a unit that starts with `e` directly after the number, such as `2em`: the `e` starts an exponent and the parse fails.
+
+For these formats, write your own parser with `Parseff.take_while`, `Parseff.recognize` and a conversion function. This parser reads digits with an optional fraction, converts them with `float_of_string`, and then reads the unit:
+
+```ocaml
+let is_digit c = c >= '0' && c <= '9'
+let is_letter c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+
+let quantity () =
+  let text =
+    Parseff.recognize (fun () ->
+        let _ = Parseff.take_while ~at_least:1 ~label:"digit" is_digit in
+        Parseff.optional
+          (fun () ->
+            let _ = Parseff.char '.' in
+            Parseff.take_while ~at_least:1 ~label:"digit" is_digit)
+          ())
+  in
+  let unit_ = Parseff.take_while ~at_least:1 ~label:"unit" is_letter in
+  (float_of_string text, unit_)
+```
+```ocaml
+# Parseff.parse "2em" quantity;;
+- : (float * string, Parseff.error) result = Ok (2., "em")
+# Parseff.parse "1.5eV" quantity;;
+- : (float * string, Parseff.error) result = Ok (1.5, "eV")
 ```
 
 ## Whitespace
