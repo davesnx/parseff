@@ -251,6 +251,14 @@ let power () =
 (* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
 ```
 
+### `expression`
+
+`Parseff.expression` parses a whole expression from one operator table, in place of one `fold_left` or `fold_right` for each precedence level. The table lists the levels from the lowest to the highest precedence, and takes `infix_left`, `infix_right`, `prefix` and `postfix` operators. The guide "Expressions with precedence" shows a complete parser.
+
+```ocaml
+val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+```
+
 ## Complete example: JSON array
 
 ```ocaml
