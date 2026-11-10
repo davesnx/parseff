@@ -1258,6 +1258,10 @@ val parse_source_each :
     the next run. Memory is bounded by [backtrack_window], not by the number of
     values.
 
+    Use it instead of a loop inside one {!parse_source} call when the consumer
+    must suspend or pull values one at a time, or when [diagnostics] must not
+    grow with the stream. A loop collects diagnostics for the whole parse.
+
     - The sequence ends when no input remains before a run. An empty source
       gives an empty sequence.
     - The sequence reads to the end of the input, as [~consume:`All] would:
@@ -1288,8 +1292,12 @@ val parse_source_each :
     once. After [parser] or the source's read function raises, the sequence
     cannot be resumed: forcing the same element again raises [Invalid_argument].
 
-    [max_depth], [backtrack_window] and the rule on suspension are as in
-    {!parse_source}: only the source's read function may suspend.
+    [max_depth] and [backtrack_window] are as in {!parse_source}. Inside
+    [parser], only the source's read function may suspend. Between elements no
+    parse state is installed, so the consumer may suspend there: an effect-based
+    scheduler such as Eio can run other fibers, also other parses, between two
+    elements. A loop inside one {!parse_source} call cannot do this, because the
+    consumer then runs inside the parser.
 
     Example:
     {@ocaml[
@@ -1303,7 +1311,9 @@ val parse_source_each :
       |> Seq.filter_map Result.to_option
       |> List.of_seq
     ]}
-    Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
+    Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. This example drops the [Error]
+    element, so [ids "1\n22\n333"] is [[1; 22]]. The example on the streaming
+    page handles it. *)
 
 (** {1 Binary Parsing}
 

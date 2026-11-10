@@ -67,6 +67,10 @@ sequence runs the parser once on the rest of the source. Memory is bounded by
 [~backtrack_window], not by the number of values. A parser that collects the
 values with {!val:Parseff.many} keeps all of them in a list.
 
+Use it instead of a loop inside one {!val:Parseff.parse_source} call when the
+consumer must suspend or pull values one at a time, or when [~diagnostics] must
+not grow with the stream. A loop collects diagnostics for the whole parse.
+
 {@ocaml skip[val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
@@ -123,9 +127,13 @@ The rules:
   more than once.
 - After the parser or the source's read function raises, the sequence cannot be
   resumed. Forcing the same element again raises [Invalid_argument].
-- Only the source's read function may suspend, as with
-  {!val:Parseff.parse_source}. Two sequences on two sources can be consumed in
-  two fibers on one domain.
+- Inside the parser, only the source's read function may suspend, as with
+  {!val:Parseff.parse_source}. Between elements no parse state is installed, so
+  the consumer may suspend there: an effect-based scheduler such as Eio can run
+  other fibers, also other parses, between two elements. A loop inside one
+  {!val:Parseff.parse_source} call cannot do this, because the consumer then
+  runs inside the parser. Two sequences on two sources can be consumed in two
+  fibers on one domain.
 
 {1 The Source module}
 

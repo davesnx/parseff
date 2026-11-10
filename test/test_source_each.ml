@@ -113,7 +113,7 @@ let test_error_location () =
     )
 
 let test_render_error () =
-  let memory =
+  let single_parse_error =
     match
       Parseff.parse_source (bytes_src error_input) (fun () ->
           ignore (line ());
@@ -124,7 +124,7 @@ let test_render_error () =
     | Error e ->
         e
     | Ok _ ->
-        Alcotest.fail "memory parse succeeded"
+        Alcotest.fail "one parse_source call succeeded"
   in
   match
     List.of_seq (Parseff.parse_source_each (bytes_src error_input) line)
@@ -132,11 +132,11 @@ let test_render_error () =
   | [ Ok _; Ok _; Error e ] ->
       Alcotest.(check string)
         "with source"
-        (Parseff.render_error ~source:error_input memory)
+        (Parseff.render_error ~source:error_input single_parse_error)
         (Parseff.render_error ~source:error_input e);
       Alcotest.(check string)
         "kept excerpt"
-        (Parseff.render_error memory)
+        (Parseff.render_error single_parse_error)
         (Parseff.render_error e)
   | _ ->
       Alcotest.fail "unexpected elements"
@@ -393,6 +393,78 @@ let test_interleaved () =
   | exception _ ->
       ()
 
+let test_consumer_yields () =
+  let log = ref [] in
+  let go name data =
+    spawn (fun () ->
+        Seq.iter
+          (fun v ->
+            log := (name ^ " " ^ show v) :: !log;
+            Effect.perform Yield
+          )
+          (Parseff.parse_source_each (bytes_src data) line)
+    )
+  in
+  go "a" "1\n22\n";
+  go "b" "333\n4444\n";
+  run ();
+  Alcotest.(check (list string))
+    "values in turn"
+    [ "a ok 1"; "b ok 333"; "a ok 22"; "b ok 4444" ]
+    (List.rev !log)
+
+let test_backtrack_window_message () =
+  Alcotest.check_raises "parse_source_each"
+    (Invalid_argument
+       "Parseff.parse_source_each: backtrack_window must be at least 2"
+    ) (fun () ->
+      let (_ : (string, Parseff.error) result Seq.t) =
+        Parseff.parse_source_each ~backtrack_window:1 (bytes_src "") line
+      in
+      ()
+  );
+  Alcotest.check_raises "parse_source"
+    (Invalid_argument
+       "Parseff.parse_source: backtrack_window must be at least 2"
+    ) (fun () ->
+      ignore (Parseff.parse_source ~backtrack_window:1 (bytes_src "") line)
+  )
+
+exception Boom
+
+let check_stopped seq =
+  Alcotest.check_raises "first force" Boom (fun () -> ignore (seq ()));
+  Alcotest.check_raises "second force"
+    (Invalid_argument
+       "Parseff.parse_source_each: the sequence stopped after an exception"
+    ) (fun () -> ignore (seq ())
+  );
+  ( match Parseff.position () with
+  | _ ->
+      Alcotest.fail "parse state left installed"
+  | exception e ->
+      Alcotest.(check bool)
+        "outside a parse" true
+        (Re.execp
+           (Re.compile (Re.str "outside of a parse context"))
+           (Printexc.to_string e)
+        )
+  );
+  Alcotest.(check string)
+    "later parse" "ok 12"
+    (show (Parseff.parse "12" digits))
+
+let test_parser_raises () =
+  check_stopped
+    (Parseff.parse_source_each (bytes_src "1\n") (fun () -> raise Boom))
+
+let test_read_raises () =
+  check_stopped
+    (Parseff.parse_source_each
+       (Parseff.Source.of_function (fun _ _ _ -> raise Boom))
+       line
+    )
+
 let () =
   let open Alcotest in
   run "Source sequence"
@@ -401,13 +473,17 @@ let () =
         [
           test_case "one-byte chunks" `Quick test_values_one_byte_chunks;
           test_case "empty source" `Quick test_empty_source;
-          test_case "whitespace between values" `Quick test_doc_example;
+          test_case "newline after each value" `Quick test_doc_example;
           test_case "node forced twice" `Quick test_force_twice;
           test_case "no progress" `Quick test_no_progress;
         ]
       );
       ( "errors",
         [
+          test_case "backtrack_window message" `Quick
+            test_backtrack_window_message;
+          test_case "parser raises" `Quick test_parser_raises;
+          test_case "read raises" `Quick test_read_raises;
           test_case "absolute location" `Quick test_error_location;
           test_case "render_error" `Quick test_render_error;
           test_case "error of each value" `Quick test_error_of_each_value;
@@ -420,7 +496,10 @@ let () =
       );
       ("trace", [ test_case "across values" `Quick test_trace_across_values ]);
       ( "concurrency",
-        [ test_case "two interleaved sequences" `Quick test_interleaved ]
+        [
+          test_case "two interleaved sequences" `Quick test_interleaved;
+          test_case "consumer yields between values" `Quick test_consumer_yields;
+        ]
       );
       ( "buffer",
         [

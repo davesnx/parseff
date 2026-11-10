@@ -60,6 +60,8 @@ Parseff.parse_source ~consume:`Partial source parser
 
 `Parseff.parse_source_each` parses a stream of values, such as NDJSON lines, log records or network frames, from one source. Each element of the sequence runs the parser once on the rest of the source. Memory is bounded by `~backtrack_window`, not by the number of values. A parser that collects the values with `Parseff.many` keeps all of them in a list.
 
+Use it instead of a loop inside one `Parseff.parse_source` call when the consumer must suspend or pull values one at a time, or when `~diagnostics` must not grow with the stream. A loop collects diagnostics for the whole parse.
+
 ```ocaml
 val parse_source_each :
   ?max_depth:int ->
@@ -100,7 +102,7 @@ The rules:
 - `~trace` works as in `Parseff.parse_source`. One callback receives the events of the whole sequence, at absolute positions.
 - The sequence is ephemeral. Force each element once, in order. Forcing an element again raises `Invalid_argument`. Use `Seq.memoize` to traverse it more than once.
 - After the parser or the source's read function raises, the sequence cannot be resumed. Forcing the same element again raises `Invalid_argument`.
-- Only the source's read function may suspend, as with `Parseff.parse_source`. Two sequences on two sources can be consumed in two fibers on one domain.
+- Inside the parser, only the source's read function may suspend, as with `Parseff.parse_source`. Between elements no parse state is installed, so the consumer may suspend there: an effect-based scheduler such as Eio can run other fibers, also other parses, between two elements. A loop inside one `Parseff.parse_source` call cannot do this, because the consumer then runs inside the parser. Two sequences on two sources can be consumed in two fibers on one domain.
 
 ## The Source module
 
