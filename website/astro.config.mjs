@@ -123,6 +123,7 @@ export default defineConfig({
 						{ label: 'Parsing an IP address', slug: 'guides/ip-address' },
 						{ label: 'A JSON parser', slug: 'guides/json-parser' },
 						{ label: 'Expressions with precedence', slug: 'guides/expression-parser' },
+						{ label: 'Error recovery', slug: 'guides/error-recovery' },
 					],
 				},
 			{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },

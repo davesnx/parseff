@@ -1,1 +1,5 @@
 (dirs :standard \ node_modules dist .astro .vscode public)
+
+(cram
+ (applies_to fix-code-spans)
+ (deps fix-code-spans.sh))

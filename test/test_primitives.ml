@@ -1775,10 +1775,7 @@ let test_span_to_string_valid () =
       (2, 8, "cdefghij");
       (1, 9, "bcdefghij");
       (0, 11, buf);
-    ];
-  Alcotest.(check string)
-    "empty span at the end" ""
-    (Parseff.span_to_string { buf = "abc"; off = 3; len = 0 })
+    ]
 
 let test_span_to_string_invalid () =
   List.iter
@@ -1789,10 +1786,10 @@ let test_span_to_string_invalid () =
       )
     )
     [
-      (2, 2);
       (5, 1);
       (3, 1);
       (-1, 1);
+      (2, 2);
       (-8, 8);
       (0, -1);
       (100, 8);

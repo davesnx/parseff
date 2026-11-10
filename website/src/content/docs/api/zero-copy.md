@@ -23,6 +23,8 @@ For parsers run with `Parseff.parse_source`, spans may be materialized into owne
 ```ocaml
 val span_to_string : span -> string
 ```
+`Parseff.span_to_string` raises `Invalid_argument` if the span is not a valid range of its buffer.
+
 
 ## Span-based operations
 
@@ -58,6 +60,32 @@ let fast_integer () =
     Parseff.take_while_span (fun c -> c >= '0' && c <= '9')
   in
   int_of_span digits
+```
+
+### `take_span`
+
+`Parseff.take_span` reads exactly `n` bytes like `Parseff.take` and returns a `Parseff.span`. Use it for a length-prefixed payload that you pass on without changing it. Under `Parseff.parse_source`, the span is an owned copy. It fails as `take` does: for a short input with `expected 10 bytes, found only 3 (end of input)`, and for a negative `n`.
+
+```ocaml
+val take_span : int -> span
+```
+```ocaml
+let payload () =
+  let len = Parseff.BE.any_uint16 () in
+  Parseff.take_span len
+
+let () =
+  match Parseff.parse "\x00\x03abc" payload with
+  | Ok span -> assert (Parseff.span_to_string span = "abc")
+  | Error e -> prerr_endline (Parseff.render_error ~name:"payload" e)
+```
+
+### `recognize_span`
+
+`Parseff.recognize_span` returns the input text that any parser consumed, as a `Parseff.span`. With `Parseff.parse_source` the span is an owned copy, and the input from the start of the parser stays buffered until it returns. See `Parseff.recognize`.
+
+```ocaml
+val recognize_span : (unit -> 'a) -> span
 ```
 
 ### `sep_by_take_span`
