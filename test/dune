@@ -14,5 +14,6 @@
   test_streaming_robust
   test_gaps
   test_lexeme
-  test_trace)
+  test_trace
+  test_expression)
  (libraries parseff alcotest re uucp))
