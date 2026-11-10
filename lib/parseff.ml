@@ -614,7 +614,8 @@ let[@inline never] handle_location st =
         idx
   in
   let up_to = min st.pos st.input_len in
-  extend_line_index idx ~base_offset:st.base st.input up_to;
+  if up_to > idx.scanned_up_to then
+    extend_line_index idx ~base_offset:st.base st.input up_to;
   let line_idx = find_line idx st.pos in
   {
     offset = st.pos;
@@ -1277,74 +1278,95 @@ let[@inline never] handle_match_regex st re label =
       raise_if_pinned st pinned;
       regex_failure st label
 
-let[@inline never] handle_any_uint8 st =
-  if have st 1 then begin
-    let v = String.get_uint8 st.input (st.pos - st.base) in
-    st.pos <- st.pos + 1;
-    v
-  end else
-    fail_int st st.pos (bytes_kind 1)
+let[@inline never] need_bytes_slow st n =
+  if not (have st n) then fail_int st st.pos (bytes_kind n)
 
-let[@inline never] handle_any_int8 st =
-  if have st 1 then begin
-    let v = String.get_int8 st.input (st.pos - st.base) in
-    st.pos <- st.pos + 1;
-    v
-  end else
-    fail_int st st.pos (bytes_kind 1)
+let[@inline always] need_bytes st n =
+  if n > st.input_len - st.pos then need_bytes_slow st n
 
-let[@inline never] handle_any_int16 st endian =
-  if have st 2 then begin
-    let pos = st.pos - st.base in
-    let v =
-      match endian with
-      | Big ->
-          String.get_int16_be st.input pos
-      | Little ->
-          String.get_int16_le st.input pos
-    in
-    st.pos <- st.pos + 2;
-    v
-  end else
-    fail_int st st.pos (bytes_kind 2)
+let[@inline always] read_uint8 st =
+  need_bytes st 1;
+  let p = st.pos in
+  st.pos <- p + 1;
+  Char.code (char_at st p)
 
-let[@inline never] handle_any_int32 st endian =
-  if have st 4 then begin
-    let pos = st.pos - st.base in
-    let v =
-      match endian with
-      | Big ->
-          String.get_int32_be st.input pos
-      | Little ->
-          String.get_int32_le st.input pos
-    in
-    st.pos <- st.pos + 4;
-    v
-  end else
-    fail_int st st.pos (bytes_kind 4)
+let[@inline always] read_int8 st =
+  need_bytes st 1;
+  let p = st.pos in
+  st.pos <- p + 1;
+  (Char.code (char_at st p) lsl (Sys.int_size - 8)) asr (Sys.int_size - 8)
 
-let[@inline never] handle_any_int64 st endian =
-  if have st 8 then begin
-    let pos = st.pos - st.base in
-    let v =
-      match endian with
-      | Big ->
-          String.get_int64_be st.input pos
-      | Little ->
-          String.get_int64_le st.input pos
-    in
-    st.pos <- st.pos + 8;
-    v
-  end else
-    fail_int st st.pos (bytes_kind 8)
+let[@inline always] read_int16_be st =
+  need_bytes st 2;
+  let p = st.pos in
+  let v = String.get_int16_be st.input (p - st.base) in
+  st.pos <- p + 2;
+  v
 
-let[@inline never] handle_take st n =
+let[@inline always] read_int16_le st =
+  need_bytes st 2;
+  let p = st.pos in
+  let v = String.get_int16_le st.input (p - st.base) in
+  st.pos <- p + 2;
+  v
+
+let[@inline always] read_uint16_be st =
+  need_bytes st 2;
+  let p = st.pos in
+  let v = String.get_uint16_be st.input (p - st.base) in
+  st.pos <- p + 2;
+  v
+
+let[@inline always] read_uint16_le st =
+  need_bytes st 2;
+  let p = st.pos in
+  let v = String.get_uint16_le st.input (p - st.base) in
+  st.pos <- p + 2;
+  v
+
+let[@inline always] read_int32_be st =
+  need_bytes st 4;
+  let p = st.pos in
+  let v = String.get_int32_be st.input (p - st.base) in
+  st.pos <- p + 4;
+  v
+
+let[@inline always] read_int32_le st =
+  need_bytes st 4;
+  let p = st.pos in
+  let v = String.get_int32_le st.input (p - st.base) in
+  st.pos <- p + 4;
+  v
+
+let[@inline always] read_int64_be st =
+  need_bytes st 8;
+  let p = st.pos in
+  let v = String.get_int64_be st.input (p - st.base) in
+  st.pos <- p + 8;
+  v
+
+let[@inline always] read_int64_le st =
+  need_bytes st 8;
+  let p = st.pos in
+  let v = String.get_int64_le st.input (p - st.base) in
+  st.pos <- p + 8;
+  v
+
+let[@inline never] take_slow st n =
   if have st n then begin
     let s = slice st st.pos n in
     st.pos <- st.pos + n;
     s
   end else
     fail_bytes st n
+
+let[@inline always] handle_take st n =
+  let p = st.pos in
+  if n <= st.input_len - p then begin
+    st.pos <- p + n;
+    slice st p n
+  end else
+    take_slow st n
 
 let[@inline] utf8_sequence_length lead =
   if lead < 0xC2 then
@@ -1373,11 +1395,45 @@ let[@inline never] utf8_fill st keep_from p =
 let[@inline] fill_uchar st ~keep_from p =
   if p + 4 > st.input_len then utf8_fill st keep_from p
 
-let[@inline never] handle_satisfy_uchar st pred label =
+let[@inline always] utf8_decode inp i =
+  let b0 = Char.code (String.unsafe_get inp i) in
+  let len = String.length inp in
+  if b0 < 0xE0 then
+    if b0 >= 0xC2 && i + 1 < len then
+      let b1 = Char.code (String.unsafe_get inp (i + 1)) in
+      if b1 land 0xC0 = 0x80 then
+        Uchar.utf_decode 2
+          (Uchar.unsafe_of_int (((b0 land 0x1F) lsl 6) lor (b1 land 0x3F)))
+      else
+        String.get_utf_8_uchar inp i
+    else
+      String.get_utf_8_uchar inp i
+  else if b0 < 0xF0 && i + 2 < len then
+    let b1 = Char.code (String.unsafe_get inp (i + 1)) in
+    let b2 = Char.code (String.unsafe_get inp (i + 2)) in
+    if
+      b1 land 0xC0 = 0x80
+      && b2 land 0xC0 = 0x80
+      && (b0 <> 0xE0 || b1 >= 0xA0)
+      && (b0 <> 0xED || b1 < 0xA0)
+    then
+      Uchar.utf_decode 3
+        (Uchar.unsafe_of_int
+           (((b0 land 0x0F) lsl 12)
+           lor ((b1 land 0x3F) lsl 6)
+           lor (b2 land 0x3F)
+           )
+        )
+    else
+      String.get_utf_8_uchar inp i
+  else
+    String.get_utf_8_uchar inp i
+
+let[@inline never] satisfy_uchar_slow st pred label =
   let p = st.pos in
   fill_uchar st ~keep_from:p p;
   if p >= st.input_len then fail_str st p tag_label label;
-  let d = String.get_utf_8_uchar st.input (p - st.base) in
+  let d = utf8_decode st.input (p - st.base) in
   if not (Uchar.utf_decode_is_valid d) then fail_str st p tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if pred u then begin
@@ -1386,12 +1442,28 @@ let[@inline never] handle_satisfy_uchar st pred label =
   end else
     fail_str st p tag_label label
 
-let[@inline never] handle_char_uchar st expected =
+let[@inline always] handle_satisfy_uchar st pred label =
+  let p = st.pos in
+  if p < st.input_len then
+    let b = Char.code (char_at st p) in
+    if b < 0x80 then
+      let u = Uchar.unsafe_of_int b in
+      if pred u then begin
+        st.pos <- p + 1;
+        u
+      end else
+        fail_str st p tag_label label
+    else
+      satisfy_uchar_slow st pred label
+  else
+    satisfy_uchar_slow st pred label
+
+let[@inline never] char_uchar_slow st expected =
   let p = st.pos in
   fill_uchar st ~keep_from:p p;
   let kind = Uchar.to_int expected lsl 3 in
   if p >= st.input_len then fail_int st p kind;
-  let d = String.get_utf_8_uchar st.input (p - st.base) in
+  let d = utf8_decode st.input (p - st.base) in
   if not (Uchar.utf_decode_is_valid d) then fail_str st p tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u expected then begin
@@ -1400,26 +1472,44 @@ let[@inline never] handle_char_uchar st expected =
   end else
     fail_int st p kind
 
+let[@inline always] handle_char_uchar st expected =
+  let p = st.pos in
+  if p < st.input_len then
+    let b = Char.code (char_at st p) in
+    if b < 0x80 then
+      if b = Uchar.to_int expected then begin
+        st.pos <- p + 1;
+        expected
+      end else
+        fail_int st p (Uchar.to_int expected lsl 3)
+    else
+      char_uchar_slow st expected
+  else
+    char_uchar_slow st expected
+
 let[@inline never] scan_uchars st inp ~base start limit pred =
   let pos = ref start in
-  let continue_loop = ref true in
-  while !pos < limit && !continue_loop do
+  while
+    !pos < limit
+    &&
     let b = Char.code (String.unsafe_get inp !pos) in
     if b < 0x80 then
-      begin if pred (Uchar.unsafe_of_int b) then
-        incr pos
-      else
-        continue_loop := false
-    end
-    else begin
-      let d = String.get_utf_8_uchar inp !pos in
+      pred (Uchar.unsafe_of_int b)
+      && begin
+        incr pos;
+        true
+      end
+    else
+      let d = utf8_decode inp !pos in
       if not (Uchar.utf_decode_is_valid d) then
         fail_str st (!pos + base) tag_label label_utf8;
-      if pred (Uchar.utf_decode_uchar d) then
-        pos := !pos + Uchar.utf_decode_length d
-      else
-        continue_loop := false
-    end
+      pred (Uchar.utf_decode_uchar d)
+      && begin
+        pos := !pos + Uchar.utf_decode_length d;
+        true
+      end
+  do
+    ()
   done;
   !pos
 
@@ -2083,8 +2173,30 @@ let letter () =
 let[@inline always] is_whitespace c =
   c <= ' ' && (c = ' ' || c = '\t' || c = '\n' || c = '\r')
 
+let[@inline always] scan_whitespace st ~keep_from start =
+  let base = st.base in
+  let inp = st.input in
+  let len = st.input_len - base in
+  let i = ref (start - base) in
+  while !i < len && is_whitespace (String.unsafe_get inp !i) do
+    incr i
+  done;
+  if !i < len || st.source == None then
+    !i + base
+  else
+    scan_while_refilling st ~keep_from (!i + base) is_whitespace
+
 let whitespace ?(at_least = 0) () =
-  take_while ~at_least ~label:"whitespace" is_whitespace
+  let st = get_state () in
+  let start = st.pos in
+  let end_pos = scan_whitespace st ~keep_from:start start in
+  st.pos <- end_pos;
+  let n = end_pos - start in
+  if n < at_least then
+    fail_str_cold st end_pos tag_label "whitespace"
+  else
+    slice st start n
+
 let[@inline] skip_whitespace () =
   let st = get_state () in
   let base = st.base in
@@ -2120,94 +2232,79 @@ let[@inline] any_char () =
 
 let[@inline] any_uint8 () =
   let st = get_state () in
-  handle_any_uint8 st
+  read_uint8 st
 
 let[@inline] any_int8 () =
   let st = get_state () in
-  handle_any_int8 st
-
-let[@inline] binary_any_int16 endian () =
-  let st = get_state () in
-  handle_any_int16 st endian
-
-let[@inline] binary_any_int32 endian () =
-  let st = get_state () in
-  handle_any_int32 st endian
-
-let[@inline] binary_any_int64 endian () =
-  let st = get_state () in
-  handle_any_int64 st endian
+  read_int8 st
 
 let int_kind index endian =
   let little = match endian with Big -> 0 | Little -> 1 in
   ((2 + (index * 2) + little) lsl 3) lor tag_big
 
-let expect_int16 endian any_fn expected =
-  if expected < -0x8000 || expected > 0xFFFF then
-    invalid_arg "Parseff.int16: value must be in -32768..65535";
+let[@inline never] int16_mismatch st start endian expected actual =
+  let b = Bytes.create 4 in
+  Bytes.set_uint16_be b 0 expected;
+  Bytes.set_uint16_be b 2 actual;
+  fail_str st start (int_kind 0 endian) (Bytes.unsafe_to_string b)
+
+let[@inline never] int32_mismatch st start endian expected actual =
+  let b = Bytes.create 8 in
+  Bytes.set_int32_be b 0 expected;
+  Bytes.set_int32_be b 4 actual;
+  fail_str st start (int_kind 1 endian) (Bytes.unsafe_to_string b)
+
+let[@inline never] int64_mismatch st start endian expected actual =
+  let b = Bytes.create 16 in
+  Bytes.set_int64_be b 0 expected;
+  Bytes.set_int64_be b 8 actual;
+  fail_str st start (int_kind 2 endian) (Bytes.unsafe_to_string b)
+
+let[@inline never] invalid_int16 () =
+  invalid_arg "Parseff.int16: value must be in -32768..65535"
+
+let[@inline always] expect_int16 endian read expected =
+  if expected < -0x8000 || expected > 0xFFFF then invalid_int16 ();
   let st = get_state () in
   let start = st.pos in
-  let actual = any_fn () land 0xFFFF in
+  let actual = read st in
   let expected = expected land 0xFFFF in
-  if actual <> expected then begin
-    let b = Bytes.create 4 in
-    Bytes.set_uint16_be b 0 expected;
-    Bytes.set_uint16_be b 2 actual;
-    fail_str st start (int_kind 0 endian) (Bytes.unsafe_to_string b)
-  end
+  if actual <> expected then int16_mismatch st start endian expected actual
 
-let expect_int32 endian any_fn expected =
+let[@inline always] expect_int32 endian read expected =
   let st = get_state () in
   let start = st.pos in
-  let actual = any_fn () in
-  if actual <> expected then begin
-    let b = Bytes.create 8 in
-    Bytes.set_int32_be b 0 expected;
-    Bytes.set_int32_be b 4 actual;
-    fail_str st start (int_kind 1 endian) (Bytes.unsafe_to_string b)
-  end
+  let actual = read st in
+  if actual <> expected then int32_mismatch st start endian expected actual
 
-let expect_int64 endian any_fn expected =
+let[@inline always] expect_int64 endian read expected =
   let st = get_state () in
   let start = st.pos in
-  let actual = any_fn () in
-  if actual <> expected then begin
-    let b = Bytes.create 16 in
-    Bytes.set_int64_be b 0 expected;
-    Bytes.set_int64_be b 8 actual;
-    fail_str st start (int_kind 2 endian) (Bytes.unsafe_to_string b)
-  end
+  let actual = read st in
+  if actual <> expected then int64_mismatch st start endian expected actual
 
 module BE = struct
-  let[@inline] any_int16 () = binary_any_int16 Big ()
-
-  let[@inline] any_uint16 () =
-    let v = binary_any_int16 Big () in
-    v land 0xFFFF
-
-  let[@inline] any_int32 () = binary_any_int32 Big ()
-  let[@inline] any_int64 () = binary_any_int64 Big ()
+  let[@inline] any_int16 () = read_int16_be (get_state ())
+  let[@inline] any_uint16 () = read_uint16_be (get_state ())
+  let[@inline] any_int32 () = read_int32_be (get_state ())
+  let[@inline] any_int64 () = read_int64_be (get_state ())
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
-  let int16 = expect_int16 Big any_int16
-  let int32 = expect_int32 Big any_int32
-  let int64 = expect_int64 Big any_int64
+  let int16 expected = expect_int16 Big read_uint16_be expected
+  let int32 expected = expect_int32 Big read_int32_be expected
+  let int64 expected = expect_int64 Big read_int64_be expected
 end
 
 module LE = struct
-  let[@inline] any_int16 () = binary_any_int16 Little ()
-
-  let[@inline] any_uint16 () =
-    let v = binary_any_int16 Little () in
-    v land 0xFFFF
-
-  let[@inline] any_int32 () = binary_any_int32 Little ()
-  let[@inline] any_int64 () = binary_any_int64 Little ()
+  let[@inline] any_int16 () = read_int16_le (get_state ())
+  let[@inline] any_uint16 () = read_uint16_le (get_state ())
+  let[@inline] any_int32 () = read_int32_le (get_state ())
+  let[@inline] any_int64 () = read_int64_le (get_state ())
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
-  let int16 = expect_int16 Little any_int16
-  let int32 = expect_int32 Little any_int32
-  let int64 = expect_int64 Little any_int64
+  let int16 expected = expect_int16 Little read_uint16_le expected
+  let int32 expected = expect_int32 Little read_int32_le expected
+  let int64 expected = expect_int64 Little read_int64_le expected
 end
 
 module Utf8 = struct
@@ -2219,7 +2316,14 @@ module Utf8 = struct
     let st = get_state () in
     handle_char_uchar st u
 
-  let[@inline] any_char () = satisfy (fun _ -> true) ~label:"any character"
+  let[@inline] any_char () =
+    let st = get_state () in
+    let p = st.pos in
+    if p < st.input_len && Char.code (char_at st p) < 0x80 then begin
+      st.pos <- p + 1;
+      Uchar.unsafe_of_int (Char.code (char_at st p))
+    end else
+      satisfy_uchar_slow st (fun _ -> true) label_any_char
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
@@ -2257,24 +2361,41 @@ module Utf8 = struct
     let st = get_state () in
     handle_skip_while_then_uchar st pred u
 
-  let[@inline] is_whitespace u = Uucp.White.is_white_space u
+  let[@inline] is_whitespace u =
+    let i = Uchar.to_int u in
+    if i < 0x80 then
+      i = 0x20 || (i >= 0x09 && i <= 0x0D)
+    else
+      Uucp.White.is_white_space u
 
-  let letter () = satisfy Uucp.Alpha.is_alphabetic ~label:"letter"
+  let[@inline always] is_alphabetic u =
+    let i = Uchar.to_int u in
+    if i < 0x80 then
+      (i >= 0x61 && i <= 0x7A) || (i >= 0x41 && i <= 0x5A)
+    else
+      Uucp.Alpha.is_alphabetic u
+
+  let[@inline always] is_alphanumeric u =
+    let i = Uchar.to_int u in
+    if i < 0x80 then
+      (i >= 0x61 && i <= 0x7A)
+      || (i >= 0x41 && i <= 0x5A)
+      || (i >= 0x30 && i <= 0x39)
+    else
+      Uucp.Alpha.is_alphabetic u
+
+  let letter () =
+    let st = get_state () in
+    handle_satisfy_uchar st is_alphabetic "letter"
 
   let alphanum () =
-    satisfy
-      (fun u ->
-        Uucp.Alpha.is_alphabetic u
-        ||
-        let i = Uchar.to_int u in
-        i >= 0x30 && i <= 0x39
-      )
-      ~label:"alphanumeric"
+    let st = get_state () in
+    handle_satisfy_uchar st is_alphanumeric "alphanumeric"
 
   let whitespace ?(at_least = 0) () =
-    take_while ~at_least ~label:"whitespace" Uucp.White.is_white_space
+    take_while ~at_least ~label:"whitespace" is_whitespace
 
-  let skip_whitespace () = skip_while Uucp.White.is_white_space
+  let skip_whitespace () = skip_while is_whitespace
 end
 
 let far_chain st =
