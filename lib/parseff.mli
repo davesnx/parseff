@@ -1247,6 +1247,7 @@ val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
@@ -1259,6 +1260,9 @@ val parse_source_each :
 
     - The sequence ends when no input remains before a run. An empty source
       gives an empty sequence.
+    - The sequence reads to the end of the input, as [~consume:`All] would:
+      bytes that [parser] cannot read give an [Error] element, so there is no
+      [consume] argument.
     - After an [Error] element the sequence ends.
     - When [parser] succeeds without consuming input while input remains, the
       element is an [Error] with kind [Failure "the parser consumed no input"],
@@ -1275,6 +1279,9 @@ val parse_source_each :
 
     [diagnostics] is emptied each time an element is forced, also the element
     that ends the sequence. Read it before you force the next element.
+
+    [trace] works as in {!parse_source}. One callback receives the events of the
+    whole sequence, at absolute positions.
 
     The sequence is ephemeral. Force each element once, in order; forcing one
     again raises [Invalid_argument]. Use [Seq.memoize] to traverse it more than

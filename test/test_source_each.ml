@@ -243,6 +243,39 @@ let test_diagnostics_per_value () =
        )
     )
 
+let test_trace_across_values () =
+  let events = ref [] in
+  let trace (e : Parseff.trace_event) =
+    let s =
+      match e with
+      | Enter { name; pos } ->
+          Printf.sprintf "enter %s %d" name pos
+      | Exit { name; start; stop } ->
+          Printf.sprintf "exit %s %d %d" name start stop
+      | Fail { name; start; pos } ->
+          Printf.sprintf "fail %s %d %d" name start pos
+    in
+    events := s :: !events
+  in
+  let parser () = Parseff.context "value" line in
+  Alcotest.(check (list string))
+    "values"
+    [ "ok 1"; "ok 22"; "ok 333" ]
+    (collect
+       (Parseff.parse_source_each ~trace (bytes_src "1\n22\n333\n") parser)
+    );
+  Alcotest.(check (list string))
+    "events"
+    [
+      "enter value 0";
+      "exit value 0 2";
+      "enter value 2";
+      "exit value 2 5";
+      "enter value 5";
+      "exit value 5 9";
+    ]
+    (List.rev !events)
+
 let repeated_chunks ~count block =
   let sent = ref 0 in
   Parseff.Source.of_chunks (fun () ->
@@ -385,6 +418,7 @@ let () =
       ( "diagnostics",
         [ test_case "per value" `Quick test_diagnostics_per_value ]
       );
+      ("trace", [ test_case "across values" `Quick test_trace_across_values ]);
       ( "concurrency",
         [ test_case "two interleaved sequences" `Quick test_interleaved ]
       );

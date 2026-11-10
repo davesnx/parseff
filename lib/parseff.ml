@@ -3745,10 +3745,10 @@ let parse_source ?(max_depth = 128)
       run_slow st ~consume ~diagnostics parser
 
 let parse_source_each ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?diagnostics (src : Source.t)
-    (parser : unit -> 'a) =
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace:None in
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   let element () =
     if have st 1 then
       Some (parser ())

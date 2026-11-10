@@ -65,6 +65,7 @@ val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
@@ -91,10 +92,12 @@ The rules:
 
 - Bytes that one value read ahead stay buffered for the next value. This includes the read-ahead of `Parseff.match_regex`.
 - The sequence ends when no input remains before a value. An empty source gives an empty sequence.
+- The sequence reads to the end of the input, as `~consume:`All` would: bytes the parser cannot read give an `Error` element, so there is no `~consume` argument.
 - After an `Error` element the sequence ends.
 - When the parser succeeds without consuming input while input remains, the element is an `Error` with kind `Failure "the parser consumed no input"`, and the sequence ends.
 - Positions are absolute offsets from the start of the source. Line numbers in errors and in `Parseff.render_error` count from the first line of the stream.
 - `~diagnostics` is emptied each time an element is forced. Read it before you force the next element.
+- `~trace` works as in `Parseff.parse_source`. One callback receives the events of the whole sequence, at absolute positions.
 - The sequence is ephemeral. Force each element once, in order. Forcing an element again raises `Invalid_argument`. Use `Seq.memoize` to traverse it more than once.
 - After the parser or the source's read function raises, the sequence cannot be resumed. Forcing the same element again raises `Invalid_argument`.
 - Only the source's read function may suspend, as with `Parseff.parse_source`. Two sequences on two sources can be consumed in two fibers on one domain.
