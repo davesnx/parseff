@@ -719,7 +719,7 @@ let test_escaping_exceptions () =
 let test_log_bounded () =
   let small = live_words_after_many 1_000 in
   let large = live_words_after_many 200_000 in
-  let per_iteration = float_of_int (large - small) /. 199_000. in
+  let per_iteration = float (large - small) /. 199_000. in
   if per_iteration > 3.5 then
     Alcotest.failf
       "%.2f live words per iteration; the result list takes 3, so the undo log \
