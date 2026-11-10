@@ -339,6 +339,23 @@ let test_infix_right_no_progress_undo () =
   | Error e ->
       Alcotest.fail (Parseff.error_message e)
 
+let test_prefix_no_progress_sealed () =
+  let sealed seal () =
+    seal ();
+    fun a -> "<" ^ a ^ ">"
+  in
+  List.iter
+    (fun seal ->
+      check Parseff.[ [ prefix (sealed seal) ] ] "1" "Ok 1";
+      check
+        Parseff.[ [ prefix (sealed seal); prefix (pre "-") ] ]
+        "-1" "Ok (-1)";
+      check
+        Parseff.[ [ prefix (sealed seal) ] ]
+        "x" "Error@0 expected digit or \"(\", found 'x'"
+    )
+    [ Parseff.commit; Parseff.cut ]
+
 let int_op c f () =
   ignore (Parseff.char c);
   f
@@ -552,6 +569,8 @@ let () =
             test_infix_right_no_progress;
           test_case "infix_right without progress undoes" `Quick
             test_infix_right_no_progress_undo;
+          test_case "prefix without progress, committed" `Quick
+            test_prefix_no_progress_sealed;
           test_case "long flat chain" `Quick test_long_flat;
           test_case "streaming window" `Quick test_streaming_window;
           test_case "doc example" `Quick test_doc_example;
