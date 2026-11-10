@@ -1356,6 +1356,19 @@ val take : int -> string
       take len
     ]} *)
 
+val take_span : int -> span
+(** [take_span n] reads exactly [n] bytes like {!take}, and returns them as a
+    {!type:span}. With {!parse} the span points into the input and nothing is
+    copied; with {!parse_source} it is an owned copy, as for {!take_while_span}.
+    Fails as {!take} does, for a short input and for a negative [n].
+
+    Example:
+    {@ocaml[
+    let payload () =
+      let len = BE.any_uint16 () in
+      take_span len
+    ]} *)
+
 (** {1 Streaming} *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
@@ -1488,6 +1501,35 @@ val any_uint8 : unit -> int
 val any_int8 : unit -> int
 (** Read one byte as a signed integer (−128–127). *)
 
+val any_varint : unit -> int
+(** Read an unsigned LEB128 varint: each byte gives 7 bits, least significant
+    first, and a byte below [0x80] ends the number. [\xAC\x02] is [300].
+
+    The value must fit in a non-negative [int], so the varint takes at most 9
+    bytes and the 9th byte is at most [0x3F]. A longer or larger varint fails at
+    its first byte with [expected varint up to max_int], and an encoding with
+    extra [0x80] bytes is accepted while it fits. Input that ends inside the
+    varint fails with [expected 1 byte, found end of input] at the end.
+
+    In Protocol Buffers, it reads a [uint32], a non-negative [int32] or [int64],
+    and a [uint64] below 2^62. It rejects a negative [int32] or [int64], which
+    Protocol Buffers writes as 10 bytes, and a [uint64] from 2^62, with
+    [expected varint up to max_int]. In WebAssembly, it reads the unsigned
+    LEB128 of indices and sizes, but not the signed LEB128 of [i32.const] and
+    [i64.const].
+
+    These limits assume a 63-bit [int]. Where [int] is smaller, such as on
+    32-bit OCaml or js_of_ocaml, a value above [max_int] can give a wrong result
+    instead of an error, and the result of a varint longer than 5 bytes is
+    unspecified.
+
+    Example:
+    {@ocaml[
+    let field () =
+      let len = any_varint () in
+      take len
+    ]} *)
+
 (** Big-endian binary parsers. *)
 module BE : sig
   val any_int16 : unit -> int
@@ -1498,6 +1540,13 @@ module BE : sig
 
   val any_int32 : unit -> int32
   (** Read 4 bytes as a big-endian signed 32-bit integer. *)
+
+  val any_uint32 : unit -> int
+  (** Read 4 bytes as a big-endian unsigned 32-bit integer, from [0] to
+      [4294967295]. Fails as {!val:Parseff.take} does when fewer than 4 bytes
+      remain. Where [int] has fewer than 33 bits, such as on 32-bit OCaml or
+      js_of_ocaml, a value above [max_int] does not fit, and the result is wrong
+      with no error. *)
 
   val any_int64 : unit -> int64
   (** Read 8 bytes as a big-endian signed 64-bit integer. *)
@@ -1536,6 +1585,13 @@ module LE : sig
 
   val any_int32 : unit -> int32
   (** Read 4 bytes as a little-endian signed 32-bit integer. *)
+
+  val any_uint32 : unit -> int
+  (** Read 4 bytes as a little-endian unsigned 32-bit integer, from [0] to
+      [4294967295]. Fails as {!val:Parseff.take} does when fewer than 4 bytes
+      remain. Where [int] has fewer than 33 bits, such as on 32-bit OCaml or
+      js_of_ocaml, a value above [max_int] does not fit, and the result is wrong
+      with no error. *)
 
   val any_int64 : unit -> int64
   (** Read 8 bytes as a little-endian signed 64-bit integer. *)
