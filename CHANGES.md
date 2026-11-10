@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** `any_uint32` reads 4 bytes as an unsigned integer and returns an `int`, so a 32-bit length goes to `take` without a conversion. `any_varint` reads an unsigned LEB128 varint, as in Protocol Buffers: `\xAC\x02` is `300`. A varint longer than 9 bytes or larger than `max_int` fails at its first byte with `expected varint up to max_int`, and never wraps. `take_span n` reads `n` bytes like `take` and returns a `span`, with no copy in `parse` and an owned copy in `parse_source`. `any_uint32` and `take_span` fail on a short input as `take` does, with `expected 4 bytes, found only 3 (end of input)`, and a varint cut by the end of the input fails with `expected 1 byte, found end of input`. `any_uint32` and `any_varint` do not allocate.
+
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

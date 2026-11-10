@@ -939,6 +939,7 @@ let[@inline never] fail_negative_count st n =
   fail_str st st.pos negative_count_kind (string_of_int n)
 let label_value = "value"
 let label_regex = "text matching the pattern"
+let label_varint = "varint up to max_int"
 
 let[@inline never] far_commit_reset st = st.far <- far_none
 
@@ -1227,6 +1228,22 @@ let[@inline never] handle_any_int8 st =
   end else
     fail_int st st.pos (bytes_kind 1)
 
+let[@inline never] handle_any_varint st =
+  let start = st.pos in
+  let i = ref 0 in
+  let acc = ref 0 in
+  let continue = ref true in
+  while !continue do
+    if not (have st (!i + 1)) then fail_int st (start + !i) (bytes_kind 1);
+    let b = Char.code (char_at st (start + !i)) in
+    if !i = 8 && b > 0x3F then fail_str st start tag_label label_varint;
+    acc := !acc lor ((b land 0x7F) lsl (7 * !i));
+    incr i;
+    continue := b >= 0x80
+  done;
+  st.pos <- start + !i;
+  !acc
+
 let[@inline never] handle_any_int16 st endian =
   if have st 2 then begin
     let pos = st.pos - st.base in
@@ -1257,6 +1274,23 @@ let[@inline never] handle_any_int32 st endian =
   end else
     fail_int st st.pos (bytes_kind 4)
 
+let[@inline never] handle_any_uint32 st endian =
+  if have st 4 then begin
+    let pos = st.pos - st.base in
+    let v =
+      match endian with
+      | Big ->
+          (String.get_uint16_be st.input pos lsl 16)
+          lor String.get_uint16_be st.input (pos + 2)
+      | Little ->
+          (String.get_uint16_le st.input (pos + 2) lsl 16)
+          lor String.get_uint16_le st.input pos
+    in
+    st.pos <- st.pos + 4;
+    v
+  end else
+    fail_int st st.pos (bytes_kind 4)
+
 let[@inline never] handle_any_int64 st endian =
   if have st 8 then begin
     let pos = st.pos - st.base in
@@ -1275,6 +1309,14 @@ let[@inline never] handle_any_int64 st endian =
 let[@inline never] handle_take st n =
   if have st n then begin
     let s = slice st st.pos n in
+    st.pos <- st.pos + n;
+    s
+  end else
+    fail_bytes st n
+
+let[@inline never] handle_take_span st n =
+  if have st n then begin
+    let s = span st st.pos n in
     st.pos <- st.pos + n;
     s
   end else
@@ -1538,6 +1580,13 @@ let take n =
     let st = get_state () in
     handle_take st n
   end
+
+let take_span n =
+  let st = get_state () in
+  if n < 0 then
+    fail_negative_count st n
+  else
+    handle_take_span st n
 
 let or_ left right () =
   let st = get_state () in
@@ -1982,6 +2031,10 @@ let[@inline] any_int8 () =
   let st = get_state () in
   handle_any_int8 st
 
+let[@inline] any_varint () =
+  let st = get_state () in
+  handle_any_varint st
+
 let[@inline] binary_any_int16 endian () =
   let st = get_state () in
   handle_any_int16 st endian
@@ -1989,6 +2042,10 @@ let[@inline] binary_any_int16 endian () =
 let[@inline] binary_any_int32 endian () =
   let st = get_state () in
   handle_any_int32 st endian
+
+let[@inline] binary_any_uint32 endian () =
+  let st = get_state () in
+  handle_any_uint32 st endian
 
 let[@inline] binary_any_int64 endian () =
   let st = get_state () in
@@ -2042,6 +2099,7 @@ module BE = struct
     v land 0xFFFF
 
   let[@inline] any_int32 () = binary_any_int32 Big ()
+  let[@inline] any_uint32 () = binary_any_uint32 Big ()
   let[@inline] any_int64 () = binary_any_int64 Big ()
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
@@ -2058,6 +2116,7 @@ module LE = struct
     v land 0xFFFF
 
   let[@inline] any_int32 () = binary_any_int32 Little ()
+  let[@inline] any_uint32 () = binary_any_uint32 Little ()
   let[@inline] any_int64 () = binary_any_int64 Little ()
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())

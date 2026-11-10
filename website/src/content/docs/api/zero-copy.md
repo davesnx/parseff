@@ -60,6 +60,24 @@ let fast_integer () =
   int_of_span digits
 ```
 
+### `take_span`
+
+`Parseff.take_span` reads exactly `n` bytes like `Parseff.take` and returns a `Parseff.span`. Use it for a length-prefixed payload that you pass on without changing it. Under `Parseff.parse_source`, the span is an owned copy. It fails as `take` does: for a short input with `expected 10 bytes, found only 3 (end of input)`, and for a negative `n`.
+
+```ocaml
+val take_span : int -> span
+```
+```ocaml
+let payload () =
+  let len = Parseff.BE.any_uint16 () in
+  Parseff.take_span len
+
+let () =
+  match Parseff.parse "\x00\x03abc" payload with
+  | Ok span -> assert (Parseff.span_to_string span = "abc")
+  | Error e -> prerr_endline (Parseff.render_error ~name:"payload" e)
+```
+
 ### `sep_by_take_span`
 
 `Parseff.sep_by_take_span` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.span`s. No `String.sub` allocations per element in the in-memory runner. Under `Parseff.parse_source`, spans may be copied so the runtime can discard older chunks safely.
