@@ -2307,7 +2307,7 @@ let rec has_prefix = function
 
 type 'a expression = {
   st : State.t;
-  atom : unit -> 'a;
+  operand : unit -> 'a;
   table : 'a operator list list;
   prefixed : bool;
 }
@@ -2316,7 +2316,7 @@ let rec expr_climb c levels = expr_loop c levels (expr_operand c)
 
 and expr_operand c =
   if not c.prefixed then
-    c.atom ()
+    c.operand ()
   else begin
     let st = c.st in
     let frame = State.push_rewind_frame st frame_choice in
@@ -2328,7 +2328,7 @@ and expr_operand c =
         State.pop_rewind_frame st frame;
         if State.frame_committed st frame then raise_notrace Fail;
         restore_rewind_frame st frame;
-        c.atom ()
+        c.operand ()
     | exception exn ->
         State.pop_rewind_frame st frame;
         raise exn
@@ -2435,8 +2435,8 @@ and expr_next c frame lhs here rest ops =
   restore_rewind_frame c.st frame;
   expr_try_ops c frame lhs here rest ops
 
-let expression ~atom table () =
-  let c = { st = get_state (); atom; table; prefixed = has_prefix table } in
+let expression ~operand table () =
+  let c = { st = get_state (); operand; table; prefixed = has_prefix table } in
   expr_climb c table
 
 let optional (p : unit -> 'a) () : 'a option =

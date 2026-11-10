@@ -224,7 +224,7 @@ let mul () =
 
 let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
 
-let rec expr () = Parseff.expression ~atom:factor table ()
+let rec expr () = Parseff.expression ~operand:factor table ()
 
 and factor () =
   Parseff.skip_whitespace ();

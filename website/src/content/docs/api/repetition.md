@@ -256,7 +256,7 @@ let power () =
 `Parseff.expression` parses a whole expression from one operator table, in place of one `fold_left` or `fold_right` for each precedence level. The guide "Expressions with precedence" shows a complete parser.
 
 ```ocaml
-val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
 ```
 
 ## Complete example: JSON array
