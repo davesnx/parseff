@@ -1264,7 +1264,9 @@ val parse_source_seq :
       element is an [Error] with kind [Failure "the parser consumed no input"],
       and the sequence ends.
     - Bytes between values, such as a newline, are the job of [parser]. Make
-      [parser] consume the separator after each value, as in the example.
+      [parser] consume the separator after each value, as in the example. A
+      separator parser that reads past the value, such as {!skip_whitespace},
+      holds that value back until more input or the end of input arrives.
 
     Positions are absolute offsets from the start of [source]: {!position},
     {!val:location}, [range] and [location] in an error count all the values
@@ -1276,7 +1278,8 @@ val parse_source_seq :
 
     The sequence is ephemeral. Force each element once, in order; forcing one
     again raises [Invalid_argument]. Use [Seq.memoize] to traverse it more than
-    once.
+    once. After [parser] or the source's read function raises, the sequence
+    cannot be resumed: forcing the same element again raises [Invalid_argument].
 
     [max_depth], [backtrack_window] and the rule on suspension are as in
     {!parse_source}: only the source's read function may suspend.
@@ -1285,7 +1288,7 @@ val parse_source_seq :
     {@ocaml[
     let record () =
       let id = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-      skip_whitespace ();
+      let _ = char '\n' in
       int_of_string id
 
     let ids text =
@@ -1293,7 +1296,7 @@ val parse_source_seq :
       |> Seq.filter_map Result.to_option
       |> List.of_seq
     ]}
-    Here [ids "1\n22\n\n333\n"] is [[1; 22; 333]]. *)
+    Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
 
 (** {1 Binary Parsing}
 

@@ -76,12 +76,12 @@ values with {!val:Parseff.many} keeps all of them in a list.
   ('a, error) Stdlib.result Seq.t]}
 
 The parser reads one value and the separator after it. Here
-{!val:Parseff.skip_whitespace} consumes the newline and any blank lines:
+{!val:Parseff.char} consumes exactly the newline:
 
 {@ocaml skip[
   let record () =
     let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-    Parseff.skip_whitespace ();
+    let _ = Parseff.char '\n' in
     int_of_string id
 
   let () =
@@ -92,6 +92,10 @@ The parser reads one value and the separator after it. Here
          | Error e -> prerr_endline (Parseff.render_error e));
     close_in ic
 ]}
+
+A separator parser that reads past the value, such as
+{!val:Parseff.skip_whitespace}, holds that value back until more input or the
+end of input arrives.
 
 The rules:
 
@@ -111,6 +115,8 @@ The rules:
 - The sequence is ephemeral. Force each element once, in order. Forcing an
   element again raises [Invalid_argument]. Use [Seq.memoize] to traverse it
   more than once.
+- After the parser or the source's read function raises, the sequence cannot be
+  resumed. Forcing the same element again raises [Invalid_argument].
 - Only the source's read function may suspend, as with
   {!val:Parseff.parse_source}. Two sequences on two sources can be consumed in
   two fibers on one domain.

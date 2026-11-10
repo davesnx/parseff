@@ -69,12 +69,12 @@ val parse_source_seq :
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
 ```
-The parser reads one value and the separator after it. Here `Parseff.skip_whitespace` consumes the newline and any blank lines:
+The parser reads one value and the separator after it. Here `Parseff.char` consumes exactly the newline:
 
 ```ocaml
   let record () =
     let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-    Parseff.skip_whitespace ();
+    let _ = Parseff.char '\n' in
     int_of_string id
 
   let () =
@@ -85,6 +85,8 @@ The parser reads one value and the separator after it. Here `Parseff.skip_whites
          | Error e -> prerr_endline (Parseff.render_error e));
     close_in ic
 ```
+A separator parser that reads past the value, such as `Parseff.skip_whitespace`, holds that value back until more input or the end of input arrives.
+
 The rules:
 
 - Bytes that one value read ahead stay buffered for the next value. This includes the read-ahead of `Parseff.match_regex`.
@@ -94,6 +96,7 @@ The rules:
 - Positions are absolute offsets from the start of the source. Line numbers in errors and in `Parseff.render_error` count from the first line of the stream.
 - `~diagnostics` is emptied each time an element is forced. Read it before you force the next element.
 - The sequence is ephemeral. Force each element once, in order. Forcing an element again raises `Invalid_argument`. Use `Seq.memoize` to traverse it more than once.
+- After the parser or the source's read function raises, the sequence cannot be resumed. Forcing the same element again raises `Invalid_argument`.
 - Only the source's read function may suspend, as with `Parseff.parse_source`. Two sequences on two sources can be consumed in two fibers on one domain.
 
 ## The Source module

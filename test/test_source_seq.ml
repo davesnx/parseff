@@ -49,7 +49,7 @@ let test_error_of_each_value () =
 let test_doc_example () =
   let record () =
     let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-    Parseff.skip_whitespace ();
+    let _ = Parseff.char '\n' in
     int_of_string id
   in
   let ids source =
@@ -57,7 +57,7 @@ let test_doc_example () =
     |> Seq.filter_map Result.to_option
     |> List.of_seq
   in
-  let text = "1\n22\n\n333\n" in
+  let text = "1\n22\n333\n" in
   Alcotest.(check (list int))
     "of_string" [ 1; 22; 333 ]
     (ids (Parseff.Source.of_string text));
