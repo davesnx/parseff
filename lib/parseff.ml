@@ -102,6 +102,7 @@ let frame_barrier = 2
 let frame_last_branch = 3
 let frame_kind_mask = 3
 let frame_committed_bit = 4
+let frame_pin_bit = 8
 let frame_stride = 3
 
 type backtrack_window_error = { limit : int; oldest : int }
@@ -382,17 +383,21 @@ module State = struct
       t.diag_len <- saved
     end
 
-  let commit_nearest (t : t) =
-    let top = t.frames_top in
-    top > 0
+  let rec commit_nearest_from (t : t) i =
+    i >= 0
     &&
-    let slot = ((top - 1) * frame_stride) + 1 in
+    let slot = (i * frame_stride) + 1 in
     let flags = Array.unsafe_get t.frames slot in
-    flags land frame_kind_mask <> frame_barrier
-    && begin
-      Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
-      true
-    end
+    if flags land frame_pin_bit <> 0 then
+      commit_nearest_from t (i - 1)
+    else
+      flags land frame_kind_mask <> frame_barrier
+      && begin
+        Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+        true
+      end
+
+  let commit_nearest (t : t) = commit_nearest_from t (t.frames_top - 1)
 
   let seal_frames (t : t) ~floor =
     let i = ref (t.frames_top - 1) in
@@ -420,6 +425,7 @@ module State = struct
       if
         (kind = frame_barrier
         || (kind <> frame_last_branch && flags land frame_committed_bit = 0)
+        || flags land frame_pin_bit <> 0
         )
         && start < !floor
       then
@@ -1457,6 +1463,38 @@ let[@inline] peek_char () =
 let[@inline] position () =
   let st = get_state () in
   st.pos
+
+let with_range p =
+  let st = get_state () in
+  let start = st.pos in
+  let v = p () in
+  (v, { start; stop = st.pos })
+
+let[@inline never] run_pinned st p =
+  let frame =
+    State.push_rewind_frame st (frame_last_branch lor frame_pin_bit)
+  in
+  match p () with
+  | _ ->
+      State.pop_rewind_frame st frame
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let[@inline always] run_keeping_input st p =
+  match st.source with None -> ignore (p ()) | Some _ -> run_pinned st p
+
+let recognize p =
+  let st = get_state () in
+  let start = st.pos in
+  run_keeping_input st p;
+  slice st start (st.pos - start)
+
+let recognize_span p =
+  let st = get_state () in
+  let start = st.pos in
+  run_keeping_input st p;
+  span st start (st.pos - start)
 
 let[@inline] location () =
   let st = get_state () in
