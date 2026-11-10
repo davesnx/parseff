@@ -34,7 +34,8 @@ type span = { buf : string; off : int; len : int }
 
 val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
-    actually need the string value. *)
+    actually need the string value. Raises [Invalid_argument] if the span is not
+    a valid range of its buffer. *)
 
 (** {1 Location Type} *)
 

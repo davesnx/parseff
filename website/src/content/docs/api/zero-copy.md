@@ -23,6 +23,8 @@ For parsers run with `Parseff.parse_source`, spans may be materialized into owne
 ```ocaml
 val span_to_string : span -> string
 ```
+`Parseff.span_to_string` raises `Invalid_argument` if the span is not a valid range of its buffer.
+
 
 ## Span-based operations
 
