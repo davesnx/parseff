@@ -24,14 +24,10 @@ differ.
 
 {1 Emitting diagnostics}
 
-{@ocaml skip[val warn : 'd Diagnostics.t -> 'd -> unit]}
+{@ocaml skip[val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit]}
 
 {!val:Parseff.warn} records a non-fatal diagnostic at the current parser
-position.
-
-{@ocaml skip[val warn_at : 'd Diagnostics.t -> pos:int -> 'd -> unit]}
-
-{!val:Parseff.warn_at} records a non-fatal diagnostic at an explicit position.
+position, or at the byte offset [~pos] when it is given.
 
 {1 Collecting diagnostics}
 
@@ -70,7 +66,7 @@ let number_lenient diagnostics () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
   if n > 255 then
-    Parseff.warn_at diagnostics ~pos:start (`Octet_out_of_range n);
+    Parseff.warn ~pos:start diagnostics (`Octet_out_of_range n);
   n
 
 let ip_address_lenient diagnostics () =
