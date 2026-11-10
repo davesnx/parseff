@@ -2585,7 +2585,7 @@ let label_int_range = "integer in int range"
 let min_int_div_10 = min_int / 10
 let min_int_last = -(min_int mod 10)
 
-let[@inline never] handle_int st =
+let[@inline never] handle_integer st =
   let start = st.pos in
   let negative = byte_at st ~keep_from:start start = Char.code '-' in
   let first =
@@ -2620,9 +2620,9 @@ let[@inline never] handle_int st =
     - !acc
   end
 
-let int () =
+let integer () =
   let st = get_state () in
-  handle_int st
+  handle_integer st
 
 let label_number = "number"
 
@@ -2638,7 +2638,7 @@ let require_digits st ~keep_from p =
     fail_str st p tag_label label_digit;
   scan_digits st ~keep_from (p + 1)
 
-let[@inline never] handle_float st =
+let[@inline never] handle_number st =
   let start = st.pos in
   let keep_from = start in
   let first =
@@ -2670,9 +2670,9 @@ let[@inline never] handle_float st =
   st.pos <- p;
   float_of_string text
 
-let float () =
+let number () =
   let st = get_state () in
-  handle_float st
+  handle_number st
 
 let[@inline always] hex_value b =
   if b >= 0x30 && b <= 0x39 then
@@ -2687,7 +2687,7 @@ let[@inline always] hex_value b =
 let label_hex = "hexadecimal integer"
 let label_hex_range = "hexadecimal integer in int range"
 
-let[@inline never] handle_hex_int st =
+let[@inline never] handle_hex_integer st =
   let start = st.pos in
   let p = ref start in
   let acc = ref 0 in
@@ -2702,9 +2702,9 @@ let[@inline never] handle_hex_int st =
   st.pos <- !p;
   !acc
 
-let hex_int () =
+let hex_integer () =
   let st = get_state () in
-  handle_hex_int st
+  handle_hex_integer st
 
 let letter () =
   satisfy

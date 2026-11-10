@@ -7,7 +7,7 @@
 - **Add trace mode.** `parse ~trace` and `parse_source ~trace` report when each `context` starts, returns or fails. `print_trace` prints the events as a tree.
 - **Add `with_range`, `recognize` and `recognize_span`.** They return the range or the text that a parser consumed.
 - **Add `lexeme` and `keyword`.** `lexeme p` skips whitespace after `p`. `keyword "let"` matches `let` but not `letter`.
-- **Add `int`, `float` and `hex_int`.** Parsers for decimal integers, JSON numbers and hexadecimal integers.
+- **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
 - **Fix `span_to_string` reading outside its buffer.** A span with an offset outside its buffer returned a wrong byte or crashed the process. It now raises `Invalid_argument`.
