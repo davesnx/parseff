@@ -931,6 +931,47 @@ val skip_whitespace : unit -> unit
     unit). More efficient than [whitespace] when you don't need the matched
     string. *)
 
+val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
+(** [lexeme p] runs [p], then [skip], and returns the result of [p]. [skip]
+    defaults to {!skip_whitespace}; pass a parser that also skips comments when
+    the grammar has them.
+
+    Example:
+    {@ocaml[
+    let skip () =
+      skip_whitespace ();
+      while peek_char () = Some '#' do
+        skip_while (fun c -> c <> '\n');
+        skip_whitespace ()
+      done
+
+    let token p = lexeme ~skip p
+    let comma () = token (fun () -> char ',')
+    ]} *)
+
+val keyword : ?is_ident:(char -> bool) -> string -> unit
+(** [keyword s] matches the literal [s] when the next byte cannot continue an
+    identifier. [is_ident] receives that one byte, not a UTF-8 character; the
+    default accepts ASCII letters, digits and [_], so [keyword "let"] matches
+    the start of ["let\xC3\xA9"]. At the end of the input the keyword matches.
+
+    Any failure is reported at the start of [s] and expects [s], so it merges
+    with the other alternatives at that position. [keyword "let"] on ["letter"]
+    fails at offset [0].
+
+    [keyword] reads the byte after [s], so in streaming it needs a backtrack
+    window of [String.length s + 1] bytes, one more than {!consume}.
+
+    @raise Invalid_argument if [s] is empty.
+
+    Example:
+    {@ocaml[
+    let binding () =
+      keyword "let";
+      skip_whitespace ();
+      take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"name"
+    ]} *)
+
 val alphanum : unit -> char
 (** [alphanum ()] parses an alphanumeric character (letter or digit). *)
 
