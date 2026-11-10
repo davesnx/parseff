@@ -404,10 +404,9 @@ module State = struct
   let[@inline always] set_frame_kind (t : t) frame kind =
     Array.unsafe_set t.frames ((frame * frame_stride) + 1) kind
 
-  let[@inline always] reset_repeat_frame (t : t) frame =
-    let base = frame * frame_stride in
+  let[@inline always] reset_repeat_frame (t : t) base pos =
     let frames = t.frames in
-    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames base pos;
     Array.unsafe_set frames (base + 1) frame_repeat;
     Array.unsafe_set frames (base + 2) t.diag_len
 
@@ -1917,20 +1916,16 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
   let st = get_state () in
   let acc = ref (many_required p [] at_least) in
   let frame = State.push_rewind_frame st frame_repeat in
+  let base = frame * frame_stride in
   match
     let start = ref st.pos in
-    while
-      let v = p () in
+    let v = ref (p ()) in
+    while st.pos <> !start do
+      acc := !v :: !acc;
       let pos = st.pos in
-      pos <> !start
-      && begin
-        acc := v :: !acc;
-        State.reset_repeat_frame st frame;
-        start := pos;
-        true
-      end
-    do
-      ()
+      State.reset_repeat_frame st base pos;
+      start := pos;
+      v := p ()
     done
   with
   | () ->
@@ -1948,23 +1943,20 @@ let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   if at_least <= 0 then (
     let acc = ref [] in
     let frame = State.push_rewind_frame st frame_repeat in
+    let base = frame * frame_stride in
     match
       acc := [ p () ];
-      State.reset_repeat_frame st frame;
       let start = ref st.pos in
-      while
-        let _ = sep () in
-        let v = p () in
+      State.reset_repeat_frame st base !start;
+      let _ = sep () in
+      let v = ref (p ()) in
+      while st.pos <> !start do
+        acc := !v :: !acc;
         let pos = st.pos in
-        pos <> !start
-        && begin
-          acc := v :: !acc;
-          State.reset_repeat_frame st frame;
-          start := pos;
-          true
-        end
-      do
-        ()
+        State.reset_repeat_frame st base pos;
+        start := pos;
+        let _ = sep () in
+        v := p ()
       done
     with
     | () ->
@@ -2006,22 +1998,21 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
   let st = get_state () in
   let acc = ref (p ()) in
   let frame = State.push_rewind_frame st frame_repeat in
+  let base = frame * frame_stride in
+  let top = frame + 1 in
   match
     let start = ref st.pos in
-    while
-      let f = op () in
-      let rhs = p () in
-      st.pos <> !start
-      && begin
-        st.frames_top <- frame;
-        acc := f !acc rhs;
-        st.frames_top <- frame + 1;
-        State.reset_repeat_frame st frame;
-        start := st.pos;
-        true
-      end
-    do
-      ()
+    let f = ref (op ()) in
+    let rhs = ref (p ()) in
+    while st.pos <> !start do
+      st.frames_top <- frame;
+      acc := !f !acc !rhs;
+      st.frames_top <- top;
+      let pos = st.pos in
+      State.reset_repeat_frame st base pos;
+      start := pos;
+      f := op ();
+      rhs := p ()
     done
   with
   | () ->
