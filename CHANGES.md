@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **Add `with_range`, `recognize` and `recognize_span`.** `with_range p` returns the result of `p` and the `range` of bytes it consumed. `recognize p` returns the text that `p` consumed as a string, and `recognize_span p` as a `span`, zero-copy with `parse` and an owned copy with `parse_source`. A failure inside `p` gives the same error as without the wrapper, and `commit` and `cut` inside `p` seal the same frames as without it. With `parse_source`, `recognize` and `recognize_span` keep the input from the start of `p` buffered until `p` returns, so a match longer than `~backtrack_window` fails with `Backtrack_window_exceeded`. A parser that does not call them pays nothing.
+
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

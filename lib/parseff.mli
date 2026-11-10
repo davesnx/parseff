@@ -471,6 +471,55 @@ val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
     the input. *)
 
+val with_range : (unit -> 'a) -> 'a * range
+(** [with_range parser] runs [parser] and returns its result with the
+    {!type:range} of bytes it consumed: [start] is the position before [parser],
+    [stop] the position after it. If [parser] fails, [with_range] fails with the
+    same error.
+
+    Example:
+    {@ocaml[
+    let number () =
+      int_of_string
+        (take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit")
+
+    let checked_number () =
+      let n, range = with_range number in
+      if n > 255 then
+        fail ~notes:[ { at = Some range; text = "this value" } ] "out of range";
+      n
+    ]} *)
+
+val recognize : (unit -> 'a) -> string
+(** [recognize parser] runs [parser], drops its result and returns the input
+    text that [parser] consumed. If [parser] fails, [recognize] fails with the
+    same error.
+
+    {!commit} and {!cut} inside [parser] act as if [recognize] were not there:
+    [commit] seals the nearest {!or_}, {!many} or other frame, also when that
+    frame is outside [recognize], and [cut] seals the frames up to the innermost
+    enclosing {!val:context}.
+
+    In {!parse_source}, the input from the start of [parser] stays buffered
+    until [parser] returns. If [parser] consumes more than [~backtrack_window]
+    bytes, the parse fails with [Backtrack_window_exceeded], also after a
+    {!commit}.
+
+    Example:
+    {@ocaml[
+    let identifier () =
+      recognize (fun () ->
+          ignore (letter ());
+          ignore (many (fun () -> or_ alphanum (fun () -> char '_') ()) ())
+      )
+    (* "foo_1 = 2" -> "foo_1" *)
+    ]} *)
+
+val recognize_span : (unit -> 'a) -> span
+(** [recognize_span parser] like {!recognize} but returns a {!type:span}. With
+    {!parse} the span is zero-copy. With {!parse_source} it is an owned copy, as
+    for {!take_while_span}. *)
+
 val location : unit -> location
 (** [location ()] returns the current parser location with line and column. Zero
     cost if never called — the line index is built lazily on first use and
