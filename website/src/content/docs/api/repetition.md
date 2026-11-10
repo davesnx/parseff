@@ -255,6 +255,8 @@ let power () =
 
 `Parseff.expression` parses a whole expression from one operator table, in place of one `fold_left` or `fold_right` for each precedence level. The table lists the levels from the lowest to the highest precedence, and takes `infix_left`, `infix_right`, `prefix` and `postfix` operators. The guide "Expressions with precedence" shows a complete parser.
 
+As in `fold_left`, the loop stops after an infix operator and its right operand that together consume no input, and that operator is not applied. This also applies to `infix_right`.
+
 ```ocaml
 val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
 ```

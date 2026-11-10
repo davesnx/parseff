@@ -1198,6 +1198,12 @@ val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
     expression. Prefix operators and right-associative operators go through
     {!rec_}, so [max_depth] limits how many of them nest.
 
+    The loop stops after an infix operator and its right operand that together
+    consume no input, or a postfix operator that consumes no input, and that
+    operator is not applied, as in {!fold_left}. Its {!warn}s and {!Ref.set}s
+    are undone. This also applies to [infix_right]: such an operator does not
+    nest until [max_depth].
+
     [expression] skips no whitespace: skip it in the token parsers and in
     [atom].
 

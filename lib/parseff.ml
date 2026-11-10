@@ -2312,7 +2312,18 @@ type 'a expression = {
   prefixed : bool;
 }
 
-let rec expr_climb c levels = expr_loop c levels (expr_operand c)
+exception Expr_stop
+
+let rec expr_climb c levels = expr_loop c levels (expr_operand c) (-1)
+
+and expr_climb_right c here start =
+  let lhs = expr_operand c in
+  expr_loop c here lhs
+    ( if c.st.pos = start then
+        start
+      else
+        -1
+    )
 
 and expr_operand c =
   if not c.prefixed then
@@ -2359,7 +2370,11 @@ and expr_prefix_ops c frame start rest = function
   | _ :: ops ->
       expr_prefix_ops c frame start rest ops
 
-and expr_loop c levels lhs =
+(* [stop_at] is the start of the first step of the right operand of an
+   [infix_right] whose operator and operand consumed no input, or [-1]. An
+   [infix_right] operator that consumes no input there would nest the same
+   step again, so the loop stops instead. *)
+and expr_loop c levels lhs stop_at =
   match levels with
   | [] ->
       lhs
@@ -2367,17 +2382,21 @@ and expr_loop c levels lhs =
       let st = c.st in
       let frame = State.push_rewind_frame st frame_repeat in
       let start = st.pos in
-      match expr_try_levels c frame lhs levels with
+      match expr_try_levels c frame start stop_at lhs levels with
       | v ->
           State.pop_rewind_frame st frame;
           if st.pos = start then begin
             restore_rewind_frame st frame;
             lhs
           end else
-            expr_loop c levels v
+            expr_loop c levels v (-1)
       | exception Fail ->
           State.pop_rewind_frame st frame;
           if State.frame_committed st frame then raise_notrace Fail;
+          restore_rewind_frame st frame;
+          lhs
+      | exception Expr_stop ->
+          State.pop_rewind_frame st frame;
           restore_rewind_frame st frame;
           lhs
       | exception exn ->
@@ -2385,17 +2404,17 @@ and expr_loop c levels lhs =
           raise exn
     )
 
-and expr_try_levels c frame lhs = function
+and expr_try_levels c frame start stop_at lhs = function
   | [] ->
       raise_notrace Fail
   | ops :: rest as here ->
-      expr_try_ops c frame lhs here rest ops
+      expr_try_ops c frame start stop_at lhs here rest ops
 
-and expr_try_ops c frame lhs here rest = function
+and expr_try_ops c frame start stop_at lhs here rest = function
   | [] ->
-      expr_try_levels c frame lhs rest
+      expr_try_levels c frame start stop_at lhs rest
   | Prefix _ :: ops ->
-      expr_try_ops c frame lhs here rest ops
+      expr_try_ops c frame start stop_at lhs here rest ops
   | Infix_left f :: ops -> (
       match
         let g = f () in
@@ -2404,17 +2423,18 @@ and expr_try_ops c frame lhs here rest = function
       | v ->
           v
       | exception Fail ->
-          expr_next c frame lhs here rest ops
+          expr_next c frame start stop_at lhs here rest ops
     )
   | Infix_right f :: ops -> (
       match
         let g = f () in
-        g lhs (rec_ (fun () -> expr_climb c here))
+        if c.st.pos = stop_at then raise_notrace Expr_stop;
+        g lhs (rec_ (fun () -> expr_climb_right c here start))
       with
       | v ->
           v
       | exception Fail ->
-          expr_next c frame lhs here rest ops
+          expr_next c frame start stop_at lhs here rest ops
     )
   | Postfix f :: ops -> (
       match
@@ -2424,13 +2444,13 @@ and expr_try_ops c frame lhs here rest = function
       | v ->
           v
       | exception Fail ->
-          expr_next c frame lhs here rest ops
+          expr_next c frame start stop_at lhs here rest ops
     )
 
-and expr_next c frame lhs here rest ops =
+and expr_next c frame start stop_at lhs here rest ops =
   if State.frame_committed c.st frame then raise_notrace Fail;
   restore_rewind_frame c.st frame;
-  expr_try_ops c frame lhs here rest ops
+  expr_try_ops c frame start stop_at lhs here rest ops
 
 let expression ~atom table () =
   let c = { st = get_state (); atom; table; prefixed = has_prefix table } in

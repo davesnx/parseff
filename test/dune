@@ -20,5 +20,6 @@
   test_capture
   test_ref
   test_source_each
-  test_numbers)
+  test_numbers
+  test_differential)
  (libraries parseff alcotest re uucp))
