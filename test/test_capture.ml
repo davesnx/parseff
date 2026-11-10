@@ -52,7 +52,12 @@ let array elem () =
   context ~delimited:true "array" (fun () ->
       ignore (char '[');
       ws ();
-      let xs = sep_by elem comma () in
+      let xs =
+        if peek_char () = Some ']' then
+          []
+        else
+          sep_by elem comma ()
+      in
       ws ();
       ignore (char ']');
       xs
@@ -107,6 +112,7 @@ let test_empty_element () =
     Alcotest.(check string) (input ^ ": value") value (show_list pp_elt r);
     Alcotest.check errs (input ^ ": entries") errors (entries d)
   in
+  case "[]" "Ok []" [];
   case "[1, , 3]" "Ok [1; <hole>; 3]" [ (4, "expected integer, found ','") ];
   case "[1, ]" "Ok [1; <hole>]" [ (4, "expected integer, found ']'") ];
   case "[1, ?, 3, @]" "Ok [1; <hole>; 3; <hole>]"
@@ -701,7 +707,7 @@ let test_rollback () =
   Alcotest.(check string) "value" "Ok" (show_error r);
   Alcotest.check errs "entry removed" [] (errors d)
 
-let test_nested_recovery_e5 () =
+let test_nested_recovery_removed () =
   let input = "let a = [1, ?] let b = [2];" in
   let d = Diagnostics.create () in
   let arr_stmt () =
@@ -981,7 +987,8 @@ let () =
           test_case "failure in sync or hole" `Quick
             test_failure_in_sync_or_hole;
           test_case "rollback" `Quick test_rollback;
-          test_case "nested recovery (E5)" `Quick test_nested_recovery_e5;
+          test_case "nested recovery is removed" `Quick
+            test_nested_recovery_removed;
         ]
       );
       ( "capture",
