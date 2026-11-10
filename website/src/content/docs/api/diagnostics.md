@@ -58,7 +58,7 @@ val parse :
 ```ocaml
 Parseff.parse input parser
 ```
-By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `~consume:`Partial` to let the parse stop before the end of the input. `Parseff.parse_source` takes the same arguments.
+By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `` ~consume:`Partial `` to let the parse stop before the end of the input. `Parseff.parse_source` takes the same arguments.
 
 
 ## Example

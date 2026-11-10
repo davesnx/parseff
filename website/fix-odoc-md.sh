@@ -7,7 +7,7 @@
 # Transformations applied:
 #  1. Replace odoc cross-reference links with plain code spans
 #  2. Unescape \= to = and \_ to _
-#  3. Fix backtick-prefixed code spans (``X` -> `` `X ``)
+#  3. Fix code spans that contain backticks (fix-code-spans.sh)
 #  4. Add blank line after closing code fences before text
 #  5. Add blank line after bullet lists before paragraphs
 #  6. Collapse runs of 3+ newlines to exactly 2
@@ -38,11 +38,7 @@ sedi '/^```$/{N;/^```\nlet /s/^```/```ocaml/;}' "$FILE"
 sedi '/^```$/{N;/^```\n(\*/s/^```/```ocaml/;}' "$FILE"
 sedi '/^```$/{N;/^```\nParseff\./s/^```/```ocaml/;}' "$FILE"
 sedi '/^```$/{N;/^```\nand /s/^```/```ocaml/;}' "$FILE"
-# 4. Fix odoc inline code spans that contain backticks:
-#    ``X` at end/mid-line -> `` `X `` (double-backtick code span missing spaces)
-#    Only match when NOT at start of line (excludes code fences ```)
-perl -i -pe 's/(?<=\s)``(?!`)(\S.*?)(?<!`)``/`` `$1 ``/g' "$FILE"
-perl -i -pe 's/(?<=\s)``(?!`)(\S+?)`(?!`)/`` `$1 ``/g' "$FILE"
+"$(dirname "$0")/fix-code-spans.sh" "$FILE"
 
 # 4-6. awk whitespace normalisation
 awk '
