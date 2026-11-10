@@ -249,7 +249,7 @@ parse_value ()
 
 ### `lexeme`
 
-`Parseff.lexeme` runs a parser, then skips what follows the token, and returns the result of the parser. By default it skips whitespace with `Parseff.skip_whitespace`. Pass `~skip` when the grammar also has comments.
+`Parseff.lexeme` runs a parser, then `~skip`, and returns the result of the parser. `~skip` defaults to `Parseff.skip_whitespace`; pass your own when the grammar also has comments.
 
 ```ocaml
 val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
@@ -276,9 +276,7 @@ let pair () =
 
 ### `keyword`
 
-`Parseff.keyword` matches a literal only when the next byte cannot continue an identifier. Use it for reserved words, so that `"let"` does not match the start of `"letter"`. By default ASCII letters, digits and `_` continue an identifier. Pass `~is_ident` to change that set. `~is_ident` receives one byte, not a UTF-8 character. At the end of the input the keyword matches. An empty keyword raises `Invalid_argument`.
-
-In streaming, `keyword` reads the byte after the keyword, so it needs a backtrack window of one byte more than the keyword.
+`Parseff.keyword` matches a literal only when the next byte cannot continue an identifier, so that `"let"` does not match the start of `"letter"`. Pass `~is_ident` to change which bytes continue an identifier. In streaming, `keyword` needs a backtrack window of one byte more than the keyword.
 
 ```ocaml
 val keyword : ?is_ident:(char -> bool) -> string -> unit
@@ -291,15 +289,4 @@ let binding () =
 
 (* Matches "let x" -> "x" *)
 (* Fails on "letter x" at offset 0, expecting "let" *)
-```
-A failure is reported at the start of the keyword and expects the keyword, so it merges with the other alternatives at that position. The comment shows the message of `parse`. In streaming, the `found` text holds only the bytes already read.
-
-```ocaml
-let statement () =
-  Parseff.or_
-    (fun () -> Parseff.keyword "let")
-    (fun () -> Parseff.keyword "in")
-    ()
-
-(* parse fails on "inx": expected "in" or "let", found 'inx' *)
 ```

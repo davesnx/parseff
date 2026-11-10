@@ -64,7 +64,7 @@ let fast_integer () =
 
 ### `take_span`
 
-`Parseff.take_span` reads exactly `n` bytes like `Parseff.take` and returns a `Parseff.span`. Use it for a length-prefixed payload that you pass on without changing it. Under `Parseff.parse_source`, the span is an owned copy. It fails as `take` does: for a short input with `expected 10 bytes, found only 3 (end of input)`, and for a negative `n`.
+`Parseff.take_span` reads exactly `n` bytes like `Parseff.take` and returns a `Parseff.span`. Use it for a length-prefixed payload that you pass on without changing it.
 
 ```ocaml
 val take_span : int -> span
@@ -82,7 +82,7 @@ let () =
 
 ### `recognize_span`
 
-`Parseff.recognize_span` returns the input text that any parser consumed, as a `Parseff.span`. With `Parseff.parse_source` the span is an owned copy, and the input from the start of the parser stays buffered until it returns. See `Parseff.recognize`.
+`Parseff.recognize_span` returns the input text that a parser consumed, as a `Parseff.span`. See `Parseff.recognize`.
 
 ```ocaml
 val recognize_span : (unit -> 'a) -> span
