@@ -599,7 +599,7 @@ let test_parse_consume_all_collects_diagnostics () =
   let parser () =
     Parseff.warn diagnostics "start";
     let _ = Parseff.consume "ok" in
-    Parseff.warn_at diagnostics ~pos:0 "forced";
+    Parseff.warn ~pos:0 diagnostics "forced";
     42
   in
   let outcome = Parseff.parse ~diagnostics "ok" parser in
@@ -836,7 +836,7 @@ let test_warn_into_other_collector_is_a_noop () =
   ( match
       Parseff.parse ~diagnostics:given "" (fun () ->
           Parseff.warn other "x";
-          Parseff.warn_at other ~pos:3 "y";
+          Parseff.warn ~pos:3 other "y";
           Parseff.warn given "z";
           1
       )
@@ -1023,12 +1023,12 @@ let test_consume_default_and_partial () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_warn_at_nonzero_pos () =
+let test_warn_pos_nonzero () =
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
     Parseff.parse ~diagnostics "ab" (fun () ->
         let _ = Parseff.consume "ab" in
-        Parseff.warn_at diagnostics ~pos:5 "at-five";
+        Parseff.warn ~pos:5 diagnostics "at-five";
         42
     )
   in
@@ -2101,7 +2101,7 @@ let () =
             test_error_contains_diagnostics;
           test_case "preserves end_of_input semantics" `Quick
             test_parse_consume_all_preserves_end_of_input_semantics;
-          test_case "warn_at nonzero pos" `Quick test_warn_at_nonzero_pos;
+          test_case "warn ~pos nonzero" `Quick test_warn_pos_nonzero;
           test_case "warn into another collector is a no-op" `Quick
             test_warn_into_other_collector_is_a_noop;
           test_case "collector reset by each parse" `Quick
