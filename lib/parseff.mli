@@ -1273,6 +1273,64 @@ val digit : unit -> int
       ...
     ]} *)
 
+val int : unit -> int
+(** [int ()] parses a decimal integer: an optional [-], then one or more digits
+    [0-9]. It accepts leading zeros. It does not accept [+], [_] separators or a
+    [0x], [0o] or [0b] prefix, and it stops at the first byte that is not a
+    digit, so [int] on ["12ab"] returns [12] and leaves ["ab"].
+
+    Without a digit at the start it fails with [expected integer], and after a
+    [-] with [expected digit]. A value outside [min_int .. max_int] fails at the
+    start of the number with [expected integer in int range]. Both are
+    [Expected] errors, so {!or_} can try another branch. On success [int] does
+    not allocate. In {!parse_source} the number must be shorter than
+    [backtrack_window] bytes, or the parse fails with
+    [Backtrack_window_exceeded] at its start.
+
+    Example:
+    {@ocaml[
+      let n = int () in  (* parses "-42" -> -42 *)
+      ...
+    ]} *)
+
+val float : unit -> float
+(** [float ()] parses a decimal number: an optional [-], one or more digits, an
+    optional fraction ([.] and one or more digits), and an optional exponent
+    ([e] or [E], an optional [+] or [-], and one or more digits). ["42"],
+    ["-0.5"] and ["2.5E-3"] match. It does not accept [+] at the start, [_]
+    separators, [.5], [inf], [nan] or hexadecimal floats.
+
+    Without a digit at the start it fails with [expected number]. A [.] or an
+    exponent marker must be followed by a digit: ["1."] and ["1e"] fail with
+    [expected digit] after the marker. A value too large for a [float] gives
+    [infinity] or [neg_infinity], and a value too small gives [0.]. In
+    {!parse_source} the number must be shorter than [backtrack_window] bytes, or
+    the parse fails with [Backtrack_window_exceeded] at its start.
+
+    Example:
+    {@ocaml[
+      let x = float () in  (* parses "6.02e23" -> 6.02e23 *)
+      ...
+    ]} *)
+
+val hex_int : unit -> int
+(** [hex_int ()] parses one or more hexadecimal digits ([0-9], [a-f], [A-F]) and
+    returns their value. It does not accept a sign, [_] separators or a [0x]
+    prefix. Parse the prefix yourself: [consume "0x" |> ignore; hex_int ()].
+
+    Without a digit at the start it fails with [expected hexadecimal integer]. A
+    value above [max_int] fails at the start of the number with
+    [expected hexadecimal integer in int range]. On success [hex_int] does not
+    allocate. In {!parse_source} the number must be shorter than
+    [backtrack_window] bytes, or the parse fails with
+    [Backtrack_window_exceeded] at its start.
+
+    Example:
+    {@ocaml[
+      let n = hex_int () in  (* parses "ff" -> 255 *)
+      ...
+    ]} *)
+
 val letter : unit -> char
 (** [letter ()] parses an ASCII letter (a-z or A-Z). *)
 
