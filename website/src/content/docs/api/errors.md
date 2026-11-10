@@ -183,8 +183,6 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 
 `Parseff.context` names a construct, for example `"array"`. A failure inside it remembers the constructs that were open, outermost first. `Parseff.cut` says that the construct is decided: after `cut`, a failure inside the construct is not retried by an enclosing `or_`, `many` or `sep_by`. Use `cut` after the token that identifies the construct, such as `let` in a `let` statement. See [`combinators`](./combinators.md).
 
-To report every error of a parse instead of the first, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
-
 
 ## Which error a parse reports
 

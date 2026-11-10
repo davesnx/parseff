@@ -3,10 +3,6 @@
 Use diagnostics when you want to keep parsing and report multiple validation
 problems instead of stopping at the first one.
 
-To collect parse errors and continue after them, see the
-{{:https://davesnx.github.io/parseff/guides/error-recovery/}Error recovery}
-guide.
-
 {1 Types}
 
 {@ocaml skip[

@@ -10,8 +10,6 @@ description: Non-fatal diagnostics and full-consumption runners
 
 Use diagnostics when you want to keep parsing and report multiple validation problems instead of stopping at the first one.
 
-To collect parse errors and continue after them, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
-
 
 ## Types
 

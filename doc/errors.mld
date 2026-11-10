@@ -202,10 +202,6 @@ inside the construct is not retried by an enclosing [or_], [many] or [sep_by].
 Use [cut] after the token that identifies the construct, such as [let] in a
 [let] statement. See {!page:combinators}.
 
-To report every error of a parse instead of the first, see the
-{{:https://davesnx.github.io/parseff/guides/error-recovery/}Error recovery}
-guide.
-
 {1 Which error a parse reports}
 
 When a parse fails, Parseff reports the {e furthest} failure: the failure of any
