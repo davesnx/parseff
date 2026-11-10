@@ -167,7 +167,7 @@ A `Parseff.Ref.set` is undone when its branch backtracks. The rule is the same a
 
 - the failed branch of `Parseff.or_` and `Parseff.one_of`;
 - a failed `Parseff.optional`;
-- the last iteration of `Parseff.many`, `Parseff.sep_by` and `Parseff.fold_left`, the one that fails or consumes nothing;
+- the last iteration of `Parseff.many`, `Parseff.sep_by`, `Parseff.fold_left` and `Parseff.fold_right`, the one that fails or consumes nothing;
 - `Parseff.look_ahead`, also when it succeeds.
 A `set` is kept when its branch succeeds. After `Parseff.commit` or `Parseff.cut` seals a branch, a failure no longer undoes the `set`s in that branch. An outer branch that backtracks still undoes them.
 

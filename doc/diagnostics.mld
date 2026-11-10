@@ -179,8 +179,9 @@ same as for diagnostics:
 
 - the failed branch of {!val:Parseff.or_} and {!val:Parseff.one_of};
 - a failed {!val:Parseff.optional};
-- the last iteration of {!val:Parseff.many}, {!val:Parseff.sep_by} and
-  {!val:Parseff.fold_left}, the one that fails or consumes nothing;
+- the last iteration of {!val:Parseff.many}, {!val:Parseff.sep_by},
+  {!val:Parseff.fold_left} and {!val:Parseff.fold_right}, the one that fails or
+  consumes nothing;
 - {!val:Parseff.look_ahead}, also when it succeeds.
 
 A [set] is kept when its branch succeeds. After {!val:Parseff.commit} or

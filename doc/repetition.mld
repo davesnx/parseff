@@ -237,7 +237,8 @@ let maybe_subtract () =
 
 {!val:Parseff.fold_right} is like {!val:Parseff.fold_left} but combines
 {b right-associatively}. Use [~otherwise] to provide a fallback value when no
-elements match.
+elements match. The loop stops after an operator and element that together
+consume no input, and that pair is not applied.
 
 {@ocaml skip[val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a]}
 

@@ -256,8 +256,8 @@ end
 
     - the failed branch of {!or_} and {!one_of};
     - a failed {!optional};
-    - the last iteration of {!many}, {!sep_by} and {!fold_left}, the one that
-      fails or consumes nothing;
+    - the last iteration of {!many}, {!sep_by}, {!fold_left} and {!fold_right},
+      the one that fails or consumes nothing;
     - {!look_ahead}, also when it succeeds.
 
     A [set] is kept when its branch succeeds. After {!commit} or {!cut} seals a
@@ -1146,7 +1146,10 @@ val fold_right :
     values.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
-    [element] values instead of failing. *)
+    [element] values instead of failing.
+
+    The loop stops after an [op] and [element] that together consume no input,
+    and that pair is not applied. *)
 
 type 'a operator
 (** An operator for {!expression}. Each constructor takes a parser for the
