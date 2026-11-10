@@ -362,6 +362,13 @@ module State = struct
   let[@inline always] set_frame_kind (t : t) frame kind =
     Array.unsafe_set t.frames ((frame * frame_stride) + 1) kind
 
+  let[@inline always] reset_repeat_frame (t : t) frame =
+    let base = frame * frame_stride in
+    let frames = t.frames in
+    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames (base + 1) frame_repeat;
+    Array.unsafe_set frames (base + 2) t.diag_len
+
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
     t.pos <- Array.unsafe_get t.frames base;
@@ -1700,117 +1707,85 @@ let rec_ p =
       st.current_depth <- st.current_depth - 1;
       raise exn
 
+let repeat_stop st frame =
+  restore_rewind_frame st frame;
+  State.pop_rewind_frame st frame
+
+let repeat_fail st frame =
+  if State.frame_committed st frame then begin
+    State.pop_rewind_frame st frame;
+    raise_notrace Fail
+  end;
+  repeat_stop st frame
+
+let rec many_required p acc n =
+  if n <= 0 then
+    acc
+  else
+    many_required p (p () :: acc) (n - 1)
+
 let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
   let st = get_state () in
-  if at_least <= 0 then begin
-    let acc = ref [] in
-    let continue_ref = ref true in
-    while !continue_ref do
-      let frame = State.push_rewind_frame st frame_repeat in
-      let start = st.pos in
-      match p () with
-      | v ->
-          State.pop_rewind_frame st frame;
-          if st.pos = start then begin
-            restore_rewind_frame st frame;
-            continue_ref := false
-          end else
-            acc := v :: !acc
-      | exception Fail ->
-          State.pop_rewind_frame st frame;
-          if State.frame_committed st frame then
-            raise_notrace Fail
-          else begin
-            restore_rewind_frame st frame;
-            continue_ref := false
-          end
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          raise exn
-    done;
-    List.rev !acc
-  end else begin
-    let rec collect_required_rev acc n =
-      if n <= 0 then
-        acc
-      else
-        collect_required_rev (p () :: acc) (n - 1)
-    in
-    let required_rev = collect_required_rev [] at_least in
-    (* Now greedily collect the rest *)
-    let acc = ref [] in
-    let continue_ref = ref true in
-    while !continue_ref do
-      let frame = State.push_rewind_frame st frame_repeat in
-      let start = st.pos in
-      match p () with
-      | v ->
-          State.pop_rewind_frame st frame;
-          if st.pos = start then begin
-            restore_rewind_frame st frame;
-            continue_ref := false
-          end else
-            acc := v :: !acc
-      | exception Fail ->
-          State.pop_rewind_frame st frame;
-          if State.frame_committed st frame then
-            raise_notrace Fail
-          else begin
-            restore_rewind_frame st frame;
-            continue_ref := false
-          end
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          raise exn
-    done;
-    List.rev_append required_rev (List.rev !acc)
-  end
+  let acc = ref (many_required p [] at_least) in
+  let frame = State.push_rewind_frame st frame_repeat in
+  match
+    let start = ref st.pos in
+    while
+      let v = p () in
+      let pos = st.pos in
+      pos <> !start
+      && begin
+        acc := v :: !acc;
+        State.reset_repeat_frame st frame;
+        start := pos;
+        true
+      end
+    do
+      ()
+    done
+  with
+  | () ->
+      repeat_stop st frame;
+      List.rev !acc
+  | exception Fail ->
+      repeat_fail st frame;
+      List.rev !acc
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
 
 let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   let st = get_state () in
   if at_least <= 0 then (
-    let start_frame = State.push_rewind_frame st frame_repeat in
-    match p () with
-    | first ->
-        State.pop_rewind_frame st start_frame;
-        let acc = ref [ first ] in
-        let continue_ref = ref true in
-        while !continue_ref do
-          let frame = State.push_rewind_frame st frame_repeat in
-          let start = st.pos in
-          try
-            let _ = sep () in
-            let v = p () in
-            State.pop_rewind_frame st frame;
-            if st.pos = start then begin
-              restore_rewind_frame st frame;
-              continue_ref := false
-            end else
-              acc := v :: !acc
-          with
-          | Fail ->
-              State.pop_rewind_frame st frame;
-              if State.frame_committed st frame then
-                raise_notrace Fail
-              else begin
-                restore_rewind_frame st frame;
-                continue_ref := false
-              end
-          | exn ->
-              State.pop_rewind_frame st frame;
-              raise exn
-        done;
+    let acc = ref [] in
+    let frame = State.push_rewind_frame st frame_repeat in
+    match
+      acc := [ p () ];
+      State.reset_repeat_frame st frame;
+      let start = ref st.pos in
+      while
+        let _ = sep () in
+        let v = p () in
+        let pos = st.pos in
+        pos <> !start
+        && begin
+          acc := v :: !acc;
+          State.reset_repeat_frame st frame;
+          start := pos;
+          true
+        end
+      do
+        ()
+      done
+    with
+    | () ->
+        repeat_stop st frame;
         List.rev !acc
     | exception Fail ->
-        State.pop_rewind_frame st start_frame;
-        if State.frame_committed st start_frame then
-          raise_notrace Fail
-        else begin
-          restore_rewind_frame st start_frame;
-          []
-        end
+        repeat_fail st frame;
+        List.rev !acc
     | exception exn ->
-        State.pop_rewind_frame st start_frame;
+        State.pop_rewind_frame st frame;
         raise exn
   ) else
     let first = p () in
@@ -1841,35 +1816,34 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     =
   let st = get_state () in
   let acc = ref (p ()) in
-  let continue_ref = ref true in
-  while !continue_ref do
-    let frame = State.push_rewind_frame st frame_repeat in
-    let start = st.pos in
-    match
+  let frame = State.push_rewind_frame st frame_repeat in
+  match
+    let start = ref st.pos in
+    while
       let f = op () in
       let rhs = p () in
-      State.pop_rewind_frame st frame;
-      (f, rhs)
-    with
-    | f, rhs ->
-        if st.pos = start then begin
-          restore_rewind_frame st frame;
-          continue_ref := false
-        end else
-          acc := f !acc rhs
-    | exception Fail ->
-        State.pop_rewind_frame st frame;
-        if State.frame_committed st frame then
-          raise_notrace Fail
-        else begin
-          restore_rewind_frame st frame;
-          continue_ref := false
-        end
-    | exception exn ->
-        State.pop_rewind_frame st frame;
-        raise exn
-  done;
-  !acc
+      st.pos <> !start
+      && begin
+        st.frames_top <- frame;
+        acc := f !acc rhs;
+        st.frames_top <- frame + 1;
+        State.reset_repeat_frame st frame;
+        start := st.pos;
+        true
+      end
+    do
+      ()
+    done
+  with
+  | () ->
+      repeat_stop st frame;
+      !acc
+  | exception Fail when st.frames_top = frame + 1 ->
+      repeat_fail st frame;
+      !acc
+  | exception exn ->
+      if st.frames_top > frame then State.pop_rewind_frame st frame;
+      raise exn
 
 let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
