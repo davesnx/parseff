@@ -599,7 +599,7 @@ let test_parse_consume_all_collects_diagnostics () =
   let parser () =
     Parseff.warn diagnostics "start";
     let _ = Parseff.consume "ok" in
-    Parseff.warn_at diagnostics ~pos:0 "forced";
+    Parseff.warn ~pos:0 diagnostics "forced";
     42
   in
   let outcome = Parseff.parse ~diagnostics "ok" parser in
@@ -836,7 +836,7 @@ let test_warn_into_other_collector_is_a_noop () =
   ( match
       Parseff.parse ~diagnostics:given "" (fun () ->
           Parseff.warn other "x";
-          Parseff.warn_at other ~pos:3 "y";
+          Parseff.warn ~pos:3 other "y";
           Parseff.warn given "z";
           1
       )
@@ -1023,12 +1023,12 @@ let test_consume_default_and_partial () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_warn_at_nonzero_pos () =
+let test_warn_pos_nonzero () =
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
     Parseff.parse ~diagnostics "ab" (fun () ->
         let _ = Parseff.consume "ab" in
-        Parseff.warn_at diagnostics ~pos:5 "at-five";
+        Parseff.warn ~pos:5 diagnostics "at-five";
         42
     )
   in
@@ -1758,6 +1758,46 @@ let test_take_while_span_empty () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_span_to_string_valid () =
+  let buf = "abcdefghijk" in
+  List.iter
+    (fun (off, len, expected) ->
+      Alcotest.(check string)
+        (Printf.sprintf "off %d len %d" off len)
+        expected
+        (Parseff.span_to_string { buf; off; len })
+    )
+    [
+      (3, 0, "");
+      (11, 0, "");
+      (4, 1, "e");
+      (1, 2, "bc");
+      (2, 8, "cdefghij");
+      (1, 9, "bcdefghij");
+      (0, 11, buf);
+    ]
+
+let test_span_to_string_invalid () =
+  List.iter
+    (fun (off, len) ->
+      Alcotest.check_raises (Printf.sprintf "off %d len %d" off len)
+        (Invalid_argument "Parseff.span_to_string") (fun () ->
+          ignore (Parseff.span_to_string { buf = "abc"; off; len })
+      )
+    )
+    [
+      (5, 1);
+      (3, 1);
+      (-1, 1);
+      (2, 2);
+      (-8, 8);
+      (0, -1);
+      (100, 8);
+      (1 lsl 40, 8);
+      (max_int, 2);
+      (1, max_int);
+    ]
+
 let check_location msg expected actual =
   Alcotest.(check int)
     (msg ^ " offset") expected.Parseff.offset actual.Parseff.offset;
@@ -2081,6 +2121,8 @@ let () =
             test_fused_sep_take_missing_value;
           test_case "take_while_span" `Quick test_take_while_span;
           test_case "take_while_span empty" `Quick test_take_while_span_empty;
+          test_case "span_to_string valid" `Quick test_span_to_string_valid;
+          test_case "span_to_string invalid" `Quick test_span_to_string_invalid;
         ]
       );
       ( "diagnostics",
@@ -2101,7 +2143,7 @@ let () =
             test_error_contains_diagnostics;
           test_case "preserves end_of_input semantics" `Quick
             test_parse_consume_all_preserves_end_of_input_semantics;
-          test_case "warn_at nonzero pos" `Quick test_warn_at_nonzero_pos;
+          test_case "warn ~pos nonzero" `Quick test_warn_pos_nonzero;
           test_case "warn into another collector is a no-op" `Quick
             test_warn_into_other_collector_is_a_noop;
           test_case "collector reset by each parse" `Quick

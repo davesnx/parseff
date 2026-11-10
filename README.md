@@ -83,6 +83,7 @@ See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) 
 - [Comparison with Angstrom](https://davesnx.github.io/parseff/guides/comparison/)
 - [A JSON parser](https://davesnx.github.io/parseff/guides/json-parser/)
 - [Expressions with precedence](https://davesnx.github.io/parseff/guides/expression-parser/)
+- [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/)
 
 ## Contributing
 

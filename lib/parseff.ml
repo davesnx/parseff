@@ -13,7 +13,10 @@ let[@inline always] string_slice inp off len total_len =
     String.sub inp off len
 
 let[@inline always] span_to_string s =
-  string_slice s.buf s.off s.len (String.length s.buf)
+  let total_len = String.length s.buf in
+  if s.off < 0 || s.len < 0 || s.off > total_len - s.len then
+    invalid_arg "Parseff.span_to_string";
+  string_slice s.buf s.off s.len total_len
 
 type location = { offset : int; line : int; col : int }
 type range_data = { start : int; stop : int }
@@ -104,6 +107,7 @@ let frame_kind_mask = 3
 let frame_committed_bit = 4
 let frame_pin_bit = 8
 let frame_stride = 3
+let frame_trail_shift = 4
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -156,6 +160,41 @@ type trace_event =
   | Exit of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
+type 'a cell = { mutable value : 'a; mutable owner : bool ref }
+
+type trail =
+  | Undo : {
+      cell : 'a cell;
+      old : 'a;
+      depth : int;
+      token : bool ref;
+      mutable next : trail;
+    }
+      -> trail
+
+let idle_token = ref false
+let dummy_cell = { value = (); owner = idle_token }
+
+let rec not_running =
+  Undo
+    {
+      cell = dummy_cell;
+      old = ();
+      depth = 0;
+      token = idle_token;
+      next = not_running;
+    }
+
+let rec running_empty =
+  Undo
+    {
+      cell = dummy_cell;
+      old = ();
+      depth = 0;
+      token = idle_token;
+      next = running_empty;
+    }
+
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
    [base, input_len) are buffered. [input] is never mutated, only replaced, so
    slices taken from it stay valid after a refill. Memory input has
@@ -172,11 +211,12 @@ type state = {
   mutable far : far;
   mutable ctx_top : int;
   mutable ctx : int array;
+  mutable ctx_names : string array;
   mutable line_index : line_index option;
   source : source option;
   mutable frames : int array;
   mutable frames_top : int;
-  mutable active : bool;
+  mutable trail : trail;
   trace : (trace_event -> unit) option;
 }
 
@@ -198,9 +238,9 @@ let max_young_wosize = 256
 let young_buf_size = (max_young_wosize - 1) * (Sys.word_size / 8)
 let default_backtrack_window = 65_536
 
-let check_backtrack_window w =
+let check_backtrack_window ?(name = "parse_source") w =
   if w < 2 then
-    invalid_arg "Parseff.parse_source: backtrack_window must be at least 2"
+    invalid_arg ("Parseff." ^ name ^ ": backtrack_window must be at least 2")
 
 module Source = struct
   type t = source
@@ -279,11 +319,12 @@ module State = struct
       far = far_none;
       ctx_top = 0;
       ctx = [||];
+      ctx_names = [||];
       line_index = None;
       source;
       frames = [||];
       frames_top = 0;
-      active = false;
+      trail = not_running;
       trace;
     }
 
@@ -300,7 +341,8 @@ module State = struct
 
   type slot = { owner : int; state : t }
 
-  let cache : slot ref = ref { owner = -1; state = none }
+  let no_slot = { owner = -1; state = none }
+  let cache : slot ref = ref no_slot
 
   let[@inline always] install (t : t) =
     let owner = (Domain.self () :> int) in
@@ -320,10 +362,25 @@ module State = struct
       t
     end
 
+  let suspend () =
+    let slot = !cache in
+    Domain.DLS.set key none;
+    cache := no_slot;
+    slot
+
+  let resume (t : t) slot =
+    if slot.owner = (Domain.self () :> int) && slot.state == t then begin
+      Domain.DLS.set key t;
+      cache := slot
+    end else
+      install t
+
   let leave (t : t) (previous : t) =
-    t.active <- false;
+    let (Undo top) = t.trail in
+    if top.token != idle_token then top.token := false;
+    t.trail <- not_running;
     install
-      ( if previous.active then
+      ( if previous.trail != not_running then
           previous
         else
           none
@@ -332,11 +389,25 @@ module State = struct
   let enter (t : t) =
     let previous = current () in
     install t;
-    t.active <- true;
+    t.trail <- running_empty;
     previous
 
   let[@inline always] diag_len (t : t) = t.diag_len
   let[@inline always] diag (t : t) = t.diag
+
+  let[@inline always] trail_depth (t : t) =
+    let (Undo u) = t.trail in
+    u.depth
+
+  let[@inline never] undo_trail (t : t) saved =
+    let rec go (Undo u as node) =
+      if u.depth > saved then begin
+        u.cell.value <- u.old;
+        go u.next
+      end else
+        t.trail <- node
+    in
+    go t.trail
 
   let push_rewind_frame (t : t) kind =
     let index = t.frames_top in
@@ -350,7 +421,8 @@ module State = struct
     end;
     let frames = t.frames in
     Array.unsafe_set frames base t.pos;
-    Array.unsafe_set frames (base + 1) kind;
+    Array.unsafe_set frames (base + 1)
+      (kind lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) (diag_len t);
     t.frames_top <- index + 1;
     index
@@ -367,7 +439,10 @@ module State = struct
     <> 0
 
   let[@inline always] set_frame_kind (t : t) frame kind =
-    Array.unsafe_set t.frames ((frame * frame_stride) + 1) kind
+    let slot = (frame * frame_stride) + 1 in
+    let flags = Array.unsafe_get t.frames slot in
+    Array.unsafe_set t.frames slot
+      (flags land lnot (frame_kind_mask lor frame_committed_bit) lor kind)
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
@@ -381,7 +456,9 @@ module State = struct
           ()
       );
       t.diag_len <- saved
-    end
+    end;
+    let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
+    if trail_depth t > saved then undo_trail t saved
 
   let rec commit_nearest_from (t : t) i =
     i >= 0
@@ -586,8 +663,17 @@ let[@inline never] append st ~floor chunk n =
   st.input_len <- st.input_len + n
 
 let[@inline never] read_source st src buf off len =
-  let n = src.read buf off len in
-  State.install st;
+  let slot = State.suspend () in
+  let n =
+    match src.read buf off len with
+    | n ->
+        n
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        State.resume st slot;
+        Printexc.raise_with_backtrace exn bt
+  in
+  State.resume st slot;
   if n < 0 || n > len then
     invalid_arg
       (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);
@@ -953,6 +1039,7 @@ let[@inline never] fail_negative_count st n =
   fail_str st st.pos negative_count_kind (string_of_int n)
 let label_value = "value"
 let label_regex = "text matching the pattern"
+let label_varint = "varint up to max_int"
 
 let[@inline never] far_commit_reset st = st.far <- far_none
 
@@ -1241,6 +1328,22 @@ let[@inline never] handle_any_int8 st =
   end else
     fail_int st st.pos (bytes_kind 1)
 
+let[@inline never] handle_any_varint st =
+  let start = st.pos in
+  let i = ref 0 in
+  let acc = ref 0 in
+  let continue = ref true in
+  while !continue do
+    if not (have st (!i + 1)) then fail_int st (start + !i) (bytes_kind 1);
+    let b = Char.code (char_at st (start + !i)) in
+    if !i = 8 && b > 0x3F then fail_str st start tag_label label_varint;
+    acc := !acc lor ((b land 0x7F) lsl (7 * !i));
+    incr i;
+    continue := b >= 0x80
+  done;
+  st.pos <- start + !i;
+  !acc
+
 let[@inline never] handle_any_int16 st endian =
   if have st 2 then begin
     let pos = st.pos - st.base in
@@ -1271,6 +1374,23 @@ let[@inline never] handle_any_int32 st endian =
   end else
     fail_int st st.pos (bytes_kind 4)
 
+let[@inline never] handle_any_uint32 st endian =
+  if have st 4 then begin
+    let pos = st.pos - st.base in
+    let v =
+      match endian with
+      | Big ->
+          (String.get_uint16_be st.input pos lsl 16)
+          lor String.get_uint16_be st.input (pos + 2)
+      | Little ->
+          (String.get_uint16_le st.input (pos + 2) lsl 16)
+          lor String.get_uint16_le st.input pos
+    in
+    st.pos <- st.pos + 4;
+    v
+  end else
+    fail_int st st.pos (bytes_kind 4)
+
 let[@inline never] handle_any_int64 st endian =
   if have st 8 then begin
     let pos = st.pos - st.base in
@@ -1289,6 +1409,14 @@ let[@inline never] handle_any_int64 st endian =
 let[@inline never] handle_take st n =
   if have st n then begin
     let s = slice st st.pos n in
+    st.pos <- st.pos + n;
+    s
+  end else
+    fail_bytes st n
+
+let[@inline never] handle_take_span st n =
+  if have st n then begin
+    let s = span st st.pos n in
     st.pos <- st.pos + n;
     s
   end else
@@ -1565,11 +1693,9 @@ let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     st.diag_len <- st.diag_len + 1
   end
 
-let[@inline] warn_at c ~pos value = record_diagnostic c (get_state ()) pos value
-
-let[@inline] warn c value =
+let[@inline] warn ?pos c value =
   let st = get_state () in
-  record_diagnostic c st st.pos value
+  record_diagnostic c st (match pos with Some p -> p | None -> st.pos) value
 
 let[@inline] commit () =
   let st = get_state () in
@@ -1584,6 +1710,13 @@ let take n =
     let st = get_state () in
     handle_take st n
   end
+
+let take_span n =
+  let st = get_state () in
+  if n < 0 then
+    fail_negative_count st n
+  else
+    handle_take_span st n
 
 let or_ left right () =
   let st = get_state () in
@@ -1659,12 +1792,16 @@ let look_ahead p =
 
 let ctx_stride = 2
 let ctx_cut_bit = 1
+let ctx_delimited_bit = 2
 
 let[@inline never] ctx_grow st =
   let old = st.ctx in
   let meta = Array.make (imax 16 (2 * Array.length old)) 0 in
   Array.blit old 0 meta 0 (Array.length old);
-  st.ctx <- meta
+  st.ctx <- meta;
+  let names = Array.make (Array.length meta / ctx_stride) "" in
+  Array.blit st.ctx_names 0 names 0 (Array.length st.ctx_names);
+  st.ctx_names <- names
 
 let[@inline never] far_contribute f d name start delimited =
   if f.chain_pos <> f.pos then begin
@@ -1689,7 +1826,10 @@ let[@inline always] context_run st delimited name p =
   let start = st.pos in
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
-  Array.unsafe_set st.ctx (m + 1) 0;
+  Array.unsafe_set st.ctx (m + 1)
+    ((start lsl 2) lor (Bool.to_int delimited * ctx_delimited_bit));
+  if Array.unsafe_get st.ctx_names d != name then
+    Array.unsafe_set st.ctx_names d name;
   st.ctx_top <- d + 1;
   match p () with
   | v ->
@@ -2400,6 +2540,10 @@ let[@inline] any_int8 () =
   let st = get_state () in
   handle_any_int8 st
 
+let[@inline] any_varint () =
+  let st = get_state () in
+  handle_any_varint st
+
 let[@inline] binary_any_int16 endian () =
   let st = get_state () in
   handle_any_int16 st endian
@@ -2407,6 +2551,10 @@ let[@inline] binary_any_int16 endian () =
 let[@inline] binary_any_int32 endian () =
   let st = get_state () in
   handle_any_int32 st endian
+
+let[@inline] binary_any_uint32 endian () =
+  let st = get_state () in
+  handle_any_uint32 st endian
 
 let[@inline] binary_any_int64 endian () =
   let st = get_state () in
@@ -2460,6 +2608,7 @@ module BE = struct
     v land 0xFFFF
 
   let[@inline] any_int32 () = binary_any_int32 Big ()
+  let[@inline] any_uint32 () = binary_any_uint32 Big ()
   let[@inline] any_int64 () = binary_any_int64 Big ()
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
@@ -2476,6 +2625,7 @@ module LE = struct
     v land 0xFFFF
 
   let[@inline] any_int32 () = binary_any_int32 Little ()
+  let[@inline] any_uint32 () = binary_any_uint32 Little ()
   let[@inline] any_int64 () = binary_any_int64 Little ()
   let[@inline] any_float () = Int32.float_of_bits (any_int32 ())
   let[@inline] any_double () = Int64.float_of_bits (any_int64 ())
@@ -3771,12 +3921,12 @@ let extras_span pos (x : fail_extra) =
   else
     { start = imin x.from pos; stop = imax x.from pos }
 
-let error_of_far st =
+let error_of_far st outer =
   let f = st.far in
   let pos = f.pos in
   if pos < 0 then
     failwith "Parseff: internal error: failure without a recorded position";
-  let frames = far_chain st in
+  let frames = outer @ far_chain st in
   match f.extra with
   | Payload e when f.special = special_user ->
       build st ~pos (Custom e) { start = pos; stop = pos } frames
@@ -3797,9 +3947,77 @@ let error_of_far st =
 let error_plain st pos kind frames =
   build st ~pos kind { start = pos; stop = pos } frames
 
-let error_failure st pos msg (x : fail_extra) =
+let error_failure st pos msg (x : fail_extra) outer =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes (Failure msg) span x.chain
+  build st ~pos:span.start ~notes:x.notes (Failure msg) span (outer @ x.chain)
+
+let outer_contexts st pos =
+  let acc = ref [] in
+  for d = st.ctx_top - 1 downto 0 do
+    let m = d * ctx_stride in
+    let flags = Array.unsafe_get st.ctx (m + 1) in
+    let start = flags lsr 2 in
+    if pos > start then
+      acc :=
+        ( Array.unsafe_get st.ctx_names d,
+          start,
+          flags land ctx_delimited_bit <> 0
+        )
+        :: !acc
+  done;
+  !acc
+
+let capture_rewind st frame saved e =
+  restore_rewind_frame st frame;
+  State.pop_rewind_frame st frame;
+  st.far <- saved;
+  Stdlib.Error e
+
+let capture p =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      Stdlib.Ok v
+  | exception Fail ->
+      capture_rewind st frame saved
+        (error_of_far st (outer_contexts st st.far.pos))
+  | exception User_failure (pos, msg, x) ->
+      capture_rewind st frame saved
+        (error_failure st pos msg x (outer_contexts st pos))
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let recover errors ~sync parser hole =
+  let st = get_state () in
+  if st.diag != errors.self then
+    invalid_arg
+      "Parseff.recover: errors is not the collector given to the runner";
+  if not (have st 1) then
+    parser ()
+  else
+    let start = st.pos in
+    match capture parser with
+    | Ok v ->
+        v
+    | Error e ->
+        record_diagnostic errors st e.range.start e;
+        sync ();
+        if st.pos = start then begin
+          let p = imax start e.range.start in
+          st.pos <- p;
+          fill_uchar st ~keep_from:p p;
+          if p < st.input_len then
+            st.pos <-
+              p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+        end;
+        hole e
 
 let run_detailed st thunk =
   let previous = State.enter st in
@@ -3808,9 +4026,9 @@ let run_detailed st thunk =
     | v ->
         Stdlib.Ok v
     | exception Fail ->
-        Stdlib.Error (error_of_far st)
+        Stdlib.Error (error_of_far st [])
     | exception User_failure (pos, msg, x) ->
-        Stdlib.Error (error_failure st pos msg x)
+        Stdlib.Error (error_failure st pos msg x [])
     | exception Depth_limit_exceeded a ->
         Stdlib.Error
           (error_plain st a.at
@@ -3882,3 +4100,105 @@ let parse_source ?(max_depth = 128)
       run_detailed st parser
   | _ ->
       run_slow st ~consume ~diagnostics parser
+
+let parse_source_each ?(max_depth = 128)
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    (src : Source.t) (parser : unit -> 'a) =
+  check_backtrack_window ~name:"parse_source_each" backtrack_window;
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let element () =
+    if have st 1 then
+      Some (parser ())
+    else
+      None
+  in
+  let forced = ref 0 in
+  let ended = ref false in
+  let raised = ref false in
+  let rec node i () =
+    if !raised then
+      invalid_arg
+        "Parseff.parse_source_each: the sequence stopped after an exception";
+    if !forced <> i then
+      invalid_arg "Parseff.parse_source_each: a node was forced twice";
+    forced := i + 1;
+    if !ended then begin
+      Option.iter diagnostics_clear diagnostics;
+      Seq.Nil
+    end else begin
+      st.far <- far_none;
+      let start = st.pos in
+      raised := true;
+      let r = run_slow st ~consume:`Partial ~diagnostics element in
+      raised := false;
+      match r with
+      | Ok None ->
+          ended := true;
+          Seq.Nil
+      | Ok (Some _) when st.pos = start ->
+          ended := true;
+          Seq.Cons
+            ( Error
+                (error_plain st start (Failure "the parser consumed no input")
+                   []
+                ),
+              node (i + 1)
+            )
+      | Ok (Some v) ->
+          Seq.Cons (Ok v, node (i + 1))
+      | Error e ->
+          ended := true;
+          Seq.Cons (Error e, node (i + 1))
+    end
+  in
+  node 0
+
+module Ref = struct
+  type 'a t = 'a cell
+
+  let create value = { value; owner = idle_token }
+  let get c = c.value
+
+  let set c value =
+    let st = State.current () in
+    let (Undo top) = st.trail in
+    let token =
+      if top.token != idle_token || st.trail == not_running then
+        top.token
+      else begin
+        let token = ref true in
+        st.trail <-
+          Undo
+            {
+              cell = dummy_cell;
+              old = ();
+              depth = top.depth;
+              token;
+              next = running_empty;
+            };
+        token
+      end
+    in
+    let owner = c.owner in
+    if owner != token then begin
+      if !owner then
+        invalid_arg "Parseff.Ref.set: another running parse uses this cell";
+      c.owner <- token
+    end;
+    if st.frames_top > 0 then begin
+      let next = st.trail in
+      let (Undo u) = next in
+      if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
+        u.next <- running_empty;
+      st.trail <-
+        Undo
+          {
+            cell = c;
+            old = c.value;
+            depth = State.trail_depth st + 1;
+            token;
+            next;
+          }
+    end;
+    c.value <- value
+end
