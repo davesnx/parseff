@@ -1,6 +1,6 @@
 ## Unreleased
 
-- **Fix `span_to_string` reading outside its buffer.** A span with a length of 1 whose offset is outside the buffer returned a byte from outside the string. It now raises `Invalid_argument`, as other invalid spans do.
+- **`span_to_string` checks the range of a span.** A span whose offset is outside its buffer, such as `{ buf = "abc"; off = 5; len = 1 }`, returned a byte from outside the string, and a far offset such as `off = min_int` crashed the process with a segmentation fault. Every out-of-range span now raises `Invalid_argument "Parseff.span_to_string"`. This includes an empty span with an out-of-range offset, such as `{ buf = "abc"; off = 4; len = 0 }`, which returned `""`. Other invalid spans raised `Invalid_argument "String.sub / Bytes.sub"` and now raise the new message. Spans that the library returns are not affected.
 - **`render_error` counts terminal cells.** Carets, note dashes and the `╭─╯` bar count the cells a character takes in a terminal, not its code points. A wide character such as `名` takes two cells and a combining mark takes none, so the caret sits under the failure on lines with CJK text, emoji or accents.
 
 ## 0.5.0

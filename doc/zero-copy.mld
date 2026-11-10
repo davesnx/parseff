@@ -19,6 +19,9 @@ prefixes. In-memory {!val:Parseff.parse} still keeps the zero-copy behavior.
 
 {@ocaml skip[val span_to_string : span -> string]}
 
+{!val:Parseff.span_to_string} raises [Invalid_argument] if the span is not a
+valid range of its buffer.
+
 {1 Span-based operations}
 
 {2 [take_while_span]}
