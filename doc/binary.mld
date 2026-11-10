@@ -45,16 +45,11 @@ integer, from [0] to [4294967295], returned as [int].
 {@ocaml skip[val any_int32 : unit -> int32]}
 {@ocaml skip[val any_uint32 : unit -> int]}
 
-{@ocaml skip[
+{@ocaml[
 let png_chunk_length () = Parseff.BE.any_int32 ()
 let elf_entry_point () = Parseff.LE.any_int32 ()
 let zip_entry_size () = Parseff.LE.any_uint32 ()
 ]}
-
-Use [any_uint32] for a length or a size, and pass the result to
-{!val:Parseff.take} without a conversion. Where [int] has fewer than 33 bits,
-such as on 32-bit OCaml or js_of_ocaml, a value above [max_int] does not fit,
-and the result is wrong with no error.
 
 {2 [any_int64]}
 
@@ -70,35 +65,20 @@ let timestamp () = Parseff.LE.any_int64 ()   (* 64-bit Unix timestamp *)
 {2 [any_varint]}
 
 {!val:Parseff.any_varint} reads an unsigned LEB128 varint, a variable-length
-integer. Each byte gives 7 bits, least significant first, and a byte below
-[0x80] ends the number: [\x01] is [1] and [\xAC\x02] is [300].
+integer: [\x01] is [1] and [\xAC\x02] is [300]. A value above [max_int] fails,
+so a negative Protocol Buffers [int32] or [int64] is rejected. There is no
+zigzag reader; decode a zigzag value with [(n lsr 1) lxor (- (n land 1))].
 
 {@ocaml skip[val any_varint : unit -> int]}
 
-{@ocaml skip[
+{@ocaml[
 let protobuf_bytes_field () =
   let len = Parseff.any_varint () in
   Parseff.take len
+
+let () =
+  assert (Parseff.parse "\xAC\x02" Parseff.any_varint = Ok 300)
 ]}
-
-The value must fit in a non-negative [int], so a varint takes at most 9 bytes
-and the 9th byte is at most [0x3F]. A longer or larger varint fails at its first
-byte with [expected varint up to max_int]. An encoding padded with extra [0x80]
-bytes is accepted while it fits in 9 bytes. Input that ends inside a varint
-fails with [expected 1 byte, found end of input] at the end of the input.
-
-In Protocol Buffers, [any_varint] reads a [uint32], a non-negative [int32] or
-[int64], and a [uint64] below 2^62. It rejects a negative [int32] or [int64],
-which Protocol Buffers writes as 10 bytes, and a [uint64] from 2^62, with
-[expected varint up to max_int]. In WebAssembly, it reads the unsigned LEB128 of
-indices and sizes, but not the signed LEB128 of [i32.const] and [i64.const].
-
-There is no signed or zigzag reader. Decode a zigzag value with
-[(n lsr 1) lxor (- (n land 1))].
-
-These limits assume a 63-bit [int]. Where [int] is smaller, such as on 32-bit
-OCaml or js_of_ocaml, a value above [max_int] can give a wrong result instead
-of an error, and the result of a varint longer than 5 bytes is unspecified.
 
 {1 Floating-point parsers}
 
@@ -173,12 +153,8 @@ let payload () =
 let chunk_type () = Parseff.take 4
 ]}
 
-{!val:Parseff.take_span} reads [n] bytes like [take] and returns a
-{!type:Parseff.span}. With {!val:Parseff.parse} the span points into the input,
-so a large payload is not copied. With {!val:Parseff.parse_source} it is an
-owned copy. It fails as [take] does. See {{!page-"zero-copy"}Zero-copy API}.
-
-{@ocaml skip[val take_span : int -> span]}
+{!val:Parseff.take_span} returns a span instead, so that {!val:Parseff.parse}
+does not copy the bytes. See {{!page-"zero-copy"}Zero-copy API}.
 
 {1 Mixing with text primitives}
 
