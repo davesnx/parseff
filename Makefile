@@ -54,23 +54,18 @@ format-check: ## Checks if format is correct
 
 .PHONY: create-switch
 create-switch: ## Create opam switch
-	opam switch create . 5.3.0 --deps-only --with-test -y
+	opam switch create . 5.5.2 --deps-only --with-test -y
 
 .PHONY: install
 install: ## Install dependencies
 	opam install . --deps-only --with-test --with-doc --with-dev-setup -y
-
-.PHONY: pin
-pin: ## Pin dependencies
-	opam pin odoc-parser https://github.com/davesnx/odoc.git#markdown-types -y
-	opam pin odoc https://github.com/davesnx/odoc.git#markdown-types -y
 
 .PHONY: setup-githooks
 setup-githooks: ## Setup githooks
 	git config core.hooksPath .githooks
 
 .PHONY: init
-init: setup-githooks create-switch pin install ## Create a local dev enviroment
+init: setup-githooks create-switch install ## Create a local dev enviroment
 
 BENCH_FILES := $(wildcard bench/bench_*.ml)
 BENCH_NAMES := $(patsubst bench/bench_%.ml,bench-%,$(BENCH_FILES))
