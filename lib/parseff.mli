@@ -124,6 +124,8 @@ type error = private {
       *)
   contexts : context list;  (** Open constructs, outermost first. *)
   notes : note list;
+  help : string option;
+      (** The text given with [~help] in {!val:fail} or {!val:error}. *)
   excerpt : excerpt;
 }
 (** A parse error: what failed, where, and what the parser was doing.
@@ -165,18 +167,19 @@ val render_error :
     [input.json: byte N: [error] ...] and there is no excerpt. The columns of
     the header and of the [* while parsing] lines count Unicode characters (code
     points), while [location.col] counts bytes, so they differ on a line with
-    non-ASCII text. In streaming, when the start of a line is no longer buffered
-    and [source] is not given, the character column is not known: the header is
-    then [input.json: byte N: [error] ...] too, the excerpt of the error line is
-    still printed, cut on the left with [...], and a [* while parsing] line says
-    [from byte N]. Carets count terminal cells, so a wide character such as [名]
-    takes two and a combining mark takes none, and a control byte, an invalid
-    UTF-8 byte or a C1 control prints in the excerpt as the escape
-    {!val:error_message} uses, such as [\x1B], with as many carets as the escape
-    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error ends with a [* help:] line. The rows the renderer adds never end with
-    a space, and source text is printed byte for byte. The result has no
-    trailing newline. *)
+    non-ASCII text. In streaming, when the start of the error line is no longer
+    buffered and [source] is not given, the header still has the line and the
+    character column, because Parseff counts the characters of the line that it
+    drops. The excerpt of the error line is then cut on the left with [...], and
+    a [* while parsing] line for a context that starts in the dropped part of
+    the line says [from byte N]. Carets count terminal cells, so a wide
+    character such as [名] takes two and a combining mark takes none, and a
+    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
+    the escape {!val:error_message} uses, such as [\x1B], with as many carets as
+    the escape has characters. An error with a [help] text ends with a [* help:]
+    line, and so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded]
+    error. The rows the renderer adds never end with a space, and source text is
+    printed byte for byte. The result has no trailing newline. *)
 
 (** {1 Diagnostics} *)
 
@@ -210,6 +213,10 @@ end
     diagnostic from {!warn}. Only the value in the cell is restored, so store
     immutable values, such as a [Map] or a list. A parse does not reset the
     cell: set the start value before each parse.
+
+    A {!Ref.set} costs more than a write to a plain [ref]. It fits state that
+    changes a few times in a construct, such as declarations, more than a write
+    for each token.
 
     {@ocaml[
     let names = Ref.create []
@@ -454,17 +461,26 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     operation. Returns the taken string. Much more efficient than calling each
     step separately when parsing separated values. *)
 
-val fail : ?from:int -> ?notes:note list -> string -> 'a
-(** [fail ?from ?notes msg] aborts parsing with a [Failure msg] error.
+val fail :
+  ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
+(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failure msg]
+    error.
 
-    [~from] makes the error cover the bytes from [from] up to the current
-    position instead of a single position, and [~notes] attaches {!type:note}s.
-    {!render_error} underlines the span and prints the notes. This is intended
-    for user-initiated validation failures (e.g. a parsed value is out of
-    range). In streaming, a [~from] older than the buffered input is kept as the
+    [~from] and [~upto] make the error cover the bytes from [from] to [upto]
+    instead of a single position, and [~notes] attaches {!type:note}s. Each of
+    them defaults to the current position, and each can be before or after it.
+    If [from] is after [upto], the two are swapped, so the range is never
+    reversed. The error is located at the start of the range. {!render_error}
+    underlines the range and prints the notes. [~help] tells the user how to
+    correct the input. {!render_error} prints it as a ["* help:"] line after the
+    notes. This is intended for user-initiated validation failures (e.g. a
+    parsed value is out of range).
+
+    In streaming, a range start older than the buffered input is kept as the
     position of the error. Its line cannot be known, so {!render_error} prints
     [byte N] instead of a line and column and shows no excerpt, unless [~source]
-    is given.
+    is given. A range end past the buffered input is kept as given.
+    {!render_error} underlines up to the end of the line it can show.
 
     {@ocaml[
     let byte () =
@@ -496,9 +512,15 @@ val fail : ?from:int -> ?notes:note list -> string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : ?from:int -> ?notes:note list -> custom_error -> 'a
-(** [error ?from ?notes e] aborts parsing with a user-defined error value.
-    [~from] and [~notes] work as in {!fail}.
+val error :
+  ?from:int ->
+  ?upto:int ->
+  ?notes:note list ->
+  ?help:string ->
+  custom_error ->
+  'a
+(** [error ?from ?upto ?notes ?help e] aborts parsing with a user-defined error
+    value. [~from], [~upto], [~notes] and [~help] work as in {!fail}.
 
     The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
     of {!type:custom_error} for rich error reporting:
