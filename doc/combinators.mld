@@ -203,7 +203,7 @@ change what the parser accepts. A failure that happens inside it remembers which
 constructs were open, outermost first, so an error report can say
 "while parsing array".
 
-{@ocaml skip[val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a]}
+{@ocaml skip[val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a]}
 
 {@ocaml[
 let array_parser value () =
