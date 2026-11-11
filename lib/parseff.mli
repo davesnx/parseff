@@ -992,7 +992,10 @@ val fold_right :
     values.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
-    [element] values instead of failing. *)
+    [element] values instead of failing.
+
+    The loop stops after an [op] and [element] that together consume no input,
+    and that pair is not applied. *)
 
 type 'a operator
 (** An operator for {!expression}. Each constructor takes a parser for the
