@@ -1654,6 +1654,79 @@ let test_error_from_and_notes () =
   | _ ->
       Alcotest.fail "expected a Custom error positioned at the span start"
 
+let test_fail_help () =
+  let parser () =
+    Parseff.context "comparison" (fun () ->
+        ignore (Parseff.consume "a ");
+        let start = Parseff.position () in
+        ignore (Parseff.consume "!=");
+        Parseff.fail ~from:start
+          ~notes:[ { Parseff.at = None; text = "'!' is not an operator" } ]
+          ~help:"write '~=' for \"not equal\"" "unexpected '!='"
+    )
+  in
+  match Parseff.parse "a != b" parser with
+  | Stdlib.Error e ->
+      Alcotest.(check (option string))
+        "help field" (Some "write '~=' for \"not equal\"") e.help;
+      Alcotest.(check string)
+        "rendered"
+        (lines
+           [
+             "1:3: [error] unexpected '!='";
+             "1 | a != b";
+             "  |   ^^";
+             "  * while parsing comparison, from 1:1";
+             "  * note: '!' is not an operator";
+             "  * help: write '~=' for \"not equal\"";
+           ]
+        )
+        (Parseff.render_error e)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
+let test_error_help () =
+  let input = String.concat "\n" (List.init 12 (fun _ -> "x")) in
+  let parser () =
+    ignore (Parseff.take_while (fun c -> c <> 'z'));
+    Parseff.error ~help:"add a final newline" Boom
+  in
+  ( match Parseff.parse input parser with
+  | Stdlib.Error ({ kind = Custom Boom; _ } as e) ->
+      Alcotest.(check string)
+        "gutter follows the line number width"
+        (lines
+           [
+             "12:2: [error] boom!";
+             "11 | x";
+             "12 | x";
+             "   |  ^";
+             "   * help: add a final newline";
+           ]
+        )
+        (Parseff.render_error ~custom:(function Boom -> "boom!" | _ -> "?") e)
+  | _ ->
+      Alcotest.fail "expected a Custom error"
+  );
+  ( match
+      Parseff.parse ~consume:`Partial input (fun () ->
+          Parseff.capture (fun () ->
+              Parseff.or_ parser (fun () -> Parseff.consume "q") ()
+          )
+      )
+    with
+  | Stdlib.Ok (Stdlib.Error e) ->
+      Alcotest.(check (option string))
+        "kept by capture" (Some "add a final newline") e.help
+  | _ ->
+      Alcotest.fail "expected a captured error"
+  );
+  match Parseff.parse "x" (fun () -> Parseff.error Boom) with
+  | Stdlib.Error e ->
+      Alcotest.(check (option string)) "no help" None e.help
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+
 let test_fail_frames () =
   let parser () =
     Parseff.context ~delimited:true "outer" (fun () ->
@@ -3534,6 +3607,8 @@ let () =
           test_case "underline on earlier lines" `Quick
             test_secondary_underline_earlier_lines;
           test_case "error ~from ~notes" `Quick test_error_from_and_notes;
+          test_case "fail ~help" `Quick test_fail_help;
+          test_case "error ~help" `Quick test_error_help;
           test_case "fail contexts" `Quick test_fail_frames;
           test_case "match_regex label" `Quick test_match_regex_label;
           test_case "note on a dropped line" `Quick test_note_on_dropped_line;

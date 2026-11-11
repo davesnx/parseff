@@ -124,6 +124,8 @@ type error = private {
       *)
   contexts : context list;  (** Open constructs, outermost first. *)
   notes : note list;
+  help : string option;
+      (** The text given with [~help] in {!val:fail} or {!val:error}. *)
   excerpt : excerpt;
 }
 (** A parse error: what failed, where, and what the parser was doing.
@@ -173,10 +175,10 @@ val render_error :
     takes two and a combining mark takes none, and a control byte, an invalid
     UTF-8 byte or a C1 control prints in the excerpt as the escape
     {!val:error_message} uses, such as [\x1B], with as many carets as the escape
-    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error ends with a [* help:] line. The rows the renderer adds never end with
-    a space, and source text is printed byte for byte. The result has no
-    trailing newline. *)
+    has characters. An error with a [help] text ends with a [* help:] line, and
+    so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded] error. The
+    rows the renderer adds never end with a space, and source text is printed
+    byte for byte. The result has no trailing newline. *)
 
 (** {1 Diagnostics} *)
 
@@ -454,17 +456,18 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     operation. Returns the taken string. Much more efficient than calling each
     step separately when parsing separated values. *)
 
-val fail : ?from:int -> ?notes:note list -> string -> 'a
-(** [fail ?from ?notes msg] aborts parsing with a [Failure msg] error.
+val fail : ?from:int -> ?notes:note list -> ?help:string -> string -> 'a
+(** [fail ?from ?notes ?help msg] aborts parsing with a [Failure msg] error.
 
     [~from] makes the error cover the bytes from [from] up to the current
     position instead of a single position, and [~notes] attaches {!type:note}s.
-    {!render_error} underlines the span and prints the notes. This is intended
-    for user-initiated validation failures (e.g. a parsed value is out of
-    range). In streaming, a [~from] older than the buffered input is kept as the
-    position of the error. Its line cannot be known, so {!render_error} prints
-    [byte N] instead of a line and column and shows no excerpt, unless [~source]
-    is given.
+    {!render_error} underlines the span and prints the notes. [~help] tells the
+    user how to correct the input. {!render_error} prints it as a ["* help:"]
+    line after the notes. This is intended for user-initiated validation
+    failures (e.g. a parsed value is out of range). In streaming, a [~from]
+    older than the buffered input is kept as the position of the error. Its line
+    cannot be known, so {!render_error} prints [byte N] instead of a line and
+    column and shows no excerpt, unless [~source] is given.
 
     {@ocaml[
     let byte () =
@@ -496,9 +499,9 @@ val fail : ?from:int -> ?notes:note list -> string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : ?from:int -> ?notes:note list -> custom_error -> 'a
-(** [error ?from ?notes e] aborts parsing with a user-defined error value.
-    [~from] and [~notes] work as in {!fail}.
+val error : ?from:int -> ?notes:note list -> ?help:string -> custom_error -> 'a
+(** [error ?from ?notes ?help e] aborts parsing with a user-defined error value.
+    [~from], [~notes] and [~help] work as in {!fail}.
 
     The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
     of {!type:custom_error} for rich error reporting:
