@@ -1025,7 +1025,8 @@ val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
     skip it in the token parsers and in [atom].
 
     The operators are tried in table order. When one token starts another, such
-    as [!] and [!=], list the longer token first.
+    as [!] and [!=], list the longer token first. The loop stops after an
+    operator and operand that together consume no input, as in {!fold_left}.
 
     Example:
     {@ocaml[
