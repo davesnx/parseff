@@ -1848,7 +1848,7 @@ let[@inline] end_of_input () =
   let st = get_state () in
   if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
-let take_while ?(at_least = 0) ?label pred =
+let[@inline] take_while ?(at_least = 0) ?label pred =
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_while st ~keep_from:start start pred in
@@ -2772,10 +2772,8 @@ let hex_integer () =
   let st = get_state () in
   handle_hex_integer st
 
-let letter () =
-  satisfy
-    (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
-    ~label:"letter"
+let is_letter_char c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+let[@inline] letter () = satisfy is_letter_char ~label:"letter"
 
 let[@inline always] is_whitespace c =
   c <= ' ' && (c = ' ' || c = '\t' || c = '\n' || c = '\r')
@@ -2793,7 +2791,7 @@ let[@inline always] scan_whitespace st ~keep_from start =
   else
     scan_while_refilling st ~keep_from (!i + base) is_whitespace
 
-let whitespace ?(at_least = 0) () =
+let[@inline] whitespace ?(at_least = 0) () =
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_whitespace st ~keep_from:start start in
@@ -2819,7 +2817,7 @@ let[@inline] skip_whitespace () =
     st.pos <-
       scan_while_refilling st ~keep_from:no_keep (!i + base) is_whitespace
 
-let lexeme ?(skip = skip_whitespace) p =
+let[@inline] lexeme ?(skip = skip_whitespace) p =
   let v = p () in
   skip ();
   v
@@ -2848,14 +2846,13 @@ let keyword ?(is_ident = is_ident_byte) s =
   else
     fail_str_cold st pos tag_literal s
 
-let alphanum () =
-  satisfy
-    (fun c ->
-      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-    )
-    ~label:"alphanumeric"
+let is_alphanum_char c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+
+let[@inline] alphanum () = satisfy is_alphanum_char ~label:"alphanumeric"
 
 let label_any_char = "any character"
+let always_true _ = true
 
 let[@inline] any_char () =
   let st = get_state () in
@@ -2864,7 +2861,7 @@ let[@inline] any_char () =
     st.pos <- p + 1;
     char_at st p
   end else
-    satisfy_slow st (fun _ -> true) label_any_char
+    satisfy_slow st always_true label_any_char
 
 let[@inline] any_uint8 () =
   let st = get_state () in
@@ -2965,7 +2962,7 @@ module Utf8 = struct
       st.pos <- p + 1;
       Uchar.unsafe_of_int (Char.code (char_at st p))
     end else
-      satisfy_uchar_slow st (fun _ -> true) label_any_char
+      satisfy_uchar_slow st always_true label_any_char
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in

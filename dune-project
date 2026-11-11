@@ -54,7 +54,7 @@
   ;; Documentation dependencies
   (odoc
    (and
-    (>= 3.1.0)
+    (>= 3.2.1)
     :with-doc))
   (odoc-parser :with-doc)
   (mdx :with-test)
