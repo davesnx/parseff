@@ -536,10 +536,20 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
     parsing. [warn ~pos diagnostics d] records it at the byte offset [pos].
     [diagnostics] must be the collector given to the runner as [~diagnostics];
-    for any other collector [warn] does nothing. A diagnostic recorded in a
-    branch that backtracks is removed with the branch. This includes a
-    successful {!look_ahead}, and a repetition iteration that succeeds without
-    consuming input. *)
+    for any other collector [warn] does nothing.
+
+    A diagnostic lives as long as the input position that it was recorded at.
+    When a parser fails and the position goes back, the diagnostics recorded
+    since that position are removed. This holds for a branch of {!or_} or
+    {!one_of}, an iteration of {!many}, {!optional}, and a {!capture} or
+    {!recover} whose parser fails. It also holds for a successful {!look_ahead},
+    and for a repetition iteration that succeeds without consuming input. A
+    {!Ref.set} is undone in the same cases.
+
+    Thus a diagnostic recorded inside a construct is lost when an enclosing
+    {!capture} or {!recover} fails later: only the error of the enclosing
+    construct stays. This rule is final. To keep the inner diagnostics, use
+    {!capture_with} or [recover ~choose]. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -670,10 +680,12 @@ val capture : (unit -> 'a) -> ('a, error) result
     {!fail} or {!val-error}, [capture] returns [Error e], where [e] is the
     furthest failure inside [parser], built as {!parse} builds an error. The
     position then goes back to where [capture] started, and the diagnostics that
-    [parser] recorded are removed. A {!cut} or {!commit} in [parser] does not
-    reach past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded]
-    are not caught. In {!parse_source}, the input that [parser] reads must fit
-    in [~backtrack_window].
+    [parser] recorded are removed, also those of a {!capture} or {!recover}
+    inside [parser] that recovered. This rule is final; {!capture_with} returns
+    the removed diagnostics. A {!cut} or {!commit} in [parser] does not reach
+    past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
+    not caught. In {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window].
 
     Example:
     {@ocaml[
@@ -688,7 +700,37 @@ val capture : (unit -> 'a) -> ('a, error) result
           Hole
     ]} *)
 
+val capture_with :
+  'd Diagnostics.t ->
+  (unit -> 'a) ->
+  ('a, error * 'd Diagnostics.entry list) result
+(** [capture_with diagnostics parser] is {!capture}, and on failure it also
+    returns the diagnostics that [parser] recorded in [diagnostics] and that the
+    failure removed, in the order they were recorded. The diagnostics are
+    removed as with {!capture}. To keep one, record it again:
+    [warn ~pos:d.pos diagnostics d.value] gives the same entry.
+
+    The list is empty when [diagnostics] is not the collector given to the
+    runner.
+
+    Example:
+    {@ocaml[
+    let statement_or_hole errors () =
+      match capture_with errors statement with
+      | Ok s ->
+          s
+      | Error (e, inner) ->
+          List.iter
+            (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
+            inner;
+          if inner = [] then warn ~pos:e.range.start errors e;
+          skip_while (fun c -> c <> ';');
+          let _ = char ';' in
+          Hole
+    ]} *)
+
 val recover :
+  ?choose:(error -> error list -> error list) ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -698,6 +740,22 @@ val recover :
     [parser] fails with the error [e], [recover] records [e] in [errors], calls
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
+
+    The errors that [parser] recorded in [errors] before it failed are removed,
+    as with {!capture}: only [e] stays. [~choose] changes this. [choose e inner]
+    gets [e] and the removed errors in the order they were recorded, and returns
+    the errors to record, in order. [recover] records each one at its
+    [range.start], also when it was recorded at another offset with [warn ~pos].
+    The default is [fun e _ -> [ e ]]. To keep the inner errors and drop the
+    error that they caused:
+
+    {@ocaml[
+    let inner_wins e inner =
+      if inner = [] then
+        [ e ]
+      else
+        inner
+    ]}
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
