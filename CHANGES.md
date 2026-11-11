@@ -5,6 +5,7 @@
 - **Add `capture` and `recover`.** `capture p` returns the failure of `p` as a value. `recover errors ~sync p hole` records the error, skips input with `sync` and returns `hole e`, so one parse can report every error. See the error recovery guide.
 - **Add `expression`.** Parses operators by precedence from a table of `infix_left`, `infix_right`, `prefix` and `postfix` levels.
 - **Add trace mode.** `parse ~trace` and `parse_source ~trace` report when each `context` starts, returns or fails. `print_trace` prints the events as a tree.
+- **Add `peek_with` and `skip_to`.** `peek_with p` runs `p`, returns its value and the position where it stopped, and puts the position back. `skip_to` moves to that position. A parser with a token lookahead reads each token once with them, and backtracks without its own save and restore.
 - **Add `with_range`, `recognize` and `recognize_span`.** They return the range or the text that a parser consumed.
 - **Add `lexeme` and `keyword`.** `lexeme p` skips whitespace after `p`. `keyword "let"` matches `let` but not `letter`.
 - **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.

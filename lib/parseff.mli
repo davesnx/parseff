@@ -662,6 +662,78 @@ val look_ahead : (unit -> 'a) -> 'a
     (* position hasn't moved *)
     ]} *)
 
+val peek_with : (unit -> 'a) -> 'a * int
+(** [peek_with parser] runs [parser] and returns its value with the position
+    where it stopped. It consumes no input: the position stays where it was
+    before. Fails if [parser] fails.
+
+    Only the position is put back. This differs from {!look_ahead}: diagnostics
+    recorded by [parser] with {!warn} and {!Ref} writes made by [parser] stay,
+    and a {!commit} or {!cut} inside [parser] acts as if it were called outside
+    it. The rule is the same when [parser] succeeds, fails or raises, and the
+    same in {!parse} and {!parse_source}. An enclosing combinator that
+    backtracks removes them, as it does for all parsers. When [parser] succeeds,
+    the failures of its probes are forgotten, as in {!look_ahead}.
+
+    Use it with {!skip_to} to read a token once: look at the token, decide, then
+    move after it without a second scan. A parser with one token of lookahead
+    keeps the last result with the position where it was read. The position is
+    all that a rewind must put back, so {!or_}, {!many}, {!capture} and
+    {!recover} work with it.
+
+    {@ocaml[
+    type token = Name of string | Symbol of char | End
+
+    let token () =
+      skip_whitespace ();
+      match peek_char () with
+      | None ->
+          End
+      | Some 'a' .. 'z' ->
+          Name (take_while (fun c -> c >= 'a' && c <= 'z'))
+      | Some c ->
+          ignore (any_char ());
+          Symbol c
+
+    let read_at = ref (-1)
+    let current = ref End
+    let stop = ref 0
+
+    let peek () =
+      let here = position () in
+      if !read_at <> here then begin
+        let t, after = peek_with token in
+        read_at := here;
+        current := t;
+        stop := after
+      end;
+      !current
+
+    let advance () =
+      ignore (peek ());
+      skip_to !stop
+    ]}
+
+    Set [read_at] to [-1] before each parse.
+
+    With this cache, do not call {!warn} or {!Ref.set} in [token]. A rewind
+    removes what [token] recorded, and the cache then answers for that position
+    without a second run of [token]. Return the error of a token in its value,
+    and record it with {!warn} in [advance].
+
+    In {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window]. This includes the whitespace and comments that it skips
+    before the token. *)
+
+val skip_to : int -> unit
+(** [skip_to target] moves the position forward to [target], an absolute offset
+    as {!position} returns it. It reads nothing and never fails. Use it with a
+    position that {!peek_with} returned.
+
+    Raises [Invalid_argument] if [target] is before the position, or after the
+    input that the parse has read. Each offset from the position to one that
+    {!peek_with} returned is in the input read. *)
+
 val capture : (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
