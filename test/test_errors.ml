@@ -1532,6 +1532,99 @@ let test_fail_from_after_position_is_normalized () =
     (lines [ "input.json:1:2: [error] short"; "1 | abcdef"; "  |  ^^" ])
     (render_error "abcdef" parser)
 
+let range_of input parser =
+  match Parseff.parse ~consume:`Partial input parser with
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error (e : Parseff.error) ->
+      (e.range.start, e.range.stop)
+
+let check_range label expected actual =
+  Alcotest.(check (pair int int)) label expected actual
+
+let test_fail_upto_before_position () =
+  let parser () =
+    ignore (Parseff.consume "abcd");
+    Parseff.fail ~from:1 ~upto:3 "inner"
+  in
+  check_range "from and upto" (1, 3) (range_of "abcdef" parser);
+  check_render "underline ends at upto"
+    (lines [ "input.json:1:2: [error] inner"; "1 | abcdef"; "  |  ^^" ])
+    (render_error "abcdef" parser);
+  let parser () =
+    ignore (Parseff.consume "abcd");
+    Parseff.fail ~upto:1 "upto only"
+  in
+  check_range "upto alone ends at the position" (1, 4) (range_of "abcdef" parser);
+  check_render "upto alone"
+    (lines [ "input.json:1:2: [error] upto only"; "1 | abcdef"; "  |  ^^^" ])
+    (render_error "abcdef" parser)
+
+let test_fail_upto_after_position () =
+  let parser () =
+    ignore (Parseff.consume "ab");
+    Parseff.fail ~upto:5 "ahead"
+  in
+  check_range "upto after the position" (2, 5) (range_of "abcdef" parser);
+  check_render "underline reaches past the position"
+    (lines [ "input.json:1:3: [error] ahead"; "1 | abcdef"; "  |   ^^^" ])
+    (render_error "abcdef" parser);
+  let parser () = Parseff.fail ~from:4 ~upto:6 "both ahead" in
+  check_range "from and upto after the position" (4, 6)
+    (range_of "abcdef" parser);
+  check_render "both ahead"
+    (lines [ "input.json:1:5: [error] both ahead"; "1 | abcdef"; "  |     ^^" ])
+    (render_error "abcdef" parser)
+
+let test_upto_reversed_pair_is_swapped () =
+  let parser () =
+    ignore (Parseff.consume "abc");
+    Parseff.fail ~from:5 ~upto:1 "reversed"
+  in
+  check_range "fail swaps the pair" (1, 5) (range_of "abcdef" parser);
+  check_render "reversed pair"
+    (lines [ "input.json:1:2: [error] reversed"; "1 | abcdef"; "  |  ^^^^" ])
+    (render_error "abcdef" parser);
+  let parser () =
+    ignore (Parseff.consume "ab");
+    Parseff.error ~from:4 ~upto:0 Boom
+  in
+  match Parseff.parse ~consume:`Partial "abcdef" parser with
+  | Stdlib.Error ({ kind = Custom Boom; _ } as e) ->
+      check_range "error swaps the pair" (0, 4) (e.range.start, e.range.stop);
+      check_render "custom error"
+        (lines [ "1:1: [error] boom!"; "1 | abcdef"; "  | ^^^^" ])
+        (Parseff.render_error ~custom:(function Boom -> "boom!" | _ -> "?") e)
+  | _ ->
+      Alcotest.fail "expected a Custom error"
+
+let test_error_upto_through_backtracking () =
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.error ~from:2 ~upto:0 Boom)
+      (fun () -> Parseff.char 'z')
+      ()
+  in
+  check_range "absorbed custom error keeps its range" (0, 2)
+    (range_of "abc" parser);
+  let captured () =
+    match
+      Parseff.capture (fun () ->
+          ignore (Parseff.consume "ab");
+          Parseff.fail ~upto:0 "captured"
+      )
+    with
+    | Stdlib.Error (e : Parseff.error) ->
+        (e.range.start, e.range.stop)
+    | Stdlib.Ok () ->
+        (-1, -1)
+  in
+  match Parseff.parse ~consume:`Partial "abc" captured with
+  | Stdlib.Ok r ->
+      check_range "capture keeps the range" (0, 2) r
+  | Stdlib.Error _ ->
+      Alcotest.fail "expected capture to return the error"
+
 let test_error_inside_a_code_point_points_at_it () =
   let input = "\xce\xbb\xc3\xa9x" in
   let parser () =
@@ -2994,6 +3087,39 @@ let test_no_excerpt_rows_are_indented_by_two () =
      )
     )
 
+let test_upto_past_the_buffer () =
+  let input = "hello world, this is a long line\nnext line" in
+  let parser () =
+    ignore (Parseff.consume "hel");
+    Parseff.fail ~upto:20 "ahead"
+  in
+  ( match
+      Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
+    with
+  | Stdlib.Error (e : Parseff.error) ->
+      Alcotest.(check (pair int int))
+        "range is kept as given" (3, 20)
+        (e.range.start, e.range.stop);
+      Alcotest.(check (option (pair int int)))
+        "location is the range start"
+        (Some (1, 4))
+        (Option.map (fun (l : Parseff.location) -> (l.line, l.col)) e.location)
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  );
+  check_render "underline stops at the buffered text"
+    (lines [ "input:1:4: [error] ahead"; "1 | hello w..."; "  |    ^^^^" ])
+    (render_stream ~name:"input" input parser);
+  check_render "~source underlines the whole range"
+    (lines
+       [
+         "input:1:4: [error] ahead";
+         "1 | hello world, this is a long line";
+         "  |    ^^^^^^^^^^^^^^^^^";
+       ]
+    )
+    (render_stream ~name:"input" ~source:input input parser)
+
 let test_limits_keep_frames_and_give_help () =
   let rec nest () =
     Parseff.rec_ (fun () ->
@@ -3599,6 +3725,14 @@ let () =
           test_case "fail ~from span" `Quick test_fail_from_span;
           test_case "span is normalized" `Quick
             test_fail_from_after_position_is_normalized;
+          test_case "fail ~upto before the position" `Quick
+            test_fail_upto_before_position;
+          test_case "fail ~upto after the position" `Quick
+            test_fail_upto_after_position;
+          test_case "reversed ~from ~upto is swapped" `Quick
+            test_upto_reversed_pair_is_swapped;
+          test_case "error ~upto through backtracking" `Quick
+            test_error_upto_through_backtracking;
           test_case "note line" `Quick test_loose_note;
           test_case "error inside a code point" `Quick
             test_error_inside_a_code_point_points_at_it;
@@ -3612,6 +3746,8 @@ let () =
           test_case "fail contexts" `Quick test_fail_frames;
           test_case "match_regex label" `Quick test_match_regex_label;
           test_case "note on a dropped line" `Quick test_note_on_dropped_line;
+          test_case "~upto past the buffered input" `Quick
+            test_upto_past_the_buffer;
         ]
       );
       ( "public errors",

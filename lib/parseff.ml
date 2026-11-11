@@ -96,6 +96,7 @@ type custom_error = ..
 exception Fail
 type fail_extra = {
   from : int;
+  upto : int;
   notes : note_data list;
   help : string option;
   mutable depth : int;
@@ -187,7 +188,11 @@ type trace_event =
   | Exit of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
-type 'a cell = { mutable value : 'a; mutable owner : bool ref }
+type 'a cell = {
+  mutable value : 'a;
+  mutable owner : bool ref;
+  mutable mark : int;
+}
 
 type trail =
   | Undo : {
@@ -200,7 +205,7 @@ type trail =
       -> trail
 
 let idle_token = ref false
-let dummy_cell = { value = (); owner = idle_token }
+let dummy_cell = { value = (); owner = idle_token; mark = 0 }
 
 let rec not_running =
   Undo
@@ -437,6 +442,7 @@ module State = struct
     let rec go (Undo u as node) =
       if u.depth > saved then begin
         u.cell.value <- u.old;
+        u.cell.mark <- 0;
         go u.next
       end else
         t.trail <- node
@@ -1849,7 +1855,7 @@ let[@inline] end_of_input () =
   let st = get_state () in
   if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
-let take_while ?(at_least = 0) ?label pred =
+let[@inline] take_while ?(at_least = 0) ?label pred =
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_while st ~keep_from:start start pred in
@@ -1893,20 +1899,20 @@ let[@inline] match_regex ?label re =
   let st = get_state () in
   handle_match_regex st re label
 
-let[@inline] fail ?(from = -1) ?(notes = []) ?help msg =
+let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
   let st = get_state () in
   raise
     (User_failure
-       (st.pos, msg, { from; notes; help; depth = st.ctx_top; chain = [] })
+       (st.pos, msg, { from; upto; notes; help; depth = st.ctx_top; chain = [] })
     )
 
-let[@inline] error ?(from = -1) ?(notes = []) ?help e =
+let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
   let st = get_state () in
-  if from < 0 && notes == [] && help == None then
+  if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
   else
     fail_user st st.pos
-      (Payload_ext (e, { from; notes; help; depth = 0; chain = [] }))
+      (Payload_ext (e, { from; upto; notes; help; depth = 0; chain = [] }))
 
 let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     (value : d) =
@@ -2776,10 +2782,8 @@ let hex_integer () =
   let st = get_state () in
   handle_hex_integer st
 
-let letter () =
-  satisfy
-    (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
-    ~label:"letter"
+let is_letter_char c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+let[@inline] letter () = satisfy is_letter_char ~label:"letter"
 
 let[@inline always] is_whitespace c =
   c <= ' ' && (c = ' ' || c = '\t' || c = '\n' || c = '\r')
@@ -2797,7 +2801,7 @@ let[@inline always] scan_whitespace st ~keep_from start =
   else
     scan_while_refilling st ~keep_from (!i + base) is_whitespace
 
-let whitespace ?(at_least = 0) () =
+let[@inline] whitespace ?(at_least = 0) () =
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_whitespace st ~keep_from:start start in
@@ -2823,7 +2827,7 @@ let[@inline] skip_whitespace () =
     st.pos <-
       scan_while_refilling st ~keep_from:no_keep (!i + base) is_whitespace
 
-let lexeme ?(skip = skip_whitespace) p =
+let[@inline] lexeme ?(skip = skip_whitespace) p =
   let v = p () in
   skip ();
   v
@@ -2852,14 +2856,13 @@ let keyword ?(is_ident = is_ident_byte) s =
   else
     fail_str_cold st pos tag_literal s
 
-let alphanum () =
-  satisfy
-    (fun c ->
-      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-    )
-    ~label:"alphanumeric"
+let is_alphanum_char c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+
+let[@inline] alphanum () = satisfy is_alphanum_char ~label:"alphanumeric"
 
 let label_any_char = "any character"
+let always_true _ = true
 
 let[@inline] any_char () =
   let st = get_state () in
@@ -2868,7 +2871,7 @@ let[@inline] any_char () =
     st.pos <- p + 1;
     char_at st p
   end else
-    satisfy_slow st (fun _ -> true) label_any_char
+    satisfy_slow st always_true label_any_char
 
 let[@inline] any_uint8 () =
   let st = get_state () in
@@ -2969,7 +2972,7 @@ module Utf8 = struct
       st.pos <- p + 1;
       Uchar.unsafe_of_int (Char.code (char_at st p))
     end else
-      satisfy_uchar_slow st (fun _ -> true) label_any_char
+      satisfy_uchar_slow st always_true label_any_char
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
@@ -4269,10 +4272,19 @@ let build st ~pos ?(notes = []) ?help kind span frames =
   }
 
 let extras_span pos (x : fail_extra) =
-  if x.from < 0 then
-    { start = pos; stop = pos }
-  else
-    { start = imin x.from pos; stop = imax x.from pos }
+  let a =
+    if x.from < 0 then
+      pos
+    else
+      x.from
+  in
+  let z =
+    if x.upto < 0 then
+      pos
+    else
+      x.upto
+  in
+  { start = imin a z; stop = imax a z }
 
 let error_of_far st outer =
   let f = st.far in
@@ -4500,7 +4512,7 @@ let parse_source_each ?(max_depth = 128)
 module Ref = struct
   type 'a t = 'a cell
 
-  let create value = { value; owner = idle_token }
+  let create value = { value; owner = idle_token; mark = 0 }
   let get c = c.value
 
   let set c value =
@@ -4527,22 +4539,23 @@ module Ref = struct
     if owner != token then begin
       if !owner then
         invalid_arg "Parseff.Ref.set: another running parse uses this cell";
-      c.owner <- token
+      c.owner <- token;
+      c.mark <- 0
     end;
-    if st.frames_top > 0 then begin
+    let top = st.frames_top in
+    if
+      top > 0
+      && c.mark
+         <= Array.unsafe_get st.frames (((top - 1) * frame_stride) + 1)
+            lsr frame_trail_shift
+    then begin
       let next = st.trail in
       let (Undo u) = next in
       if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
         u.next <- running_empty;
-      st.trail <-
-        Undo
-          {
-            cell = c;
-            old = c.value;
-            depth = State.trail_depth st + 1;
-            token;
-            next;
-          }
+      let depth = u.depth + 1 in
+      c.mark <- depth;
+      st.trail <- Undo { cell = c; old = c.value; depth; token; next }
     end;
     c.value <- value
 end
