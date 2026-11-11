@@ -549,7 +549,7 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
     Thus a diagnostic recorded inside a construct is lost when an enclosing
     {!capture} or {!recover} fails later: only the error of the enclosing
     construct stays. This rule is final. To keep the inner diagnostics, use
-    {!capture_with} or [recover ~choose]. *)
+    {!capture_with}. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -730,7 +730,6 @@ val capture_with :
     ]} *)
 
 val recover :
-  ?choose:(error -> error list -> error list) ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -742,20 +741,7 @@ val recover :
     [hole e].
 
     The errors that [parser] recorded in [errors] before it failed are removed,
-    as with {!capture}: only [e] stays. [~choose] changes this. [choose e inner]
-    gets [e] and the removed errors in the order they were recorded, and returns
-    the errors to record, in order. [recover] records each one at its
-    [range.start], also when it was recorded at another offset with [warn ~pos].
-    The default is [fun e _ -> [ e ]]. To keep the inner errors and drop the
-    error that they caused:
-
-    {@ocaml[
-    let inner_wins e inner =
-      if inner = [] then
-        [ e ]
-      else
-        inner
-    ]}
+    as with {!capture}: only [e] stays. To keep them, use {!capture_with}.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,

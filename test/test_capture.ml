@@ -893,55 +893,6 @@ let test_capture_with_scope () =
   Alcotest.(check string) "other collector" "Ok" (show_error r);
   Alcotest.(check (list string)) "entry removed" [] (values d)
 
-let test_recover_choose () =
-  let d = Diagnostics.create () in
-  let calls = ref 0 in
-  let counted choose e inner =
-    incr calls;
-    choose e inner
-  in
-  let run ?(pos = at_start) choose =
-    let r =
-      parse ~diagnostics:d lost_input
-        (lost_top (fun () ->
-             recover d ~choose:(counted choose) ~sync:to_line_end
-               (lost_call d ~pos) ignore
-         )
-        )
-    in
-    Alcotest.(check string) "value" "Ok" (show_error r);
-    entries d
-  in
-  let inner_wins e inner =
-    if inner = [] then
-      [ e ]
-    else
-      inner
-  in
-  Alcotest.check entry_list "the default choice"
-    [ (16, no_closer) ]
-    (run (fun e _ -> [ e ]));
-  Alcotest.check entry_list "inner wins" [ (12, unfinished) ] (run inner_wins);
-  Alcotest.check entry_list "both, in the returned order"
-    [ (12, unfinished); (16, no_closer) ]
-    (run (fun e inner -> inner @ [ e ]));
-  Alcotest.check entry_list "none" [] (run (fun _ _ -> []));
-  Alcotest.check entry_list "an entry recorded at another offset moves"
-    [ (12, unfinished) ]
-    (run ~pos:at_stop inner_wins);
-  calls := 0;
-  let r =
-    parse ~diagnostics:d "print(\"hi\")" (fun () ->
-        recover d
-          ~choose:(counted (fun e _ -> [ e ]))
-          ~sync:to_line_end
-          (lost_call d ~pos:at_start)
-          ignore
-    )
-  in
-  Alcotest.(check string) "success" "Ok" (show_error r);
-  Alcotest.(check int) "choose is not called on success" 0 !calls
-
 let test_nested_recovery_removed () =
   let input = "let a = [1, ?] let b = [2];" in
   let d = Diagnostics.create () in
@@ -1227,7 +1178,6 @@ let () =
           test_case "inner error is removed" `Quick test_inner_error_removed;
           test_case "capture_with" `Quick test_capture_with;
           test_case "capture_with scope" `Quick test_capture_with_scope;
-          test_case "recover ~choose" `Quick test_recover_choose;
         ]
       );
       ( "capture",

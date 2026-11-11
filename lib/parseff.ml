@@ -4369,28 +4369,7 @@ let capture_with c p =
       far_merge st saved;
       raise exn
 
-let recover_sync st start ~sync hole (e : error) =
-  sync ();
-  if st.pos = start then begin
-    let p = imax start e.range.start in
-    st.pos <- p;
-    fill_uchar st ~keep_from:p p;
-    if p < st.input_len then
-      st.pos <- p + imin (char_len st.input (p - st.base)) (st.input_len - p)
-  end;
-  hole e
-
-let recover_choose st start choose errors ~sync parser hole =
-  match capture_with errors parser with
-  | Ok v ->
-      v
-  | Error (e, inner) ->
-      List.iter
-        (fun (x : error) -> record_diagnostic errors st x.range.start x)
-        (choose e (List.map (fun (d : error diagnostic_entry) -> d.value) inner));
-      recover_sync st start ~sync hole e
-
-let recover ?choose errors ~sync parser hole =
+let recover errors ~sync parser hole =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4399,17 +4378,21 @@ let recover ?choose errors ~sync parser hole =
     parser ()
   else
     let start = st.pos in
-    match choose with
-    | Some choose ->
-        recover_choose st start choose errors ~sync parser hole
-    | None -> (
-        match capture parser with
-        | Ok v ->
-            v
-        | Error e ->
-            record_diagnostic errors st e.range.start e;
-            recover_sync st start ~sync hole e
-      )
+    match capture parser with
+    | Ok v ->
+        v
+    | Error e ->
+        record_diagnostic errors st e.range.start e;
+        sync ();
+        if st.pos = start then begin
+          let p = imax start e.range.start in
+          st.pos <- p;
+          fill_uchar st ~keep_from:p p;
+          if p < st.input_len then
+            st.pos <-
+              p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+        end;
+        hole e
 
 let run_detailed st ~all thunk =
   let previous = State.enter st in
