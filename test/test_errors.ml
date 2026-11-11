@@ -649,6 +649,62 @@ let test_context_start_offsets () =
   in
   Alcotest.(check string) "offsets" "second@2" (contexts_of "abcdx" parser)
 
+let test_context_given_start () =
+  let input = "call ( x y )" in
+  let word () =
+    Parseff.skip_whitespace ();
+    Parseff.take_while ~at_least:1 ~label:"word" (fun c -> c >= 'a' && c <= 'z')
+  in
+  let parser () =
+    ignore (word ());
+    Parseff.skip_whitespace ();
+    let opener = Parseff.position () in
+    ignore (Parseff.char '(');
+    ignore (word ());
+    Parseff.context ~delimited:true ~start:opener "argument list" (fun () ->
+        Parseff.skip_whitespace ();
+        ignore (Parseff.char ')')
+    )
+  in
+  Alcotest.(check string) "start" "argument list@5!" (contexts_of input parser);
+  ( match Parseff.parse input parser with
+  | Error e ->
+      Alcotest.(check string)
+        "rendering"
+        "1:10: [error] expected ')', found 'y'\n\
+         1 | call ( x y )\n\
+        \  |          ^\n\
+        \  * while parsing argument list, from 1:6"
+        (Parseff.render_error ~source:input e)
+  | Ok () ->
+      Alcotest.fail "expected an error"
+  );
+  let fails_at_entry () =
+    ignore (Parseff.consume "ab");
+    Parseff.context ~start:0 "early" (fun () -> ignore (Parseff.consume "c"))
+  in
+  Alcotest.(check string)
+    "reported when the failure is at the entry" "early@0"
+    (contexts_of "abx" fails_at_entry);
+  let invalid start () =
+    ignore (Parseff.consume "ab");
+    Parseff.context ~start "bad" (fun () -> ())
+  in
+  List.iter
+    (fun start ->
+      Alcotest.check_raises (Printf.sprintf "start %d" start)
+        (Invalid_argument
+           "Parseff.context: start is not between 0 and the position"
+        ) (fun () -> ignore (Parseff.parse "ab" (invalid start))
+      )
+    )
+    [ -1; 3 ];
+  match Parseff.parse "ab" (invalid 2) with
+  | Ok () ->
+      ()
+  | Error _ ->
+      Alcotest.fail "start at the position is valid"
+
 let test_context_siblings_do_not_leak () =
   let parser () =
     Parseff.context "a" (fun () -> ignore (Parseff.consume "x"));
@@ -3888,6 +3944,7 @@ let () =
           test_case "chain after a context closes" `Quick
             test_context_chain_after_frame_closes;
           test_case "start offsets" `Quick test_context_start_offsets;
+          test_case "given start" `Quick test_context_given_start;
           test_case "siblings do not leak" `Quick
             test_context_siblings_do_not_leak;
           test_case "tie keeps the first chain" `Quick

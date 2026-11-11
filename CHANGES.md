@@ -11,6 +11,7 @@
 - **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
+- **Add `context ~start`.** The position where the construct starts, for a parser that has already consumed the opening token.
 - **Add `?upto` to `fail` and `error`.** `~from` and `~upto` set the start and the end of the error range. Each defaults to the current position and can be before or after it. A reversed pair is swapped, so the range is never reversed.
 - **Fix `span_to_string` reading outside its buffer.** A span with an offset outside its buffer returned a wrong byte or crashed the process. It now raises `Invalid_argument`.
 - **Fix `expression` with an `infix_right` operator that consumes no input.** It failed with a depth-limit error. It now stops, as `fold_left` does.

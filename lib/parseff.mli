@@ -781,13 +781,19 @@ val commit : unit -> unit
         ()
     ]} *)
 
-val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
-(** [context ?delimited name parser] runs [parser] inside a named construct. The
-    name is kept for the error report: a parse that fails inside [parser] can
-    say which constructs were open at the furthest failure, outermost first.
+val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
+(** [context ?delimited ?start name parser] runs [parser] inside a named
+    construct. The name is kept for the error report: a parse that fails inside
+    [parser] can say which constructs were open at the furthest failure,
+    outermost first.
 
     [~delimited:true] marks a construct that has an opening token, such as an
     array or a block. An error renderer can then point to where it was opened.
+
+    [~start] is the position where the construct starts. The default is the
+    current position. Give it when the opening token is already consumed, for
+    example by a lexer that reads one token ahead. [context] raises
+    [Invalid_argument] when [start] is negative or after the current position.
 
     A construct is only reported when the failure is strictly past the place
     where it started. A [context] whose parser fails at its first byte, such as

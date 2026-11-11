@@ -2130,10 +2130,9 @@ let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
     ignore (State.seal_frames st ~floor:0)
 
-let[@inline always] context_run st delimited name p =
+let[@inline always] context_run st delimited start name p =
   let d = st.ctx_top in
   if (d + 1) * ctx_stride > Array.length st.ctx then ctx_grow st;
-  let start = st.pos in
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
   Array.unsafe_set st.ctx (m + 1)
@@ -2173,10 +2172,9 @@ let[@inline never] trace_emit st f event =
       State.resume st;
       Printexc.raise_with_backtrace exn bt
 
-let[@inline never] context_traced st f delimited name p =
-  let start = st.pos in
+let[@inline never] context_traced st f delimited start name p =
   trace_emit st f (Enter { name; pos = start });
-  match context_run st delimited name p with
+  match context_run st delimited start name p with
   | v ->
       trace_emit st f (Exit { name; start; stop = st.pos });
       v
@@ -2188,13 +2186,21 @@ let[@inline never] context_traced st f delimited name p =
       trace_emit st f (Fail { name; start; pos = st.pos });
       Printexc.raise_with_backtrace exn bt
 
-let context ?(delimited = false) name p =
+let[@inline never] context_start st start =
+  if start < 0 || start > st.pos then
+    invalid_arg "Parseff.context: start is not between 0 and the position";
+  start
+
+let context ?(delimited = false) ?start name p =
   let st = get_state () in
+  let start =
+    match start with None -> st.pos | Some start -> context_start st start
+  in
   match st.trace with
   | None ->
-      context_run st delimited name p
+      context_run st delimited start name p
   | Some f ->
-      context_traced st f delimited name p
+      context_traced st f delimited start name p
 
 let print_trace ppf =
   let depth = ref 0 in
