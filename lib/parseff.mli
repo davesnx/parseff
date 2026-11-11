@@ -722,6 +722,88 @@ val recover :
         ()
     ]} *)
 
+val sep_by_recover :
+  error Diagnostics.t ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (unit -> 'b) ->
+  (error -> 'a) ->
+  unit ->
+  'a list
+(** [sep_by_recover errors ~sync element separator hole] parses one or more
+    occurrences of [element] with [separator] between each pair, as {!sep_by}
+    does, and recovers from each [element] that fails. For a failure [e], it
+    records [e] in [errors], goes back to the start of the element, calls
+    [sync ()] to skip the broken element, and puts [hole e] in the list.
+
+    [sync] must stop before the next separator and before the token that closes
+    the list: {!skip_nested} does this for lists in brackets. Unlike {!recover},
+    [sep_by_recover] does not consume input when [sync] consumes nothing, so a
+    hole can be empty, as in [f(1, , 3)]. The list ends where [separator] fails.
+
+    A failure at the end of the input is not recovered: the parse fails there,
+    as with {!sep_by}. A failing first element gives a list with one hole, so
+    for a list that can be empty, test for the closing token first. [errors]
+    must be the collector given to the runner as [~diagnostics]; otherwise
+    [sep_by_recover] raises [Invalid_argument].
+
+    Example:
+    {@ocaml[
+    let arguments errors () =
+      let _ = char '(' in
+      let args =
+        if peek_char () = Some ')' then
+          []
+        else
+          sep_by_recover errors
+            ~sync:(fun () ->
+              skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ',')
+            )
+            expr
+            (fun () -> char ',')
+            (fun _ -> Hole)
+            ()
+      in
+      let _ = char ')' in
+      args
+    (* "(1, [2 3], 4)" -> [1; Hole; 4], with one error recorded *)
+    ]} *)
+
+val skip_nested :
+  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit
+(** [skip_nested pairs stop] skips input up to the end of a broken list element.
+    It is made for the [~sync] of {!sep_by_recover} and {!recover}.
+
+    [pairs] gives the brackets of the grammar as [(opening, closing)]
+    characters. The skip stops, without consuming, before the first of:
+
+    - a character for which [stop] is true, outside all brackets that the skip
+      opened;
+    - a closing character whose opening character the skip did not consume: it
+      closes a construct around the element;
+    - the end of the input.
+
+    Each kind of bracket is matched with its own kind. A closing character that
+    does not match the innermost open bracket closes the nearest open bracket of
+    its kind, and the brackets inside that one are taken as not closed. In
+    {v [1 2), 3 v} the closing parenthesis has no opening parenthesis, so the
+    skip stops before it.
+
+    [~atom] is a parser for a piece of input that the skip must take as a
+    whole, such as a string literal or a comment, so that a bracket or a
+    separator inside it is not counted. The skip tries [atom] at each position;
+    where [atom] fails or consumes nothing, the skip reads the next character.
+    The failures of [atom] do not appear in later errors.
+
+    Example:
+    {@ocaml[
+    let skip_argument () =
+      skip_nested ~atom:string_literal
+        [ ('(', ')'); ('[', ']'); ('{', '}') ]
+        (fun c -> c = ',')
+    (* on "g(1, 2) \"a,b\" x, 3)" it stops before ", 3)" *)
+    ]} *)
+
 val commit : unit -> unit
 (** [commit ()] seals the innermost active choice or repetition frame: the
     nearest enclosing {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} or

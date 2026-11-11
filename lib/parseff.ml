@@ -4358,6 +4358,105 @@ let recover errors ~sync parser hole =
         end;
         hole e
 
+let skip_nested ?atom pairs stop =
+  let st = get_state () in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  let rec close_of c = function
+    | [] ->
+        None
+    | (o, k) :: rest ->
+        if o = c then
+          Some k
+        else
+          close_of c rest
+  in
+  let rec drop_through c = function
+    | [] ->
+        None
+    | k :: rest ->
+        if k = c then
+          Some rest
+        else
+          drop_through c rest
+  in
+  let rec go stack =
+    if have st 1 then begin
+      let start = st.pos in
+      (match atom with Some a -> ignore (optional a ()) | None -> ());
+      if st.pos <> start then
+        go stack
+      else
+        let c = char_at st start in
+        match close_of c pairs with
+        | Some k ->
+            st.pos <- start + 1;
+            go (k :: stack)
+        | None ->
+            if List.exists (fun (_, k) -> k = c) pairs then
+              begin match drop_through c stack with
+              | Some rest ->
+                  st.pos <- start + 1;
+                  go rest
+              | None ->
+                  ()
+            end
+            else if stack == [] && stop c then
+              ()
+            else begin
+              st.pos <- start + 1;
+              go stack
+            end
+    end
+  in
+  match go [] with
+  | () ->
+      if st.far != saved then st.far <- saved
+  | exception exn ->
+      far_merge st saved;
+      raise exn
+
+let sep_by_recover errors ~sync elem sep hole () =
+  let st = get_state () in
+  if st.diag != errors.self then
+    invalid_arg
+      "Parseff.sep_by_recover: errors is not the collector given to the runner";
+  let item () =
+    if not (have st 1) then
+      elem ()
+    else
+      let start = st.pos in
+      let frame = State.push_rewind_frame st frame_barrier in
+      let saved = st.far in
+      if saved != far_none then st.far <- far_none;
+      let more pos = fill st ~keep_from:start (pos + 1) || pos < st.input_len in
+      let fill_hole e =
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        st.far <- saved;
+        record_diagnostic errors st e.range.start e;
+        sync ();
+        hole e
+      in
+      let leave exn =
+        State.pop_rewind_frame st frame;
+        far_merge st saved;
+        raise exn
+      in
+      match elem () with
+      | v ->
+          State.pop_rewind_frame st frame;
+          far_merge st saved;
+          v
+      | exception Fail when more st.far.pos ->
+          fill_hole (error_of_far st (outer_contexts st st.far.pos))
+      | exception User_failure (pos, msg, x) when more pos ->
+          fill_hole (error_failure st pos msg x (outer_contexts st pos))
+      | exception exn ->
+          leave exn
+  in
+  sep_by ~at_least:1 item sep ()
+
 let run_detailed st ~all thunk =
   let previous = State.enter st in
   match

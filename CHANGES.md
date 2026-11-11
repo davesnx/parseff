@@ -3,6 +3,7 @@
 - **Breaking: `warn_at` is removed.** Use `warn ~pos d x`.
 - **Add `Ref`.** A `ref` whose changes are undone when the parser backtracks. Use it for symbol tables, indentation stacks and counters.
 - **Add `capture` and `recover`.** `capture p` returns the failure of `p` as a value. `recover errors ~sync p hole` records the error, skips input with `sync` and returns `hole e`, so one parse can report every error. See the error recovery guide.
+- **Add `sep_by_recover` and `skip_nested`.** `sep_by_recover errors ~sync element separator hole` parses a separated list and puts `hole e` in the place of each element that fails; a hole can be empty, and a failure at the end of the input is not recovered. `skip_nested pairs stop` is a `sync` for it: it skips a broken element up to the next separator or the closing bracket, and matches each kind of bracket with its own kind.
 - **Add `expression`.** Parses operators by precedence from a table of `infix_left`, `infix_right`, `prefix` and `postfix` levels.
 - **Add trace mode.** `parse ~trace` and `parse_source ~trace` report when each `context` starts, returns or fails. `print_trace` prints the events as a tree.
 - **Add `with_range`, `recognize` and `recognize_span`.** They return the range or the text that a parser consumed.
