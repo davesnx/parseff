@@ -189,7 +189,7 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 `Parseff.context` runs a parser inside a named construct. The name does not change what the parser accepts. A failure that happens inside it remembers which constructs were open, outermost first, so an error report can say "while parsing array".
 
 ```ocaml
-val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
+val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
 ```
 ```ocaml
 let array_parser value () =

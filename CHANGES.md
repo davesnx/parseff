@@ -5,17 +5,21 @@
 - **Add `capture` and `recover`.** `capture p` returns the failure of `p` as a value. `recover errors ~sync p hole` records the error, skips input with `sync` and returns `hole e`, so one parse can report every error. See the error recovery guide.
 - **Add `expression`.** Parses operators by precedence from a table of `infix_left`, `infix_right`, `prefix` and `postfix` levels.
 - **Add `climb`.** `climb ~operand ~operator` parses operators by precedence with one operator lookup after each operand: `operator` returns `Some (precedence, op)` or `None`. Use it in place of `expression` when the table has many levels, or when the failed operator tokens must stay out of the expected set. A chain of `infix_right` operators uses no depth level.
+- **Add `~help` to `fail` and `error`.** `fail ~help:"write ~= for not equal" msg` keeps the text in the new `help` field of `error`, and `render_error` prints it as a `* help:` line after the notes.
 - **Add trace mode.** `parse ~trace` and `parse_source ~trace` report when each `context` starts, returns or fails. `print_trace` prints the events as a tree.
 - **Add `with_range`, `recognize` and `recognize_span`.** They return the range or the text that a parser consumed.
 - **Add `lexeme` and `keyword`.** `lexeme p` skips whitespace after `p`. `keyword "let"` matches `let` but not `letter`.
 - **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
+- **Add `context ~start`.** The position where the construct starts, for a parser that has already consumed the opening token.
+- **Add `?upto` to `fail` and `error`.** `~from` and `~upto` set the start and the end of the error range. Each defaults to the current position and can be before or after it. A reversed pair is swapped, so the range is never reversed.
 - **Fix `span_to_string` reading outside its buffer.** A span with an offset outside its buffer returned a wrong byte or crashed the process. It now raises `Invalid_argument`.
 - **Fix `expression` with an `infix_right` operator that consumes no input.** It failed with a depth-limit error. It now stops, as `fold_left` does.
 - **Fix `match_regex` returning a cut match in streaming.** It now reads more input when a match reaches the end of the buffer, and fails with `Backtrack_window_exceeded` when the window is full. Parseff now needs `re` 1.11.0 or later.
 - **Fix `fold_right` looping forever.** It now stops after an operator and element that together consume no input, as `fold_left` does.
 - **Fix `expression` raising `Failure` with a `prefix` operator that commits and consumes no input.** That operator is now skipped, like one that does not commit.
+- **Fix `render_error` printing `byte N` in streaming when the start of the error line is no longer buffered.** Parseff now counts the characters of the line that it drops, so the header is `name:line:col`, with the same column as with `~source`. The excerpt is still cut on the left with `...`. Input is now dropped up to a character boundary, so the buffer can hold up to 3 bytes more than before.
 - **`render_error` counts terminal cells.** The caret stays under the failure on lines with CJK text, emoji or accents.
 - **Improve runtime performance.** The generic combinators, the binary readers and the `Utf8` primitives allocate less and run about 18% fewer instructions over the benchmark set.
 
