@@ -344,7 +344,9 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 
 ### Regex at chunk boundaries
 
-Before `Parseff.match_regex` runs, the runtime reads ahead until about half of the `~backtrack_window` is buffered ahead of the current position, or the source ends. The regex then runs on the buffered input only, so a match cannot extend past the window. If the window is already full of rewind history and the source has not ended, the regex runs on what is buffered. A match that ends before the end of the buffer is returned. Otherwise, because more input could change the result, `Parseff.match_regex` fails with `Backtrack_window_exceeded`. `~backtrack_window` must be at least `2`.
+`Parseff.match_regex` reads more input when a match reaches the end of the buffered input, because more input could change the result. A match and the byte after it must fit in the `~backtrack_window`, unless the source ends after the match. Otherwise the parse fails with `Backtrack_window_exceeded`.
+
+A regex that needs later bytes to choose a longer match can return the shorter one when the window is small: `a(bc)?` on `"abc;"` can return `"a"` with a window below `6`.
 
 
 ### One parse returns one result
