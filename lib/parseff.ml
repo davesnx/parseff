@@ -683,147 +683,41 @@ let last_newline s from limit =
   done;
   !i
 
-let utf8_width_or_cut s i len =
-  let byte j = Char.code (String.unsafe_get s j) in
-  let continuation j = byte j land 0xC0 = 0x80 in
-  let c = byte i in
-  if c < 0xC2 || c > 0xF4 then
-    1
-  else if c < 0xE0 then
-    if i + 1 >= len then
-      0
-    else if continuation (i + 1) then
-      2
-    else
-      1
-  else if c < 0xF0 then
-    if i + 2 >= len then
-      0
-    else begin
-      let b = byte (i + 1) in
-      let low =
-        if c = 0xE0 then
-          0xA0
-        else
-          0x80
-      in
-      let high =
-        if c = 0xED then
-          0x9F
-        else
-          0xBF
-      in
-      if b >= low && b <= high && continuation (i + 2) then
-        3
-      else
-        1
-    end
-  else if i + 3 >= len then
-    0
-  else begin
-    let b = byte (i + 1) in
-    let low =
-      if c = 0xF0 then
-        0x90
-      else
-        0x80
-    in
-    let high =
-      if c = 0xF4 then
-        0x8F
-      else
-        0xBF
-    in
-    if b >= low && b <= high && continuation (i + 2) && continuation (i + 3)
-    then
-      4
-    else
-      1
-  end
-
-let rec count_cut_words idx s i stop len n =
-  if i + 8 <= stop then begin
-    let w = String.get_int64_le s i in
-    let high = Int64.logand w 0x8080808080808080L in
-    if high = 0L then
-      count_cut_words idx s (i + 8) stop len (n + 8)
-    else begin
-      let continuation =
-        Int64.logand high (Int64.lognot (Int64.shift_left w 1))
-      in
-      let lead = Int64.logxor high continuation in
-      let lead3 = Int64.logand lead (Int64.shift_left w 2) in
-      let lead4 = Int64.logand lead3 (Int64.shift_left w 3) in
-      let expected =
-        Int64.logor (Int64.shift_left lead 8) (Int64.shift_left lead3 16)
-      in
-      let low = 0x7F7F7F7F7F7F7F7FL in
-      let nibble = 0x0F0F0F0F0F0F0F0FL in
-      let above_c1 = Int64.add (Int64.logand w 0x1E1E1E1E1E1E1E1EL) low in
-      let not_e0 = Int64.add (Int64.logand w nibble) low in
-      let not_ed =
-        Int64.add (Int64.logand (Int64.logxor w 0x0D0D0D0D0D0D0D0DL) nibble) low
-      in
-      let overlong2 =
-        Int64.logand lead (Int64.lognot (Int64.logor lead3 above_c1))
-      in
-      let restricted3 =
-        Int64.logand lead3 (Int64.lognot (Int64.logand not_e0 not_ed))
-      in
-      if
-        Int64.logor
-          (Int64.logor lead4 (Int64.logxor continuation expected))
-          (Int64.logor overlong2 restricted3)
-        <> 0L
-      then
-        count_cut_bytes idx s i (i + 8) stop len n
-      else begin
-        let continuations =
-          Int64.to_int
-            (Int64.shift_right_logical
-               (Int64.mul
-                  (Int64.shift_right_logical continuation 7)
-                  0x0101010101010101L
-               )
-               56
-            )
-        in
-        if Int64.logand lead3 0x0080000000000000L <> 0L then
-          count_cut_words idx s (i + 6) stop len (n + 7 - continuations)
-        else if Int64.logand lead 0x8000000000000000L <> 0L then
-          count_cut_words idx s (i + 7) stop len (n + 7 - continuations)
-        else
-          count_cut_words idx s (i + 8) stop len (n + 8 - continuations)
-      end
-    end
-  end else if i < stop then
-    count_cut_bytes idx s i stop stop len n
-  else begin
-    idx.cut_chars <- idx.cut_chars + n;
+let rec count_cut_chars idx s i stop =
+  if i >= stop then
     i
-  end
-
-and count_cut_bytes idx s i limit stop len n =
-  if i >= limit then
-    count_cut_words idx s i stop len n
   else begin
     let c = Char.code (String.unsafe_get s i) in
-    if c < 0x80 then
-      count_cut_bytes idx s (i + 1) limit stop len (n + 1)
-    else if
-      c >= 0xC2 && c < 0xE0
-      && i + 1 < stop
-      && Char.code (String.unsafe_get s (i + 1)) land 0xC0 = 0x80
-    then
-      count_cut_bytes idx s (i + 2) limit stop len (n + 1)
-    else begin
-      let width = utf8_width_or_cut s i len in
-      if width > 0 && i + width <= stop then
-        count_cut_bytes idx s (i + width) limit stop len (n + 1)
+    let width =
+      if c < 0x80 then
+        1
       else begin
-        idx.cut_chars <- idx.cut_chars + n;
-        i
+        let d = String.get_utf_8_uchar s i in
+        if Uchar.utf_decode_is_valid d then
+          Uchar.utf_decode_length d
+        else begin
+          let need =
+            if c < 0xC2 || c > 0xF4 then
+              1
+            else if c < 0xE0 then
+              2
+            else if c < 0xF0 then
+              3
+            else
+              4
+          in
+          if i + need > String.length s then
+            need
+          else
+            1
+        end
       end
+    in
+    if i + width > stop then
+      i
+    else begin
+      idx.cut_chars <- idx.cut_chars + 1;
+      count_cut_chars idx s (i + width) stop
     end
   end
 
@@ -877,10 +771,9 @@ let ensure_line_index_preserved_through st up_to =
         up_to
       end else begin
         let input = st.input in
-        let len = String.length input in
-        let stop = imin (up_to - st.base) len in
+        let stop = imin (up_to - st.base) (String.length input) in
         if not known then idx.cut_chars <- 0;
-        let i = count_cut_words idx input (from - st.base) stop len 0 in
+        let i = count_cut_chars idx input (from - st.base) stop in
         idx.cut_line <- line_start;
         idx.cut_at <- i + st.base;
         if i < stop then
