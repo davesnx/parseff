@@ -15,6 +15,7 @@
 - **Fix `match_regex` returning a cut match in streaming.** It now reads more input when a match reaches the end of the buffer, and fails with `Backtrack_window_exceeded` when the window is full. Parseff now needs `re` 1.11.0 or later.
 - **Fix `fold_right` looping forever.** It now stops after an operator and element that together consume no input, as `fold_left` does.
 - **Fix `expression` raising `Failure` with a `prefix` operator that commits and consumes no input.** That operator is now skipped, like one that does not commit.
+- **Fix `render_error` printing `byte N` in streaming when the start of the error line is no longer buffered.** Parseff now counts the characters of the line that it drops, so the header is `name:line:col`, with the same column as with `~source`. The excerpt is still cut on the left with `...`. Input is now dropped up to a character boundary, so the buffer can hold up to 3 bytes more than before.
 - **`render_error` counts terminal cells.** The caret stays under the failure on lines with CJK text, emoji or accents.
 - **Improve runtime performance.** The generic combinators, the binary readers and the `Utf8` primitives allocate less and run about 18% fewer instructions over the benchmark set.
 

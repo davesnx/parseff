@@ -165,18 +165,19 @@ val render_error :
     [input.json: byte N: [error] ...] and there is no excerpt. The columns of
     the header and of the [* while parsing] lines count Unicode characters (code
     points), while [location.col] counts bytes, so they differ on a line with
-    non-ASCII text. In streaming, when the start of a line is no longer buffered
-    and [source] is not given, the character column is not known: the header is
-    then [input.json: byte N: [error] ...] too, the excerpt of the error line is
-    still printed, cut on the left with [...], and a [* while parsing] line says
-    [from byte N]. Carets count terminal cells, so a wide character such as [名]
-    takes two and a combining mark takes none, and a control byte, an invalid
-    UTF-8 byte or a C1 control prints in the excerpt as the escape
-    {!val:error_message} uses, such as [\x1B], with as many carets as the escape
-    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error ends with a [* help:] line. The rows the renderer adds never end with
-    a space, and source text is printed byte for byte. The result has no
-    trailing newline. *)
+    non-ASCII text. In streaming, when the start of the error line is no longer
+    buffered and [source] is not given, the header still has the line and the
+    character column, because Parseff counts the characters of the line that it
+    drops. The excerpt of the error line is then cut on the left with [...], and
+    a [* while parsing] line for a context that starts in the dropped part of
+    the line says [from byte N]. Carets count terminal cells, so a wide
+    character such as [名] takes two and a combining mark takes none, and a
+    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
+    the escape {!val:error_message} uses, such as [\x1B], with as many carets as
+    the escape has characters. A [Depth_limit_exceeded] or
+    [Backtrack_window_exceeded] error ends with a [* help:] line. The rows the
+    renderer adds never end with a space, and source text is printed byte for
+    byte. The result has no trailing newline. *)
 
 (** {1 Diagnostics} *)
 

@@ -122,6 +122,9 @@ type line_index = {
   mutable count : int;
   mutable scanned_up_to : int;
   mutable line_base : int;
+  mutable cut_line : int;
+  mutable cut_at : int;
+  mutable cut_chars : int;
 }
 
 let frame_choice = 0
@@ -581,7 +584,15 @@ let[@inline always] get_state () =
 let create_line_index () =
   let starts = Array.make 64 0 in
   starts.(0) <- 0;
-  { starts; count = 1; scanned_up_to = 0; line_base = 0 }
+  {
+    starts;
+    count = 1;
+    scanned_up_to = 0;
+    line_base = 0;
+    cut_line = -1;
+    cut_at = 0;
+    cut_chars = 0;
+  }
 
 let find_newline s from limit =
   let i = ref from in
@@ -672,6 +683,150 @@ let last_newline s from limit =
   done;
   !i
 
+let utf8_width_or_cut s i len =
+  let byte j = Char.code (String.unsafe_get s j) in
+  let continuation j = byte j land 0xC0 = 0x80 in
+  let c = byte i in
+  if c < 0xC2 || c > 0xF4 then
+    1
+  else if c < 0xE0 then
+    if i + 1 >= len then
+      0
+    else if continuation (i + 1) then
+      2
+    else
+      1
+  else if c < 0xF0 then
+    if i + 2 >= len then
+      0
+    else begin
+      let b = byte (i + 1) in
+      let low =
+        if c = 0xE0 then
+          0xA0
+        else
+          0x80
+      in
+      let high =
+        if c = 0xED then
+          0x9F
+        else
+          0xBF
+      in
+      if b >= low && b <= high && continuation (i + 2) then
+        3
+      else
+        1
+    end
+  else if i + 3 >= len then
+    0
+  else begin
+    let b = byte (i + 1) in
+    let low =
+      if c = 0xF0 then
+        0x90
+      else
+        0x80
+    in
+    let high =
+      if c = 0xF4 then
+        0x8F
+      else
+        0xBF
+    in
+    if b >= low && b <= high && continuation (i + 2) && continuation (i + 3)
+    then
+      4
+    else
+      1
+  end
+
+let rec count_cut_words idx s i stop len n =
+  if i + 8 <= stop then begin
+    let w = String.get_int64_le s i in
+    let high = Int64.logand w 0x8080808080808080L in
+    if high = 0L then
+      count_cut_words idx s (i + 8) stop len (n + 8)
+    else begin
+      let continuation =
+        Int64.logand high (Int64.lognot (Int64.shift_left w 1))
+      in
+      let lead = Int64.logxor high continuation in
+      let lead3 = Int64.logand lead (Int64.shift_left w 2) in
+      let lead4 = Int64.logand lead3 (Int64.shift_left w 3) in
+      let expected =
+        Int64.logor (Int64.shift_left lead 8) (Int64.shift_left lead3 16)
+      in
+      let low = 0x7F7F7F7F7F7F7F7FL in
+      let nibble = 0x0F0F0F0F0F0F0F0FL in
+      let above_c1 = Int64.add (Int64.logand w 0x1E1E1E1E1E1E1E1EL) low in
+      let not_e0 = Int64.add (Int64.logand w nibble) low in
+      let not_ed =
+        Int64.add (Int64.logand (Int64.logxor w 0x0D0D0D0D0D0D0D0DL) nibble) low
+      in
+      let overlong2 =
+        Int64.logand lead (Int64.lognot (Int64.logor lead3 above_c1))
+      in
+      let restricted3 =
+        Int64.logand lead3 (Int64.lognot (Int64.logand not_e0 not_ed))
+      in
+      if
+        Int64.logor
+          (Int64.logor lead4 (Int64.logxor continuation expected))
+          (Int64.logor overlong2 restricted3)
+        <> 0L
+      then
+        count_cut_bytes idx s i (i + 8) stop len n
+      else begin
+        let continuations =
+          Int64.to_int
+            (Int64.shift_right_logical
+               (Int64.mul
+                  (Int64.shift_right_logical continuation 7)
+                  0x0101010101010101L
+               )
+               56
+            )
+        in
+        if Int64.logand lead3 0x0080000000000000L <> 0L then
+          count_cut_words idx s (i + 6) stop len (n + 7 - continuations)
+        else if Int64.logand lead 0x8000000000000000L <> 0L then
+          count_cut_words idx s (i + 7) stop len (n + 7 - continuations)
+        else
+          count_cut_words idx s (i + 8) stop len (n + 8 - continuations)
+      end
+    end
+  end else if i < stop then
+    count_cut_bytes idx s i stop stop len n
+  else begin
+    idx.cut_chars <- idx.cut_chars + n;
+    i
+  end
+
+and count_cut_bytes idx s i limit stop len n =
+  if i >= limit then
+    count_cut_words idx s i stop len n
+  else begin
+    let c = Char.code (String.unsafe_get s i) in
+    if c < 0x80 then
+      count_cut_bytes idx s (i + 1) limit stop len (n + 1)
+    else if
+      c >= 0xC2 && c < 0xE0
+      && i + 1 < stop
+      && Char.code (String.unsafe_get s (i + 1)) land 0xC0 = 0x80
+    then
+      count_cut_bytes idx s (i + 2) limit stop len (n + 1)
+    else begin
+      let width = utf8_width_or_cut s i len in
+      if width > 0 && i + width <= stop then
+        count_cut_bytes idx s (i + width) limit stop len (n + 1)
+      else begin
+        idx.cut_chars <- idx.cut_chars + n;
+        i
+      end
+    end
+  end
+
 let ensure_line_index_preserved_through st up_to =
   if up_to > 0 then begin
     let idx =
@@ -705,8 +860,37 @@ let ensure_line_index_preserved_through st up_to =
         );
       idx.count <- 1;
       idx.scanned_up_to <- up_to
+    end;
+    let line_start = idx.starts.(0) in
+    if line_start >= up_to then
+      up_to
+    else begin
+      let known = idx.cut_line = line_start in
+      let from =
+        if known then
+          idx.cut_at
+        else
+          line_start
+      in
+      if from < st.base || from > up_to then begin
+        idx.cut_line <- -1;
+        up_to
+      end else begin
+        let input = st.input in
+        let len = String.length input in
+        let stop = imin (up_to - st.base) len in
+        if not known then idx.cut_chars <- 0;
+        let i = count_cut_words idx input (from - st.base) stop len 0 in
+        idx.cut_line <- line_start;
+        idx.cut_at <- i + st.base;
+        if i < stop then
+          i + st.base
+        else
+          up_to
+      end
     end
-  end
+  end else
+    up_to
 
 let[@inline never] handle_location st =
   let idx =
@@ -732,7 +916,12 @@ let[@inline never] append st ~floor chunk n =
   let floor = imax 0 (floor - 1) in
   let cur_len = st.input_len - st.base in
   let drop = imin (imax 0 (floor - st.base)) cur_len in
-  if drop > 0 then ensure_line_index_preserved_through st floor;
+  let drop =
+    if drop > 0 then
+      ensure_line_index_preserved_through st floor - st.base
+    else
+      drop
+  in
   let kept = cur_len - drop in
   let buf = Bytes.create (kept + n) in
   Bytes.blit_string st.input drop buf 0 kept;
@@ -4031,16 +4220,23 @@ let build st ~pos ?(notes = []) kind span frames =
       )
       here
   in
+  let char_column_of line_start p =
+    if p > st.input_len then
+      None
+    else if line_start >= st.base then
+      Some (1 + count_code_points st.input (line_start - st.base) (p - st.base))
+    else if
+      idx.cut_line = line_start && idx.cut_at >= st.base && p >= idx.cut_at
+    then
+      Some
+        (1 + idx.cut_chars
+        + count_code_points st.input (idx.cut_at - st.base) (p - st.base)
+        )
+    else
+      None
+  in
   let char_column =
-    Option.bind here (fun (_, line_start, _) ->
-        if line_start >= st.base then
-          Some
-            (1
-            + count_code_points st.input (line_start - st.base) (pos - st.base)
-            )
-        else
-          None
-    )
+    Option.bind here (fun (_, line_start, _) -> char_column_of line_start pos)
   in
   let source_open =
     match st.source with Some src -> not src.eof | None -> false
@@ -4113,19 +4309,7 @@ let build st ~pos ?(notes = []) kind span frames =
     List.map
       (fun (_, s, _) ->
         Option.map
-          (fun (l, c) ->
-            let first = s - c + 1 in
-            ( l,
-              c,
-              if first >= st.base && s <= st.input_len then
-                Some
-                  (1
-                  + count_code_points st.input (first - st.base) (s - st.base)
-                  )
-              else
-                None
-            )
-          )
+          (fun (l, c) -> (l, c, char_column_of (s - c + 1) s))
           (locate s)
       )
       frames
