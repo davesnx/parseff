@@ -1,23 +1,23 @@
-module P = Parseff
 module L = Lexer
 open Ast
 
-let errors : P.error P.Diagnostics.t = P.Diagnostics.create ()
+let errors : Parseff.error Parseff.Diagnostics.t = Parseff.Diagnostics.create ()
 
 type opener = { kind : string; at : range; indent : int }
 type closer = Chunk | End_only | If_branch | Until
 
-type P.custom_error +=
+type Parseff.custom_error +=
   | Deferred of {
       from : int;
       upto : int;
       msg : string;
-      notes : P.note list;
+      notes : Parseff.note list;
       help : string option;
     }
 
-let unclosed_hints : (string * range * range) list P.Ref.t = P.Ref.create []
-let else_ifs : (range * range) list P.Ref.t = P.Ref.create []
+let unclosed_hints : (string * range * range) list Parseff.Ref.t =
+  Parseff.Ref.create []
+let else_ifs : (range * range) list Parseff.Ref.t = Parseff.Ref.create []
 let st = L.st
 let here () = { start = st.start; stop = st.stop }
 let opener kind = { kind; at = here (); indent = st.indent }
@@ -28,17 +28,17 @@ let is_kw k = match st.tok with L.Kw k' -> k' == k | _ -> false
 let is_sym s = match st.tok with L.Sym s' -> s' == s | _ -> false
 
 let advance_to q =
-  let p = P.position () in
-  if q > p then ignore (P.take_span (q - p))
+  let p = Parseff.position () in
+  if q > p then ignore (Parseff.take_span (q - p))
 
 let defer ~from ~upto ?(notes = []) ?help msg : 'a =
-  P.error (Deferred { from; upto; msg; notes; help })
+  Parseff.error (Deferred { from; upto; msg; notes; help })
 
-let materialize (e : P.error) =
+let materialize (e : Parseff.error) =
   match e.kind with
   | Custom (Deferred d) -> (
       match
-        P.capture (fun () ->
+        Parseff.capture (fun () ->
             advance_to d.upto;
             (L.error ~from:d.from ~notes:d.notes ?help:d.help d.msg : unit)
         )
@@ -53,14 +53,14 @@ let materialize (e : P.error) =
 
 let attempt f =
   let snap = L.save () in
-  match P.capture f with
+  match Parseff.capture f with
   | Ok v ->
       Ok v
   | Error e ->
       L.restore snap;
       Error (materialize e)
 
-let caused_by_lexical ?word ~region (e : P.error) =
+let caused_by_lexical ?word ~region (e : Parseff.error) =
   (not (L.is_lexical e))
   && Hashtbl.fold
        (fun start (l : L.lexical) found ->
@@ -77,7 +77,7 @@ let caused_by_lexical ?word ~region (e : P.error) =
        )
        L.lexical_errors false
 
-let report ?word ?region (e : P.error) =
+let report ?word ?region (e : Parseff.error) =
   let consequence =
     match region with
     | Some region ->
@@ -85,7 +85,7 @@ let report ?word ?region (e : P.error) =
     | None ->
         false
   in
-  if not consequence then P.warn ~pos:e.range.start errors e
+  if not consequence then Parseff.warn ~pos:e.range.start errors e
 
 let fail_here ?notes ?help msg : 'a =
   match st.tok with
@@ -104,7 +104,7 @@ let error_here ?notes ?help msg =
 let soft_here ?word ?region ?notes ?help msg =
   report ?word ?region (error_here ?notes ?help msg)
 
-let is_eof_error (e : P.error) =
+let is_eof_error (e : Parseff.error) =
   match e.kind with Custom (L.Lua { eof = true; _ }) -> true | _ -> false
 
 let span a b = { start = a.start; stop = b.stop }
@@ -348,22 +348,22 @@ let expect_sym s =
 
 let note_close opener (r_end : range) =
   if st.indent < opener.indent then
-    P.Ref.set unclosed_hints
-      ((opener.kind, opener.at, r_end) :: P.Ref.get unclosed_hints)
+    Parseff.Ref.set unclosed_hints
+      ((opener.kind, opener.at, r_end) :: Parseff.Ref.get unclosed_hints)
 
 let missing_end opener =
   let inside (r : range) = r.start > opener.at.start in
   let else_if =
-    List.find_opt (fun (e, _) -> inside e) (List.rev (P.Ref.get else_ifs))
+    List.find_opt (fun (e, _) -> inside e) (List.rev (Parseff.Ref.get else_ifs))
   in
   let dedented =
     List.find_opt
       (fun (_, r, _) -> inside r)
-      (List.rev (P.Ref.get unclosed_hints))
+      (List.rev (Parseff.Ref.get unclosed_hints))
   in
   let base =
     {
-      P.at = Some opener.at;
+      Parseff.at = Some opener.at;
       text = Printf.sprintf "this \"%s\" is not closed" opener.kind;
     }
   in
@@ -373,7 +373,7 @@ let missing_end opener =
         ( [
             base;
             {
-              P.at = Some (span r_else r_if);
+              Parseff.at = Some (span r_else r_if);
               text = "this \"else if\" opens a new \"if\"";
             };
           ],
@@ -385,7 +385,7 @@ let missing_end opener =
         ( [
             base;
             {
-              P.at = Some r_open;
+              Parseff.at = Some r_open;
               text =
                 Printf.sprintf "this \"%s\" may be missing its \"end\"" kind;
             };
@@ -437,7 +437,10 @@ let unclosed ~(opener : range) ~what expected =
   let notes =
     if line_of caret > line_of opener.start then
       [
-        { P.at = Some opener; text = Printf.sprintf "the %s starts here" what };
+        {
+          Parseff.at = Some opener;
+          text = Printf.sprintf "the %s starts here" what;
+        };
       ]
     else
       []
@@ -536,7 +539,7 @@ let expected_expression () =
   fail_here ?help:(expression_hint ())
     (Printf.sprintf "expected expression, found %s" (L.found ()))
 
-let rec expr () = P.rec_ (fun () -> subexpr 0)
+let rec expr () = Parseff.rec_ (fun () -> subexpr 0)
 
 and subexpr limit =
   let left =
@@ -544,7 +547,7 @@ and subexpr limit =
     | Some op ->
         let start = st.start in
         advance ();
-        let e = P.rec_ (fun () -> subexpr unary_priority) in
+        let e = Parseff.rec_ (fun () -> subexpr unary_priority) in
         mk_expr (Unop (op, e)) { start; stop = e.erange.stop }
     | None ->
         simpleexp ()
@@ -555,7 +558,7 @@ and climb limit left =
   match binop_of st.tok with
   | Some op when Printer.prio_left op > limit ->
       advance ();
-      let right = P.rec_ (fun () -> subexpr (Printer.prio_right op)) in
+      let right = Parseff.rec_ (fun () -> subexpr (Printer.prio_right op)) in
       climb limit (mk_bin op left right)
   | _ ->
       left
@@ -766,7 +769,7 @@ and explist () =
   loop []
 
 and block closer opener : block =
-  P.rec_ (fun () ->
+  Parseff.rec_ (fun () ->
       let stops = function
         | L.Kw w -> (
             match (closer, w) with
@@ -812,7 +815,8 @@ and after_return returned t =
   match returned with
   | Some r when starts_statement t ->
       soft_here ~region:r.start
-        ~notes:[ { P.at = Some r; text = "this \"return\" ends the block" } ]
+        ~notes:
+          [ { Parseff.at = Some r; text = "this \"return\" ends the block" } ]
         ~help:
           "remove the code after \"return\", or write \"do return end\" to \
            return early"
@@ -973,7 +977,8 @@ and if_stat () =
         advance ();
         ( match st.tok with
         | L.Kw L.If when not st.nl ->
-            P.Ref.set else_ifs ((r_else, here ()) :: P.Ref.get else_ifs)
+            Parseff.Ref.set else_ifs
+              ((r_else, here ()) :: Parseff.Ref.get else_ifs)
         | _ ->
             ()
         );
@@ -1056,7 +1061,7 @@ and repeat_stat () =
   let r = op.at in
   advance ();
   let body = block Until (Some op) in
-  let note = { P.at = Some r; text = "this \"repeat\" is not closed" } in
+  let note = { Parseff.at = Some r; text = "this \"repeat\" is not closed" } in
   match st.tok with
   | L.Kw L.Until ->
       advance ();
@@ -1427,11 +1432,11 @@ let started = ref false
 let reset () =
   started := false;
   returned := None;
-  P.Diagnostics.clear errors
+  Parseff.Diagnostics.clear errors
 
 let one () =
-  P.Ref.set unclosed_hints [];
-  P.Ref.set else_ifs [];
+  Parseff.Ref.set unclosed_hints [];
+  Parseff.Ref.set else_ifs [];
   match st.tok with
   | L.Eof ->
       None
@@ -1459,7 +1464,7 @@ let top () =
   let rec go acc =
     let acc = match one () with Some s -> s :: acc | None -> acc in
     let exhausted =
-      match P.peek_char () with None -> true | Some _ -> false
+      match Parseff.peek_char () with None -> true | Some _ -> false
     in
     if exhausted && not (is_eof ()) then
       go acc
@@ -1470,9 +1475,9 @@ let top () =
 
 let error_at source (r : range) ?notes ?help msg =
   match
-    P.parse ~consume:`Partial source (fun () ->
-        if r.start > 0 then ignore (P.take_span r.start);
-        if r.stop > r.start then ignore (P.take_span (r.stop - r.start));
+    Parseff.parse ~consume:`Partial source (fun () ->
+        if r.start > 0 then ignore (Parseff.take_span r.start);
+        if r.stop > r.start then ignore (Parseff.take_span (r.stop - r.start));
         (L.error ~from:r.start ?notes ?help msg : unit)
     )
   with

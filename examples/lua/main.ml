@@ -1,8 +1,6 @@
-module P = Parseff
-
 let custom = function Lexer.Lua { msg; _ } -> msg | _ -> "unknown error"
 
-let help_of (e : P.error) =
+let help_of (e : Parseff.error) =
   match e.kind with Custom (Lexer.Lua { help; _ }) -> help | _ -> None
 
 let gutter text =
@@ -36,7 +34,7 @@ let with_help base help =
       base ^ "\n" ^ gutter base ^ "* help: " ^ h
 
 let render ~name ?source e =
-  with_help (P.render_error ~name ?source ~custom e) (help_of e)
+  with_help (Parseff.render_error ~name ?source ~custom e) (help_of e)
 
 let max_shown = 50
 let backtrack_window = 64 * 1024 * 1024
@@ -93,9 +91,9 @@ let tee_trim (base, line) =
     tee.line <- line
   end
 
-let render_window ~name (e : P.error) =
+let render_window ~name (e : Parseff.error) =
   let stop = tee.base + (tee.hi - tee.lo) in
-  let inside (r : P.range) = r.start >= tee.base && r.stop <= stop in
+  let inside (r : Parseff.range) = r.start >= tee.base && r.stop <= stop in
   match e.kind with
   | Custom (Lexer.Lua { msg; help; _ }) when inside e.range ->
       let shift = tee.base - (tee.line - 1) in
@@ -103,12 +101,12 @@ let render_window ~name (e : P.error) =
         String.make (tee.line - 1) '\n'
         ^ Bytes.sub_string tee.data tee.lo (tee.hi - tee.lo)
       in
-      let rebase (r : P.range) =
-        { P.start = r.start - shift; stop = r.stop - shift }
+      let rebase (r : Parseff.range) =
+        { Parseff.start = r.start - shift; stop = r.stop - shift }
       in
       let notes =
         List.map
-          (fun (n : P.note) ->
+          (fun (n : Parseff.note) ->
             match n.at with
             | Some r when inside r ->
                 { n with at = Some (rebase r) }
@@ -130,8 +128,8 @@ let analyse path ~on_statement ~on_errors =
       (fun r ->
         let errors =
           List.map
-            (fun (d : _ P.Diagnostics.entry) -> d.value)
-            (P.Diagnostics.to_list Parser.errors)
+            (fun (d : _ Parseff.Diagnostics.entry) -> d.value)
+            (Parseff.Diagnostics.to_list Parser.errors)
         in
         let errors =
           match r with
@@ -148,20 +146,23 @@ let analyse path ~on_statement ~on_errors =
         in
         on_errors (errors @ Lexer.take_fresh_lexical ())
       )
-      (P.parse_source_each ~max_depth:100_000 ~backtrack_window
+      (Parseff.parse_source_each ~max_depth:100_000 ~backtrack_window
          ~diagnostics:Parser.errors source Parser.top
       )
   in
   ( try
       if path = "-" then
-        run (P.Source.of_function (tee_read stdin))
+        run (Parseff.Source.of_function (tee_read stdin))
       else
-        In_channel.with_open_bin path (fun ic -> run (P.Source.of_channel ic))
+        In_channel.with_open_bin path (fun ic ->
+            run (Parseff.Source.of_channel ic)
+        )
     with Sys_error msg -> cannot_read path msg
   );
   checker.finish ()
 
-let same (a : P.error) (b : P.error) = a.range = b.range && a.kind = b.kind
+let same (a : Parseff.error) (b : Parseff.error) =
+  a.range = b.range && a.kind = b.kind
 
 let dedupe errors =
   List.fold_left
@@ -175,7 +176,7 @@ let dedupe errors =
   |> List.rev
 
 type collected = {
-  mutable errors : P.error list;
+  mutable errors : Parseff.error list;
   mutable rendered : (int * string) list;
   mutable count : int;
   seen : (int * int * string, unit) Hashtbl.t;
@@ -184,8 +185,10 @@ type collected = {
 let collect path c errors =
   if path = "-" then begin
     List.iter
-      (fun (e : P.error) ->
-        let key = (e.range.start, e.range.stop, P.error_message ~custom e) in
+      (fun (e : Parseff.error) ->
+        let key =
+          (e.range.start, e.range.stop, Parseff.error_message ~custom e)
+        in
         if not (Hashtbl.mem c.seen key) then begin
           Hashtbl.replace c.seen key ();
           c.count <- c.count + 1;
@@ -219,7 +222,9 @@ let report path c issues =
           List.map
             (fun (i : Check.issue) ->
               let notes =
-                List.map (fun (r, text) -> { P.at = Some r; text }) i.notes
+                List.map
+                  (fun (r, text) -> { Parseff.at = Some r; text })
+                  i.notes
               in
               Parser.error_at source i.at ~notes ?help:i.help i.msg
             )
@@ -227,7 +232,7 @@ let report path c issues =
         in
         let all = dedupe (List.rev c.errors @ check_errors) in
         ( List.map
-            (fun (e : P.error) -> (e.range.start, render ~name ~source e))
+            (fun (e : Parseff.error) -> (e.range.start, render ~name ~source e))
             all,
           List.length all
         )
@@ -237,7 +242,7 @@ let report path c issues =
             []
           else
             List.map
-              (fun (e : P.error) -> (e.range.start, render ~name e))
+              (fun (e : Parseff.error) -> (e.range.start, render ~name e))
               (dedupe (List.rev c.errors))
         in
         let issues =

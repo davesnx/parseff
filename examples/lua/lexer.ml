@@ -1,12 +1,13 @@
-module P = Parseff
-
-type P.custom_error += Lua of { msg : string; help : string option; eof : bool }
+type Parseff.custom_error +=
+  | Lua of { msg : string; help : string option; eof : bool }
 
 let error ?from ?notes ?help ?(eof = false) msg : 'a =
-  P.error ?from ?notes (Lua { msg; help; eof })
+  Parseff.error ?from ?notes (Lua { msg; help; eof })
 
 let make_error ?from ?notes ?help ?eof msg =
-  match P.capture (fun () -> (error ?from ?notes ?help ?eof msg : unit)) with
+  match
+    Parseff.capture (fun () -> (error ?from ?notes ?help ?eof msg : unit))
+  with
   | Error e ->
       e
   | Ok () ->
@@ -423,11 +424,15 @@ let add_utf8 b x =
     in
     List.iter add (bytes x 0x3f [])
 
-type lexical = { err : P.error; mutable ends : bool; mutable untils : bool }
+type lexical = {
+  err : Parseff.error;
+  mutable ends : bool;
+  mutable untils : bool;
+}
 
 let lexical_errors : (int, lexical) Hashtbl.t = Hashtbl.create 8
 
-let fresh_lexical : P.error list ref = ref []
+let fresh_lexical : Parseff.error list ref = ref []
 
 let take_fresh_lexical () =
   let l = List.rev !fresh_lexical in
@@ -458,7 +463,7 @@ let swallowed_all (l : lexical) =
   l.ends <- true;
   l.untils <- true
 
-let is_lexical (e : P.error) =
+let is_lexical (e : Parseff.error) =
   match Hashtbl.find_opt lexical_errors e.range.start with
   | Some l ->
       l.err.range = e.range && l.err.kind = e.kind
@@ -505,16 +510,16 @@ let space c =
       false
 
 let skip_space () =
-  scan := P.position ();
-  P.skip_while space
+  scan := Parseff.position ();
+  Parseff.skip_while space
 
 let newline () =
-  let p = P.position () in
-  let c = P.any_char () in
+  let p = Parseff.position () in
+  let c = Parseff.any_char () in
   if c = '\n' then Dynarray.add_last lines (p + 1);
-  match P.peek_char () with
+  match Parseff.peek_char () with
   | Some (('\n' | '\r') as d) when d <> c ->
-      ignore (P.any_char ());
+      ignore (Parseff.any_char ());
       if d = '\n' then Dynarray.add_last lines (p + 2)
   | _ ->
       ()
@@ -530,7 +535,7 @@ let equal_sign c =
 
 let count_equals () =
   level := 0;
-  P.skip_while equal_sign;
+  Parseff.skip_while equal_sign;
   !level
 
 let hex_numeral = ref false
@@ -556,11 +561,11 @@ let numeral_char c =
 let number ~start ~head =
   hex_numeral := String.length head = 2;
   after_exponent := false;
-  let rest = P.take_while numeral_char in
+  let rest = Parseff.take_while numeral_char in
   let extra =
-    match P.peek_char () with
+    match Parseff.peek_char () with
     | Some c when is_alpha c ->
-        ignore (P.any_char ());
+        ignore (Parseff.any_char ());
         String.make 1 c
     | _ ->
         ""
@@ -586,22 +591,22 @@ let plain_char c = c <> !quote_char && c <> '\\' && c <> '\n' && c <> '\r'
 
 let rest_of_string l q b =
   let rec go () =
-    Buffer.add_string b (P.take_while plain_char);
-    match P.peek_char () with
+    Buffer.add_string b (Parseff.take_while plain_char);
+    match Parseff.peek_char () with
     | Some '\\' -> (
-        ignore (P.any_char ());
-        match P.peek_char () with
+        ignore (Parseff.any_char ());
+        match Parseff.peek_char () with
         | Some ('\n' | '\r') ->
             newline ();
             go ()
         | Some _ ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             go ()
         | None ->
             ()
       )
     | Some c when c = q ->
-        ignore (P.any_char ())
+        ignore (Parseff.any_char ())
     | Some _ | None ->
         ()
   in
@@ -611,19 +616,19 @@ let rest_of_string l q b =
   Bad
 
 let short_string ~start =
-  let q = P.any_char () in
+  let q = Parseff.any_char () in
   quote_char := q;
-  let first = P.take_while plain_char in
-  match P.peek_char () with
+  let first = Parseff.take_while plain_char in
+  match Parseff.peek_char () with
   | Some c when c = q ->
-      ignore (P.any_char ());
+      ignore (Parseff.any_char ());
       String first
   | _ -> (
       let b = Buffer.create (String.length first + 16) in
       Buffer.add_string b first;
       let unfinished () =
         let help =
-          match P.peek_char () with
+          match Parseff.peek_char () with
           | Some _ ->
               "a short string cannot contain a line break: close it with "
               ^ String.make 1 q
@@ -637,11 +642,11 @@ let short_string ~start =
         Bad
       in
       let bad_char () =
-        match P.peek_char () with
+        match Parseff.peek_char () with
         | Some ('\n' | '\r') | None ->
             false
         | Some c ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             c = q
       in
       let escape_error k ?help ~took_char msg =
@@ -655,23 +660,23 @@ let short_string ~start =
       in
       let rec loop () =
         quote_char := q;
-        Buffer.add_string b (P.take_while plain_char);
-        match P.peek_char () with
+        Buffer.add_string b (Parseff.take_while plain_char);
+        match Parseff.peek_char () with
         | None | Some ('\n' | '\r') ->
             unfinished ()
         | Some c when c = q ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             String (Buffer.contents b)
         | Some _ ->
             escape ()
       and add c =
-        ignore (P.any_char ());
+        ignore (Parseff.any_char ());
         Buffer.add_char b c;
         loop ()
       and escape () =
-        let k = P.position () in
-        ignore (P.any_char ());
-        match P.peek_char () with
+        let k = Parseff.position () in
+        ignore (Parseff.any_char ());
+        match Parseff.peek_char () with
         | None ->
             unfinished ()
         | Some 'a' ->
@@ -695,11 +700,11 @@ let short_string ~start =
             Buffer.add_char b '\n';
             loop ()
         | Some 'x' ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             let digit () =
-              match P.peek_char () with
+              match Parseff.peek_char () with
               | Some c when is_xdigit c ->
-                  ignore (P.any_char ());
+                  ignore (Parseff.any_char ());
                   Some c
               | _ ->
                   None
@@ -730,7 +735,7 @@ let short_string ~start =
               )
             end
         | Some 'z' ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             skip_space ();
             loop ()
         | Some 'u' ->
@@ -739,9 +744,9 @@ let short_string ~start =
             let v = ref 0 and count = ref 0 in
             let continue = ref true in
             while !continue && !count < 3 do
-              match P.peek_char () with
+              match Parseff.peek_char () with
               | Some d when is_digit d ->
-                  ignore (P.any_char ());
+                  ignore (Parseff.any_char ());
                   v := (!v * 10) + Char.code d - Char.code '0';
                   incr count
               | _ ->
@@ -758,20 +763,20 @@ let short_string ~start =
               loop ()
             end
         | Some c ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             escape_error k ~took_char:false ~help:valid_escapes
               (Printf.sprintf "invalid escape sequence '\\%s'"
                  (escape_found (String.make 1 c))
               )
       and unicode k =
-        ignore (P.any_char ());
-        match P.peek_char () with
+        ignore (Parseff.any_char ());
+        match Parseff.peek_char () with
         | Some '{' ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             let rec digits v count =
-              match P.peek_char () with
+              match Parseff.peek_char () with
               | Some c when is_xdigit c ->
-                  ignore (P.any_char ());
+                  ignore (Parseff.any_char ());
                   let v = (v lsl 4) + int_of_string ("0x" ^ String.make 1 c) in
                   if v > 0x7FFFFFFF then
                     escape_error k ~took_char:false
@@ -783,7 +788,7 @@ let short_string ~start =
                   escape_error k ~took_char:true
                     "hexadecimal digit expected in '\\u{XXX}' escape"
               | Some '}' ->
-                  ignore (P.any_char ());
+                  ignore (Parseff.any_char ());
                   add_utf8 b v;
                   loop ()
               | _ ->
@@ -795,7 +800,7 @@ let short_string ~start =
             escape_error k ~took_char:true ~help:"write \\u{XXX}, as in \\u{48}"
               "missing '{' in '\\u{XXX}' escape"
       in
-      match P.peek_char () with
+      match Parseff.peek_char () with
       | None | Some ('\n' | '\r') ->
           unfinished ()
       | Some _ ->
@@ -812,23 +817,23 @@ let long_bracket ~start ~level ~keep ~what =
       None
   in
   let add s = match b with Some b -> Buffer.add_string b s | None -> () in
-  (match P.peek_char () with Some ('\n' | '\r') -> newline () | _ -> ());
+  (match Parseff.peek_char () with Some ('\n' | '\r') -> newline () | _ -> ());
   let other = ref None in
   let rec loop () =
     ( match b with
     | Some b ->
-        Buffer.add_string b (P.take_while long_char)
+        Buffer.add_string b (Parseff.take_while long_char)
     | None ->
-        P.skip_while long_char
+        Parseff.skip_while long_char
     );
-    match P.peek_char () with
+    match Parseff.peek_char () with
     | None ->
         let notes =
           match !other with
           | Some (a, n) ->
               [
                 {
-                  P.at = Some { start = a; stop = a + n + 2 };
+                  Parseff.at = Some { start = a; stop = a + n + 2 };
                   text =
                     Printf.sprintf "this '%s' has level %d, the %s needs %s"
                       (closing n) n what (closing level);
@@ -849,12 +854,12 @@ let long_bracket ~start ~level ~keep ~what =
           (lex_error ~from:start ~notes ~help ("unfinished long " ^ what));
         None
     | Some ']' -> (
-        let a = P.position () in
-        ignore (P.any_char ());
+        let a = Parseff.position () in
+        ignore (Parseff.any_char ());
         let n = count_equals () in
-        match P.peek_char () with
+        match Parseff.peek_char () with
         | Some ']' when n = level ->
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             Some (match b with Some b -> Buffer.contents b | None -> "")
         | Some ']' ->
             (match !other with None -> other := Some (a, n) | Some _ -> ());
@@ -872,19 +877,19 @@ let long_bracket ~start ~level ~keep ~what =
   loop ()
 
 let comment ~start =
-  match P.peek_char () with
+  match Parseff.peek_char () with
   | Some '[' -> (
-      ignore (P.any_char ());
+      ignore (Parseff.any_char ());
       let n = count_equals () in
-      match P.peek_char () with
+      match Parseff.peek_char () with
       | Some '[' ->
-          ignore (P.any_char ());
+          ignore (Parseff.any_char ());
           ignore (long_bracket ~start ~level:n ~keep:false ~what:"comment")
       | _ ->
-          P.skip_while (fun c -> c <> '\n' && c <> '\r')
+          Parseff.skip_while (fun c -> c <> '\n' && c <> '\r')
     )
   | _ ->
-      P.skip_while (fun c -> c <> '\n' && c <> '\r')
+      Parseff.skip_while (fun c -> c <> '\n' && c <> '\r')
 
 let lx_tok = ref Eof
 let lx_start = ref 0
@@ -893,43 +898,43 @@ let lx_comment = ref (-1)
 let lx_lines_before = ref 0
 
 let other_char () =
-  let c = P.any_char () in
+  let c = Parseff.any_char () in
   if Char.code c >= 0xC0 then
-    String.make 1 c ^ P.take_while (fun c -> Char.code c land 0xC0 = 0x80)
+    String.make 1 c ^ Parseff.take_while (fun c -> Char.code c land 0xC0 = 0x80)
   else
     String.make 1 c
 
 let one s =
-  ignore (P.any_char ());
+  ignore (Parseff.any_char ());
   Sym s
 
 let two c s1 s2 =
-  ignore (P.any_char ());
-  match P.peek_char () with
+  ignore (Parseff.any_char ());
+  match Parseff.peek_char () with
   | Some d when d = c ->
-      ignore (P.any_char ());
+      ignore (Parseff.any_char ());
       Sym s2
   | _ ->
       Sym s1
 
 let rec lex () =
   skip_space ();
-  let p = P.position () in
+  let p = Parseff.position () in
   lx_start := p;
   let tok =
-    match P.peek_char () with
+    match Parseff.peek_char () with
     | None ->
         Eof
     | Some c -> (
         match c with
         | 'a' .. 'z' | 'A' .. 'Z' | '_' ->
-            keyword (P.take_while is_alnum)
+            keyword (Parseff.take_while is_alnum)
         | '0' .. '9' ->
-            let d = P.any_char () in
+            let d = Parseff.any_char () in
             let head =
-              match (d, P.peek_char ()) with
+              match (d, Parseff.peek_char ()) with
               | '0', Some (('x' | 'X') as x) ->
-                  ignore (P.any_char ());
+                  ignore (Parseff.any_char ());
                   String.init 2 (fun i ->
                       if i = 0 then
                         '0'
@@ -943,10 +948,10 @@ let rec lex () =
         | '"' | '\'' ->
             short_string ~start:p
         | '-' -> (
-            ignore (P.any_char ());
-            match P.peek_char () with
+            ignore (Parseff.any_char ());
+            match Parseff.peek_char () with
             | Some '-' ->
-                ignore (P.any_char ());
+                ignore (Parseff.any_char ());
                 if !lx_comment < 0 && Dynarray.length lines = !lx_lines_before
                 then
                   lx_comment := p;
@@ -956,11 +961,11 @@ let rec lex () =
                 Sym Minus
           )
         | '[' -> (
-            ignore (P.any_char ());
+            ignore (Parseff.any_char ());
             let n = count_equals () in
-            match P.peek_char () with
+            match Parseff.peek_char () with
             | Some '[' -> (
-                ignore (P.any_char ());
+                ignore (Parseff.any_char ());
                 match
                   long_bracket ~start:p ~level:n ~keep:true ~what:"string"
                 with
@@ -982,13 +987,13 @@ let rec lex () =
                 Bad
           )
         | '.' -> (
-            ignore (P.any_char ());
-            match P.peek_char () with
+            ignore (Parseff.any_char ());
+            match Parseff.peek_char () with
             | Some '.' -> (
-                ignore (P.any_char ());
-                match P.peek_char () with
+                ignore (Parseff.any_char ());
+                match Parseff.peek_char () with
                 | Some '.' ->
-                    ignore (P.any_char ());
+                    ignore (Parseff.any_char ());
                     Sym Dots
                 | _ ->
                     Sym Concat
@@ -1007,8 +1012,8 @@ let rec lex () =
         | '~' ->
             two '=' Tilde Ne
         | '<' -> (
-            ignore (P.any_char ());
-            match P.peek_char () with
+            ignore (Parseff.any_char ());
+            match Parseff.peek_char () with
             | Some '=' ->
                 one Le
             | Some '<' ->
@@ -1017,8 +1022,8 @@ let rec lex () =
                 Sym Lt
           )
         | '>' -> (
-            ignore (P.any_char ());
-            match P.peek_char () with
+            ignore (Parseff.any_char ());
+            match Parseff.peek_char () with
             | Some '=' ->
                 one Ge
             | Some '>' ->
@@ -1055,10 +1060,10 @@ let rec lex () =
         | ',' ->
             one Comma
         | '!' -> (
-            ignore (P.any_char ());
-            match P.peek_char () with
+            ignore (Parseff.any_char ());
+            match Parseff.peek_char () with
             | Some '=' ->
-                ignore (P.any_char ());
+                ignore (Parseff.any_char ());
                 Other "!="
             | _ ->
                 Other "!"
@@ -1072,7 +1077,7 @@ let rec lex () =
       lex ()
   | tok ->
       lx_tok := tok;
-      lx_stop := P.position ()
+      lx_stop := Parseff.position ()
 
 type state = {
   mutable tok : token;
@@ -1171,10 +1176,10 @@ let start () =
   Dynarray.clear lines;
   Dynarray.add_last lines 0;
   first_line := 1;
-  ignore (P.optional (fun () -> P.consume "\xEF\xBB\xBF") ());
-  ( match P.peek_char () with
+  ignore (Parseff.optional (fun () -> Parseff.consume "\xEF\xBB\xBF") ());
+  ( match Parseff.peek_char () with
   | Some '#' ->
-      P.skip_while (fun c -> c <> '\n')
+      Parseff.skip_while (fun c -> c <> '\n')
   | _ ->
       ()
   );
