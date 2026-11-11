@@ -217,7 +217,7 @@ let number () =
 
 {!val:Parseff.fail} aborts parsing with an error message.
 
-{@ocaml skip[val fail : ?from:int -> ?notes:note list -> string -> 'a]}
+{@ocaml skip[val fail : ?from:int -> ?upto:int -> ?notes:note list -> string -> 'a]}
 
 {@ocaml[
 (* Validate range *)
@@ -240,7 +240,7 @@ let byte () =
 {!val:Parseff.error} aborts parsing with a user-defined error value. Custom
 errors are caught by {!val:Parseff.parse} and returned in the result.
 
-{@ocaml skip[val error : ?from:int -> ?notes:note list -> custom_error -> 'a]}
+{@ocaml skip[val error : ?from:int -> ?upto:int -> ?notes:note list -> custom_error -> 'a]}
 
 {@ocaml[
 type Parseff.custom_error += Negative of int | Out_of_range of int

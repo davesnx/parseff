@@ -96,6 +96,7 @@ type custom_error = ..
 exception Fail
 type fail_extra = {
   from : int;
+  upto : int;
   notes : note_data list;
   mutable depth : int;
   mutable chain : (string * int * bool) list;
@@ -1897,17 +1898,20 @@ let[@inline] match_regex ?label re =
   let st = get_state () in
   handle_match_regex st re label
 
-let[@inline] fail ?(from = -1) ?(notes = []) msg =
+let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) msg =
   let st = get_state () in
   raise
-    (User_failure (st.pos, msg, { from; notes; depth = st.ctx_top; chain = [] }))
+    (User_failure
+       (st.pos, msg, { from; upto; notes; depth = st.ctx_top; chain = [] })
+    )
 
-let[@inline] error ?(from = -1) ?(notes = []) e =
+let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) e =
   let st = get_state () in
-  if from < 0 && notes == [] then
+  if from < 0 && upto < 0 && notes == [] then
     fail_user st st.pos (Payload e)
   else
-    fail_user st st.pos (Payload_ext (e, { from; notes; depth = 0; chain = [] }))
+    fail_user st st.pos
+      (Payload_ext (e, { from; upto; notes; depth = 0; chain = [] }))
 
 let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     (value : d) =
@@ -4257,10 +4261,19 @@ let build st ~pos ?(notes = []) kind span frames =
   }
 
 let extras_span pos (x : fail_extra) =
-  if x.from < 0 then
-    { start = pos; stop = pos }
-  else
-    { start = imin x.from pos; stop = imax x.from pos }
+  let a =
+    if x.from < 0 then
+      pos
+    else
+      x.from
+  in
+  let z =
+    if x.upto < 0 then
+      pos
+    else
+      x.upto
+  in
+  { start = imin a z; stop = imax a z }
 
 let error_of_far st outer =
   let f = st.far in
