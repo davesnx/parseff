@@ -189,7 +189,25 @@ let test_read_ahead_kept () =
            )
         )
     )
-    [ (16, 1); (16, 3); (16, 4096); (65536, 1); (65536, 4096) ];
+    [
+      (5, 1);
+      (5, 2);
+      (5, 3);
+      (6, 1);
+      (16, 1);
+      (16, 3);
+      (16, 4096);
+      (65536, 1);
+      (65536, 4096);
+    ];
+  Alcotest.(check (list string))
+    "window 4"
+    [ "ok a1"; "ok b22"; "error 7 backtrack window of 4 bytes exceeded" ]
+    (collect
+       (Parseff.parse_source_each ~backtrack_window:4 (bytes_src ~chunk:1 input)
+          regex_value
+       )
+    );
   Alcotest.(check (list string))
     "of_string"
     [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]

@@ -237,7 +237,8 @@ let maybe_subtract () =
 
 {!val:Parseff.fold_right} is like {!val:Parseff.fold_left} but combines
 {b right-associatively}. Use [~otherwise] to provide a fallback value when no
-elements match.
+elements match. The loop stops after an operator and element that together
+consume no input, and that pair is not applied.
 
 {@ocaml skip[val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a]}
 
@@ -258,6 +259,10 @@ let power () =
 {!val:Parseff.expression} parses a whole expression from one operator table,
 in place of one [fold_left] or [fold_right] for each precedence level. The
 guide "Expressions with precedence" shows a complete parser.
+
+As in [fold_left], the loop stops after an infix operator and its right operand
+that together consume no input, and that operator is not applied. This also
+applies to [infix_right].
 
 {@ocaml skip[val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a]}
 

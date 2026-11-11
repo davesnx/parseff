@@ -378,16 +378,12 @@ val match_regex : ?label:string -> Re.re -> string
     expected at the same position like any other primitive. Without [~label] the
     label is ["text matching the pattern"].
 
-    In streaming mode, the parser keeps at least half of the backtrack window
-    buffered ahead of the current position, unless the source has ended. A match
-    is cut at the end of the buffered input, so it can be shorter than the match
-    that [parse] finds on the same input. The byte before the current position
-    stays visible to [Re.bol] and word boundaries.
-
-    If the window is full of rewind history, the regex runs on the buffered
-    input. A match that ends before the end of the buffer is returned. A failed
-    match, or one that reaches the end of the buffer, fails with
-    [Backtrack_window_exceeded], because more input could change the result.
+    In streaming mode, a match and the byte after it must fit in the backtrack
+    window, unless the source ends after the match. Otherwise the parse fails
+    with [Backtrack_window_exceeded]. A regex that needs later bytes to choose a
+    longer match can return the shorter one when the window is small: [a(bc)?]
+    on ["abc"] can return ["a"] with a window below [6]. The byte before the
+    current position stays visible to [Re.bol] and word boundaries.
 
     The match must start at the current position, but [Re] searches forward when
     it does not. A failed match therefore scans the rest of the input, and a
@@ -992,7 +988,10 @@ val fold_right :
     values.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
-    [element] values instead of failing. *)
+    [element] values instead of failing.
+
+    The loop stops after an [op] and [element] that together consume no input,
+    and that pair is not applied. *)
 
 type 'a operator
 (** An operator for {!expression}. Each constructor takes a parser for the
@@ -1026,7 +1025,8 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
     skip it in the token parsers and in [operand].
 
     The operators are tried in table order. When one token starts another, such
-    as [!] and [!=], list the longer token first.
+    as [!] and [!=], list the longer token first. The loop stops after an
+    operator and operand that together consume no input, as in {!fold_left}.
 
     Example:
     {@ocaml[
@@ -1081,61 +1081,40 @@ val digit : unit -> int
       ...
     ]} *)
 
-val int : unit -> int
-(** [int ()] parses a decimal integer: an optional [-], then one or more digits
-    [0-9]. It accepts leading zeros. It does not accept [+], [_] separators or a
-    [0x], [0o] or [0b] prefix, and it stops at the first byte that is not a
-    digit, so [int] on ["12ab"] returns [12] and leaves ["ab"].
-
-    Without a digit at the start it fails with [expected integer], and after a
-    [-] with [expected digit]. A value outside [min_int .. max_int] fails at the
-    start of the number with [expected integer in int range]. Both are
-    [Expected] errors, so {!or_} can try another branch. On success [int] does
-    not allocate. In {!parse_source} the number must be shorter than
-    [backtrack_window] bytes, or the parse fails with
-    [Backtrack_window_exceeded] at its start.
+val integer : unit -> int
+(** [integer ()] parses a decimal integer: an optional [-], then digits. It
+    fails without a digit, and when the value is outside the [int] range.
 
     Example:
     {@ocaml[
-      let n = int () in  (* parses "-42" -> -42 *)
+      let n = integer () in  (* parses "-42" -> -42 *)
       ...
     ]} *)
 
-val float : unit -> float
-(** [float ()] parses a decimal number: an optional [-], one or more digits, an
-    optional fraction ([.] and one or more digits), and an optional exponent
-    ([e] or [E], an optional [+] or [-], and one or more digits). ["42"],
-    ["-0.5"] and ["2.5E-3"] match. It does not accept [+] at the start, [_]
-    separators, [.5], [inf], [nan] or hexadecimal floats.
+val number : unit -> float
+(** [number ()] parses a number with the JSON grammar: an optional [-], digits,
+    an optional fraction and an optional exponent. ["-0.5"] and ["2.5e-3"]
+    match.
 
-    Without a digit at the start it fails with [expected number]. A [.] or an
-    exponent marker must be followed by a digit: ["1."] and ["1e"] fail with
-    [expected digit] after the marker. A value too large for a [float] gives
-    [infinity] or [neg_infinity], and a value too small gives [0.]. In
-    {!parse_source} the number must be shorter than [backtrack_window] bytes, or
-    the parse fails with [Backtrack_window_exceeded] at its start.
+    An [e] or [E] after the number always starts an exponent, so ["2em"] fails.
+    For other formats, such as a unit after the number, a leading [+], [.5],
+    digit separators or [inf], write your own parser with {!take_while},
+    {!recognize} and [float_of_string].
 
     Example:
     {@ocaml[
-      let x = float () in  (* parses "6.02e23" -> 6.02e23 *)
+      let x = number () in  (* parses "6.02e23" -> 6.02e23 *)
       ...
     ]} *)
 
-val hex_int : unit -> int
-(** [hex_int ()] parses one or more hexadecimal digits ([0-9], [a-f], [A-F]) and
-    returns their value. It does not accept a sign, [_] separators or a [0x]
-    prefix. Parse the prefix yourself: [consume "0x" |> ignore; hex_int ()].
-
-    Without a digit at the start it fails with [expected hexadecimal integer]. A
-    value above [max_int] fails at the start of the number with
-    [expected hexadecimal integer in int range]. On success [hex_int] does not
-    allocate. In {!parse_source} the number must be shorter than
-    [backtrack_window] bytes, or the parse fails with
-    [Backtrack_window_exceeded] at its start.
+val hex_integer : unit -> int
+(** [hex_integer ()] parses hexadecimal digits and returns their value. It
+    accepts no sign and no [0x] prefix. It fails without a digit, and when the
+    value is above [max_int].
 
     Example:
     {@ocaml[
-      let n = hex_int () in  (* parses "ff" -> 255 *)
+      let n = hex_integer () in  (* parses "ff" -> 255 *)
       ...
     ]} *)
 

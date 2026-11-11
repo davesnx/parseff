@@ -296,6 +296,49 @@ let test_prefix_no_progress () =
   check Parseff.[ [ prefix empty; prefix (pre "-") ] ] "-1" "Ok (-1)";
   check Parseff.[ [ infix_left (bin "+") ]; [ prefix empty ] ] "1+2" "Ok (1+2)"
 
+let maybe_digit () =
+  match Parseff.optional Parseff.digit () with
+  | Some d ->
+      string_of_int d
+  | None ->
+      "_"
+
+let maybe_expr table () = Parseff.expression ~operand:maybe_digit table ()
+
+let test_infix_right_no_progress () =
+  let empty () = fun a b -> "(" ^ a ^ "." ^ b ^ ")" in
+  let right = Parseff.[ [ infix_right empty ] ] in
+  check ~parser:maybe_expr right "" "Ok _";
+  check ~parser:maybe_expr right "1" "Ok 1";
+  check ~parser:maybe_expr right "12" "Ok (1.2)";
+  check ~parser:maybe_expr right "123" "Ok (1.(2.3))";
+  check ~parser:maybe_expr
+    Parseff.[ [ infix_left (bin "+") ]; [ infix_right empty ] ]
+    "1+2" "Ok (1+2)";
+  check ~parser:maybe_expr
+    Parseff.[ [ infix_right (bin "^"); infix_right empty ] ]
+    "1^2" "Ok (1^2)"
+
+let test_infix_right_no_progress_undo () =
+  let notes = Parseff.Diagnostics.create () in
+  let count = Parseff.Ref.create 0 in
+  let empty () =
+    Parseff.warn notes "empty";
+    Parseff.Ref.set count (Parseff.Ref.get count + 1);
+    fun a b -> "(" ^ a ^ "." ^ b ^ ")"
+  in
+  let parser () =
+    let e = maybe_expr Parseff.[ [ infix_right empty ] ] () in
+    (e, Parseff.Ref.get count)
+  in
+  match Parseff.parse ~diagnostics:notes "1" parser with
+  | Ok (e, n) ->
+      Alcotest.(check string) "value" "1" e;
+      Alcotest.(check int) "sets undone" 0 n;
+      Alcotest.(check int) "warnings undone" 0 (Parseff.Diagnostics.length notes)
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
 let test_prefix_no_progress_sealed () =
   let sealed seal () =
     seal ();
@@ -522,6 +565,10 @@ let () =
           test_case "depth limit" `Quick test_depth_limit;
           test_case "commit in operand" `Quick test_commit_in_operand;
           test_case "prefix without progress" `Quick test_prefix_no_progress;
+          test_case "infix_right without progress" `Quick
+            test_infix_right_no_progress;
+          test_case "infix_right without progress undoes" `Quick
+            test_infix_right_no_progress_undo;
           test_case "prefix without progress, committed" `Quick
             test_prefix_no_progress_sealed;
           test_case "long flat chain" `Quick test_long_flat;
