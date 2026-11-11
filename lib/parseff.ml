@@ -98,6 +98,7 @@ type fail_extra = {
   from : int;
   upto : int;
   notes : note_data list;
+  help : string option;
   mutable depth : int;
   mutable chain : (string * int * bool) list;
 }
@@ -1898,20 +1899,20 @@ let[@inline] match_regex ?label re =
   let st = get_state () in
   handle_match_regex st re label
 
-let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) msg =
+let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
   let st = get_state () in
   raise
     (User_failure
-       (st.pos, msg, { from; upto; notes; depth = st.ctx_top; chain = [] })
+       (st.pos, msg, { from; upto; notes; help; depth = st.ctx_top; chain = [] })
     )
 
-let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) e =
+let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
   let st = get_state () in
-  if from < 0 && upto < 0 && notes == [] then
+  if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
   else
     fail_user st st.pos
-      (Payload_ext (e, { from; upto; notes; depth = 0; chain = [] }))
+      (Payload_ext (e, { from; upto; notes; help; depth = 0; chain = [] }))
 
 let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     (value : d) =
@@ -3097,6 +3098,7 @@ type error = {
   location : location option;
   contexts : context list;
   notes : note list;
+  help : string option;
   excerpt : excerpt;
 }
 
@@ -3846,6 +3848,14 @@ let render ?name ?source ?custom e =
       add_text b n.text
     )
     loose;
+  ( match e.help with
+  | Some h ->
+      gutter_star ();
+      Buffer.add_string b "help:";
+      add_text b h
+  | None ->
+      ()
+  );
   ( match e.kind with
   | Depth_limit_exceeded _ ->
       gutter_star ();
@@ -4011,7 +4021,7 @@ let found_of_far st f pos =
     | _ ->
         found_of st pos
 
-let build st ~pos ?(notes = []) kind span frames =
+let build st ~pos ?(notes = []) ?help kind span frames =
   let idx =
     match st.line_index with
     | Some idx ->
@@ -4257,6 +4267,7 @@ let build st ~pos ?(notes = []) kind span frames =
         (fun (name, start, delimited) -> { name; start; delimited })
         frames;
     notes;
+    help;
     excerpt = { views; frame_locs; char_column };
   }
 
@@ -4286,7 +4297,8 @@ let error_of_far st outer =
       build st ~pos (Custom e) { start = pos; stop = pos } frames
   | Payload_ext (e, x) when f.special = special_user ->
       let span = extras_span pos x in
-      build st ~pos:span.start ~notes:x.notes (Custom e) span frames
+      build st ~pos:span.start ~notes:x.notes ?help:x.help (Custom e) span
+        frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
@@ -4303,7 +4315,8 @@ let error_plain st pos kind frames =
 
 let error_failure st pos msg (x : fail_extra) outer =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes (Failure msg) span (outer @ x.chain)
+  build st ~pos:span.start ~notes:x.notes ?help:x.help (Failure msg) span
+    (outer @ x.chain)
 
 let outer_contexts st pos =
   let acc = ref [] in
