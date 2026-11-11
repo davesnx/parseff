@@ -3,6 +3,7 @@
 - **Breaking: `warn_at` is removed.** Use `warn ~pos d x`.
 - **Add `Ref`.** A `ref` whose changes are undone when the parser backtracks. Use it for symbol tables, indentation stacks and counters.
 - **Add `capture` and `recover`.** `capture p` returns the failure of `p` as a value. `recover errors ~sync p hole` records the error, skips input with `sync` and returns `hole e`, so one parse can report every error. See the error recovery guide.
+- **Add `capture_with`.** A failed `capture` or `recover` removes the diagnostics recorded inside it; this rule is now written down as final. `capture_with errors p` also returns the removed diagnostics, so a parser can keep an inner error and drop the outer error that it caused.
 - **Add `expression`.** Parses operators by precedence from a table of `infix_left`, `infix_right`, `prefix` and `postfix` levels.
 - **Add `climb`.** `climb ~operand ~operator` parses operators by precedence with one operator lookup after each operand: `operator` returns `Some (precedence, op)` or `None`. Use it in place of `expression` when the table has many levels, or when the failed operator tokens must stay out of the expected set. A chain of `infix_right` operators uses no depth level.
 - **Add `~help` to `fail` and `error`.** `fail ~help:"write ~= for not equal" msg` keeps the text in the new `help` field of `error`, and `render_error` prints it as a `* help:` line after the notes.

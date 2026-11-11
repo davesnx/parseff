@@ -707,6 +707,192 @@ let test_rollback () =
   Alcotest.(check string) "value" "Ok" (show_error r);
   Alcotest.check errs "entry removed" [] (errors d)
 
+let lost_input = "x = 1\nprint(\"hi)\n"
+
+let lost_string () =
+  let start = position () in
+  ignore (char '"');
+  skip_while (fun c -> c <> '"' && c <> '\n');
+  match peek_char () with
+  | Some '"' ->
+      ignore (char '"')
+  | _ ->
+      fail ~from:start "unfinished string"
+
+let to_line_end () = skip_while (fun c -> c <> '\n')
+
+let lost_argument d ~pos () =
+  match capture lost_string with
+  | Ok () ->
+      ()
+  | Error e ->
+      warn ~pos:(pos e) d e;
+      to_line_end ()
+
+let lost_call d ~pos () =
+  ignore (consume "print(");
+  lost_argument d ~pos ();
+  ignore (char ')')
+
+let lost_top statement () =
+  ignore (consume "x = 1\n");
+  statement ();
+  ignore (char '\n')
+
+let at_start (e : error) = e.range.start
+let at_stop (e : error) = e.range.stop
+
+let show_entries l =
+  List.map
+    (fun { Diagnostics.pos; value = (e : error) } ->
+      (pos, (e.range.start, error_message e))
+    )
+    l
+
+let entries d = show_entries (Diagnostics.to_list d)
+let values d = List.map (fun x -> x.Diagnostics.value) (Diagnostics.to_list d)
+let entry_list = Alcotest.(list (pair int (pair int string)))
+let unfinished = (12, "unfinished string")
+let no_closer = (16, "expected ')', found '\\n'")
+
+let test_inner_error_removed () =
+  let d = Diagnostics.create () in
+  let run statement =
+    let r = parse ~diagnostics:d lost_input (lost_top statement) in
+    Alcotest.(check string) "value" "Ok" (show_error r);
+    errors d
+  in
+  Alcotest.check errs "the inner error stays when the construct succeeds"
+    [ unfinished ]
+    (run (fun () ->
+         ignore (consume "print(");
+         lost_argument d ~pos:at_start ()
+     )
+    );
+  Alcotest.check errs "recover keeps only the outer error" [ no_closer ]
+    (run (fun () ->
+         recover d ~sync:to_line_end (lost_call d ~pos:at_start) ignore
+     )
+    );
+  Alcotest.check errs "capture removes the inner error" []
+    (run (fun () ->
+         match capture (lost_call d ~pos:at_start) with
+         | Ok () ->
+             ()
+         | Error _ ->
+             to_line_end ()
+     )
+    )
+
+let test_capture_with () =
+  let d = Diagnostics.create () in
+  let seen = ref [] in
+  let r =
+    parse ~diagnostics:d "ab\"x\n\"y\n" (fun () ->
+        ignore (char 'a');
+        match
+          capture_with d (fun () ->
+              ignore (char 'b');
+              lost_argument d ~pos:at_stop ();
+              ignore (char '\n');
+              lost_argument d ~pos:at_start ();
+              char '!'
+          )
+        with
+        | Ok _ ->
+            Alcotest.fail "expected a failure"
+        | Error (e, inner) ->
+            seen := show_entries inner;
+            Alcotest.(check int) "position restored" 1 (position ());
+            Alcotest.check errs "inner entries are removed" [] (errors d);
+            List.iter
+              (fun (x : _ Diagnostics.entry) -> warn ~pos:x.pos d x.value)
+              inner;
+            warn ~pos:e.range.start d e;
+            ignore (consume "b\"x\n\"y\n")
+    )
+  in
+  Alcotest.(check string) "value" "Ok" (show_error r);
+  Alcotest.check entry_list "removed entries, in order, with their offsets"
+    [ (4, (2, "unfinished string")); (5, (5, "unfinished string")) ]
+    !seen;
+  Alcotest.check entry_list "recorded again at the same offsets"
+    [
+      (4, (2, "unfinished string"));
+      (5, (5, "unfinished string"));
+      (7, (7, "expected '!', found '\\n'"));
+    ]
+    (entries d)
+
+let test_capture_with_scope () =
+  let d = Diagnostics.create () in
+  let other = Diagnostics.create () in
+  let r =
+    parse ~diagnostics:d "a" (fun () ->
+        warn d "before";
+        match
+          capture_with d (fun () ->
+              warn d "inside";
+              char 'a'
+          )
+        with
+        | Ok c ->
+            c
+        | Error _ ->
+            Alcotest.fail "expected success"
+    )
+  in
+  Alcotest.(check string) "success" "Ok" (show_error r);
+  Alcotest.(check (list string))
+    "success keeps the entries" [ "before"; "inside" ] (values d);
+  let r =
+    parse ~diagnostics:d "a" (fun () ->
+        warn d "before";
+        match
+          capture_with d (fun () ->
+              warn d "inside";
+              ignore
+                (optional
+                   (fun () ->
+                     warn d "branch";
+                     char 'b'
+                   )
+                   ()
+                );
+              warn d "inside 2";
+              char 'b'
+          )
+        with
+        | Ok _ ->
+            Alcotest.fail "expected a failure"
+        | Error (_, inner) ->
+            Alcotest.(check (list string))
+              "only the entries of the failed parser" [ "inside"; "inside 2" ]
+              (List.map (fun x -> x.Diagnostics.value) inner);
+            char 'a'
+    )
+  in
+  Alcotest.(check string) "failure" "Ok" (show_error r);
+  Alcotest.(check (list string))
+    "failure removes the entries" [ "before" ] (values d);
+  let r =
+    parse ~diagnostics:d "a" (fun () ->
+        match
+          capture_with other (fun () ->
+              warn d "inside";
+              char 'b'
+          )
+        with
+        | Ok _ ->
+            Alcotest.fail "expected a failure"
+        | Error (_, inner) ->
+            Alcotest.(check int) "other collector" 0 (List.length inner);
+            char 'a'
+    )
+  in
+  Alcotest.(check string) "other collector" "Ok" (show_error r);
+  Alcotest.(check (list string)) "entry removed" [] (values d)
+
 let test_nested_recovery_removed () =
   let input = "let a = [1, ?] let b = [2];" in
   let d = Diagnostics.create () in
@@ -989,6 +1175,9 @@ let () =
           test_case "rollback" `Quick test_rollback;
           test_case "nested recovery is removed" `Quick
             test_nested_recovery_removed;
+          test_case "inner error is removed" `Quick test_inner_error_removed;
+          test_case "capture_with" `Quick test_capture_with;
+          test_case "capture_with scope" `Quick test_capture_with_scope;
         ]
       );
       ( "capture",
