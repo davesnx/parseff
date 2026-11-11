@@ -124,6 +124,9 @@ type line_index = {
   mutable count : int;
   mutable scanned_up_to : int;
   mutable line_base : int;
+  mutable cut_line : int;
+  mutable cut_at : int;
+  mutable cut_chars : int;
 }
 
 let frame_choice = 0
@@ -588,7 +591,15 @@ let[@inline always] get_state () =
 let create_line_index () =
   let starts = Array.make 64 0 in
   starts.(0) <- 0;
-  { starts; count = 1; scanned_up_to = 0; line_base = 0 }
+  {
+    starts;
+    count = 1;
+    scanned_up_to = 0;
+    line_base = 0;
+    cut_line = -1;
+    cut_at = 0;
+    cut_chars = 0;
+  }
 
 let find_newline s from limit =
   let i = ref from in
@@ -679,6 +690,44 @@ let last_newline s from limit =
   done;
   !i
 
+let rec count_cut_chars idx s i stop =
+  if i >= stop then
+    i
+  else begin
+    let c = Char.code (String.unsafe_get s i) in
+    let width =
+      if c < 0x80 then
+        1
+      else begin
+        let d = String.get_utf_8_uchar s i in
+        if Uchar.utf_decode_is_valid d then
+          Uchar.utf_decode_length d
+        else begin
+          let need =
+            if c < 0xC2 || c > 0xF4 then
+              1
+            else if c < 0xE0 then
+              2
+            else if c < 0xF0 then
+              3
+            else
+              4
+          in
+          if i + need > String.length s then
+            need
+          else
+            1
+        end
+      end
+    in
+    if i + width > stop then
+      i
+    else begin
+      idx.cut_chars <- idx.cut_chars + 1;
+      count_cut_chars idx s (i + width) stop
+    end
+  end
+
 let ensure_line_index_preserved_through st up_to =
   if up_to > 0 then begin
     let idx =
@@ -712,8 +761,36 @@ let ensure_line_index_preserved_through st up_to =
         );
       idx.count <- 1;
       idx.scanned_up_to <- up_to
+    end;
+    let line_start = idx.starts.(0) in
+    if line_start >= up_to then
+      up_to
+    else begin
+      let known = idx.cut_line = line_start in
+      let from =
+        if known then
+          idx.cut_at
+        else
+          line_start
+      in
+      if from < st.base || from > up_to then begin
+        idx.cut_line <- -1;
+        up_to
+      end else begin
+        let input = st.input in
+        let stop = imin (up_to - st.base) (String.length input) in
+        if not known then idx.cut_chars <- 0;
+        let i = count_cut_chars idx input (from - st.base) stop in
+        idx.cut_line <- line_start;
+        idx.cut_at <- i + st.base;
+        if i < stop then
+          i + st.base
+        else
+          up_to
+      end
     end
-  end
+  end else
+    up_to
 
 let[@inline never] handle_location st =
   let idx =
@@ -739,7 +816,12 @@ let[@inline never] append st ~floor chunk n =
   let floor = imax 0 (floor - 1) in
   let cur_len = st.input_len - st.base in
   let drop = imin (imax 0 (floor - st.base)) cur_len in
-  if drop > 0 then ensure_line_index_preserved_through st floor;
+  let drop =
+    if drop > 0 then
+      ensure_line_index_preserved_through st floor - st.base
+    else
+      drop
+  in
   let kept = cur_len - drop in
   let buf = Bytes.create (kept + n) in
   Bytes.blit_string st.input drop buf 0 kept;
@@ -4047,16 +4129,23 @@ let build st ~pos ?(notes = []) ?help kind span frames =
       )
       here
   in
+  let char_column_of line_start p =
+    if p > st.input_len then
+      None
+    else if line_start >= st.base then
+      Some (1 + count_code_points st.input (line_start - st.base) (p - st.base))
+    else if
+      idx.cut_line = line_start && idx.cut_at >= st.base && p >= idx.cut_at
+    then
+      Some
+        (1 + idx.cut_chars
+        + count_code_points st.input (idx.cut_at - st.base) (p - st.base)
+        )
+    else
+      None
+  in
   let char_column =
-    Option.bind here (fun (_, line_start, _) ->
-        if line_start >= st.base then
-          Some
-            (1
-            + count_code_points st.input (line_start - st.base) (pos - st.base)
-            )
-        else
-          None
-    )
+    Option.bind here (fun (_, line_start, _) -> char_column_of line_start pos)
   in
   let source_open =
     match st.source with Some src -> not src.eof | None -> false
@@ -4129,19 +4218,7 @@ let build st ~pos ?(notes = []) ?help kind span frames =
     List.map
       (fun (_, s, _) ->
         Option.map
-          (fun (l, c) ->
-            let first = s - c + 1 in
-            ( l,
-              c,
-              if first >= st.base && s <= st.input_len then
-                Some
-                  (1
-                  + count_code_points st.input (first - st.base) (s - st.base)
-                  )
-              else
-                None
-            )
-          )
+          (fun (l, c) -> (l, c, char_column_of (s - c + 1) s))
           (locate s)
       )
       frames

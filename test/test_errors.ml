@@ -2701,15 +2701,243 @@ let test_known_line_without_a_buffered_start () =
   | Stdlib.Error (e : Parseff.error) ->
       Alcotest.(check bool) "the line is known" true (e.location <> None);
       Alcotest.(check string)
-        "byte header with the cut excerpt"
+        "line and column header with the cut excerpt"
         (lines
            [
-             "input: byte 60: [error] expected 'a' or 'b', found '!'";
+             "input:1:61: [error] expected 'a' or 'b', found '!'";
              "1 | ...aaaaa!...";
              "  |         ^";
            ]
         )
         (Parseff.render_error ~name:"input" e)
+
+let header_of s = List.hd (String.split_on_char '\n' s)
+
+let test_cut_line_keeps_line_and_column () =
+  let statement () =
+    Parseff.skip_whitespace ();
+    ignore
+      (Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
+           c >= 'a' && c <= 'z'
+       )
+      );
+    Parseff.skip_whitespace ();
+    ignore (Parseff.char '=');
+    Parseff.skip_whitespace ();
+    ignore
+      (Parseff.take_while ~at_least:1 ~label:"number" (fun c ->
+           c >= '0' && c <= '9'
+       )
+      )
+  in
+  let input = "x = 1 y = = 2\n" in
+  let headers source =
+    Parseff.parse_source_each source statement
+    |> Seq.filter_map (function
+      | Stdlib.Ok () ->
+          None
+      | Stdlib.Error (e : Parseff.error) ->
+          Some
+            ( Option.map
+                (fun (l : Parseff.location) -> (l.line, l.col))
+                e.location,
+              header_of (Parseff.render_error ~name:"stdin" e)
+            )
+      )
+    |> List.of_seq
+  in
+  let expected =
+    [ (Some (1, 11), "stdin:1:11: [error] expected number, found '='") ]
+  in
+  Alcotest.(check (list (pair (option (pair int int)) string)))
+    "one chunk" expected
+    (headers (Parseff.Source.of_string input));
+  Alcotest.(check (list (pair (option (pair int int)) string)))
+    "3-byte chunks" expected
+    (headers (source_of_chunks ~chunk:3 input))
+
+let test_cut_line_column_counts_characters () =
+  let units =
+    [
+      ("ascii", "a");
+      ("two bytes", "\xC3\xA9");
+      ("three bytes", "\xE2\x82\xAC");
+      ("four bytes", "\xF0\x9F\x98\x80");
+      ("lone continuation", "\x80");
+      ("lone lead", "\xE2");
+      ("cut sequence", "\xE2\x82");
+      ("overlong two bytes", "\xC0\x80");
+      ("overlong three bytes", "\xE0\x80\x80");
+      ("surrogate", "\xED\xA0\x80");
+      ("above the range", "\xF4\x90\x80\x80");
+      ("cut four bytes", "\xF0\x9F\x98");
+      ("invalid lead", "\xF5\x80");
+      ("first of each range", "\xE0\xA0\x80\xF0\x90\x80\x80");
+      ("last of each range", "\xED\x9F\xBF\xF4\x8F\xBF\xBF");
+      ("mixed", "a\xC3\xA9\x80\xF0\x9F\x98\x80\xE2");
+    ]
+  in
+  let parser () =
+    Parseff.skip_while_then_char (fun c -> c <> '!') '!';
+    Parseff.cut ();
+    ignore (Parseff.char '?')
+  in
+  List.iter
+    (fun (label, unit) ->
+      List.iter
+        (fun prefix ->
+          let line = String.concat "" (List.init 30 (fun _ -> unit)) in
+          let input = prefix ^ line ^ "!x" in
+          List.iter
+            (fun chunk ->
+              List.iter
+                (fun backtrack_window ->
+                  let label =
+                    Printf.sprintf "%s, prefix %S, chunk %d, window %d" label
+                      prefix chunk backtrack_window
+                  in
+                  match
+                    Parseff.parse_source ~backtrack_window
+                      (source_of_chunks ~chunk input)
+                      parser
+                  with
+                  | Stdlib.Ok _ ->
+                      Alcotest.fail (label ^ ": expected an error")
+                  | Stdlib.Error (e : Parseff.error) ->
+                      Alcotest.(check string)
+                        label
+                        (header_of (Parseff.render_error ~source:input e))
+                        (header_of (Parseff.render_error e))
+                )
+                [ 2; 3; 4; 5; 8; 64 ]
+            )
+            [ 1; 2; 3; 4; 5; 7; 16 ]
+        )
+        [ ""; "first\n"; "first\r\n\xC3\xA9\n" ]
+    )
+    units
+
+let test_cut_line_column_random_bytes () =
+  let pieces =
+    [|
+      "a";
+      "b ";
+      "\xC3\xA9";
+      "\xDF\xBF";
+      "\xE2\x82\xAC";
+      "\xE1\x80\x80";
+      "\xEF\xBF\xBD";
+      "\xE0\xA0\x80";
+      "\xED\x9F\xBF";
+      "\xF0\x9F\x98\x80";
+      "\xF4\x8F\xBF\xBF";
+      "\x80";
+      "\xBF";
+      "\xC0";
+      "\xC1";
+      "\xC2";
+      "\xE0";
+      "\xE0\x9F";
+      "\xED";
+      "\xED\xA0";
+      "\xEE";
+      "\xF0";
+      "\xF0\x8F";
+      "\xF4\x90";
+      "\xF5";
+      "\xFF";
+    |]
+  in
+  let state = Random.State.make [| 19 |] in
+  let parser () =
+    Parseff.skip_while_then_char (fun c -> c <> '!') '!';
+    Parseff.cut ();
+    ignore (Parseff.char '?')
+  in
+  for case = 1 to 4000 do
+    let valid_only = Random.State.int state 3 > 0 in
+    let b = Buffer.create 256 in
+    for _ = 1 to 10 + Random.State.int state 120 do
+      let k =
+        if valid_only then
+          Random.State.int state 11
+        else if Random.State.bool state then
+          Random.State.int state 7
+        else
+          Random.State.int state (Array.length pieces)
+      in
+      Buffer.add_string b pieces.(k)
+    done;
+    let input = Buffer.contents b ^ "!x" in
+    let chunk = 1 + Random.State.int state 48 in
+    let backtrack_window =
+      if Random.State.bool state then
+        2 + Random.State.int state 40
+      else
+        64 + Random.State.int state 200
+    in
+    match
+      Parseff.parse_source ~backtrack_window
+        (source_of_chunks ~chunk input)
+        parser
+    with
+    | Stdlib.Ok _ ->
+        Alcotest.fail "expected an error"
+    | Stdlib.Error (e : Parseff.error) ->
+        Alcotest.(check string)
+          (Printf.sprintf "case %d, chunk %d, window %d, input %S" case chunk
+             backtrack_window input
+          )
+          (header_of (Parseff.render_error ~source:input e))
+          (header_of (Parseff.render_error e))
+  done
+
+let test_cut_line_context_column () =
+  let line = String.concat "" (List.init 40 (fun _ -> "\xC3\xA9")) in
+  let input = line ^ "[x" in
+  let parser () =
+    Parseff.skip_while (fun c -> c <> '[');
+    Parseff.cut ();
+    Parseff.context "list" (fun () ->
+        ignore (Parseff.char '[');
+        ignore (Parseff.char ']')
+    )
+  in
+  match
+    Parseff.parse_source ~backtrack_window:8
+      (source_of_chunks ~chunk:3 input)
+      parser
+  with
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error (e : Parseff.error) ->
+      let rendered = Parseff.render_error e in
+      Alcotest.(check string)
+        "header" "1:42: [error] expected ']', found 'x'" (header_of rendered);
+      Alcotest.(check bool)
+        "context column" true
+        (List.mem "  * while parsing list, from 1:41"
+           (String.split_on_char '\n' rendered)
+        )
+
+let test_location_after_dropped_lines () =
+  let input = "ab\ncd\n" ^ String.make 50 'e' ^ "\nf" in
+  let parser () =
+    Parseff.skip_while (fun c -> c <> 'f');
+    Parseff.cut ();
+    let l = Parseff.location () in
+    ignore (Parseff.char 'f');
+    (l.line, l.col)
+  in
+  match
+    Parseff.parse_source ~backtrack_window:4
+      (source_of_chunks ~chunk:3 input)
+      parser
+  with
+  | Stdlib.Ok at ->
+      Alcotest.(check (pair int int)) "line and byte column" (4, 1) at
+  | Stdlib.Error e ->
+      Alcotest.fail (Parseff.render_error e)
 
 let test_context_column_in_code_points () =
   let input = "\xCE\xBB\xCE\xBB\xCE\xBB[x" in
@@ -3795,6 +4023,16 @@ let () =
             test_unknown_line_has_byte_header;
           test_case "known line without a buffered start" `Quick
             test_known_line_without_a_buffered_start;
+          test_case "cut line keeps line and column" `Quick
+            test_cut_line_keeps_line_and_column;
+          test_case "cut line column counts characters" `Quick
+            test_cut_line_column_counts_characters;
+          test_case "cut line column, random bytes" `Quick
+            test_cut_line_column_random_bytes;
+          test_case "cut line context column" `Quick
+            test_cut_line_context_column;
+          test_case "location after dropped lines" `Quick
+            test_location_after_dropped_lines;
           test_case "context column in code points" `Quick
             test_context_column_in_code_points;
           test_case "take reports what is left" `Quick
