@@ -211,6 +211,10 @@ end
     immutable values, such as a [Map] or a list. A parse does not reset the
     cell: set the start value before each parse.
 
+    A {!Ref.set} costs more than a write to a plain [ref]. It fits state that
+    changes a few times in a construct, such as declarations, more than a write
+    for each token.
+
     {@ocaml[
     let names = Ref.create []
 
