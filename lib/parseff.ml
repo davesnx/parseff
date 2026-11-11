@@ -236,6 +236,7 @@ type state = {
   mutable diag_len : int;
   mutable far : far;
   mutable ctx_top : int;
+  mutable ctx_floor : int;
   mutable ctx : int array;
   mutable ctx_names : string array;
   mutable line_index : line_index option;
@@ -352,6 +353,7 @@ module State = struct
       diag_len = 0;
       far = far_none;
       ctx_top = 0;
+      ctx_floor = 0;
       ctx = [||];
       ctx_names = [||];
       line_index = None;
@@ -2038,10 +2040,9 @@ let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
     ignore (State.seal_frames st ~floor:0)
 
-let[@inline always] context_run st delimited name p =
+let[@inline always] context_run st delimited start name p =
   let d = st.ctx_top in
   if (d + 1) * ctx_stride > Array.length st.ctx then ctx_grow st;
-  let start = st.pos in
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
   Array.unsafe_set st.ctx (m + 1)
@@ -2081,10 +2082,9 @@ let[@inline never] trace_emit st f event =
       State.resume st;
       Printexc.raise_with_backtrace exn bt
 
-let[@inline never] context_traced st f delimited name p =
-  let start = st.pos in
+let[@inline never] context_traced st f delimited start name p =
   trace_emit st f (Enter { name; pos = start });
-  match context_run st delimited name p with
+  match context_run st delimited start name p with
   | v ->
       trace_emit st f (Exit { name; start; stop = st.pos });
       v
@@ -2096,13 +2096,21 @@ let[@inline never] context_traced st f delimited name p =
       trace_emit st f (Fail { name; start; pos = st.pos });
       Printexc.raise_with_backtrace exn bt
 
-let context ?(delimited = false) name p =
+let[@inline never] context_start st start =
+  if start < 0 || start > st.pos then
+    invalid_arg "Parseff.context: start is not between 0 and the position";
+  start
+
+let context ?(delimited = false) ?start name p =
   let st = get_state () in
+  let start =
+    match start with None -> st.pos | Some start -> context_start st start
+  in
   match st.trace with
   | None ->
-      context_run st delimited name p
+      context_run st delimited start name p
   | Some f ->
-      context_traced st f delimited name p
+      context_traced st f delimited start name p
 
 let print_trace ppf =
   let depth = ref 0 in
@@ -4292,7 +4300,7 @@ let error_failure st pos msg (x : fail_extra) outer =
 
 let outer_contexts st pos =
   let acc = ref [] in
-  for d = st.ctx_top - 1 downto 0 do
+  for d = st.ctx_top - 1 downto st.ctx_floor do
     let m = d * ctx_stride in
     let flags = Array.unsafe_get st.ctx (m + 1) in
     let start = flags lsr 2 in
@@ -4312,28 +4320,34 @@ let capture_rewind st frame saved e =
   st.far <- saved;
   Stdlib.Error e
 
-let capture p =
+let capture ?(outer = true) p =
   let st = get_state () in
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
+  let floor = st.ctx_floor in
+  if not outer then st.ctx_floor <- st.ctx_top;
   match p () with
   | v ->
+      st.ctx_floor <- floor;
       State.pop_rewind_frame st frame;
       far_merge st saved;
       Stdlib.Ok v
   | exception Fail ->
-      capture_rewind st frame saved
-        (error_of_far st (outer_contexts st st.far.pos))
+      let contexts = outer_contexts st st.far.pos in
+      st.ctx_floor <- floor;
+      capture_rewind st frame saved (error_of_far st contexts)
   | exception User_failure (pos, msg, x) ->
-      capture_rewind st frame saved
-        (error_failure st pos msg x (outer_contexts st pos))
+      let contexts = outer_contexts st pos in
+      st.ctx_floor <- floor;
+      capture_rewind st frame saved (error_failure st pos msg x contexts)
   | exception exn ->
+      st.ctx_floor <- floor;
       State.pop_rewind_frame st frame;
       far_merge st saved;
       raise exn
 
-let recover errors ~sync parser hole =
+let recover ?outer errors ~sync parser hole =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4342,7 +4356,7 @@ let recover errors ~sync parser hole =
     parser ()
   else
     let start = st.pos in
-    match capture parser with
+    match capture ?outer parser with
     | Ok v ->
         v
     | Error e ->

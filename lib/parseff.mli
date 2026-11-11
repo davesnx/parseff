@@ -662,9 +662,9 @@ val look_ahead : (unit -> 'a) -> 'a
     (* position hasn't moved *)
     ]} *)
 
-val capture : (unit -> 'a) -> ('a, error) result
-(** [capture parser] runs [parser] and returns its failure as a value, so that
-    the parser can recover from an error and continue.
+val capture : ?outer:bool -> (unit -> 'a) -> ('a, error) result
+(** [capture ?outer parser] runs [parser] and returns its failure as a value, so
+    that the parser can recover from an error and continue.
 
     If [parser] succeeds, [capture] returns [Ok v]. If [parser] fails, also with
     {!fail} or {!val-error}, [capture] returns [Error e], where [e] is the
@@ -674,6 +674,13 @@ val capture : (unit -> 'a) -> ('a, error) result
     reach past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded]
     are not caught. In {!parse_source}, the input that [parser] reads must fit
     in [~backtrack_window].
+
+    [e.contexts] holds the {!val:context}s open around [capture] and those
+    opened inside [parser]. With [~outer:false], [e] holds only those opened
+    inside [parser], and so does the error of each [capture] that [parser]
+    calls. Use it when [parser] is a construct that stands by itself, such as a
+    statement in a block: the report then does not name the constructs around
+    the block, which can start many lines before the error.
 
     Example:
     {@ocaml[
@@ -689,15 +696,16 @@ val capture : (unit -> 'a) -> ('a, error) result
     ]} *)
 
 val recover :
+  ?outer:bool ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
-    [parser] fails with the error [e], [recover] records [e] in [errors], calls
-    [sync ()] to skip to a point where parsing can continue, and returns
-    [hole e].
+(** [recover ?outer errors ~sync parser hole] runs [parser] with
+    [capture ?outer]. If [parser] fails with the error [e], [recover] records
+    [e] in [errors], calls [sync ()] to skip to a point where parsing can
+    continue, and returns [hole e].
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
@@ -759,13 +767,19 @@ val commit : unit -> unit
         ()
     ]} *)
 
-val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
-(** [context ?delimited name parser] runs [parser] inside a named construct. The
-    name is kept for the error report: a parse that fails inside [parser] can
-    say which constructs were open at the furthest failure, outermost first.
+val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
+(** [context ?delimited ?start name parser] runs [parser] inside a named
+    construct. The name is kept for the error report: a parse that fails inside
+    [parser] can say which constructs were open at the furthest failure,
+    outermost first.
 
     [~delimited:true] marks a construct that has an opening token, such as an
     array or a block. An error renderer can then point to where it was opened.
+
+    [~start] is the position where the construct starts. The default is the
+    current position. Give it when the opening token is already consumed, for
+    example by a lexer that reads one token ahead. [context] raises
+    [Invalid_argument] when [start] is negative or after the current position.
 
     A construct is only reported when the failure is strictly past the place
     where it started. A [context] whose parser fails at its first byte, such as

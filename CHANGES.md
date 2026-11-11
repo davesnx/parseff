@@ -10,6 +10,8 @@
 - **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
+- **Add `capture ~outer:false` and `recover ~outer:false`.** The error then holds only the contexts opened inside the captured parser, not the ones open around it. The same holds for the captures inside that parser. Use it for a statement in a block, so the report does not name a construct that starts many lines before.
+- **Add `context ~start`.** The position where the construct starts, for a parser that has already consumed the opening token.
 - **Fix `span_to_string` reading outside its buffer.** A span with an offset outside its buffer returned a wrong byte or crashed the process. It now raises `Invalid_argument`.
 - **Fix `expression` with an `infix_right` operator that consumes no input.** It failed with a depth-limit error. It now stops, as `fold_left` does.
 - **Fix `match_regex` returning a cut match in streaming.** It now reads more input when a match reaches the end of the buffer, and fails with `Backtrack_window_exceeded` when the window is full. Parseff now needs `re` 1.11.0 or later.
