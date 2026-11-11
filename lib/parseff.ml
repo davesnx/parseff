@@ -186,7 +186,11 @@ type trace_event =
   | Exit of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
-type 'a cell = { mutable value : 'a; mutable owner : bool ref }
+type 'a cell = {
+  mutable value : 'a;
+  mutable owner : bool ref;
+  mutable mark : int;
+}
 
 type trail =
   | Undo : {
@@ -199,7 +203,7 @@ type trail =
       -> trail
 
 let idle_token = ref false
-let dummy_cell = { value = (); owner = idle_token }
+let dummy_cell = { value = (); owner = idle_token; mark = 0 }
 
 let rec not_running =
   Undo
@@ -436,6 +440,7 @@ module State = struct
     let rec go (Undo u as node) =
       if u.depth > saved then begin
         u.cell.value <- u.old;
+        u.cell.mark <- 0;
         go u.next
       end else
         t.trail <- node
@@ -4481,7 +4486,7 @@ let parse_source_each ?(max_depth = 128)
 module Ref = struct
   type 'a t = 'a cell
 
-  let create value = { value; owner = idle_token }
+  let create value = { value; owner = idle_token; mark = 0 }
   let get c = c.value
 
   let set c value =
@@ -4508,22 +4513,23 @@ module Ref = struct
     if owner != token then begin
       if !owner then
         invalid_arg "Parseff.Ref.set: another running parse uses this cell";
-      c.owner <- token
+      c.owner <- token;
+      c.mark <- 0
     end;
-    if st.frames_top > 0 then begin
+    let top = st.frames_top in
+    if
+      top > 0
+      && c.mark
+         <= Array.unsafe_get st.frames (((top - 1) * frame_stride) + 1)
+            lsr frame_trail_shift
+    then begin
       let next = st.trail in
       let (Undo u) = next in
       if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
         u.next <- running_empty;
-      st.trail <-
-        Undo
-          {
-            cell = c;
-            old = c.value;
-            depth = State.trail_depth st + 1;
-            token;
-            next;
-          }
+      let depth = u.depth + 1 in
+      c.mark <- depth;
+      st.trail <- Undo { cell = c; old = c.value; depth; token; next }
     end;
     c.value <- value
 end
