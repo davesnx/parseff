@@ -494,6 +494,9 @@ module State = struct
       (frame_repeat lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) t.diag_len
 
+  let[@inline always] frame_diag_len (t : t) frame =
+    Array.unsafe_get t.frames ((frame * frame_stride) + 2)
+
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
     t.pos <- Array.unsafe_get t.frames base;
@@ -4439,6 +4442,39 @@ let capture p =
   | exception User_failure (pos, msg, x) ->
       capture_rewind st frame saved
         (error_failure st pos msg x (outer_contexts st pos))
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let rec take_entries l k acc =
+  if k = 0 then
+    acc
+  else
+    match l with x :: rest -> take_entries rest (k - 1) (x :: acc) | [] -> acc
+
+let removed_entries (type d) st frame (c : d diagnostics) e =
+  if st.diag == c.self then
+    (e, take_entries c.rev (st.diag_len - State.frame_diag_len st frame) [])
+  else
+    (e, [])
+
+let capture_with c p =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      Stdlib.Ok v
+  | exception Fail ->
+      let e = error_of_far st (outer_contexts st st.far.pos) in
+      capture_rewind st frame saved (removed_entries st frame c e)
+  | exception User_failure (pos, msg, x) ->
+      let e = error_failure st pos msg x (outer_contexts st pos) in
+      capture_rewind st frame saved (removed_entries st frame c e)
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
