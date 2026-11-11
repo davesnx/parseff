@@ -2286,17 +2286,37 @@ let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
   | Some d ->
       or_ (fold_left_one_or_more p op) (fun () -> d) ()
 
-let rec fold_right_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ()
+let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
     : 'a =
+  let frame = State.push_rewind_frame st frame_choice in
+  match
+    let start = st.pos in
+    let f = op () in
+    let rhs = p () in
+    if st.pos = start then begin
+      restore_rewind_frame st frame;
+      first
+    end else
+      f first (fold_right_from st p op rhs)
+  with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception Fail ->
+      if State.frame_committed st frame then begin
+        State.pop_rewind_frame st frame;
+        raise_notrace Fail
+      end;
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      first
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let fold_right_one_or_more p op () =
   let first = p () in
-  or_
-    (fun () ->
-      let f = op () in
-      let rhs = fold_right_one_or_more p op () in
-      f first rhs
-    )
-    (fun () -> first)
-    ()
+  fold_right_from (get_state ()) p op first
 
 let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
