@@ -66,6 +66,7 @@ val parse_source_each :
   ?backtrack_window:int ->
   ?diagnostics:'d Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
+  ?pending:(unit -> bool) ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
