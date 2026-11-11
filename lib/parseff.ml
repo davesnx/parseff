@@ -236,7 +236,6 @@ type state = {
   mutable diag_len : int;
   mutable far : far;
   mutable ctx_top : int;
-  mutable ctx_floor : int;
   mutable ctx : int array;
   mutable ctx_names : string array;
   mutable line_index : line_index option;
@@ -353,7 +352,6 @@ module State = struct
       diag_len = 0;
       far = far_none;
       ctx_top = 0;
-      ctx_floor = 0;
       ctx = [||];
       ctx_names = [||];
       line_index = None;
@@ -4300,7 +4298,7 @@ let error_failure st pos msg (x : fail_extra) outer =
 
 let outer_contexts st pos =
   let acc = ref [] in
-  for d = st.ctx_top - 1 downto st.ctx_floor do
+  for d = st.ctx_top - 1 downto 0 do
     let m = d * ctx_stride in
     let flags = Array.unsafe_get st.ctx (m + 1) in
     let start = flags lsr 2 in
@@ -4320,34 +4318,28 @@ let capture_rewind st frame saved e =
   st.far <- saved;
   Stdlib.Error e
 
-let capture ?(outer = true) p =
+let capture p =
   let st = get_state () in
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  let floor = st.ctx_floor in
-  if not outer then st.ctx_floor <- st.ctx_top;
   match p () with
   | v ->
-      st.ctx_floor <- floor;
       State.pop_rewind_frame st frame;
       far_merge st saved;
       Stdlib.Ok v
   | exception Fail ->
-      let contexts = outer_contexts st st.far.pos in
-      st.ctx_floor <- floor;
-      capture_rewind st frame saved (error_of_far st contexts)
+      capture_rewind st frame saved
+        (error_of_far st (outer_contexts st st.far.pos))
   | exception User_failure (pos, msg, x) ->
-      let contexts = outer_contexts st pos in
-      st.ctx_floor <- floor;
-      capture_rewind st frame saved (error_failure st pos msg x contexts)
+      capture_rewind st frame saved
+        (error_failure st pos msg x (outer_contexts st pos))
   | exception exn ->
-      st.ctx_floor <- floor;
       State.pop_rewind_frame st frame;
       far_merge st saved;
       raise exn
 
-let recover ?outer errors ~sync parser hole =
+let recover errors ~sync parser hole =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4356,7 +4348,7 @@ let recover ?outer errors ~sync parser hole =
     parser ()
   else
     let start = st.pos in
-    match capture ?outer parser with
+    match capture parser with
     | Ok v ->
         v
     | Error e ->
