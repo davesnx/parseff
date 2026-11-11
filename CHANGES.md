@@ -9,6 +9,7 @@
 - **Add `lexeme` and `keyword`.** `lexeme p` skips whitespace after `p`. `keyword "let"` matches `let` but not `letter`.
 - **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
+- **Add `parse_source_each ?pending`.** A parser that keeps a lookahead, such as a lexer that reads the next token early, lost its last value: the sequence ended when no input remained. `~pending:(fun () -> ...)` is asked at that point; when it returns `true`, the parser runs one more time.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
 - **Fix `span_to_string` reading outside its buffer.** A span with an offset outside its buffer returned a wrong byte or crashed the process. It now raises `Invalid_argument`.
 - **Fix `expression` with an `infix_right` operator that consumes no input.** It failed with a depth-limit error. It now stops, as `fold_left` does.

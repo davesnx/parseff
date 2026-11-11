@@ -4430,15 +4430,21 @@ let parse_source ?(max_depth = 128)
     ~consume ~diagnostics parser
 
 let parse_source_each ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window ~name:"parse_source_each" backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let held = ref false in
   let element () =
     if have st 1 then
       Some (parser ())
     else
-      None
+      match pending with
+      | Some pending when pending () ->
+          held := true;
+          Some (parser ())
+      | _ ->
+          None
   in
   let forced = ref 0 in
   let ended = ref false in
@@ -4456,6 +4462,7 @@ let parse_source_each ?(max_depth = 128)
     end else begin
       st.far <- far_none;
       let start = st.pos in
+      held := false;
       raised := true;
       let r = run st ~consume:`Partial ~diagnostics element in
       raised := false;
@@ -4463,7 +4470,7 @@ let parse_source_each ?(max_depth = 128)
       | Ok None ->
           ended := true;
           Seq.Nil
-      | Ok (Some _) when st.pos = start ->
+      | Ok (Some _) when st.pos = start && not !held ->
           ended := true;
           Seq.Cons
             ( Error
