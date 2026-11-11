@@ -5,10 +5,17 @@ type issue = {
   msg : string;
   notes : (range * string) list;
   help : string option;
+  where : string;
 }
 
-type label = { lname : string; lat : range; lnactvar : int }
-type pending = { gname : string; gat : range; mutable gnactvar : int }
+type label = { lname : string; lat : range; lnactvar : int; lwhere : string }
+
+type pending = {
+  gname : string;
+  gat : range;
+  mutable gnactvar : int;
+  gwhere : string;
+}
 type blk = { firstlabel : int; firstgoto : int; bnactvar : int; isloop : bool }
 type var = { vname : string; vattrib : attrib option; vat : range; vctc : bool }
 
@@ -33,24 +40,20 @@ let base_levels = 1
 
 exception Too_deep of range
 
-let nesting source chunk =
-  let n = String.length source in
+let nesting =
   let enter c at =
     let c = c + 1 in
     if c >= max_levels then raise (Too_deep at);
     c
   in
-  let char_after i =
-    let k = Lexer.skip_raw source i in
-    if k < n then
-      source.[k]
-    else
-      '\000'
-  in
-  let method_args_char (o : expr) =
-    let colon = Lexer.skip_raw source o.erange.stop in
-    let name = Lexer.skip_raw source (colon + 1) in
-    char_after (Lexer.ident_end source name)
+  let form (call : expr) args =
+    match args with
+    | [ { edesc = Table _; erange } ] when erange.stop = call.erange.stop ->
+        '{'
+    | [ { edesc = String _; erange } ] when erange.stop = call.erange.stop ->
+        '"'
+    | _ ->
+        '('
   in
   let rec expr c e = node (enter c e.erange) e
   and node f e =
@@ -66,14 +69,14 @@ let nesting source chunk =
         expr f x
     | Call (fn, args) ->
         node f fn;
-        arguments f (char_after fn.erange.stop) args
+        arguments f (form e args) args
     | Method_call (o, _, args) ->
         node f o;
-        arguments f (method_args_char o) args
+        arguments f (form e args) args
     | Index (o, k) -> (
         node f o;
         match k.edesc with
-        | String _ when Lexer.is_alpha source.[k.erange.start] ->
+        | String _ when k.erange.stop = e.erange.stop ->
             ()
         | _ ->
             expr f k
@@ -164,11 +167,7 @@ let nesting source chunk =
     | Break | Goto _ | Label _ | Bad_stat ->
         ()
   in
-  match block base_levels chunk with
-  | () ->
-      None
-  | exception Too_deep at ->
-      Some at
+  stat
 
 let find_last p a =
   let rec go i =
@@ -183,15 +182,14 @@ let find_last p a =
   in
   go (Dynarray.length a - 1)
 
-let run source chunk =
+type t = { statement : stat -> unit; finish : unit -> issue list }
+
+let create ~loc =
   let issues = ref [] in
   let all_labels = ref [] in
-  let loc i =
-    let l = Parseff.location_of_position source i in
-    Printf.sprintf "%d:%d" l.line l.col
-  in
-  let add ?(notes = []) ?help at msg =
-    issues := { at; msg; notes; help } :: !issues
+  let add ?(notes = []) ?help ?where at msg =
+    let where = match where with Some w -> w | None -> loc at.start in
+    issues := { at; msg; notes; help; where } :: !issues
   in
   let new_fs ?opener parent vararg =
     {
@@ -333,7 +331,7 @@ let run source chunk =
       if g.gname = l.lname then begin
         if g.gnactvar < l.lnactvar then begin
           let v = Dynarray.get fs.vars g.gnactvar in
-          add g.gat
+          add g.gat ~where:g.gwhere
             ~notes:
               [
                 (v.vat, Printf.sprintf "local '%s' is declared here" v.vname);
@@ -352,21 +350,21 @@ let run source chunk =
         incr i
     done
   in
-  let create_label fs lname lat ~last =
+  let create_label ?(where = "") fs lname lat ~last =
     let lnactvar =
       if last then
         (List.hd fs.blocks).bnactvar
       else
         Dynarray.length fs.vars
     in
-    let l = { lname; lat; lnactvar } in
+    let l = { lname; lat; lnactvar; lwhere = where } in
     Dynarray.add_last fs.labels l;
     solve fs l
   in
   let find_label fs name = find_last (fun l -> l.lname = name) fs.labels in
   let undefined fs (g : pending) =
     if g.gname = "break" then
-      add g.gat
+      add g.gat ~where:g.gwhere
         ~help:
           "\"break\" leaves the innermost \"while\", \"for\" or \"repeat\" \
            loop of the same function"
@@ -379,12 +377,13 @@ let run source chunk =
               (Printf.sprintf
                  "the label at %s is not visible here: a label is visible in \
                   its block and the nested blocks, but not in nested functions"
-                 (loc l.lat.start)
+                 l.lwhere
               )
         | None ->
             None
       in
-      add g.gat ?help (Printf.sprintf "no visible label '%s' for goto" g.gname)
+      add g.gat ~where:g.gwhere ?help
+        (Printf.sprintf "no visible label '%s' for goto" g.gname)
   in
   let leave fs =
     match fs.blocks with
@@ -421,6 +420,7 @@ let run source chunk =
     | Some _ | None ->
         ()
   in
+  let label_where = ref None in
   let rec expr fs e =
     match e.edesc with
     | Nil | True | False | Number _ | String _ ->
@@ -589,6 +589,7 @@ let run source chunk =
             gname = "break";
             gat = s.srange;
             gnactvar = Dynarray.length fs.vars;
+            gwhere = loc s.srange.start;
           }
     | Goto name -> (
         match find_label fs name with
@@ -600,40 +601,82 @@ let run source chunk =
                 gname = name;
                 gat = s.srange;
                 gnactvar = Dynarray.length fs.vars;
+                gwhere = loc s.srange.start;
               }
       )
     | Label name ->
+        let where =
+          match !label_where with
+          | Some w ->
+              label_where := None;
+              w
+          | None ->
+              loc s.srange.start
+        in
         ( match find_label fs name with
         | Some l ->
-            add s.srange
+            add s.srange ~where
               ~notes:[ (l.lat, "first defined here") ]
               (Printf.sprintf "label '%s' is already defined at %s" name
-                 (loc l.lat.start)
+                 l.lwhere
               )
         | None ->
             ()
         );
         all_labels :=
-          { lname = name; lat = s.srange; lnactvar = 0 } :: !all_labels;
-        create_label fs name s.srange ~last
+          { lname = name; lat = s.srange; lnactvar = 0; lwhere = where }
+          :: !all_labels;
+        create_label ~where fs name s.srange ~last
     | Bad_stat ->
         fs.broken <- true
   in
   let main = new_fs None true in
   Dynarray.add_last main.upvals "_ENV";
   enter main false;
-  block main chunk ~repeat:false;
-  leave main;
-  ( match nesting source chunk with
-  | Some at ->
-      add at
-        ~help:
-          "luac counts a level for each enclosing statement and expression, \
-           and for each operand of a chain such as a .. b .. c, and stops with \
-           \"C stack overflow\"; move part of it into a local variable or a \
-           function"
-        (Printf.sprintf "too deeply nested (the limit is %d levels)" max_levels)
-  | None ->
-      ()
-  );
-  List.rev !issues
+  let queued = ref [] in
+  let run = ref 0 in
+  let deep = ref false in
+  let depth s level =
+    if not !deep then
+      match nesting level s with
+      | () ->
+          ()
+      | exception Too_deep at ->
+          deep := true;
+          add at
+            ~help:
+              "luac counts a level for each enclosing statement and \
+               expression, and for each operand of a chain such as a .. b .. \
+               c, and stops with \"C stack overflow\"; move part of it into a \
+               local variable or a function"
+            (Printf.sprintf "too deeply nested (the limit is %d levels)"
+               max_levels
+            )
+  in
+  let flush ~last =
+    List.iter
+      (fun (s, where) ->
+        label_where := Some where;
+        stat main s ~last
+      )
+      (List.rev !queued);
+    queued := []
+  in
+  let statement s =
+    match s.sdesc with
+    | Label _ ->
+        depth s (base_levels + !run);
+        incr run;
+        queued := (s, loc s.srange.start) :: !queued
+    | _ ->
+        flush ~last:false;
+        depth s base_levels;
+        run := 0;
+        stat main s ~last:false
+  in
+  let finish () =
+    flush ~last:true;
+    leave main;
+    List.rev !issues
+  in
+  { statement; finish }

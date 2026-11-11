@@ -1,7 +1,7 @@
 A Lua 5.4 parser. `check` reports every error and exits 1 if there is one,
-`ast` prints the tree without positions, `print` prints Lua source again,
-`explicit` prints it with every operator expression in parentheses, and `trace`
-prints the trace events of the parse.
+`ast` prints the tree without positions, `print` prints Lua source again, and
+`explicit` prints it with every operator expression in parentheses. The input
+is a file, or `-` for stdin, read as a stream.
 
 A file that cannot be read is an error, not a crash.
 
@@ -11,6 +11,53 @@ A file that cannot be read is an error, not a crash.
   $ ./main.exe ast cases
   main.exe: cannot read cases: Is a directory
   [1]
+
+With `-`, the parser reads stdin as a stream. Stdin cannot be read again, so
+a parse error shows the lines that the error kept from the stream, and an error
+found after the parse shows its place and message without an excerpt.
+
+  $ printf 'local x = 1\nlocal function f()\n  if x then\n    return x = 2\n  end\nend\n' | ./main.exe check -
+  stdin:4:14: [error] unexpected '=' after the return statement
+  3 |   if x then
+  4 |     return x = 2
+    |              ^
+    * help: the values of a "return" are separated by ','
+  
+  1 error
+  [1]
+  $ printf 'local x = 1\ngoto done\n' | ./main.exe check -
+  stdin:2:1: [error] no visible label 'done' for goto
+  
+  1 error
+  [1]
+  $ printf 'print("from stdin")\n' | ./main.exe ast -
+  (chunk
+    (call (name print) ((string "from stdin"))))
+
+A last statement of one token with no final newline still gets its line and
+column.
+
+  $ printf 'goto a\nreturn' | ./main.exe check -
+  stdin:1:1: [error] no visible label 'a' for goto
+  
+  1 error
+  [1]
+  $ printf 'local x <const> = 1\nx = 2\nreturn' | ./main.exe check -
+  stdin:2:1: [error] attempt to assign to const variable 'x'
+  
+  1 error
+  [1]
+
+A long line: the stream has dropped the start of the line before the error, but
+the excerpt and the column are those of the whole line.
+
+  $ printf 'local t = {%s} x = = 2\n' "$(seq -s ', ' -f 'a%g' 1 2000)" > long_line.lua
+  $ cat long_line.lua | ./main.exe check - > from_stdin.txt 2>&1
+  [1]
+  $ ./main.exe check long_line.lua 2>&1 | sed 's/^long_line.lua:/stdin:/' > from_file.txt
+  $ diff from_file.txt from_stdin.txt
+  $ head -1 from_stdin.txt
+  stdin:1:12909: [error] expected expression, found '='
 
 Valid programs
 ==============
@@ -353,7 +400,7 @@ Hints for common mistakes
   > end
   > EOF
   $ ./main.exe check not_equal.lua
-  not_equal.lua:1:6: [error] expected "then" after the "if" condition, found '!'
+  not_equal.lua:1:6: [error] expected "then" after the "if" condition, found '!='
   1 | if a != b then
     |      ^^
     * help: Lua writes "not equal" as '~='
@@ -552,7 +599,6 @@ its `end`.
   reserved.lua:1:18: [error] expected a parameter name, found reserved word 'end'
   1 | local function f(end, x)
     |                  ^^^
-    * while parsing parameter list, from 1:17
     * help: 'end' is a reserved word in Lua and cannot be used as a name
   
   reserved.lua:5:3: [error] expected a field name after '.', found reserved word 'end'
@@ -764,7 +810,6 @@ headers of `if`, `for` and `while`. `ast` shows the recovered parts as
   6 | print(t.a, , t.c)
   7 | local function f(a, 1, c)
     |                     ^
-    * while parsing parameter list, from 7:17
   
   recovery.lua:10:10: [error] expected a variable name after "local", found '2'
    9 | end
@@ -786,7 +831,6 @@ headers of `if`, `for` and `while`. `ast` shows the recovered parts as
   14 | end
   15 | for i = 1 10 do
      |           ^^
-     * while parsing for header, from 15:4
   
   recovery.lua:18:12: [error] expected expression, found 'do'
   17 | end
@@ -875,7 +919,6 @@ reported once, and the lines between them parse.
   1 | local t = {a = "x\q", b = 2}
   2 | function f(a, 1..2) end
     |               ^^^^
-    * while parsing parameter list, from 2:11
     * help: to concatenate numbers, put spaces around '..', as in 1 .. 2
   
   lexical_sites.lua:3:10: [error] unfinished string
@@ -906,7 +949,6 @@ reported once, and the lines between them parse.
   6 | while "\300" do end
   7 | for i = [=x, 2 do end
     |         ^^
-    * while parsing for header, from 7:4
     * help: a long string starts with '[', any number of '=' and another '[', as in [==[
   
   lexical_sites.lua:8:14: [error] malformed number '3e'
@@ -925,7 +967,6 @@ reported once, and the lines between them parse.
    9 | x = t[0x1p]
   10 | goto 12abc
      |      ^^^^^
-     * while parsing goto statement, from 10:1
      * help: a number cannot be followed directly by a letter or '_'
   
   lexical_sites.lua:11:16: [error] UTF-8 value too large
@@ -1148,16 +1189,3 @@ uses.
   
   1 error
   [1]
-
-Trace
-=====
-
-The trace shows the `context` calls. The failure in the `for` header is
-recovered inside the context, so the context ends with `ok`.
-
-  $ printf 'for i = 1 10 do end\nlocal function f(a, b) end\n' > trace.lua
-  $ ./main.exe trace trace.lua
-  for header @3
-  for header ok @3..15
-  parameter list @36
-  parameter list ok @36..42

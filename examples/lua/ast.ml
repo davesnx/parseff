@@ -336,9 +336,7 @@ and dump_stat b indent s =
   | Bad_stat ->
       add (pad ^ "<error>")
 
-let dump block =
-  let b = Buffer.create 4096 in
-  Buffer.add_string b "(chunk";
-  dump_block b 1 block;
-  Buffer.add_string b ")\n";
+let dump_statement s =
+  let b = Buffer.create 256 in
+  dump_block b 1 [ s ];
   Buffer.contents b
