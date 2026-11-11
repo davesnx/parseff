@@ -258,7 +258,7 @@ let power () =
 As in `fold_left`, the loop stops after an infix operator and its right operand that together consume no input, and that operator is not applied. This also applies to `infix_right`.
 
 ```ocaml
-val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
 ```
 
 ## Complete example: JSON array

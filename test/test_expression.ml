@@ -16,9 +16,9 @@ let post s () =
   tok s ();
   fun a -> "(" ^ a ^ s ^ ")"
 
-let rec expr table () = Parseff.expression ~atom:(atom table) table ()
+let rec expr table () = Parseff.expression ~operand:(operand table) table ()
 
-and atom table () =
+and operand table () =
   ws ();
   Parseff.or_
     (fun () ->
@@ -220,7 +220,7 @@ let test_commit_in_operator () =
        )
       )
   in
-  let hand op () = Parseff.fold_left (atom []) op () in
+  let hand op () = Parseff.fold_left (operand []) op () in
   let partial_hand op input =
     show
       (Parseff.parse ~consume:`Partial input (fun () ->
@@ -250,8 +250,8 @@ let test_depth_limit () =
   | r ->
       Alcotest.failf "expected depth limit, got %s" (show r)
 
-let test_commit_in_atom () =
-  let atom () =
+let test_commit_in_operand () =
+  let operand () =
     let d = Parseff.digit () in
     Parseff.commit ();
     string_of_int d
@@ -270,14 +270,14 @@ let test_commit_in_atom () =
        )
       )
   in
-  let table t () = Parseff.expression ~atom t () in
+  let table t () = Parseff.expression ~operand t () in
   let plain = Parseff.[ [ infix_left (bin "+") ] ] in
   let prefixed = Parseff.[ [ infix_left (bin "+") ]; [ prefix (pre "-") ] ] in
   List.iter
     (fun (input, expected) ->
       Alcotest.(check string)
         ("fold_left " ^ input) expected
-        (run (Parseff.fold_left atom (bin "+")) input);
+        (run (Parseff.fold_left operand (bin "+")) input);
       Alcotest.(check string)
         ("no prefix " ^ input) expected
         (run (table plain) input);
@@ -303,7 +303,7 @@ let maybe_digit () =
   | None ->
       "_"
 
-let maybe_expr table () = Parseff.expression ~atom:maybe_digit table ()
+let maybe_expr table () = Parseff.expression ~operand:maybe_digit table ()
 
 let test_infix_right_no_progress () =
   let empty () = fun a b -> "(" ^ a ^ "." ^ b ^ ")" in
@@ -367,7 +367,7 @@ let int_table =
       [ infix_left (int_op '*' ( * )) ];
     ]
 
-let int_expr () = Parseff.expression ~atom:Parseff.digit int_table ()
+let int_expr () = Parseff.expression ~operand:Parseff.digit int_table ()
 
 let int_hand () =
   Parseff.fold_left
@@ -439,9 +439,9 @@ module Doc_example = struct
       [ infix_right (bin '^') ];
     ]
 
-  let rec expr () = expression ~atom table ()
+  let rec expr () = expression ~operand table ()
 
-  and atom () =
+  and operand () =
     skip_whitespace ();
     or_
       (fun () ->
@@ -481,7 +481,7 @@ module Guide_example = struct
 
   let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
 
-  let rec expr () = Parseff.expression ~atom:factor table ()
+  let rec expr () = Parseff.expression ~operand:factor table ()
 
   and factor () =
     Parseff.skip_whitespace ();
@@ -563,7 +563,7 @@ let () =
           test_case "inside look_ahead" `Quick test_inside_look_ahead;
           test_case "commit in operator" `Quick test_commit_in_operator;
           test_case "depth limit" `Quick test_depth_limit;
-          test_case "commit in atom" `Quick test_commit_in_atom;
+          test_case "commit in operand" `Quick test_commit_in_operand;
           test_case "prefix without progress" `Quick test_prefix_no_progress;
           test_case "infix_right without progress" `Quick
             test_infix_right_no_progress;

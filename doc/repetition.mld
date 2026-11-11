@@ -264,7 +264,7 @@ As in [fold_left], the loop stops after an infix operator and its right operand
 that together consume no input, and that operator is not applied. This also
 applies to [infix_right].
 
-{@ocaml skip[val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a]}
+{@ocaml skip[val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a]}
 
 {1 Complete example: JSON array}
 

@@ -1015,14 +1015,14 @@ val postfix : (unit -> 'a -> 'a) -> 'a operator
 (** [postfix op] is a unary operator after its operand. It can repeat: [3!!] is
     [(3!)!]. *)
 
-val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
-(** [expression ~atom table] parses operands with [atom], joined by the
+val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+(** [expression ~operand table] parses operands with [operand], joined by the
     operators of [table].
 
     [table] lists the precedence levels from the lowest to the highest
-    precedence. [atom] parses an operand; for parentheses, it calls the
+    precedence. [operand] parses an operand; for parentheses, it calls the
     expression parser again inside {!rec_}. [expression] skips no whitespace:
-    skip it in the token parsers and in [atom].
+    skip it in the token parsers and in [operand].
 
     The operators are tried in table order. When one token starts another, such
     as [!] and [!=], list the longer token first. The loop stops after an
@@ -1038,9 +1038,9 @@ val expression : atom:(unit -> 'a) -> 'a operator list list -> unit -> 'a
         [ infix_right pow ];
       ]
 
-    let rec expr () = expression ~atom table ()
+    let rec expr () = expression ~operand table ()
 
-    and atom () =
+    and operand () =
       or_
         (fun () ->
           token '(' ();

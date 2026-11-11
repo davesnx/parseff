@@ -284,7 +284,7 @@ let rec run cx g =
             )
       in
       Parseff.expression
-        ~atom:(fun () -> run cx atom)
+        ~operand:(fun () -> run cx atom)
         (List.map (List.map op) table)
         ()
   | Capture a -> (
