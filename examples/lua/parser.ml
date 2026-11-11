@@ -1,4 +1,3 @@
-module L = Lexer
 open Ast
 
 let errors : Parseff.error Parseff.Diagnostics.t = Parseff.Diagnostics.create ()
@@ -18,14 +17,14 @@ type Parseff.custom_error +=
 let unclosed_hints : (string * range * range) list Parseff.Ref.t =
   Parseff.Ref.create []
 let else_ifs : (range * range) list Parseff.Ref.t = Parseff.Ref.create []
-let st = L.st
+let st = Lexer.st
 let here () = { start = st.start; stop = st.stop }
 let opener kind = { kind; at = here (); indent = st.indent }
-let advance = L.advance
-let loc = L.loc
-let is_eof () = match st.tok with L.Eof -> true | _ -> false
-let is_kw k = match st.tok with L.Kw k' -> k' == k | _ -> false
-let is_sym s = match st.tok with L.Sym s' -> s' == s | _ -> false
+let advance = Lexer.advance
+let loc = Lexer.loc
+let is_eof () = match st.tok with Lexer.Eof -> true | _ -> false
+let is_kw k = match st.tok with Lexer.Kw k' -> k' == k | _ -> false
+let is_sym s = match st.tok with Lexer.Sym s' -> s' == s | _ -> false
 
 let advance_to q =
   let p = Parseff.position () in
@@ -40,7 +39,7 @@ let materialize (e : Parseff.error) =
       match
         Parseff.capture (fun () ->
             advance_to d.upto;
-            (L.error ~from:d.from ~notes:d.notes ?help:d.help d.msg : unit)
+            (Lexer.error ~from:d.from ~notes:d.notes ?help:d.help d.msg : unit)
         )
       with
       | Error e ->
@@ -52,18 +51,18 @@ let materialize (e : Parseff.error) =
       e
 
 let attempt f =
-  let snap = L.save () in
+  let snap = Lexer.save () in
   match Parseff.capture f with
   | Ok v ->
       Ok v
   | Error e ->
-      L.restore snap;
+      Lexer.restore snap;
       Error (materialize e)
 
 let caused_by_lexical ?word ~region (e : Parseff.error) =
-  (not (L.is_lexical e))
+  (not (Lexer.is_lexical e))
   && Hashtbl.fold
-       (fun start (l : L.lexical) found ->
+       (fun start (l : Lexer.lexical) found ->
          found
          || start >= region && start <= e.range.stop
             &&
@@ -75,7 +74,7 @@ let caused_by_lexical ?word ~region (e : Parseff.error) =
             | None ->
                 true
        )
-       L.lexical_errors false
+       Lexer.lexical_errors false
 
 let report ?word ?region (e : Parseff.error) =
   let consequence =
@@ -89,23 +88,23 @@ let report ?word ?region (e : Parseff.error) =
 
 let fail_here ?notes ?help msg : 'a =
   match st.tok with
-  | L.Eof ->
-      L.error ~from:st.prev_stop ?notes ?help ~eof:true msg
+  | Lexer.Eof ->
+      Lexer.error ~from:st.prev_stop ?notes ?help ~eof:true msg
   | _ ->
-      L.error ~from:st.start ?notes ?help msg
+      Lexer.error ~from:st.start ?notes ?help msg
 
 let error_here ?notes ?help msg =
   match st.tok with
-  | L.Eof ->
-      L.make_error ~from:st.prev_stop ?notes ?help ~eof:true msg
+  | Lexer.Eof ->
+      Lexer.make_error ~from:st.prev_stop ?notes ?help ~eof:true msg
   | _ ->
-      L.make_error ~from:st.start ?notes ?help msg
+      Lexer.make_error ~from:st.start ?notes ?help msg
 
 let soft_here ?word ?region ?notes ?help msg =
   report ?word ?region (error_here ?notes ?help msg)
 
 let is_eof_error (e : Parseff.error) =
-  match e.kind with Custom (L.Lua { eof = true; _ }) -> true | _ -> false
+  match e.kind with Custom (Lexer.Lua { eof = true; _ }) -> true | _ -> false
 
 let span a b = { start = a.start; stop = b.stop }
 let mk_expr edesc erange = { edesc; erange }
@@ -113,24 +112,24 @@ let bad_expr r = mk_expr Bad_expr r
 
 let adjacent_after s =
   match st.prev with
-  | L.Sym s' ->
+  | Lexer.Sym s' ->
       s' == s && st.prev_stop = st.start
   | _ ->
       false
 
 let token_hint () =
   match st.tok with
-  | L.Other "!=" ->
+  | Lexer.Other "!=" ->
       Some "Lua writes \"not equal\" as '~='"
-  | L.Other "!" ->
+  | Lexer.Other "!" ->
       Some "Lua writes logical negation as 'not'"
-  | L.Sym L.Amp when adjacent_after L.Amp ->
+  | Lexer.Sym Lexer.Amp when adjacent_after Lexer.Amp ->
       Some "Lua writes logical \"and\" as 'and'"
-  | L.Sym L.Pipe when adjacent_after L.Pipe ->
+  | Lexer.Sym Lexer.Pipe when adjacent_after Lexer.Pipe ->
       Some "Lua writes logical \"or\" as 'or'"
-  | L.Sym L.Assign ->
+  | Lexer.Sym Lexer.Assign ->
       Some "use '==' to compare values; '=' only assigns"
-  | L.Sym L.Lbrace ->
+  | Lexer.Sym Lexer.Lbrace ->
       Some "Lua blocks do not use braces"
   | _ ->
       None
@@ -138,7 +137,11 @@ let token_hint () =
 let expression_hint () =
   match token_hint () with
   | Some _ as h -> (
-      match st.tok with L.Sym (L.Assign | L.Lbrace) -> None | _ -> h
+      match st.tok with
+      | Lexer.Sym (Lexer.Assign | Lexer.Lbrace) ->
+          None
+      | _ ->
+          h
     )
   | None ->
       None
@@ -147,33 +150,39 @@ let reserved_help w =
   Printf.sprintf "'%s' is a reserved word in Lua and cannot be used as a name" w
 
 let is_terminator = function
-  | L.Kw (L.End | L.Else | L.Elseif | L.Until) ->
+  | Lexer.Kw (Lexer.End | Lexer.Else | Lexer.Elseif | Lexer.Until) ->
       true
   | _ ->
       false
 
 let statement_only = function
-  | L.Kw
-      (L.Local | L.If | L.While | L.For | L.Repeat | L.Return | L.Break | L.Goto)
-    ->
+  | Lexer.Kw
+      ( Lexer.Local
+      | Lexer.If
+      | Lexer.While
+      | Lexer.For
+      | Lexer.Repeat
+      | Lexer.Return
+      | Lexer.Break
+      | Lexer.Goto ) ->
       true
   | _ ->
       false
 
 let starts_statement = function
-  | L.Name _
-  | L.Kw
-      ( L.If
-      | L.While
-      | L.Do
-      | L.For
-      | L.Repeat
-      | L.Function
-      | L.Local
-      | L.Return
-      | L.Break
-      | L.Goto )
-  | L.Sym (L.Lparen | L.Dcolon) ->
+  | Lexer.Name _
+  | Lexer.Kw
+      ( Lexer.If
+      | Lexer.While
+      | Lexer.Do
+      | Lexer.For
+      | Lexer.Repeat
+      | Lexer.Function
+      | Lexer.Local
+      | Lexer.Return
+      | Lexer.Break
+      | Lexer.Goto )
+  | Lexer.Sym (Lexer.Lparen | Lexer.Dcolon) ->
       true
   | _ ->
       false
@@ -182,13 +191,13 @@ type scan = { mutable depth : int; mutable bal : int; mutable last : int }
 
 let account sc =
   ( match st.tok with
-  | L.Kw (L.Function | L.If | L.Do | L.Repeat) ->
+  | Lexer.Kw (Lexer.Function | Lexer.If | Lexer.Do | Lexer.Repeat) ->
       sc.depth <- sc.depth + 1
-  | L.Kw (L.End | L.Until) ->
+  | Lexer.Kw (Lexer.End | Lexer.Until) ->
       sc.depth <- max 0 (sc.depth - 1)
-  | L.Sym (L.Lparen | L.Lbracket | L.Lbrace) ->
+  | Lexer.Sym (Lexer.Lparen | Lexer.Lbracket | Lexer.Lbrace) ->
       sc.bal <- sc.bal + 1
-  | L.Sym (L.Rparen | L.Rbracket | L.Rbrace) ->
+  | Lexer.Sym (Lexer.Rparen | Lexer.Rbracket | Lexer.Rbrace) ->
       sc.bal <- max 0 (sc.bal - 1)
   | _ ->
       ()
@@ -215,7 +224,7 @@ let sync_statement () =
     .last
 
 let closing_bracket = function
-  | L.Sym (L.Rparen | L.Rbracket | L.Rbrace) ->
+  | Lexer.Sym (Lexer.Rparen | Lexer.Rbracket | Lexer.Rbrace) ->
       true
   | _ ->
       false
@@ -236,7 +245,7 @@ let sync_kw ~kw ~err =
      )
     )
 
-let comma = function L.Sym L.Comma -> true | _ -> false
+let comma = function Lexer.Sym Lexer.Comma -> true | _ -> false
 
 let list_elem ?(line_stop = false) ?(skip_word = false) ?region
     ?(at_end = `Fail) ~stops parse bad =
@@ -256,7 +265,7 @@ let list_elem ?(line_stop = false) ?(skip_word = false) ?region
         let sc = sync_elem ~stops ~line_stop ~err () in
         let sc =
           match st.tok with
-          | L.Kw _ when skip_word && st.start = start ->
+          | Lexer.Kw _ when skip_word && st.start = start ->
               account sc;
               sync_elem ~sc ~stops ~line_stop ~err ()
           | _ ->
@@ -284,12 +293,12 @@ let what_header = function
       "the \"" ^ k ^ "\" condition"
 
 let expect_kw ~kw opener =
-  let name = L.kw_text kw in
+  let name = Lexer.kw_text kw in
   if is_kw kw then
     advance ()
   else if is_eof () || st.nl then
     report ~region:opener.at.start
-      (L.make_error ~from:st.prev_stop
+      (Lexer.make_error ~from:st.prev_stop
          ~help:
            (Printf.sprintf "add \"%s\" at the end of %s" name
               (what_header opener.kind)
@@ -300,7 +309,7 @@ let expect_kw ~kw opener =
   else begin
     soft_here ~region:opener.at.start ?help:(token_hint ())
       (Printf.sprintf "expected \"%s\" after %s, found %s" name
-         (what_header opener.kind) (L.found ())
+         (what_header opener.kind) (Lexer.found ())
       );
     sync_kw ~kw ~err:st.start;
     if is_kw kw then advance ()
@@ -308,21 +317,21 @@ let expect_kw ~kw opener =
 
 let need_name ~what () =
   match st.tok with
-  | L.Name w ->
+  | Lexer.Name w ->
       let r = here () in
       advance ();
       (w, r)
-  | L.Kw k ->
-      let w = L.kw_text k in
+  | Lexer.Kw k ->
+      let w = Lexer.kw_text k in
       fail_here ~help:(reserved_help w)
         (Printf.sprintf "expected %s, found reserved word '%s'" what w)
   | _ ->
-      fail_here (Printf.sprintf "expected %s, found %s" what (L.found ()))
+      fail_here (Printf.sprintf "expected %s, found %s" what (Lexer.found ()))
 
 let field_name ~what () =
   match st.tok with
-  | L.Kw k ->
-      let w = L.kw_text k in
+  | Lexer.Kw k ->
+      let w = Lexer.kw_text k in
       soft_here
         ~help:
           (Printf.sprintf
@@ -342,8 +351,8 @@ let expect_sym s =
   else
     fail_here
       (Printf.sprintf "expected %s, found %s"
-         (L.quote (L.sym_text s))
-         (L.found ())
+         (Lexer.quote (Lexer.sym_text s))
+         (Lexer.found ())
       )
 
 let note_close opener (r_end : range) =
@@ -402,11 +411,11 @@ let missing_end opener =
   in
   soft_here ~word:`End ~region:opener.at.start ~notes ?help
     (Printf.sprintf "expected \"end\" to close the \"%s\" at %s, found %s"
-       opener.kind (loc opener.at.start) (L.found ())
+       opener.kind (loc opener.at.start) (Lexer.found ())
     )
 
 let close_end opener =
-  if is_kw L.End then begin
+  if is_kw Lexer.End then begin
     let r = here () in
     note_close opener r;
     advance ();
@@ -425,7 +434,7 @@ let one_of_text = function
       let rev = List.rev xs in
       String.concat ", " (List.rev (List.tl rev)) ^ " or " ^ List.hd rev
 
-let line_of i = L.line_index i
+let line_of i = Lexer.line_index i
 
 let unclosed ~(opener : range) ~what expected =
   let caret =
@@ -447,7 +456,7 @@ let unclosed ~(opener : range) ~what expected =
   in
   fail_here ~notes
     (Printf.sprintf "expected %s in the %s that starts at %s, found %s" expected
-       what (loc opener.start) (L.found ())
+       what (loc opener.start) (Lexer.found ())
     )
 
 let close_sym ~opener ~what s =
@@ -456,79 +465,82 @@ let close_sym ~opener ~what s =
     advance ();
     r
   end else
-    unclosed ~opener ~what (L.quote (L.sym_text s))
+    unclosed ~opener ~what (Lexer.quote (Lexer.sym_text s))
 
 let sep_or_close ~opener ~what seps closer =
   match st.tok with
-  | L.Sym s when List.exists (fun x -> x == s) seps ->
+  | Lexer.Sym s when List.exists (fun x -> x == s) seps ->
       advance ();
       `Sep
-  | L.Sym s when s == closer ->
+  | Lexer.Sym s when s == closer ->
       let r = here () in
       advance ();
       `Close r
   | _ ->
       unclosed ~opener ~what
         (one_of_text
-           (List.map (fun s -> L.quote (L.sym_text s)) (seps @ [ closer ]))
+           (List.map
+              (fun s -> Lexer.quote (Lexer.sym_text s))
+              (seps @ [ closer ])
+           )
         )
 
 let mk_bin op a b = mk_expr (Binop (op, a, b)) (span a.erange b.erange)
 
 let binop_of = function
-  | L.Kw L.Or ->
+  | Lexer.Kw Lexer.Or ->
       Some Or
-  | L.Kw L.And ->
+  | Lexer.Kw Lexer.And ->
       Some And
-  | L.Sym L.Lt ->
+  | Lexer.Sym Lexer.Lt ->
       Some Lt
-  | L.Sym L.Gt ->
+  | Lexer.Sym Lexer.Gt ->
       Some Gt
-  | L.Sym L.Le ->
+  | Lexer.Sym Lexer.Le ->
       Some Le
-  | L.Sym L.Ge ->
+  | Lexer.Sym Lexer.Ge ->
       Some Ge
-  | L.Sym L.Ne ->
+  | Lexer.Sym Lexer.Ne ->
       Some Ne
-  | L.Sym L.Eq ->
+  | Lexer.Sym Lexer.Eq ->
       Some Eq
-  | L.Sym L.Pipe ->
+  | Lexer.Sym Lexer.Pipe ->
       Some Bor
-  | L.Sym L.Tilde ->
+  | Lexer.Sym Lexer.Tilde ->
       Some Bxor
-  | L.Sym L.Amp ->
+  | Lexer.Sym Lexer.Amp ->
       Some Band
-  | L.Sym L.Shl ->
+  | Lexer.Sym Lexer.Shl ->
       Some Shl
-  | L.Sym L.Shr ->
+  | Lexer.Sym Lexer.Shr ->
       Some Shr
-  | L.Sym L.Concat ->
+  | Lexer.Sym Lexer.Concat ->
       Some Concat
-  | L.Sym L.Plus ->
+  | Lexer.Sym Lexer.Plus ->
       Some Add
-  | L.Sym L.Minus ->
+  | Lexer.Sym Lexer.Minus ->
       Some Sub
-  | L.Sym L.Star ->
+  | Lexer.Sym Lexer.Star ->
       Some Mul
-  | L.Sym L.Slash ->
+  | Lexer.Sym Lexer.Slash ->
       Some Div
-  | L.Sym L.Dslash ->
+  | Lexer.Sym Lexer.Dslash ->
       Some Idiv
-  | L.Sym L.Percent ->
+  | Lexer.Sym Lexer.Percent ->
       Some Mod
-  | L.Sym L.Caret ->
+  | Lexer.Sym Lexer.Caret ->
       Some Pow
   | _ ->
       None
 
 let unop_of = function
-  | L.Kw L.Not ->
+  | Lexer.Kw Lexer.Not ->
       Some Not
-  | L.Sym L.Minus ->
+  | Lexer.Sym Lexer.Minus ->
       Some Neg
-  | L.Sym L.Hash ->
+  | Lexer.Sym Lexer.Hash ->
       Some Len
-  | L.Sym L.Tilde ->
+  | Lexer.Sym Lexer.Tilde ->
       Some Bnot
   | _ ->
       None
@@ -537,7 +549,7 @@ let unary_priority = 12
 
 let expected_expression () =
   fail_here ?help:(expression_hint ())
-    (Printf.sprintf "expected expression, found %s" (L.found ()))
+    (Printf.sprintf "expected expression, found %s" (Lexer.found ()))
 
 let rec expr () = Parseff.rec_ (fun () -> subexpr 0)
 
@@ -566,27 +578,27 @@ and climb limit left =
 and simpleexp () =
   let r = here () in
   match st.tok with
-  | L.Number (v, text) ->
+  | Lexer.Number (v, text) ->
       advance ();
       mk_expr (Number (v, text)) r
-  | L.String s ->
+  | Lexer.String s ->
       advance ();
       mk_expr (String s) r
-  | L.Kw L.Nil ->
+  | Lexer.Kw Lexer.Nil ->
       advance ();
       mk_expr Nil r
-  | L.Kw L.True ->
+  | Lexer.Kw Lexer.True ->
       advance ();
       mk_expr True r
-  | L.Kw L.False ->
+  | Lexer.Kw Lexer.False ->
       advance ();
       mk_expr False r
-  | L.Sym L.Dots ->
+  | Lexer.Sym Lexer.Dots ->
       advance ();
       mk_expr Vararg r
-  | L.Sym L.Lbrace ->
+  | Lexer.Sym Lexer.Lbrace ->
       table_cons ()
-  | L.Kw L.Function ->
+  | Lexer.Kw Lexer.Function ->
       let op = opener "function" in
       advance ();
       let f, stop = funcbody op in
@@ -596,15 +608,17 @@ and simpleexp () =
 
 and primary () =
   match st.tok with
-  | L.Name w ->
+  | Lexer.Name w ->
       let r = here () in
       advance ();
       mk_expr (Name w) r
-  | L.Sym L.Lparen ->
+  | Lexer.Sym Lexer.Lparen ->
       let r1 = here () in
       advance ();
       let e = expr () in
-      let r2 = close_sym ~opener:r1 ~what:"parenthesized expression" L.Rparen in
+      let r2 =
+        close_sym ~opener:r1 ~what:"parenthesized expression" Lexer.Rparen
+      in
       mk_expr (Paren e) (span r1 r2)
   | _ ->
       expected_expression ()
@@ -613,23 +627,23 @@ and suffixed () = suffixes (primary ())
 
 and suffixes e =
   match st.tok with
-  | L.Sym L.Dot ->
+  | Lexer.Sym Lexer.Dot ->
       advance ();
       let n, r = field_name ~what:"a field name after '.'" () in
       suffixes (mk_expr (Index (e, mk_expr (String n) r)) (span e.erange r))
-  | L.Sym L.Lbracket ->
+  | Lexer.Sym Lexer.Lbracket ->
       let r1 = here () in
       advance ();
       let k = expr () in
-      let r = close_sym ~opener:r1 ~what:"index" L.Rbracket in
+      let r = close_sym ~opener:r1 ~what:"index" Lexer.Rbracket in
       suffixes (mk_expr (Index (e, k)) (span e.erange r))
-  | L.Sym L.Colon ->
+  | Lexer.Sym Lexer.Colon ->
       advance ();
       let m, _ = need_name ~what:"a method name after ':'" () in
       let args, stop = call_args ~after_method:true () in
       suffixes
         (mk_expr (Method_call (e, m, args)) { start = e.erange.start; stop })
-  | L.Sym L.Lparen | L.String _ | L.Sym L.Lbrace ->
+  | Lexer.Sym Lexer.Lparen | Lexer.String _ | Lexer.Sym Lexer.Lbrace ->
       let args, stop = call_args () in
       suffixes (mk_expr (Call (e, args)) { start = e.erange.start; stop })
   | _ ->
@@ -637,18 +651,18 @@ and suffixes e =
 
 and call_args ?(after_method = false) () =
   match st.tok with
-  | L.String s ->
+  | Lexer.String s ->
       let r = here () in
       advance ();
       ([ mk_expr (String s) r ], r.stop)
-  | L.Sym L.Lbrace ->
+  | Lexer.Sym Lexer.Lbrace ->
       let t = table_cons () in
       ([ t ], t.erange.stop)
-  | L.Sym L.Lparen -> (
+  | Lexer.Sym Lexer.Lparen -> (
       let opener = here () in
       advance ();
       match st.tok with
-      | L.Sym L.Rparen ->
+      | Lexer.Sym Lexer.Rparen ->
           let r = here () in
           advance ();
           ([], r.stop)
@@ -656,7 +670,8 @@ and call_args ?(after_method = false) () =
           let rec loop acc =
             let e = list_elem ~stops:comma expr bad_expr in
             match
-              sep_or_close ~opener ~what:"argument list" [ L.Comma ] L.Rparen
+              sep_or_close ~opener ~what:"argument list" [ Lexer.Comma ]
+                Lexer.Rparen
             with
             | `Sep ->
                 loop (e :: acc)
@@ -669,7 +684,7 @@ and call_args ?(after_method = false) () =
       if after_method then
         fail_here ~help:"a method call needs arguments, as in obj:name()"
           (Printf.sprintf "expected arguments after the method name, found %s"
-             (L.found ())
+             (Lexer.found ())
           )
       else
         expected_expression ()
@@ -677,17 +692,24 @@ and call_args ?(after_method = false) () =
 and table_cons () =
   let r1 = here () in
   advance ();
-  let stops = function L.Sym (L.Comma | L.Semi) -> true | _ -> false in
+  let stops = function
+    | Lexer.Sym (Lexer.Comma | Lexer.Semi) ->
+        true
+    | _ ->
+        false
+  in
   let rec loop acc =
     match st.tok with
-    | L.Sym L.Rbrace ->
+    | Lexer.Sym Lexer.Rbrace ->
         let r = here () in
         advance ();
         (List.rev acc, r)
     | _ -> (
         let f = list_elem ~stops field (fun _ -> Bad_field) in
         match
-          sep_or_close ~opener:r1 ~what:"table" [ L.Comma; L.Semi ] L.Rbrace
+          sep_or_close ~opener:r1 ~what:"table"
+            [ Lexer.Comma; Lexer.Semi ]
+            Lexer.Rbrace
         with
         | `Sep ->
             loop (f :: acc)
@@ -700,14 +722,16 @@ and table_cons () =
 
 and field () =
   match st.tok with
-  | L.Sym L.Lbracket ->
+  | Lexer.Sym Lexer.Lbracket ->
       let r1 = here () in
       advance ();
       let k = expr () in
-      ignore (close_sym ~opener:r1 ~what:"key" L.Rbracket);
-      expect_sym L.Assign;
+      ignore (close_sym ~opener:r1 ~what:"key" Lexer.Rbracket);
+      expect_sym Lexer.Assign;
       Keyed (k, expr ())
-  | L.Name n when match L.peek2 () with L.Sym L.Assign -> true | _ -> false ->
+  | Lexer.Name n
+    when match Lexer.peek2 () with Lexer.Sym Lexer.Assign -> true | _ -> false
+    ->
       advance ();
       advance ();
       Named (n, expr ())
@@ -721,21 +745,21 @@ and funcbody opener =
   ({ params; vararg; body }, stop)
 
 and param_list () =
-  if not (is_sym L.Lparen) then
-    fail_here (Printf.sprintf "expected \"(\", found %s" (L.found ()));
+  if not (is_sym Lexer.Lparen) then
+    fail_here (Printf.sprintf "expected \"(\", found %s" (Lexer.found ()));
   let opener = here () in
   advance ();
   match st.tok with
-  | L.Sym L.Rparen ->
+  | Lexer.Sym Lexer.Rparen ->
       advance ();
       ([], false)
   | _ ->
-      let stops = function L.Sym L.Comma -> true | _ -> false in
+      let stops = function Lexer.Sym Lexer.Comma -> true | _ -> false in
       let rec loop acc =
         match st.tok with
-        | L.Sym L.Dots ->
+        | Lexer.Sym Lexer.Dots ->
             advance ();
-            ignore (close_sym ~opener ~what:"parameter list" L.Rparen);
+            ignore (close_sym ~opener ~what:"parameter list" Lexer.Rparen);
             (List.rev acc, true)
         | _ -> (
             let p =
@@ -747,7 +771,8 @@ and param_list () =
                 (fun _ -> Bad_param)
             in
             match
-              sep_or_close ~opener ~what:"parameter list" [ L.Comma ] L.Rparen
+              sep_or_close ~opener ~what:"parameter list" [ Lexer.Comma ]
+                Lexer.Rparen
             with
             | `Sep ->
                 loop (p :: acc)
@@ -760,7 +785,7 @@ and param_list () =
 and explist () =
   let rec loop acc =
     let e = list_elem ~line_stop:true ~stops:comma expr bad_expr in
-    if is_sym L.Comma then begin
+    if is_sym Lexer.Comma then begin
       advance ();
       loop (e :: acc)
     end else
@@ -771,15 +796,15 @@ and explist () =
 and block closer opener : block =
   Parseff.rec_ (fun () ->
       let stops = function
-        | L.Kw w -> (
+        | Lexer.Kw w -> (
             match (closer, w) with
             | Chunk, _ ->
                 false
-            | End_only, L.End ->
+            | End_only, Lexer.End ->
                 true
-            | If_branch, (L.End | L.Else | L.Elseif) ->
+            | If_branch, (Lexer.End | Lexer.Else | Lexer.Elseif) ->
                 true
-            | Until, (L.Until | L.End) ->
+            | Until, (Lexer.Until | Lexer.End) ->
                 true
             | _ ->
                 false
@@ -789,11 +814,11 @@ and block closer opener : block =
       in
       let rec loop acc returned =
         match st.tok with
-        | L.Eof ->
+        | Lexer.Eof ->
             List.rev acc
         | t when stops t ->
             List.rev acc
-        | L.Sym L.Semi ->
+        | Lexer.Sym Lexer.Semi ->
             advance ();
             loop acc returned
         | t ->
@@ -822,7 +847,7 @@ and after_return returned t =
            return early"
         (Printf.sprintf
            "\"return\" must be the last statement of a block, found %s after it"
-           (L.found ())
+           (Lexer.found ())
         )
   | _ ->
       ()
@@ -831,10 +856,16 @@ and statement_rec opener =
   let start = st.start in
   let compound =
     match st.tok with
-    | L.Kw (L.If | L.While | L.Do | L.For | L.Repeat | L.Function) ->
+    | Lexer.Kw
+        ( Lexer.If
+        | Lexer.While
+        | Lexer.Do
+        | Lexer.For
+        | Lexer.Repeat
+        | Lexer.Function ) ->
         true
-    | L.Kw L.Local -> (
-        match L.peek2 () with L.Kw L.Function -> true | _ -> false
+    | Lexer.Kw Lexer.Local -> (
+        match Lexer.peek2 () with Lexer.Kw Lexer.Function -> true | _ -> false
       )
     | _ ->
         false
@@ -859,66 +890,66 @@ and statement opener =
   let start = st.start in
   let mk sdesc stop = { sdesc; srange = { start; stop } } in
   match st.tok with
-  | L.Kw L.If ->
+  | Lexer.Kw Lexer.If ->
       if_stat ()
-  | L.Kw L.While ->
+  | Lexer.Kw Lexer.While ->
       let op = opener_of "while" in
       advance ();
-      let c = condition ~kw:L.Do op in
+      let c = condition ~kw:Lexer.Do op in
       let body = block End_only (Some op) in
       mk (While (c, body)) (close_end op)
-  | L.Kw L.Do ->
+  | Lexer.Kw Lexer.Do ->
       let op = opener_of "do" in
       advance ();
       let body = block End_only (Some op) in
       mk (Do body) (close_end op)
-  | L.Kw L.For ->
+  | Lexer.Kw Lexer.For ->
       for_stat ()
-  | L.Kw L.Repeat ->
+  | Lexer.Kw Lexer.Repeat ->
       repeat_stat ()
-  | L.Kw L.Function ->
+  | Lexer.Kw Lexer.Function ->
       function_stat ()
-  | L.Kw L.Local ->
+  | Lexer.Kw Lexer.Local ->
       local_stat ()
-  | L.Kw L.Return ->
+  | Lexer.Kw Lexer.Return ->
       return_stat ()
-  | L.Kw L.Break ->
+  | Lexer.Kw Lexer.Break ->
       let r = here () in
       advance ();
       mk Break r.stop
-  | L.Kw L.Goto ->
+  | Lexer.Kw Lexer.Goto ->
       advance ();
       let n, r = need_name ~what:"a label name after \"goto\"" () in
       mk (Goto n) r.stop
-  | L.Sym L.Dcolon ->
+  | Lexer.Sym Lexer.Dcolon ->
       advance ();
       let n, _ = need_name ~what:"a label name after '::'" () in
       let stop = st.stop in
-      expect_sym L.Dcolon;
+      expect_sym Lexer.Dcolon;
       mk (Label n) stop
-  | L.Kw ((L.End | L.Else | L.Elseif | L.Until) as w) ->
-      stray (L.kw_text w) opener
-  | L.Name _ | L.Sym L.Lparen ->
+  | Lexer.Kw ((Lexer.End | Lexer.Else | Lexer.Elseif | Lexer.Until) as w) ->
+      stray (Lexer.kw_text w) opener
+  | Lexer.Name _ | Lexer.Sym Lexer.Lparen ->
       expr_stat ()
   | t ->
       let help =
         match t with
-        | L.Sym (L.Rbrace | L.Rparen | L.Rbracket) ->
+        | Lexer.Sym (Lexer.Rbrace | Lexer.Rparen | Lexer.Rbracket) ->
             Some "this bracket has no matching opening bracket"
-        | L.Number _
-        | L.String _
-        | L.Sym L.Lbrace
-        | L.Kw (L.Nil | L.True | L.False | L.Not) ->
+        | Lexer.Number _
+        | Lexer.String _
+        | Lexer.Sym Lexer.Lbrace
+        | Lexer.Kw (Lexer.Nil | Lexer.True | Lexer.False | Lexer.Not) ->
             Some
               "an expression alone is not a statement; only a call or an \
                assignment is"
-        | L.Kw L.Then ->
+        | Lexer.Kw Lexer.Then ->
             Some "\"then\" must follow the condition of an \"if\" or \"elseif\""
         | _ ->
             token_hint ()
       in
       fail_here ?help
-        (Printf.sprintf "expected a statement, found %s" (L.found ()))
+        (Printf.sprintf "expected a statement, found %s" (Lexer.found ()))
 
 and opener_of kind = opener kind
 
@@ -962,21 +993,21 @@ and if_stat () =
   let start = st.start in
   let op = opener "if" in
   advance ();
-  let c = condition ~kw:L.Then op in
+  let c = condition ~kw:Lexer.Then op in
   let b = block If_branch (Some op) in
   let rec branches acc =
     match st.tok with
-    | L.Kw L.Elseif ->
+    | Lexer.Kw Lexer.Elseif ->
         let eop = opener "elseif" in
         advance ();
-        let c = condition ~kw:L.Then eop in
+        let c = condition ~kw:Lexer.Then eop in
         let b = block If_branch (Some op) in
         branches ((c, b) :: acc)
-    | L.Kw L.Else ->
+    | Lexer.Kw Lexer.Else ->
         let r_else = here () in
         advance ();
         ( match st.tok with
-        | L.Kw L.If when not st.nl ->
+        | Lexer.Kw Lexer.If when not st.nl ->
             Parseff.Ref.set else_ifs
               ((r_else, here ()) :: Parseff.Ref.get else_ifs)
         | _ ->
@@ -996,8 +1027,8 @@ and for_stat () =
   let op = opener "for" in
   let r = op.at in
   advance ();
-  let h = header ~region:op.at.start ~kw:L.Do for_header in
-  (match h with Some _ -> expect_kw ~kw:L.Do op | None -> ());
+  let h = header ~region:op.at.start ~kw:Lexer.Do for_header in
+  (match h with Some _ -> expect_kw ~kw:Lexer.Do op | None -> ());
   let body = block End_only (Some op) in
   let stop = close_end op in
   let sdesc =
@@ -1014,34 +1045,34 @@ and for_stat () =
 and for_header () =
   let v, _ = need_name ~what:"a loop variable after \"for\"" () in
   match st.tok with
-  | L.Sym L.Assign ->
+  | Lexer.Sym Lexer.Assign ->
       advance ();
       let a = expr () in
-      expect_sym L.Comma;
+      expect_sym Lexer.Comma;
       let b = expr () in
       let c =
-        if is_sym L.Comma then begin
+        if is_sym Lexer.Comma then begin
           advance ();
           Some (expr ())
         end else
           None
       in
       `Num (v, a, b, c)
-  | L.Sym L.Comma | L.Kw L.In ->
+  | Lexer.Sym Lexer.Comma | Lexer.Kw Lexer.In ->
       let rec names acc =
-        if is_sym L.Comma then begin
+        if is_sym Lexer.Comma then begin
           advance ();
           names (fst (need_name ~what:"a loop variable after ','" ()) :: acc)
         end else
           List.rev acc
       in
       let vs = names [ v ] in
-      if not (is_kw L.In) then
-        fail_here (Printf.sprintf "expected \"in\", found %s" (L.found ()));
+      if not (is_kw Lexer.In) then
+        fail_here (Printf.sprintf "expected \"in\", found %s" (Lexer.found ()));
       advance ();
       let rec exprs acc =
         let e = expr () in
-        if is_sym L.Comma then begin
+        if is_sym Lexer.Comma then begin
           advance ();
           exprs (e :: acc)
         end else
@@ -1052,7 +1083,7 @@ and for_header () =
       fail_here
         (Printf.sprintf
            "expected '=' or \"in\" after the loop variable, found %s"
-           (L.found ())
+           (Lexer.found ())
         )
 
 and repeat_stat () =
@@ -1063,7 +1094,7 @@ and repeat_stat () =
   let body = block Until (Some op) in
   let note = { Parseff.at = Some r; text = "this \"repeat\" is not closed" } in
   match st.tok with
-  | L.Kw L.Until ->
+  | Lexer.Kw Lexer.Until ->
       advance ();
       let c =
         list_elem ~line_stop:true ~region:r.start ~at_end:`Report
@@ -1071,7 +1102,7 @@ and repeat_stat () =
           expr bad_expr
       in
       { sdesc = Repeat (body, c); srange = { start; stop = c.erange.stop } }
-  | L.Kw L.End ->
+  | Lexer.Kw Lexer.End ->
       soft_here ~notes:[ note ]
         ~help:"a \"repeat\" loop ends with \"until\" and a condition"
         (Printf.sprintf
@@ -1085,7 +1116,7 @@ and repeat_stat () =
       soft_here ~word:`Until ~region:r.start ~notes:[ note ]
         (Printf.sprintf
            "expected \"until\" to close the \"repeat\" at %s, found %s"
-           (loc r.start) (L.found ())
+           (loc r.start) (Lexer.found ())
         );
       let p = st.prev_stop in
       {
@@ -1100,7 +1131,7 @@ and function_stat () =
     attempt (fun () ->
         advance ();
         ( match st.tok with
-        | L.Sym L.Lparen ->
+        | Lexer.Sym Lexer.Lparen ->
             fail_here
               ~help:
                 "an anonymous function is an expression: assign it, as in \
@@ -1111,7 +1142,7 @@ and function_stat () =
         );
         let n, _ = need_name ~what:"a function name after \"function\"" () in
         let rec path acc =
-          if is_sym L.Dot then begin
+          if is_sym Lexer.Dot then begin
             advance ();
             path (fst (need_name ~what:"a name after '.'" ()) :: acc)
           end else
@@ -1119,7 +1150,7 @@ and function_stat () =
         in
         let names = path [ n ] in
         let meth =
-          if is_sym L.Colon then begin
+          if is_sym Lexer.Colon then begin
             advance ();
             Some (fst (need_name ~what:"a method name after ':'" ()))
           end else
@@ -1149,20 +1180,20 @@ and local_function start =
         in
         let qualified =
           match st.tok with
-          | L.Sym (L.Dot | L.Colon) ->
+          | Lexer.Sym (Lexer.Dot | Lexer.Colon) ->
               let text = Buffer.create 32 in
               Buffer.add_string text n;
               let err = ref None in
-              while is_sym L.Dot || is_sym L.Colon do
+              while is_sym Lexer.Dot || is_sym Lexer.Colon do
                 Buffer.add_string text
-                  (match st.tok with L.Sym s -> L.sym_text s | _ -> "");
+                  (match st.tok with Lexer.Sym s -> Lexer.sym_text s | _ -> "");
                 advance ();
                 ( match st.tok with
-                | L.Name part ->
+                | Lexer.Name part ->
                     Buffer.add_string text part;
                     err :=
                       Some
-                        (L.make_error ~from:r_name.start
+                        (Lexer.make_error ~from:r_name.start
                            ~help:
                              "write \"function a.b()\" without \"local\" to \
                               set a field, or \"local function b()\" for a \
@@ -1206,18 +1237,23 @@ and local_stat () =
   let start = st.start in
   advance ();
   match st.tok with
-  | L.Kw L.Function ->
+  | Lexer.Kw Lexer.Function ->
       local_function start
   | _ -> (
       let closes = ref 0 in
-      let stops = function L.Sym (L.Comma | L.Assign) -> true | _ -> false in
+      let stops = function
+        | Lexer.Sym (Lexer.Comma | Lexer.Assign) ->
+            true
+        | _ ->
+            false
+      in
       let rec names acc =
         let v =
           list_elem ~line_stop:true ~skip_word:true ~stops (local_name closes)
             (fun _ -> Bad_var
           )
         in
-        if is_sym L.Comma then begin
+        if is_sym Lexer.Comma then begin
           advance ();
           names (v :: acc)
         end else
@@ -1226,7 +1262,7 @@ and local_stat () =
       let vars = names [] in
       let stop = st.prev_stop in
       match (st.tok, vars) with
-      | L.Sym L.Lparen, [ Var (n, None) ] ->
+      | Lexer.Sym Lexer.Lparen, [ Var (n, None) ] ->
           soft_here
             ~help:
               (Printf.sprintf
@@ -1239,7 +1275,7 @@ and local_stat () =
               { kind = "function"; at = { start; stop }; indent = st.indent }
           in
           { sdesc = Bad_stat; srange = { start; stop } }
-      | L.Sym L.Assign, _ ->
+      | Lexer.Sym Lexer.Assign, _ ->
           advance ();
           let es = explist () in
           let stop =
@@ -1252,13 +1288,13 @@ and local_stat () =
 
 and local_name closes () =
   let n, _ = need_name ~what:"a variable name after \"local\"" () in
-  if is_sym L.Lt then begin
+  if is_sym Lexer.Lt then begin
     advance ();
     let attrib =
       match st.tok with
-      | L.Name "const" ->
+      | Lexer.Name "const" ->
           Const
-      | L.Name "close" ->
+      | Lexer.Name "close" ->
           incr closes;
           if !closes > 1 then
             soft_here
@@ -1266,7 +1302,7 @@ and local_name closes () =
                 "declare each <close> variable in its own \"local\" statement"
               "multiple to-be-closed variables in one local declaration";
           Close
-      | L.Name a ->
+      | Lexer.Name a ->
           fail_here ~help:"the attributes are <const> and <close>"
             (Printf.sprintf "unknown attribute '%s'" a)
       | _ ->
@@ -1274,7 +1310,7 @@ and local_name closes () =
           Const
     in
     advance ();
-    expect_sym L.Gt;
+    expect_sym Lexer.Gt;
     Var (n, Some attrib)
   end else
     Var (n, None)
@@ -1285,7 +1321,7 @@ and return_stat () =
   advance ();
   let es =
     match st.tok with
-    | L.Eof | L.Sym L.Semi ->
+    | Lexer.Eof | Lexer.Sym Lexer.Semi ->
         []
     | t when is_terminator t ->
         []
@@ -1294,7 +1330,7 @@ and return_stat () =
   in
   let stop = match List.rev es with e :: _ -> e.erange.stop | [] -> r.stop in
   let stop =
-    if is_sym L.Semi then begin
+    if is_sym Lexer.Semi then begin
       let s = st.stop in
       advance ();
       s
@@ -1302,13 +1338,15 @@ and return_stat () =
       stop
   in
   ( match st.tok with
-  | L.Eof ->
+  | Lexer.Eof ->
       ()
   | t when is_terminator t || starts_statement t ->
       ()
   | _ ->
       fail_here ~help:"the values of a \"return\" are separated by ','"
-        (Printf.sprintf "unexpected %s after the return statement" (L.found ()))
+        (Printf.sprintf "unexpected %s after the return statement"
+           (Lexer.found ())
+        )
   );
   { sdesc = Return es; srange = { start; stop } }
 
@@ -1316,10 +1354,10 @@ and expr_stat () =
   let start = st.start in
   let e = suffixed () in
   match st.tok with
-  | L.Sym (L.Assign | L.Comma) ->
+  | Lexer.Sym (Lexer.Assign | Lexer.Comma) ->
       check_target e;
       let rec targets acc =
-        if is_sym L.Comma then begin
+        if is_sym Lexer.Comma then begin
           advance ();
           let t = suffixed () in
           check_target t;
@@ -1328,7 +1366,7 @@ and expr_stat () =
           List.rev acc
       in
       let ts = targets [ e ] in
-      expect_sym L.Assign;
+      expect_sym Lexer.Assign;
       let es = explist () in
       let stop =
         match List.rev es with x :: _ -> x.erange.stop | [] -> e.erange.stop
@@ -1361,19 +1399,19 @@ and not_a_statement e =
   let target = match e.edesc with Name n -> n | _ -> "x" in
   let compound =
     match st.tok with
-    | L.Sym
-        ( ( L.Plus
-          | L.Minus
-          | L.Star
-          | L.Slash
-          | L.Dslash
-          | L.Percent
-          | L.Caret
-          | L.Concat
-          | L.Pipe
-          | L.Amp
-          | L.Shl
-          | L.Shr ) as s
+    | Lexer.Sym
+        ( ( Lexer.Plus
+          | Lexer.Minus
+          | Lexer.Star
+          | Lexer.Slash
+          | Lexer.Dslash
+          | Lexer.Percent
+          | Lexer.Caret
+          | Lexer.Concat
+          | Lexer.Pipe
+          | Lexer.Amp
+          | Lexer.Shl
+          | Lexer.Shr ) as s
         ) ->
         Some s
     | _ ->
@@ -1387,14 +1425,15 @@ and not_a_statement e =
       let op_start = st.start in
       advance ();
       match st.tok with
-      | L.Sym (L.Assign | L.Eq) when st.start = st.prev_stop ->
-          L.error ~from:op_start
+      | Lexer.Sym (Lexer.Assign | Lexer.Eq) when st.start = st.prev_stop ->
+          Lexer.error ~from:op_start
             ~help:
-              (Printf.sprintf "write %s = %s %s ..." target target (L.sym_text s)
+              (Printf.sprintf "write %s = %s %s ..." target target
+                 (Lexer.sym_text s)
               )
-            (Printf.sprintf "Lua has no '%s=' operator" (L.sym_text s))
-      | L.Sym L.Plus when s == L.Plus && st.start = st.prev_stop ->
-          L.error ~from:op_start
+            (Printf.sprintf "Lua has no '%s=' operator" (Lexer.sym_text s))
+      | Lexer.Sym Lexer.Plus when s == Lexer.Plus && st.start = st.prev_stop ->
+          Lexer.error ~from:op_start
             ~help:(Printf.sprintf "write %s = %s + 1" target target)
             "Lua has no '++' operator"
       | _ ->
@@ -1438,9 +1477,9 @@ let one () =
   Parseff.Ref.set unclosed_hints [];
   Parseff.Ref.set else_ifs [];
   match st.tok with
-  | L.Eof ->
+  | Lexer.Eof ->
       None
-  | L.Sym L.Semi ->
+  | Lexer.Sym Lexer.Semi ->
       advance ();
       None
   | t ->
@@ -1457,10 +1496,10 @@ let one () =
 
 let top () =
   if not !started then begin
-    L.start ();
+    Lexer.start ();
     started := true
   end;
-  L.trim_lines ();
+  Lexer.trim_lines ();
   let rec go acc =
     let acc = match one () with Some s -> s :: acc | None -> acc in
     let exhausted =
@@ -1478,7 +1517,7 @@ let error_at source (r : range) ?notes ?help msg =
     Parseff.parse ~consume:`Partial source (fun () ->
         if r.start > 0 then ignore (Parseff.take_span r.start);
         if r.stop > r.start then ignore (Parseff.take_span (r.stop - r.start));
-        (L.error ~from:r.start ?notes ?help msg : unit)
+        (Lexer.error ~from:r.start ?notes ?help msg : unit)
     )
   with
   | Error e ->
