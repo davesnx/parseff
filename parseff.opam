@@ -12,7 +12,7 @@ bug-reports: "https://github.com/davesnx/parseff/issues"
 depends: [
   "dune" {>= "3.17" & (>= "3.22" & with-doc = "true" | with-doc = "false")}
   "ocaml" {>= "5.3"}
-  "re" {>= "1.9.0"}
+  "re" {>= "1.11.0"}
   "uucp" {>= "16.0.0"}
   "alcotest" {with-test}
   "eio_main" {with-test}

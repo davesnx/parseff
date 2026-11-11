@@ -1337,30 +1337,26 @@ let[@inline always] handle_sep_by_take_span st ws_pred sep_char take_pred =
 
 let label_utf8 = "valid UTF-8"
 
-let[@inline never] buffer_for_regex st =
-  match st.source with
-  | Some src when (not src.eof) && st.input_len - st.pos < src.window / 2 ->
-      let floor = State.reclaim_floor st ~keep_from:st.pos in
-      let room = src.window - (st.input_len - floor) in
-      if room <= 0 then
-        Some (st.pos + (src.window / 2), { limit = src.window; oldest = floor })
-      else begin
-        if Bytes.length src.rx < room then src.rx <- Bytes.create room;
-        let chunk = src.rx in
-        let got = ref 0 in
-        let want = imin room ((src.window / 2) - (st.input_len - st.pos)) in
-        while !got < want && not src.eof do
-          let n = read_source st src chunk !got (room - !got) in
-          if n = 0 then
-            src.eof <- true
-          else
-            got := !got + n
-        done;
-        if !got > 0 then append st ~floor chunk !got;
-        None
-      end
-  | _ ->
-      None
+let regex_read_ahead st src ahead =
+  let floor = State.reclaim_floor st ~keep_from:st.pos in
+  let room = src.window - (st.input_len - floor) in
+  if room <= 0 then
+    false
+  else begin
+    if Bytes.length src.rx < room then src.rx <- Bytes.create room;
+    let chunk = src.rx in
+    let got = ref 0 in
+    let want = imin room (ahead - (st.input_len - st.pos)) in
+    while !got < want && not src.eof do
+      let n = read_source st src chunk !got (room - !got) in
+      if n = 0 then
+        src.eof <- true
+      else
+        got := !got + n
+    done;
+    if !got > 0 then append st ~floor chunk !got;
+    true
+  end
 
 let regex_failure st label =
   match label with
@@ -1369,29 +1365,59 @@ let regex_failure st label =
   | None ->
       fail_str st st.pos tag_label label_regex
 
-let raise_if_pinned st = function
-  | Some (_, info) ->
-      raise (Backtrack_window_exceeded (info, { at = st.pos; open_frames = [] }))
-  | None ->
-      ()
+let rec match_regex_source st src re label =
+  let off = st.pos - st.base in
+  let ahead = st.input_len - st.pos in
+  match Re.exec_partial_detailed ~pos:off re st.input with
+  | `Full g
+    when Re.Group.start g 0 = off
+         && (src.eof || st.base + Re.Group.stop g 0 < st.input_len) ->
+      let match_start = st.pos in
+      let match_end = st.base + Re.Group.stop g 0 in
+      st.pos <- match_end;
+      slice st match_start (match_end - match_start)
+  | `Full g
+    when Re.Group.start g 0 <> off && (src.eof || ahead >= src.window / 2) ->
+      regex_failure st label
+  | `Partial p when p > off ->
+      regex_failure st label
+  | `Mismatch ->
+      regex_failure st label
+  | _ when src.eof ->
+      regex_failure st label
+  | _ ->
+      if not (regex_read_ahead st src (ahead + imax 1 ahead)) then
+        raise
+          (Backtrack_window_exceeded
+             ( {
+                 limit = src.window;
+                 oldest = State.reclaim_floor st ~keep_from:st.pos;
+               },
+               { at = st.pos; open_frames = [] }
+             )
+          );
+      match_regex_source st src re label
 
 let[@inline never] handle_match_regex st re label =
-  let pinned = buffer_for_regex st in
-  match Re.exec ~pos:(st.pos - st.base) re st.input with
-  | groups ->
-      let match_start = st.base + Re.Group.start groups 0 in
-      let match_end = st.base + Re.Group.stop groups 0 in
-      if match_start <> st.pos then begin
-        raise_if_pinned st pinned;
-        regex_failure st label
-      end else begin
-        if match_end >= st.input_len then raise_if_pinned st pinned;
-        st.pos <- match_end;
-        slice st match_start (match_end - match_start)
-      end
-  | exception Not_found ->
-      raise_if_pinned st pinned;
-      regex_failure st label
+  match st.source with
+  | None -> (
+      match Re.exec ~pos:(st.pos - st.base) re st.input with
+      | groups ->
+          let match_start = st.base + Re.Group.start groups 0 in
+          let match_end = st.base + Re.Group.stop groups 0 in
+          if match_start <> st.pos then
+            regex_failure st label
+          else begin
+            st.pos <- match_end;
+            slice st match_start (match_end - match_start)
+          end
+      | exception Not_found ->
+          regex_failure st label
+    )
+  | Some src ->
+      if (not src.eof) && st.input_len - st.pos < src.window / 2 then
+        ignore (regex_read_ahead st src (src.window / 2));
+      match_regex_source st src re label
 
 let[@inline never] need_bytes_slow st n =
   if not (have st n) then fail_int st st.pos (bytes_kind n)
@@ -2260,17 +2286,37 @@ let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
   | Some d ->
       or_ (fold_left_one_or_more p op) (fun () -> d) ()
 
-let rec fold_right_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ()
+let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
     : 'a =
+  let frame = State.push_rewind_frame st frame_choice in
+  match
+    let start = st.pos in
+    let f = op () in
+    let rhs = p () in
+    if st.pos = start then begin
+      restore_rewind_frame st frame;
+      first
+    end else
+      f first (fold_right_from st p op rhs)
+  with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception Fail ->
+      if State.frame_committed st frame then begin
+        State.pop_rewind_frame st frame;
+        raise_notrace Fail
+      end;
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      first
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let fold_right_one_or_more p op () =
   let first = p () in
-  or_
-    (fun () ->
-      let f = op () in
-      let rhs = fold_right_one_or_more p op () in
-      f first rhs
-    )
-    (fun () -> first)
-    ()
+  fold_right_from (get_state ()) p op first
 
 let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =

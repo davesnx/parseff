@@ -140,6 +140,85 @@ let test_fold_left_non_consuming () =
     (fun () -> Parseff.fold_left (fun () -> 1) (fun () -> ( + )) ())
     "Ok (1, 0)"
 
+let bounded p =
+  let calls = ref 0 in
+  fun () ->
+    incr calls;
+    if !calls > 1000 then Alcotest.fail "the loop did not stop";
+    p ()
+
+let tree a b = "(" ^ a ^ "^" ^ b ^ ")"
+
+let digit_or_dash () =
+  match Parseff.optional Parseff.digit () with
+  | Some d ->
+      string_of_int d
+  | None ->
+      "-"
+
+let test_fold_right_non_consuming () =
+  both string_of_int "abc"
+    (fun () -> Parseff.fold_right (bounded (fun () -> 1)) (fun () -> ( + )) ())
+    "Ok (1, 0)";
+  both string_of_int "abc"
+    (fun () ->
+      Parseff.fold_right
+        (bounded (fun () -> 1))
+        (fun () -> ( + ))
+        ~otherwise:0 ()
+    )
+    "Ok (1, 0)"
+
+let test_fold_right_op_non_consuming () =
+  both show_string "12a"
+    (fun () -> Parseff.fold_right (bounded digit_or_dash) (fun () -> tree) ())
+    {|Ok ("(1^2)", 2)|}
+
+let test_fold_right_element_non_consuming () =
+  both show_string "1^^"
+    (fun () ->
+      Parseff.fold_right (bounded digit_or_dash)
+        (fun () ->
+          ignore (Parseff.optional (fun () -> Parseff.char '^') ());
+          tree
+        )
+        ()
+    )
+    {|Ok ("(1^(-^-))", 3)|}
+
+let test_fold_right_right_assoc () =
+  both show_string "1^2^3"
+    (fun () ->
+      Parseff.fold_right
+        (fun () -> string_of_int (Parseff.digit ()))
+        (fun () ->
+          ignore (Parseff.char '^');
+          tree
+        )
+        ()
+    )
+    {|Ok ("(1^(2^3))", 5)|}
+
+let test_fold_right_dropped_pair_rolled_back () =
+  let d = Parseff.Diagnostics.create () in
+  let cell = Parseff.Ref.create 0 in
+  let r =
+    Parseff.parse ~consume:`Partial ~diagnostics:d "12" (fun () ->
+        let v =
+          Parseff.fold_right (bounded digit_or_dash)
+            (fun () ->
+              Parseff.warn d "op";
+              Parseff.Ref.set cell (Parseff.Ref.get cell + 1);
+              tree
+            )
+            ()
+        in
+        Printf.sprintf "%s %d" v (Parseff.Ref.get cell)
+    )
+  in
+  Alcotest.(check string) "value" {|Ok "(1^2) 1"|} (show show_string r);
+  Alcotest.(check int) "diagnostics" 1 (Parseff.Diagnostics.length d)
+
 let test_take_max_int () =
   let r =
     Parseff.parse "abc" (fun () ->
@@ -272,6 +351,13 @@ let () =
           test_case "many at_least" `Quick test_many_at_least_non_consuming;
           test_case "sep_by" `Quick test_sep_by_non_consuming;
           test_case "fold_left" `Quick test_fold_left_non_consuming;
+          test_case "fold_right" `Quick test_fold_right_non_consuming;
+          test_case "fold_right op" `Quick test_fold_right_op_non_consuming;
+          test_case "fold_right element" `Quick
+            test_fold_right_element_non_consuming;
+          test_case "fold_right right assoc" `Quick test_fold_right_right_assoc;
+          test_case "fold_right dropped pair" `Quick
+            test_fold_right_dropped_pair_rolled_back;
         ]
       );
       ( "take",
