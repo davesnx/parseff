@@ -1028,6 +1028,9 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
     as [!] and [!=], list the longer token first. The loop stops after an
     operator and operand that together consume no input, as in {!fold_left}.
 
+    For a grammar with many precedence levels, {!climb} is faster: it looks for
+    the operator once after each operand.
+
     Example:
     {@ocaml[
     let table =
@@ -1049,6 +1052,85 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
           e
         )
         number ()
+    ]} *)
+
+val climb :
+  ?min:int ->
+  operand:(unit -> 'a) ->
+  operator:(unit -> (int * 'a operator) option) ->
+  unit ->
+  'a
+(** [climb ~operand ~operator] parses operands with [operand], joined by the
+    operators that [operator] finds. It does the work of {!expression} with one
+    operator lookup after each operand, where {!expression} tries each operator
+    of its table.
+
+    After each operand, [climb] calls [operator] once. [operator] looks at the
+    input and returns [Some (precedence, op)], or [None] when no operator is
+    next. A higher [precedence] binds tighter. [op] is {!infix_left},
+    {!infix_right} or {!postfix}; a {!prefix} raises [Invalid_argument].
+
+    When the operator belongs to the expression, [climb] runs the token parser
+    of [op] from the position where [operator] stopped. Thus [operator] can read
+    the token, and the token parser of [op] then reads nothing. Or [operator]
+    can only look at the token, and the token parser of [op] reads it. In all
+    other cases, [climb] goes back to the position before the call of
+    [operator]: when [operator] returns [None], when it fails, and when the
+    precedence is below [min].
+
+    An [operator] that returns [None] adds nothing to the expected set of an
+    error. Use {!peek_char}, or read a token and compare it, in place of one
+    {!consume} for each operator.
+
+    [min] is the lowest precedence that [climb] accepts. The default accepts all
+    operators. Use it for a prefix operator: read the prefix token in [operand],
+    then parse its operand with [climb ~min] inside {!rec_}.
+
+    A chain of operators uses no depth level of {!rec_}. As in {!expression},
+    when the token parser of [op] or the operand after it fails, the expression
+    stops before that operator, unless the token parser called {!commit}. The
+    loop stops after an operator and operand that together consume no input. A
+    build function runs when the operator after its right operand is known, with
+    {!position} at the end of that operand.
+
+    Example:
+    {@ocaml[
+    let read build () =
+      ignore (any_char ());
+      build
+
+    let add = infix_left (read ( + ))
+    let mul = infix_left (read ( * ))
+    let pow = infix_right (read (fun a b -> int_of_float (float a ** float b)))
+
+    let operator () =
+      skip_whitespace ();
+      match peek_char () with
+      | Some '+' ->
+          Some (1, add)
+      | Some '*' ->
+          Some (2, mul)
+      | Some '^' ->
+          Some (4, pow)
+      | _ ->
+          None
+
+    let rec expr () = climb ~operand ~operator ()
+
+    and operand () =
+      skip_whitespace ();
+      match peek_char () with
+      | Some '-' ->
+          ignore (any_char ());
+          -rec_ (climb ~min:3 ~operand ~operator)
+      | Some '(' ->
+          ignore (any_char ());
+          let e = rec_ expr in
+          skip_whitespace ();
+          ignore (char ')');
+          e
+      | _ ->
+          digit ()
     ]} *)
 
 val optional : (unit -> 'a) -> unit -> 'a option
