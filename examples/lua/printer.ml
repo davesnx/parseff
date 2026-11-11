@@ -1,5 +1,7 @@
 open Ast
 
+exception Error_node
+
 let prio_left = function
   | Or ->
       1
@@ -156,7 +158,7 @@ and operator b ind e =
       expr b ind x;
       add ")"
   | Bad_expr ->
-      invalid_arg "Printer: error node"
+      raise Error_node
 
 and wrap b ind parens e =
   if parens then begin
@@ -198,13 +200,11 @@ and field b ind = function
       Buffer.add_string b "] = ";
       expr b ind v
   | Bad_field ->
-      invalid_arg "Printer: error node"
+      raise Error_node
 
 and funcbody b ind f =
   let params =
-    List.map
-      (function Param p -> p | Bad_param -> invalid_arg "Printer: error node")
-      f.params
+    List.map (function Param p -> p | Bad_param -> raise Error_node) f.params
     @
     if f.vararg then
       [ "..." ]
@@ -242,7 +242,7 @@ and stat b ind s =
         | Var (n, Some a) ->
             n ^ " <" ^ attrib_text a ^ ">"
         | Bad_var ->
-            invalid_arg "Printer: error node"
+            raise Error_node
       in
       add ("local " ^ String.concat ", " (List.map var vars));
       if es <> [] then begin
@@ -318,7 +318,7 @@ and stat b ind s =
   | Label l ->
       add ("::" ^ l ^ "::")
   | Bad_stat ->
-      invalid_arg "Printer: error node"
+      raise Error_node
 
 let to_string ?(parens = false) chunk =
   explicit := parens;

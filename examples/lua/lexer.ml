@@ -473,6 +473,7 @@ let is_lexical (e : Parseff.error) =
 let lines : int Dynarray.t = Dynarray.create ()
 let first_line = ref 1
 let scan = ref 0
+let breaks = ref 0
 
 let line_index i =
   let rec go lo hi =
@@ -501,9 +502,14 @@ let space c =
   match c with
   | '\n' ->
       incr scan;
+      incr breaks;
       Dynarray.add_last lines !scan;
       true
-  | ' ' | '\t' | '\r' | '\011' | '\012' ->
+  | '\r' ->
+      incr scan;
+      incr breaks;
+      true
+  | ' ' | '\t' | '\011' | '\012' ->
       incr scan;
       true
   | _ ->
@@ -516,6 +522,7 @@ let skip_space () =
 let newline () =
   let p = Parseff.position () in
   let c = Parseff.any_char () in
+  incr breaks;
   if c = '\n' then Dynarray.add_last lines (p + 1);
   match Parseff.peek_char () with
   | Some (('\n' | '\r') as d) when d <> c ->
@@ -895,7 +902,7 @@ let lx_tok = ref Eof
 let lx_start = ref 0
 let lx_stop = ref 0
 let lx_comment = ref (-1)
-let lx_lines_before = ref 0
+let lx_breaks_before = ref 0
 
 let other_char () =
   let c = Parseff.any_char () in
@@ -952,8 +959,7 @@ let rec lex () =
             match Parseff.peek_char () with
             | Some '-' ->
                 ignore (Parseff.any_char ());
-                if !lx_comment < 0 && Dynarray.length lines = !lx_lines_before
-                then
+                if !lx_comment < 0 && !breaks = !lx_breaks_before then
                   lx_comment := p;
                 comment ~start:p;
                 Other ""
@@ -1105,14 +1111,14 @@ let st =
   }
 
 let lex_into (s : state) ~indent =
-  let lines_before = Dynarray.length lines in
-  lx_lines_before := lines_before;
+  let breaks_before = !breaks in
+  lx_breaks_before := breaks_before;
   lx_comment := -1;
   lex ();
   s.tok <- !lx_tok;
   s.start <- !lx_start;
   s.stop <- !lx_stop;
-  s.nl <- Dynarray.length lines > lines_before;
+  s.nl <- !breaks > breaks_before;
   s.comment <- !lx_comment;
   s.indent <-
     ( if s.nl then

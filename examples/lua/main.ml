@@ -153,19 +153,19 @@ let analyse path ~on_statement ~on_errors =
       )
   with Sys_error msg -> cannot_read path msg
 
-let same (a : Parseff.error) (b : Parseff.error) =
-  a.range = b.range && a.kind = b.kind
-
 let dedupe errors =
-  List.fold_left
-    (fun kept e ->
-      if List.exists (same e) kept then
-        kept
-      else
-        e :: kept
+  let seen = Hashtbl.create 64 in
+  List.filter
+    (fun (e : Parseff.error) ->
+      let key = (e.range, e.kind) in
+      if Hashtbl.mem seen key then
+        false
+      else begin
+        Hashtbl.replace seen key ();
+        true
+      end
     )
-    [] errors
-  |> List.rev
+    errors
 
 type collected = {
   mutable errors : Parseff.error list;
@@ -210,10 +210,16 @@ let report path c =
   let rendered, total =
     match source with
     | Some source ->
-        let all = dedupe (List.rev c.errors) in
+        let all =
+          List.stable_sort
+            (fun (a : Parseff.error) (b : Parseff.error) ->
+              compare a.range.start b.range.start
+            )
+            (dedupe (List.rev c.errors))
+        in
         ( List.map
             (fun (e : Parseff.error) -> (e.range.start, render ~name ~source e))
-            all,
+            (List.filteri (fun i _ -> i < max_shown) all),
           List.length all
         )
     | None ->
@@ -287,7 +293,11 @@ let () =
           let parens = cmd = "explicit" in
           finish
             (run path ~on_statement:(fun s ->
-                 print_string (Printer.to_string ~parens [ s ])
+                 match Printer.to_string ~parens [ s ] with
+                 | text ->
+                     print_string text
+                 | exception Printer.Error_node ->
+                     ()
              )
             )
       | _ ->

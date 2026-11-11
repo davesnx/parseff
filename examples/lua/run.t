@@ -350,6 +350,22 @@ token of an unclosed construct.
   3 errors
   [1]
 
+`print` and `explicit` print the statements that have no error, and report
+the errors as `check` does.
+
+  $ ./main.exe print cases/14-recovery-three-errors.lua 2> /dev/null
+  local b = 2
+  if b then
+    print(b)
+  end
+  print(a, b)
+  [1]
+  $ ./main.exe explicit cases/14-recovery-three-errors.lua > /dev/null 2> explicit.txt
+  [1]
+  $ ./main.exe check cases/14-recovery-three-errors.lua 2> check.txt
+  [1]
+  $ diff check.txt explicit.txt
+
 Hints for common mistakes
 =========================
 
@@ -545,6 +561,19 @@ its `end`.
   
   3 errors
   [1]
+
+The hint applies only when the '(' is on the line of the name and does not
+start a valid statement. Without an initial value, "local x" ends before the
+'(', so these two programs are valid.
+
+  $ printf 'local x\n(print)("ok")\n' | ./main.exe ast -
+  (chunk
+    (local (x) ())
+    (call (paren (name print)) ((string "ok"))))
+  $ printf 'local x (print)("ok")\n' | ./main.exe ast -
+  (chunk
+    (local (x) ())
+    (call (paren (name print)) ((string "ok"))))
 
   $ cat > reserved.lua <<'EOF'
   > local function f(end, x)
@@ -825,6 +854,40 @@ headers of `if`, `for` and `while`. `ast` shows the recovered parts as
     <error>
     (call (name print) ((string "done"))))
   [1]
+
+A line ends at `\n`, `\r`, `\r\n` or `\n\r`. With each form, the line break
+ends the "if" condition that has no "then", and the body is kept.
+
+  $ for nl in '\n' '\r' '\r\n' '\n\r'; do printf "if x${nl}print(1)${nl}end" | ./main.exe ast - 2> /dev/null; done
+  (chunk
+    (if
+      (cond (name x)
+        (call (name print) ((int 1))))))
+  (chunk
+    (if
+      (cond (name x)
+        (call (name print) ((int 1))))))
+  (chunk
+    (if
+      (cond (name x)
+        (call (name print) ((int 1))))))
+  (chunk
+    (if
+      (cond (name x)
+        (call (name print) ((int 1))))))
+  [1]
+
+At most 50 errors are shown, the first 50 in the file. The last line gives the
+count of all errors.
+
+  $ awk 'BEGIN { for (i = 0; i < 3000; i++) print "x = = 1" }' > many.lua
+  $ ./main.exe check many.lua 2>&1 | grep '\[error\]' | sed -n '1p;$p'
+  many.lua:1:5: [error] expected expression, found '='
+  many.lua:50:5: [error] expected expression, found '='
+  $ ./main.exe check many.lua 2>&1 | grep -c '\[error\]'
+  50
+  $ ./main.exe check many.lua 2>&1 | tail -1
+  3000 errors, 50 shown
 
 Lexical errors inside recovered constructs
 ==========================================

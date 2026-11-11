@@ -1262,7 +1262,8 @@ and local_stat () =
       let vars = names [] in
       let stop = st.prev_stop in
       match (st.tok, vars) with
-      | Lexer.Sym Lexer.Lparen, [ Var (n, None) ] ->
+      | Lexer.Sym Lexer.Lparen, [ Var (n, None) ]
+        when (not st.nl) && not (parses_as_statement ()) ->
           soft_here
             ~help:
               (Printf.sprintf
@@ -1285,6 +1286,25 @@ and local_stat () =
       | _ ->
           { sdesc = Local (vars, []); srange = { start; stop } }
     )
+
+and parses_as_statement () =
+  let snap = Lexer.save () in
+  let before = Parseff.Diagnostics.length errors in
+  let valid =
+    Parseff.look_ahead (fun () ->
+        match
+          Parseff.capture (fun () ->
+              match expr_stat () with _ -> true | exception Truncated -> false
+          )
+        with
+        | Ok parsed ->
+            parsed && Parseff.Diagnostics.length errors = before
+        | Error _ ->
+            false
+    )
+  in
+  Lexer.restore snap;
+  valid
 
 and local_name closes () =
   let n, _ = need_name ~what:"a variable name after \"local\"" () in
