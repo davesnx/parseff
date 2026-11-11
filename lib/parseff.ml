@@ -222,8 +222,10 @@ let rec running_empty =
     }
 
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
-   [base, input_len) are buffered. [input] is never mutated, only replaced, so
-   slices taken from it stay valid after a refill. Memory input has
+   [base, input_len) are buffered. While a source is open, [input] can be
+   longer than [input_len - base]: the bytes after that length are not input,
+   and a refill writes there. Buffered bytes are never changed, and a slice
+   shares [input] only when it has no such room. Memory input has
    [base = 0] and no source. *)
 type state = {
   mutable input : string;
@@ -693,7 +695,7 @@ let ensure_line_index_preserved_through st up_to =
     end else begin
       let input = st.input in
       let base = st.base in
-      let stop = imin (up_to - base) (String.length input) in
+      let stop = imin (up_to - base) (st.input_len - base) in
       let start = imax 0 (idx.scanned_up_to - base) in
       let newlines = count_newlines input start stop in
       idx.line_base <- idx.line_base + idx.count - 1 + newlines;
@@ -728,18 +730,33 @@ let[@inline never] handle_location st =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
-let[@inline never] append st ~floor chunk n =
-  let floor = imax 0 (floor - 1) in
+let[@inline never] append st ~floor ~spare chunk n =
   let cur_len = st.input_len - st.base in
-  let drop = imin (imax 0 (floor - st.base)) cur_len in
-  if drop > 0 then ensure_line_index_preserved_through st floor;
-  let kept = cur_len - drop in
-  let buf = Bytes.create (kept + n) in
-  Bytes.blit_string st.input drop buf 0 kept;
-  Bytes.blit chunk 0 buf kept n;
-  st.input <- Bytes.unsafe_to_string buf;
-  st.base <- st.base + drop;
-  st.input_len <- st.input_len + n
+  if spare && String.length st.input - cur_len >= n then begin
+    Bytes.blit chunk 0 (Bytes.unsafe_of_string st.input) cur_len n;
+    st.input_len <- st.input_len + n
+  end else begin
+    let floor = imax 0 (floor - 1) in
+    let drop = imin (imax 0 (floor - st.base)) cur_len in
+    if drop > 0 then ensure_line_index_preserved_through st floor;
+    let kept = cur_len - drop in
+    let room =
+      if spare then
+        imax kept n
+      else
+        0
+    in
+    let buf = Bytes.create (kept + n + room) in
+    Bytes.blit_string st.input drop buf 0 kept;
+    Bytes.blit chunk 0 buf kept n;
+    st.input <- Bytes.unsafe_to_string buf;
+    st.base <- st.base + drop;
+    st.input_len <- st.input_len + n
+  end
+
+let trim_input st =
+  let len = st.input_len - st.base in
+  if String.length st.input > len then st.input <- String.sub st.input 0 len
 
 let[@inline never] read_source st src buf off len =
   State.suspend ();
@@ -782,9 +799,10 @@ let[@inline never] rec fill st ~keep_from need =
           let n = read_source st src src.tmp 0 max_bytes in
           if n = 0 then begin
             src.eof <- true;
+            trim_input st;
             false
           end else begin
-            append st ~floor src.tmp n;
+            append st ~floor ~spare:true src.tmp n;
             if n = Bytes.length src.tmp && n < src.tmp_cap then
               src.tmp <- Bytes.create src.tmp_cap;
             fill st ~keep_from need
@@ -814,7 +832,7 @@ let[@inline never] refill_at st keep_from p =
 let[@inline always] char_at st pos = String.unsafe_get st.input (pos - st.base)
 
 let[@inline always] slice st off len =
-  string_slice st.input (off - st.base) len (st.input_len - st.base)
+  string_slice st.input (off - st.base) len (String.length st.input)
 
 let[@inline always] span st off len =
   match st.source with
@@ -1354,7 +1372,7 @@ let regex_read_ahead st src ahead =
       else
         got := !got + n
     done;
-    if !got > 0 then append st ~floor chunk !got;
+    if !got > 0 then append st ~floor ~spare:false chunk !got;
     true
   end
 
@@ -1366,6 +1384,7 @@ let regex_failure st label =
       fail_str st st.pos tag_label label_regex
 
 let rec match_regex_source st src re label =
+  trim_input st;
   let off = st.pos - st.base in
   let ahead = st.input_len - st.pos in
   match Re.exec_partial_detailed ~pos:off re st.input with
@@ -3305,22 +3324,21 @@ let error_message ?custom e =
   | Backtrack_window_exceeded { limit; _ } ->
       Printf.sprintf "backtrack window of %d bytes exceeded" limit
 
-let is_continuation s i =
-  i < String.length s && Char.code (String.unsafe_get s i) land 0xC0 = 0x80
+let is_continuation s len i =
+  i < len && Char.code (String.unsafe_get s i) land 0xC0 = 0x80
 
-let window_start s line_start focus =
+let window_start s len line_start focus =
   let start =
-    ref
-      (imin (String.length s) (line_start + imax 0 (focus - (window_size / 2))))
+    ref (imin len (line_start + imax 0 (focus - (window_size / 2))))
   in
-  while is_continuation s !start do
+  while is_continuation s len !start do
     incr start
   done;
   !start
 
-let window_stop s start limit =
+let window_stop s len start limit =
   let stop = ref (imin limit (start + window_size)) in
-  while !stop > start && is_continuation s !stop do
+  while !stop > start && is_continuation s len !stop do
     decr stop
   done;
   !stop
@@ -3330,8 +3348,8 @@ let window ~number ~first text focus =
   if len <= window_size then
     { number; text; first; left_cut = false; right_cut = false }
   else begin
-    let start = window_start text 0 focus in
-    let stop = window_stop text start len in
+    let start = window_start text len 0 focus in
+    let stop = window_stop text len start len in
     {
       number;
       text = String.sub text start (stop - start);
@@ -3422,7 +3440,9 @@ let char_boundary text i =
     i
   else
     let j = ref i in
-    while !j > 0 && i - !j < 3 && is_continuation text !j do
+    while
+      !j > 0 && i - !j < 3 && is_continuation text (String.length text) !j
+    do
       decr j
     done;
     let d = String.get_utf_8_uchar text !j in
@@ -3956,7 +3976,7 @@ let found_of st pos =
   else begin
     let p = imax pos st.base in
     let rel = p - st.base in
-    let len = String.length st.input in
+    let len = st.input_len - st.base in
     let c = String.unsafe_get st.input rel in
     if is_ident_byte c then begin
       let k = ref 0 in
@@ -4051,7 +4071,7 @@ let build st ~pos ?(notes = []) kind span frames =
     else begin
       let focus = imax 0 (imin focus (st.input_len - start)) in
       let input = st.input in
-      let len = String.length input in
+      let len = st.input_len - st.base in
       let rel = start - st.base in
       let scan_end from limit = find_newline input from limit in
       let line_end = scan_end rel (imin len (rel + window_size + 1)) in
@@ -4078,7 +4098,7 @@ let build st ~pos ?(notes = []) kind span frames =
             right_cut = (not ended) && source_open;
           }
       end else begin
-        let ws = window_start input rel focus in
+        let ws = window_start input len rel focus in
         let limit = imin len (ws + window_size + 1) in
         let nl = scan_end ws limit in
         let ended = nl < len && String.unsafe_get input nl = '\n' in
@@ -4088,7 +4108,7 @@ let build st ~pos ?(notes = []) kind span frames =
           else
             nl
         in
-        let stop = imax ws (window_stop input ws line_stop) in
+        let stop = imax ws (window_stop input len ws line_stop) in
         Some
           {
             number;
