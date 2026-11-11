@@ -3,6 +3,7 @@
 - **Breaking: `warn_at` is removed.** Use `warn ~pos d x`.
 - **Add `Ref`.** A `ref` whose changes are undone when the parser backtracks. Use it for symbol tables, indentation stacks and counters.
 - **Add `capture` and `recover`.** `capture p` returns the failure of `p` as a value. `recover errors ~sync p hole` records the error, skips input with `sync` and returns `hole e`, so one parse can report every error. See the error recovery guide.
+- **`commit` and `cut` move the rewind point of `capture`.** After a `commit` or `cut` inside `capture p`, a failure of `p` goes back to that call, not to the start of `p`, and keeps the diagnostics recorded before it. A streaming source can then drop the input before the call, so a recovered construct can be longer than `~backtrack_window`. `cut` continues past `capture` and seals the frames outside it, unless a `context` inside the `capture` encloses the `cut`.
 - **Add `expression`.** Parses operators by precedence from a table of `infix_left`, `infix_right`, `prefix` and `postfix` levels.
 - **Add trace mode.** `parse ~trace` and `parse_source ~trace` report when each `context` starts, returns or fails. `print_trace` prints the events as a tree.
 - **Add `with_range`, `recognize` and `recognize_span`.** They return the range or the text that a parser consumed.

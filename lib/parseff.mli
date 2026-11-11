@@ -670,10 +670,18 @@ val capture : (unit -> 'a) -> ('a, error) result
     {!fail} or {!val-error}, [capture] returns [Error e], where [e] is the
     furthest failure inside [parser], built as {!parse} builds an error. The
     position then goes back to where [capture] started, and the diagnostics that
-    [parser] recorded are removed. A {!cut} or {!commit} in [parser] does not
-    reach past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded]
-    are not caught. In {!parse_source}, the input that [parser] reads must fit
-    in [~backtrack_window].
+    [parser] recorded are removed. [Depth_limit_exceeded] and
+    [Backtrack_window_exceeded] are not caught.
+
+    A {!commit} or {!cut} in [parser] that reaches [capture] moves this rewind
+    point to the position of the call. A later failure then goes back to that
+    position only, and keeps the diagnostics and the {!Ref} changes made before
+    it. [e] can then start after the position: skip to [e.range.start] before
+    you look for a point to continue from. In {!parse_source}, the input that
+    [parser] reads after the rewind point must fit in [~backtrack_window], so a
+    parser of long constructs must call {!cut} after each part that is decided.
+    A {!commit} does not seal a frame outside [capture]. A {!cut} does, unless a
+    {!val:context} inside [capture] encloses it.
 
     Example:
     {@ocaml[
@@ -700,10 +708,12 @@ val recover :
     [hole e].
 
     [errors] must be the collector given to the runner as [~diagnostics];
-    otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
-    [recover] still consumes input, so a loop around it always moves forward. To
-    continue without consuming input, use {!capture}. At the end of the input,
-    [recover] calls [parser] directly, so the parse fails as without [recover].
+    otherwise [recover] raises [Invalid_argument]. [sync] starts where
+    {!capture} goes back to: the start of [parser], or the last {!commit} or
+    {!cut} that reached it. If [sync] consumes nothing, [recover] still consumes
+    input, so a loop around it always moves forward. To continue without
+    consuming input, use {!capture}. At the end of the input, [recover] calls
+    [parser] directly, so the parse fails as without [recover].
 
     Example:
     {@ocaml[
@@ -735,7 +745,9 @@ val commit : unit -> unit
     expected.
 
     [commit ()] does nothing outside any frame. It does nothing inside
-    {!look_ahead}, and it does not reach the frames outside the look-ahead.
+    {!look_ahead}, and it does not reach the frames outside the look-ahead. When
+    the innermost frame is a {!capture}, [commit ()] moves the rewind point of
+    that [capture] to the current position.
 
     [commit ()] does not seal or release outer frames. In
     [many (fun () -> or_ a b ())], a [commit ()] inside [a] seals the [or_]
@@ -796,13 +808,16 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead}.
+    backtracks after the cut. It moves the rewind point of every {!capture}
+    among them to the current position, and continues past it. It stops at a
+    {!look_ahead}.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
-    failure. If the context ends without failing, the outer frames stay as they
-    were. Without an enclosing {!val:context}, [cut ()] seals every frame down
-    to the first {!look_ahead}.
+    failure. This stops at a {!capture}, which returns the failure and keeps its
+    rewind point. If the context ends without failing, the outer frames stay as
+    they were. Without an enclosing {!val:context}, [cut ()] seals every frame
+    down to the first {!look_ahead}.
 
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames

@@ -415,7 +415,11 @@ let run_real ?(traced = false) ~partial runner g input =
    diagnostics recorded so far (newest first) and the value of the one Ref
    cell. Every backtracking point saves the state and gets back to it
    explicitly. A frame is a [bool ref] committed flag, so [commit] and [cut]
-   can seal the frames that are open around them. *)
+   can seal the frames that are open around them. A [capture] frame holds the
+   state it goes back to, which [commit] and [cut] replace. A [cut] that
+   replaces it also gives that state to the sealed frames above the [capture]:
+   a frame that then drops a step without progress goes back to it, so nothing
+   recorded before the cut is lost. *)
 
 type mst = { pos : int; diags : (int * int) list; cell : int }
 
@@ -430,8 +434,14 @@ exception M_depth of int * mst
 exception Expression_stop
 
 type frame =
-  | Flag of { committed : bool ref; start : int; last : bool }
+  | Flag of {
+      committed : bool ref;
+      kept : mst option ref;
+      start : int;
+      last : bool;
+    }
   | Barrier of int
+  | Captured of mst ref
   | Pin of int
 
 type env = {
@@ -448,32 +458,52 @@ let push f env =
 
 let flag ?(last = false) env st =
   let committed = ref false in
-  (committed, push (Flag { committed; start = st.pos; last }) env)
+  ( committed,
+    push (Flag { committed; kept = ref None; start = st.pos; last }) env
+  )
 
-let rec commit_top = function
+let back env st =
+  match env.frames with
+  | Flag { kept = { contents = Some s }; _ } :: _ ->
+      { s with pos = st.pos }
+  | _ ->
+      st
+
+let rec commit_top st = function
   | Pin _ :: rest ->
-      commit_top rest
+      commit_top st rest
   | Flag f :: _ ->
       f.committed := true
+  | Captured saved :: _ ->
+      saved := st
   | Barrier _ :: _ | [] ->
       ()
 
-let seal frames n =
-  let rec go fs n =
+let seal ?captures frames n =
+  let rec go above fs n =
     n <= 0
     ||
     match fs with
     | Barrier _ :: _ ->
         false
+    | Captured saved :: rest -> (
+        match captures with
+        | Some st ->
+            saved := st;
+            List.iter (fun kept -> kept := Some st) above;
+            go above rest (n - 1)
+        | None ->
+            false
+      )
     | Flag f :: rest ->
         f.committed := true;
-        go rest (n - 1)
+        go (f.kept :: above) rest (n - 1)
     | Pin _ :: rest ->
-        go rest (n - 1)
+        go above rest (n - 1)
     | [] ->
         true
   in
-  go frames n
+  go [] frames n
 
 (* [parse_source] must keep the bytes from the oldest position that a frame
    can still rewind to. A read that needs the bytes up to [need] checks the
@@ -485,7 +515,9 @@ let read m env st need =
       (fun oldest -> function
         | Barrier start | Pin start ->
             min oldest start
-        | Flag { committed; start; last } ->
+        | Captured saved ->
+            min oldest !saved.pos
+        | Flag { committed; start; last; _ } ->
             if !committed || last then
               oldest
             else
@@ -514,7 +546,7 @@ let repeat env body acc st =
     match body envf st with
     | v, st' ->
         if st'.pos = st.pos then
-          (List.rev acc, st)
+          (List.rev acc, back envf st)
         else
           loop (v :: acc) st'
     | exception M_fail s ->
@@ -622,7 +654,7 @@ let rec ev m env g st =
           with
           | v, st' ->
               if st'.pos = st.pos then
-                (acc, st)
+                (acc, back env' st)
               else
                 loop v st'
           | exception M_fail s ->
@@ -662,14 +694,14 @@ let rec ev m env g st =
           raise (M_depth (p, st))
     )
   | Commit ->
-      commit_top env.frames;
+      commit_top st env.frames;
       (Unit, st)
   | Cut ->
       ( match env.ctx with
       | None ->
-          ignore (seal env.frames env.nframes)
+          ignore (seal ~captures:st env.frames env.nframes)
       | Some (floor, cut) ->
-          if seal env.frames (env.nframes - floor) then cut := true
+          if seal ~captures:st env.frames (env.nframes - floor) then cut := true
       );
       (Unit, st)
   | Context (_, _, a) -> (
@@ -692,11 +724,12 @@ let rec ev m env g st =
   | Expression (atom, table) ->
       expression m env atom table st
   | Capture a -> (
-      match ev m (push (Barrier st.pos) env) a st with
+      let saved = ref st in
+      match ev m (push (Captured saved) env) a st with
       | v, st ->
           (Cap_ok v, st)
       | exception (M_fail _ | M_hard _) ->
-          (Cap_err "", st)
+          (Cap_err "", !saved)
     )
   | Warn k ->
       (Unit, { st with diags = (st.pos, k) :: st.diags })
@@ -815,14 +848,14 @@ and expression m env atom table st =
         match try_levels levels with
         | v, st' ->
             if st'.pos = st.pos then
-              (lhs, st)
+              (lhs, back envr st)
             else
               loop env levels v st' (-1)
         | exception M_fail s ->
             if !f then raise (M_fail s);
             (lhs, st)
         | exception Expression_stop ->
-            (lhs, st)
+            (lhs, back envr st)
       )
   in
   climb env table st

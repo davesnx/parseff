@@ -408,7 +408,47 @@ let test_failure_forgotten () =
        )
     )
 
-let test_cut_does_not_escape () =
+let test_cut_in_context_does_not_escape () =
+  let p () =
+    or_
+      (fun () ->
+        ignore
+          (capture (fun () ->
+               context "inner" (fun () ->
+                   ignore (char 'a');
+                   cut ();
+                   char 'b'
+               )
+           )
+          );
+        consume "zz"
+      )
+      (fun () -> consume "ax")
+      ()
+  in
+  Alcotest.(check (result string string))
+    "outer or_ backtracks" (Ok "ax")
+    (Result.map_error error_message (parse "ax" p));
+  let q () =
+    or_
+      (fun () ->
+        ignore
+          (capture (fun () ->
+               ignore (char 'a');
+               commit ();
+               char 'b'
+           )
+          );
+        consume "zz"
+      )
+      (fun () -> consume "ax")
+      ()
+  in
+  Alcotest.(check (result string string))
+    "commit does not seal the outer or_" (Ok "ax")
+    (Result.map_error error_message (parse "ax" q))
+
+let test_cut_passes_capture () =
   let p () =
     or_
       (fun () ->
@@ -425,28 +465,100 @@ let test_cut_does_not_escape () =
       ()
   in
   Alcotest.(check (result string string))
-    "outer or_ backtracks" (Ok "ax")
-    (Result.map_error error_message (parse "ax" p));
-  let q () =
-    context "outer" (fun () ->
-        or_
-          (fun () ->
-            ignore
-              (capture (fun () ->
-                   cut ();
-                   commit ();
-                   char 'b'
-               )
-              );
-            consume "zz"
-          )
-          (fun () -> consume "ax")
-          ()
+    "outer or_ is sealed" (Error "expected \"zz\", found 'x'")
+    (Result.map_error error_message (parse "ax" p))
+
+let test_commit_moves_rewind_point () =
+  let d = Diagnostics.create () in
+  let body cell advance () =
+    warn d "before";
+    Ref.set cell 1;
+    ignore (consume "ab");
+    advance ();
+    warn d "after";
+    Ref.set cell 2;
+    ignore (consume "cd");
+    char '!'
+  in
+  let run advance =
+    let cell = Ref.create 0 in
+    let r =
+      parse ~diagnostics:d ~consume:`Partial "abcd?" (fun () ->
+          let r = capture (body cell advance) in
+          (show_error r, position (), Ref.get cell)
+      )
+    in
+    ( Result.get_ok r,
+      List.map (fun (e : _ Diagnostics.entry) -> e.value) (Diagnostics.to_list d)
     )
   in
-  Alcotest.(check (result string string))
-    "cut in outer context" (Ok "ax")
-    (Result.map_error error_message (parse "ax" q))
+  let outcome = Alcotest.(pair (triple string int int) (list string)) in
+  let failure = "Error at 4: expected '!', found '?'" in
+  Alcotest.check outcome "without commit" ((failure, 0, 0), []) (run ignore);
+  Alcotest.check outcome "commit" ((failure, 2, 1), [ "before" ]) (run commit);
+  Alcotest.check outcome "cut" ((failure, 2, 1), [ "before" ]) (run cut);
+  Alcotest.check outcome "commit inside look_ahead"
+    ((failure, 0, 0), [])
+    (run (fun () -> look_ahead commit));
+  Alcotest.check outcome "cut inside look_ahead"
+    ((failure, 0, 0), [])
+    (run (fun () -> look_ahead cut));
+  Alcotest.check outcome "commit seals an inner or_ only"
+    ((failure, 0, 0), [])
+    (run (fun () -> or_ commit ignore ()));
+  Alcotest.check outcome "cut reaches through an inner or_"
+    ((failure, 2, 1), [ "before" ])
+    (run (fun () -> or_ cut ignore ()))
+
+let test_cut_moves_outer_captures () =
+  let r =
+    parse ~consume:`Partial "abc?" (fun () ->
+        let outer =
+          capture (fun () ->
+              ignore (char 'a');
+              let inner =
+                capture (fun () ->
+                    ignore (char 'b');
+                    cut ();
+                    ignore (char 'c')
+                )
+              in
+              ignore (char '!');
+              inner
+          )
+        in
+        (show_error outer, position ())
+    )
+  in
+  Alcotest.(check (result (pair string int) string))
+    "outer capture rewinds to the cut"
+    (Ok ("Error at 3: expected '!', found '?'", 2))
+    (Result.map_error error_message r)
+
+let test_recover_syncs_from_commit () =
+  let d = Diagnostics.create () in
+  let seen = ref (-1) in
+  let r =
+    parse ~diagnostics:d ~consume:`Partial "ab?;z" (fun () ->
+        recover d
+          ~sync:(fun () ->
+            seen := position ();
+            skip_while (fun c -> c <> ';')
+          )
+          (fun () ->
+            ignore (consume "ab");
+            commit ();
+            ignore (char '!')
+          )
+          (fun _ -> ());
+        position ()
+    )
+  in
+  Alcotest.(check (result int string))
+    "position after recover" (Ok 3)
+    (Result.map_error error_message r);
+  Alcotest.(check int) "sync starts at the commit" 2 !seen;
+  Alcotest.check errs "entries" [ (2, "expected '!', found '?'") ] (entries d)
 
 let test_inside_or () =
   let d = Diagnostics.create () in
@@ -942,23 +1054,108 @@ let test_streaming_pins_start () =
   let source () =
     Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
   in
-  let body () =
+  let body advance () =
     ignore (consume "let");
-    cut ();
+    advance ();
     skip_while (fun c -> c = ' ');
+    char '!'
+  in
+  let stepwise () =
+    ignore (consume "let");
+    ignore
+      (many
+         (fun () ->
+           ignore (char ' ');
+           cut ()
+         )
+         ()
+      );
     char '!'
   in
   Alcotest.(check string)
     "without capture, cut releases the input" "expected '!', found '?'"
-    (kind_name (parse_source ~backtrack_window:16 (source ()) body));
-  Alcotest.(check string)
-    "capture keeps its start" "Backtrack_window_exceeded"
-    (kind_name
-       (parse_source ~backtrack_window:16 ~consume:`Partial (source ())
-          (fun () -> match capture body with Ok c -> c | Error _ -> '?'
-        )
+    (kind_name (parse_source ~backtrack_window:16 (source ()) (body cut)));
+  let run body =
+    Result.map_error
+      (fun e -> kind_name (Error e))
+      (parse_source ~backtrack_window:16 ~consume:`Partial (source ())
+         (fun () ->
+           match capture body with
+           | Ok c ->
+               (c, -1)
+           | Error _ ->
+               ('?', position ())
        )
+      )
+  in
+  let outcome = Alcotest.(result (pair char int) string) in
+  Alcotest.check outcome "capture without cut keeps its start"
+    (Error "Backtrack_window_exceeded")
+    (run (body ignore));
+  Alcotest.check outcome "capture keeps the input after the last cut"
+    (Error "Backtrack_window_exceeded")
+    (run (body cut));
+  Alcotest.check outcome "each cut releases the input before it"
+    (Ok ('?', 43))
+    (run stepwise)
+
+let chunks size s =
+  let i = ref 0 in
+  Source.of_chunks (fun () ->
+      if !i >= String.length s then
+        None
+      else begin
+        let n = min size (String.length s - !i) in
+        let c = String.sub s !i n in
+        i := !i + n;
+        Some c
+      end
+  )
+
+let test_streaming_nested_release () =
+  let d = Diagnostics.create () in
+  let rec statement () =
+    recover d
+      ~sync:(fun () ->
+        skip_while (fun c -> c <> ';' && c <> '}');
+        ignore (optional (fun () -> char ';') ())
+      )
+      (fun () ->
+        ( match any_char () with
+        | '{' ->
+            ignore (many item ());
+            ignore (char '}')
+        | 'x' ->
+            skip_while (fun c -> c = 'x')
+        | _ ->
+            fail "expected a statement"
+        );
+        ignore (char ';');
+        cut ()
+      )
+      (fun _ -> ())
+  and item () =
+    ignore
+      (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"statement"));
+    statement ()
+  in
+  let leaf = String.make 100 'x' ^ ";" in
+  let block n = "{" ^ String.concat "" (List.init n (fun _ -> leaf)) ^ "};" in
+  let input = "{" ^ block 30 ^ "x?;" ^ block 30 ^ "};" ^ leaf in
+  Alcotest.(check bool)
+    "input is larger than the window" true
+    (String.length input > 4 * 1024);
+  let r =
+    parse_source ~backtrack_window:1024 ~diagnostics:d (chunks 64 input)
+      (fun () -> List.length (many statement ())
     )
+  in
+  Alcotest.(check (result int string))
+    "parses" (Ok 2)
+    (Result.map_error error_message r);
+  Alcotest.check errs "one error"
+    [ (3035, "expected ';', found '?'") ]
+    (entries d)
 
 let () =
   let open Alcotest in
@@ -998,7 +1195,15 @@ let () =
           test_case "success keeps failures" `Quick test_success_keeps_failures;
           test_case "failure restores" `Quick test_failure_restores;
           test_case "failure forgotten" `Quick test_failure_forgotten;
-          test_case "cut does not escape" `Quick test_cut_does_not_escape;
+          test_case "cut in a context does not escape" `Quick
+            test_cut_in_context_does_not_escape;
+          test_case "cut passes capture" `Quick test_cut_passes_capture;
+          test_case "commit moves the rewind point" `Quick
+            test_commit_moves_rewind_point;
+          test_case "cut moves outer captures" `Quick
+            test_cut_moves_outer_captures;
+          test_case "recover syncs from the commit" `Quick
+            test_recover_syncs_from_commit;
           test_case "inside or_" `Quick test_inside_or;
           test_case "inside many" `Quick test_inside_many;
           test_case "inside look_ahead" `Quick test_inside_look_ahead;
@@ -1007,6 +1212,8 @@ let () =
           test_case "more than 8 outer contexts" `Quick test_many_outer_contexts;
           test_case "limits propagate" `Quick test_limits_propagate;
           test_case "streaming pins start" `Quick test_streaming_pins_start;
+          test_case "streaming nested release" `Quick
+            test_streaming_nested_release;
         ]
       );
     ]
