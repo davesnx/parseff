@@ -13,8 +13,7 @@ A file that cannot be read is an error, not a crash.
   [1]
 
 With `-`, the parser reads stdin as a stream. Stdin cannot be read again, so
-a parse error shows the lines that the error kept from the stream, and an error
-found after the parse shows its place and message without an excerpt.
+an error shows the lines that the error kept from the stream.
 
   $ printf 'local x = 1\nlocal function f()\n  if x then\n    return x = 2\n  end\nend\n' | ./main.exe check -
   stdin:4:14: [error] unexpected '=' after the return statement
@@ -25,28 +24,9 @@ found after the parse shows its place and message without an excerpt.
   
   1 error
   [1]
-  $ printf 'local x = 1\ngoto done\n' | ./main.exe check -
-  stdin:2:1: [error] no visible label 'done' for goto
-  
-  1 error
-  [1]
   $ printf 'print("from stdin")\n' | ./main.exe ast -
   (chunk
     (call (name print) ((string "from stdin"))))
-
-A last statement of one token with no final newline still gets its line and
-column.
-
-  $ printf 'goto a\nreturn' | ./main.exe check -
-  stdin:1:1: [error] no visible label 'a' for goto
-  
-  1 error
-  [1]
-  $ printf 'local x <const> = 1\nx = 2\nreturn' | ./main.exe check -
-  stdin:2:1: [error] attempt to assign to const variable 'x'
-  
-  1 error
-  [1]
 
 A long line: the stream has dropped the start of the line before the error, but
 the excerpt and the column are those of the whole line.
@@ -58,6 +38,18 @@ the excerpt and the column are those of the whole line.
   $ diff from_file.txt from_stdin.txt
   $ head -1 from_stdin.txt
   stdin:1:12909: [error] expected expression, found '='
+
+A last statement of one token with no final newline keeps its line and column.
+
+  $ printf 'local x = 1\nend' | ./main.exe check -
+  stdin:2:1: [error] unexpected "end"
+  1 | local x = 1
+  2 | end
+    | ^^^
+    * help: there is no open block here; remove this "end" or check the blocks above
+  
+  1 error
+  [1]
 
 Valid programs
 ==============
@@ -332,39 +324,6 @@ token of an unclosed construct.
     |           ^^^^^^^^^^^^^
     |                     --- this ']=]' has level 1, the string needs ]==]
     * help: a long string that starts with [==[ ends at the first ]==]
-  
-  1 error
-  [1]
-  $ cat cases/11-goto-no-visible-label.luac.txt
-  luac: 11-goto-no-visible-label.lua:4: no visible label 'done' for <goto> at line 2
-  $ ./main.exe check cases/11-goto-no-visible-label.lua
-  cases/11-goto-no-visible-label.lua:2:1: [error] no visible label 'done' for goto
-  1 | local x = 1
-  2 | goto done
-    | ^^^^^^^^^
-  
-  1 error
-  [1]
-  $ cat cases/12-duplicate-label.luac.txt
-  luac: 12-duplicate-label.lua:5: label 'top' already defined on line 2
-  $ ./main.exe check cases/12-duplicate-label.lua
-  cases/12-duplicate-label.lua:4:3: [error] label 'top' is already defined at 2:3
-  2 |   ::top::
-    |   ------- first defined here
-  3 |   local x = 1
-  4 |   ::top::
-    |   ^^^^^^^
-  
-  1 error
-  [1]
-  $ cat cases/13-break-outside-loop.luac.txt
-  luac: 13-break-outside-loop.lua:3: break outside loop at line 2
-  $ ./main.exe check cases/13-break-outside-loop.lua
-  cases/13-break-outside-loop.lua:2:1: [error] "break" outside a loop
-  1 | local x = 1
-  2 | break
-    | ^^^^^
-    * help: "break" leaves the innermost "while", "for" or "repeat" loop of the same function
   
   1 error
   [1]
@@ -998,194 +957,6 @@ The constructs around it are not reported as unclosed.
   2 |   f = function() --[[ note
     |                  ^^^^^^^^^
     * help: close the comment with ]]
-  
-  1 error
-  [1]
-
-Checks after the parse
-======================
-
-`luac` also rejects these programs after the parse.
-
-  $ cat > scope.lua <<'EOF'
-  > do
-  >   goto skip
-  >   local x = 1
-  >   ::skip::
-  >   print(x)
-  > end
-  > local limit <const> = 10
-  > limit = 20
-  > local function f()
-  >   return ...
-  > end
-  > while true do
-  >   local function g() break end
-  > end
-  > ::top::
-  > do ::top:: end
-  > local function h() goto top end
-  > EOF
-  $ ./main.exe check scope.lua
-  scope.lua:2:3: [error] goto 'skip' jumps into the scope of local 'x'
-  1 | do
-  2 |   goto skip
-    |   ^^^^^^^^^
-  3 |   local x = 1
-    |         - local 'x' is declared here
-  4 |   ::skip::
-    |   -------- the label is here
-    * help: a "goto" cannot jump forward into the scope of a local; move the label before the declaration, or put the declaration in a "do ... end" block
-  
-  scope.lua:8:1: [error] attempt to assign to const variable 'limit'
-  7 | local limit <const> = 10
-    |       ----- declared <const> here
-  8 | limit = 20
-    | ^^^^^
-  
-  scope.lua:10:10: [error] cannot use '...' outside a vararg function
-   9 | local function f()
-  10 |   return ...
-     |          ^^^
-     * help: add "..." to the parameter list of the enclosing function
-  
-  scope.lua:13:22: [error] "break" outside a loop
-  12 | while true do
-  13 |   local function g() break end
-     |                      ^^^^^
-     * help: "break" leaves the innermost "while", "for" or "repeat" loop of the same function
-  
-  scope.lua:16:4: [error] label 'top' is already defined at 15:1
-  15 | ::top::
-     | ------- first defined here
-  16 | do ::top:: end
-     |    ^^^^^^^
-  
-  scope.lua:17:20: [error] no visible label 'top' for goto
-  16 | do ::top:: end
-  17 | local function h() goto top end
-     |                    ^^^^^^^^
-     * help: the label at 16:4 is not visible here: a label is visible in its block and the nested blocks, but not in nested functions
-  
-  6 errors
-  [1]
-
-Limits of luac
-==============
-
-Like `luac`, the parser rejects code that nests 200 levels deep: each nested
-statement and expression counts a level, the parser itself starts at 2, and
-`luac` fails with "C stack overflow".
-
-  $ nest() { printf '%s' "$1"; yes "$2" | head -n $3; echo 1; yes "$4" | head -n $3; }
-  $ nest 'x = ' '(' 196 ')' > paren196.lua
-  $ ./main.exe check paren196.lua
-  $ nest 'x = ' '(' 197 ')' > paren197.lua
-  $ ./main.exe check paren197.lua
-  paren197.lua:198:1: [error] too deeply nested (the limit is 200 levels)
-  197 | (
-  198 | 1
-      | ^
-      * help: luac counts a level for each enclosing statement and expression, and for each operand of a chain such as a .. b .. c, and stops with "C stack overflow"; move part of it into a local variable or a function
-  
-  1 error
-  [1]
-  $ (yes do | head -n 198; yes end | head -n 198) > do198.lua
-  $ ./main.exe check do198.lua
-  $ (yes do | head -n 199; yes end | head -n 199) > do199.lua
-  $ ./main.exe check do199.lua
-  do199.lua:199:1: [error] too deeply nested (the limit is 200 levels)
-  198 | do
-  199 | do
-      | ^^
-      * help: luac counts a level for each enclosing statement and expression, and for each operand of a chain such as a .. b .. c, and stops with "C stack overflow"; move part of it into a local variable or a function
-  
-  1 error
-  [1]
-
-A nested function costs two levels, its statement and its expression.
-
-  $ nest 'return ' 'function() return' 98 'end' > func98.lua
-  $ ./main.exe check func98.lua
-  $ nest 'return ' 'function() return' 99 'end' > func99.lua
-  $ ./main.exe check func99.lua
-  func99.lua:99:12: [error] too deeply nested (the limit is 200 levels)
-  98 | function() return
-  99 | function() return
-     |            ^^^^^^
-     * help: luac counts a level for each enclosing statement and expression, and for each operand of a chain such as a .. b .. c, and stops with "C stack overflow"; move part of it into a local variable or a function
-  
-  1 error
-  [1]
-
-A function has at most 200 local variables. Parameters, `<const>` locals and
-the hidden variables of `for` loops count.
-
-  $ (echo 'local a0'; seq -f ', a%g' 1 199) > locals200.lua
-  $ ./main.exe check locals200.lua
-  $ (echo 'local a0'; seq -f ', a%g' 1 200) > locals201.lua
-  $ ./main.exe check locals201.lua
-  locals201.lua:201:3: [error] too many local variables in one function (the limit is 200)
-  200 | , a199
-  201 | , a200
-      |   ^^^^
-      * help: every active local of the function counts, with its parameters, its <const> locals, and the hidden control variables of each enclosing for loop (3 for a numeric for, 4 for a generic for)
-  
-  1 error
-  [1]
-  $ (echo 'local a0'; seq -f ', a%g' 1 149; printf 'local function f()\n  local x\nend\nlocal b0\n'; seq -f ', b%g' 1 49) > locals_split.lua
-  $ ./main.exe check locals_split.lua
-  locals_split.lua:203:3: [error] too many local variables in one function (the limit is 200)
-  202 | , b48
-  203 | , b49
-      |   ^^^
-      * help: every active local of the function counts, with its parameters, its <const> locals, and the hidden control variables of each enclosing for loop (3 for a numeric for, 4 for a generic for)
-  
-  1 error
-  [1]
-  $ seq -f 'local c%g <const> = 1' 1 201 > consts201.lua
-  $ ./main.exe check consts201.lua
-  consts201.lua:201:7: [error] too many local variables in one function (the limit is 200)
-  200 | local c200 <const> = 1
-  201 | local c201 <const> = 1
-      |       ^^^^
-      * help: every active local of the function counts, with its parameters, its <const> locals, and the hidden control variables of each enclosing for loop (3 for a numeric for, 4 for a generic for)
-  
-  1 error
-  [1]
-  $ (echo 'local a0'; seq -f ', a%g' 1 196; echo 'for i = 1, 2 do end') > for_hidden.lua
-  $ ./main.exe check for_hidden.lua
-  for_hidden.lua:198:1: [error] too many local variables in one function (the limit is 200)
-  197 | , a196
-  198 | for i = 1, 2 do end
-      | ^^^^^^^^^^^^^^^^^^^
-      * help: every active local of the function counts, with its parameters, its <const> locals, and the hidden control variables of each enclosing for loop (3 for a numeric for, 4 for a generic for)
-  
-  1 error
-  [1]
-
-A function has at most 255 upvalues: the locals of enclosing functions that it
-uses.
-
-  $ upvalues() {
-  >   echo 'local a0'; seq -f ', a%g' 1 149
-  >   echo 'local function m()'; echo '  local b0'; seq -f '  , b%g' 1 149
-  >   echo '  return function()'
-  >   seq -f '    a%g = 0' 0 149; seq -f '    b%g = 0' 0 $(($1 - 1))
-  >   echo '  end'; echo 'end'
-  > }
-  $ upvalues 105 > up255.lua
-  $ ./main.exe check up255.lua
-  $ upvalues 106 > up256.lua
-  $ ./main.exe check up256.lua
-  up256.lua:558:5: [error] too many upvalues in one function (the limit is 255)
-  302 |   return function()
-      |          ---------- in this function
-      | ...
-  557 |     b104 = 0
-  558 |     b105 = 0
-      |     ^^^^
-      * help: each local of an enclosing function that this function uses counts, and _ENV counts when it uses a global
   
   1 error
   [1]

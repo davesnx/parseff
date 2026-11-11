@@ -122,7 +122,6 @@ let render_window ~name (e : Parseff.error) =
 
 let analyse path ~on_statement ~on_errors =
   Parser.reset ();
-  let checker = Check.create ~loc:Lexer.loc in
   let run source =
     Seq.iter
       (fun r ->
@@ -134,12 +133,7 @@ let analyse path ~on_statement ~on_errors =
         let errors =
           match r with
           | Ok stats ->
-              List.iter
-                (fun s ->
-                  checker.statement s;
-                  on_statement s
-                )
-                stats;
+              List.iter on_statement stats;
               errors
           | Error e ->
               errors @ [ e ]
@@ -150,16 +144,14 @@ let analyse path ~on_statement ~on_errors =
          ~diagnostics:Parser.errors source Parser.top
       )
   in
-  ( try
-      if path = "-" then
-        run (Parseff.Source.of_function (tee_read stdin))
-      else
-        In_channel.with_open_bin path (fun ic ->
-            run (Parseff.Source.of_channel ic)
-        )
-    with Sys_error msg -> cannot_read path msg
-  );
-  checker.finish ()
+  try
+    if path = "-" then
+      run (Parseff.Source.of_function (tee_read stdin))
+    else
+      In_channel.with_open_bin path (fun ic ->
+          run (Parseff.Source.of_channel ic)
+      )
+  with Sys_error msg -> cannot_read path msg
 
 let same (a : Parseff.error) (b : Parseff.error) =
   a.range = b.range && a.kind = b.kind
@@ -202,7 +194,7 @@ let collect path c errors =
   end else
     c.errors <- List.rev_append errors c.errors
 
-let report path c issues =
+let report path c =
   let name =
     if path = "-" then
       "stdin"
@@ -218,19 +210,7 @@ let report path c issues =
   let rendered, total =
     match source with
     | Some source ->
-        let check_errors =
-          List.map
-            (fun (i : Check.issue) ->
-              let notes =
-                List.map
-                  (fun (r, text) -> { Parseff.at = Some r; text })
-                  i.notes
-              in
-              Parser.error_at source i.at ~notes ?help:i.help i.msg
-            )
-            issues
-        in
-        let all = dedupe (List.rev c.errors @ check_errors) in
+        let all = dedupe (List.rev c.errors) in
         ( List.map
             (fun (e : Parseff.error) -> (e.range.start, render ~name ~source e))
             all,
@@ -245,25 +225,8 @@ let report path c issues =
               (fun (e : Parseff.error) -> (e.range.start, render ~name e))
               (dedupe (List.rev c.errors))
         in
-        let issues =
-          List.map
-            (fun (i : Check.issue) ->
-              let sep =
-                if String.starts_with ~prefix:"byte" i.where then
-                  ": "
-                else
-                  ":"
-              in
-              ( i.at.start,
-                with_help
-                  (Printf.sprintf "%s%s%s: [error] %s" name sep i.where i.msg)
-                  i.help
-              )
-            )
-            issues
-        in
-        let all = List.rev c.rendered @ plain @ issues in
-        (all, List.length plain + List.length issues + c.count)
+        let all = List.rev c.rendered @ plain in
+        (all, List.length plain + c.count)
   in
   let rendered = List.stable_sort (fun (a, _) (b, _) -> compare a b) rendered in
   List.iteri
@@ -281,10 +244,10 @@ let report path c issues =
 
 let run path ~on_statement =
   let c = { errors = []; rendered = []; count = 0; seen = Hashtbl.create 16 } in
-  let issues = analyse path ~on_statement ~on_errors:(collect path c) in
-  (c, issues)
+  analyse path ~on_statement ~on_errors:(collect path c);
+  c
 
-let failed (c, issues) = c.errors <> [] || c.count > 0 || issues <> []
+let failed c = c.errors <> [] || c.count > 0
 
 let usage () =
   prerr_endline "usage: main.exe (check|print|explicit|ast) FILE (- for stdin)";
@@ -295,7 +258,7 @@ let () =
   | [| _; cmd; path |] ->
       let finish result =
         if failed result then begin
-          report path (fst result) (snd result);
+          report path result;
           exit 1
         end else
           exit 0

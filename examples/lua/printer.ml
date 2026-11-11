@@ -203,9 +203,7 @@ and field b ind = function
 and funcbody b ind f =
   let params =
     List.map
-      (function
-        | Param (p, _) -> p | Bad_param -> invalid_arg "Printer: error node"
-        )
+      (function Param p -> p | Bad_param -> invalid_arg "Printer: error node")
       f.params
     @
     if f.vararg then
@@ -239,9 +237,9 @@ and stat b ind s =
   match s.sdesc with
   | Local (vars, es) ->
       let var = function
-        | Var (n, None, _) ->
+        | Var (n, None) ->
             n
-        | Var (n, Some a, _) ->
+        | Var (n, Some a) ->
             n ^ " <" ^ attrib_text a ^ ">"
         | Bad_var ->
             invalid_arg "Printer: error node"

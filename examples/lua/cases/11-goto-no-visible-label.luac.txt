@@ -1,1 +1,0 @@
-luac: 11-goto-no-visible-label.lua:4: no visible label 'done' for <goto> at line 2

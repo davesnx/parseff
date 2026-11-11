@@ -53,11 +53,11 @@ and field =
   | Keyed of expr * expr
   | Bad_field
 
-and param = Param of string * range | Bad_param
+and param = Param of string | Bad_param
 and funcbody = { params : param list; vararg : bool; body : block }
 and block = stat list
 and stat = { sdesc : sdesc; srange : range }
-and local = Var of string * attrib option * range | Bad_var
+and local = Var of string * attrib option | Bad_var
 
 and sdesc =
   | Local of local list * expr list
@@ -214,7 +214,7 @@ and dump_field b = function
 
 and dump_funcbody ?(indent = 0) b f =
   let params =
-    List.map (function Param (p, _) -> p | Bad_param -> "<error>") f.params
+    List.map (function Param p -> p | Bad_param -> "<error>") f.params
     @
     if f.vararg then
       [ "..." ]
@@ -253,9 +253,9 @@ and dump_stat b indent s =
   match s.sdesc with
   | Local (vars, es) ->
       let var = function
-        | Var (n, None, _) ->
+        | Var (n, None) ->
             n
-        | Var (n, Some a, _) ->
+        | Var (n, Some a) ->
             n ^ " <" ^ attrib_text a ^ ">"
         | Bad_var ->
             "<error>"

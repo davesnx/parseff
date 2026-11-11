@@ -741,8 +741,8 @@ and param_list () =
             let p =
               list_elem ~skip_word:true ~stops
                 (fun () ->
-                  let n, r = need_name ~what:"a parameter name" () in
-                  Param (n, r)
+                  let n, _ = need_name ~what:"a parameter name" () in
+                  Param n
                 )
                 (fun _ -> Bad_param)
             in
@@ -1226,7 +1226,7 @@ and local_stat () =
       let vars = names [] in
       let stop = st.prev_stop in
       match (st.tok, vars) with
-      | L.Sym L.Lparen, [ Var (n, None, _) ] ->
+      | L.Sym L.Lparen, [ Var (n, None) ] ->
           soft_here
             ~help:
               (Printf.sprintf
@@ -1251,7 +1251,7 @@ and local_stat () =
     )
 
 and local_name closes () =
-  let n, r = need_name ~what:"a variable name after \"local\"" () in
+  let n, _ = need_name ~what:"a variable name after \"local\"" () in
   if is_sym L.Lt then begin
     advance ();
     let attrib =
@@ -1275,9 +1275,9 @@ and local_name closes () =
     in
     advance ();
     expect_sym L.Gt;
-    Var (n, Some attrib, r)
+    Var (n, Some attrib)
   end else
-    Var (n, None, r)
+    Var (n, None)
 
 and return_stat () =
   let start = st.start in
