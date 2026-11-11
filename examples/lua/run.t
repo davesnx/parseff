@@ -31,7 +31,7 @@ an error shows the lines that the error kept from the stream.
 A long line: the stream has dropped the start of the line before the error, but
 the excerpt and the column are those of the whole line.
 
-  $ printf 'local t = {%s} x = = 2\n' "$(seq -s ', ' -f 'a%g' 1 2000)" > long_line.lua
+  $ printf 'local t = {%s} x = = 2\n' "$(awk 'BEGIN { for (i = 1; i <= 2000; i++) printf "%sa%d", (i > 1 ? ", " : ""), i }')" > long_line.lua
   $ cat long_line.lua | ./main.exe check - > from_stdin.txt 2>&1
   [1]
   $ ./main.exe check long_line.lua 2>&1 | sed 's/^long_line.lua:/stdin:/' > from_file.txt
