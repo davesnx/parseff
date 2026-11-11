@@ -124,6 +124,8 @@ type error = private {
       *)
   contexts : context list;  (** Open constructs, outermost first. *)
   notes : note list;
+  help : string option;
+      (** The text given with [~help] in {!val:fail} or {!val:error}. *)
   excerpt : excerpt;
 }
 (** A parse error: what failed, where, and what the parser was doing.
@@ -165,18 +167,19 @@ val render_error :
     [input.json: byte N: [error] ...] and there is no excerpt. The columns of
     the header and of the [* while parsing] lines count Unicode characters (code
     points), while [location.col] counts bytes, so they differ on a line with
-    non-ASCII text. In streaming, when the start of a line is no longer buffered
-    and [source] is not given, the character column is not known: the header is
-    then [input.json: byte N: [error] ...] too, the excerpt of the error line is
-    still printed, cut on the left with [...], and a [* while parsing] line says
-    [from byte N]. Carets count terminal cells, so a wide character such as [名]
-    takes two and a combining mark takes none, and a control byte, an invalid
-    UTF-8 byte or a C1 control prints in the excerpt as the escape
-    {!val:error_message} uses, such as [\x1B], with as many carets as the escape
-    has characters. A [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error ends with a [* help:] line. The rows the renderer adds never end with
-    a space, and source text is printed byte for byte. The result has no
-    trailing newline. *)
+    non-ASCII text. In streaming, when the start of the error line is no longer
+    buffered and [source] is not given, the header still has the line and the
+    character column, because Parseff counts the characters of the line that it
+    drops. The excerpt of the error line is then cut on the left with [...], and
+    a [* while parsing] line for a context that starts in the dropped part of
+    the line says [from byte N]. Carets count terminal cells, so a wide
+    character such as [名] takes two and a combining mark takes none, and a
+    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
+    the escape {!val:error_message} uses, such as [\x1B], with as many carets as
+    the escape has characters. An error with a [help] text ends with a [* help:]
+    line, and so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded]
+    error. The rows the renderer adds never end with a space, and source text is
+    printed byte for byte. The result has no trailing newline. *)
 
 (** {1 Diagnostics} *)
 
@@ -210,6 +213,10 @@ end
     diagnostic from {!warn}. Only the value in the cell is restored, so store
     immutable values, such as a [Map] or a list. A parse does not reset the
     cell: set the start value before each parse.
+
+    A {!Ref.set} costs more than a write to a plain [ref]. It fits state that
+    changes a few times in a construct, such as declarations, more than a write
+    for each token.
 
     {@ocaml[
     let names = Ref.create []
@@ -454,17 +461,26 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
     operation. Returns the taken string. Much more efficient than calling each
     step separately when parsing separated values. *)
 
-val fail : ?from:int -> ?notes:note list -> string -> 'a
-(** [fail ?from ?notes msg] aborts parsing with a [Failure msg] error.
+val fail :
+  ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
+(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failure msg]
+    error.
 
-    [~from] makes the error cover the bytes from [from] up to the current
-    position instead of a single position, and [~notes] attaches {!type:note}s.
-    {!render_error} underlines the span and prints the notes. This is intended
-    for user-initiated validation failures (e.g. a parsed value is out of
-    range). In streaming, a [~from] older than the buffered input is kept as the
+    [~from] and [~upto] make the error cover the bytes from [from] to [upto]
+    instead of a single position, and [~notes] attaches {!type:note}s. Each of
+    them defaults to the current position, and each can be before or after it.
+    If [from] is after [upto], the two are swapped, so the range is never
+    reversed. The error is located at the start of the range. {!render_error}
+    underlines the range and prints the notes. [~help] tells the user how to
+    correct the input. {!render_error} prints it as a ["* help:"] line after the
+    notes. This is intended for user-initiated validation failures (e.g. a
+    parsed value is out of range).
+
+    In streaming, a range start older than the buffered input is kept as the
     position of the error. Its line cannot be known, so {!render_error} prints
     [byte N] instead of a line and column and shows no excerpt, unless [~source]
-    is given.
+    is given. A range end past the buffered input is kept as given.
+    {!render_error} underlines up to the end of the line it can show.
 
     {@ocaml[
     let byte () =
@@ -496,9 +512,15 @@ val fail : ?from:int -> ?notes:note list -> string -> 'a
         fail "number out of range"
     ]} *)
 
-val error : ?from:int -> ?notes:note list -> custom_error -> 'a
-(** [error ?from ?notes e] aborts parsing with a user-defined error value.
-    [~from] and [~notes] work as in {!fail}.
+val error :
+  ?from:int ->
+  ?upto:int ->
+  ?notes:note list ->
+  ?help:string ->
+  custom_error ->
+  'a
+(** [error ?from ?upto ?notes ?help e] aborts parsing with a user-defined error
+    value. [~from], [~upto], [~notes] and [~help] work as in {!fail}.
 
     The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
     of {!type:custom_error} for rich error reporting:
@@ -536,10 +558,20 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
     parsing. [warn ~pos diagnostics d] records it at the byte offset [pos].
     [diagnostics] must be the collector given to the runner as [~diagnostics];
-    for any other collector [warn] does nothing. A diagnostic recorded in a
-    branch that backtracks is removed with the branch. This includes a
-    successful {!look_ahead}, and a repetition iteration that succeeds without
-    consuming input. *)
+    for any other collector [warn] does nothing.
+
+    A diagnostic lives as long as the input position that it was recorded at.
+    When a parser fails and the position goes back, the diagnostics recorded
+    since that position are removed. This holds for a branch of {!or_} or
+    {!one_of}, an iteration of {!many}, {!optional}, and a {!capture} or
+    {!recover} whose parser fails. It also holds for a successful {!look_ahead},
+    and for a repetition iteration that succeeds without consuming input. A
+    {!Ref.set} is undone in the same cases.
+
+    Thus a diagnostic recorded inside a construct is lost when an enclosing
+    {!capture} or {!recover} fails later: only the error of the enclosing
+    construct stays. This rule is final. To keep the inner diagnostics, use
+    {!capture_with}. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -670,10 +702,12 @@ val capture : (unit -> 'a) -> ('a, error) result
     {!fail} or {!val-error}, [capture] returns [Error e], where [e] is the
     furthest failure inside [parser], built as {!parse} builds an error. The
     position then goes back to where [capture] started, and the diagnostics that
-    [parser] recorded are removed. A {!cut} or {!commit} in [parser] does not
-    reach past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded]
-    are not caught. In {!parse_source}, the input that [parser] reads must fit
-    in [~backtrack_window].
+    [parser] recorded are removed, also those of a {!capture} or {!recover}
+    inside [parser] that recovered. This rule is final; {!capture_with} returns
+    the removed diagnostics. A {!cut} or {!commit} in [parser] does not reach
+    past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
+    not caught. In {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window].
 
     Example:
     {@ocaml[
@@ -683,6 +717,35 @@ val capture : (unit -> 'a) -> ('a, error) result
           s
       | Error e ->
           warn ~pos:e.range.start errors e;
+          skip_while (fun c -> c <> ';');
+          let _ = char ';' in
+          Hole
+    ]} *)
+
+val capture_with :
+  'd Diagnostics.t ->
+  (unit -> 'a) ->
+  ('a, error * 'd Diagnostics.entry list) result
+(** [capture_with diagnostics parser] is {!capture}, and on failure it also
+    returns the diagnostics that [parser] recorded in [diagnostics] and that the
+    failure removed, in the order they were recorded. The diagnostics are
+    removed as with {!capture}. To keep one, record it again:
+    [warn ~pos:d.pos diagnostics d.value] gives the same entry.
+
+    The list is empty when [diagnostics] is not the collector given to the
+    runner.
+
+    Example:
+    {@ocaml[
+    let statement_or_hole errors () =
+      match capture_with errors statement with
+      | Ok s ->
+          s
+      | Error (e, inner) ->
+          List.iter
+            (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
+            inner;
+          if inner = [] then warn ~pos:e.range.start errors e;
           skip_while (fun c -> c <> ';');
           let _ = char ';' in
           Hole
@@ -698,6 +761,9 @@ val recover :
     [parser] fails with the error [e], [recover] records [e] in [errors], calls
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
+
+    The errors that [parser] recorded in [errors] before it failed are removed,
+    as with {!capture}: only [e] stays. To keep them, use {!capture_with}.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
@@ -759,13 +825,19 @@ val commit : unit -> unit
         ()
     ]} *)
 
-val context : ?delimited:bool -> string -> (unit -> 'a) -> 'a
-(** [context ?delimited name parser] runs [parser] inside a named construct. The
-    name is kept for the error report: a parse that fails inside [parser] can
-    say which constructs were open at the furthest failure, outermost first.
+val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
+(** [context ?delimited ?start name parser] runs [parser] inside a named
+    construct. The name is kept for the error report: a parse that fails inside
+    [parser] can say which constructs were open at the furthest failure,
+    outermost first.
 
     [~delimited:true] marks a construct that has an opening token, such as an
     array or a block. An error renderer can then point to where it was opened.
+
+    [~start] is the position where the construct starts. The default is the
+    current position. Give it when the opening token is already consumed, for
+    example by a lexer that reads one token ahead. [context] raises
+    [Invalid_argument] when [start] is negative or after the current position.
 
     A construct is only reported when the failure is strictly past the place
     where it started. A [context] whose parser fails at its first byte, such as

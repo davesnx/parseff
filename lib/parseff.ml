@@ -96,7 +96,9 @@ type custom_error = ..
 exception Fail
 type fail_extra = {
   from : int;
+  upto : int;
   notes : note_data list;
+  help : string option;
   mutable depth : int;
   mutable chain : (string * int * bool) list;
 }
@@ -122,6 +124,9 @@ type line_index = {
   mutable count : int;
   mutable scanned_up_to : int;
   mutable line_base : int;
+  mutable cut_line : int;
+  mutable cut_at : int;
+  mutable cut_chars : int;
 }
 
 let frame_choice = 0
@@ -186,7 +191,11 @@ type trace_event =
   | Exit of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
-type 'a cell = { mutable value : 'a; mutable owner : bool ref }
+type 'a cell = {
+  mutable value : 'a;
+  mutable owner : bool ref;
+  mutable mark : int;
+}
 
 type trail =
   | Undo : {
@@ -199,7 +208,7 @@ type trail =
       -> trail
 
 let idle_token = ref false
-let dummy_cell = { value = (); owner = idle_token }
+let dummy_cell = { value = (); owner = idle_token; mark = 0 }
 
 let rec not_running =
   Undo
@@ -436,6 +445,7 @@ module State = struct
     let rec go (Undo u as node) =
       if u.depth > saved then begin
         u.cell.value <- u.old;
+        u.cell.mark <- 0;
         go u.next
       end else
         t.trail <- node
@@ -483,6 +493,9 @@ module State = struct
     Array.unsafe_set frames (base + 1)
       (frame_repeat lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) t.diag_len
+
+  let[@inline always] frame_diag_len (t : t) frame =
+    Array.unsafe_get t.frames ((frame * frame_stride) + 2)
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
@@ -581,7 +594,15 @@ let[@inline always] get_state () =
 let create_line_index () =
   let starts = Array.make 64 0 in
   starts.(0) <- 0;
-  { starts; count = 1; scanned_up_to = 0; line_base = 0 }
+  {
+    starts;
+    count = 1;
+    scanned_up_to = 0;
+    line_base = 0;
+    cut_line = -1;
+    cut_at = 0;
+    cut_chars = 0;
+  }
 
 let find_newline s from limit =
   let i = ref from in
@@ -672,6 +693,44 @@ let last_newline s from limit =
   done;
   !i
 
+let rec count_cut_chars idx s i stop =
+  if i >= stop then
+    i
+  else begin
+    let c = Char.code (String.unsafe_get s i) in
+    let width =
+      if c < 0x80 then
+        1
+      else begin
+        let d = String.get_utf_8_uchar s i in
+        if Uchar.utf_decode_is_valid d then
+          Uchar.utf_decode_length d
+        else begin
+          let need =
+            if c < 0xC2 || c > 0xF4 then
+              1
+            else if c < 0xE0 then
+              2
+            else if c < 0xF0 then
+              3
+            else
+              4
+          in
+          if i + need > String.length s then
+            need
+          else
+            1
+        end
+      end
+    in
+    if i + width > stop then
+      i
+    else begin
+      idx.cut_chars <- idx.cut_chars + 1;
+      count_cut_chars idx s (i + width) stop
+    end
+  end
+
 let ensure_line_index_preserved_through st up_to =
   if up_to > 0 then begin
     let idx =
@@ -705,8 +764,36 @@ let ensure_line_index_preserved_through st up_to =
         );
       idx.count <- 1;
       idx.scanned_up_to <- up_to
+    end;
+    let line_start = idx.starts.(0) in
+    if line_start >= up_to then
+      up_to
+    else begin
+      let known = idx.cut_line = line_start in
+      let from =
+        if known then
+          idx.cut_at
+        else
+          line_start
+      in
+      if from < st.base || from > up_to then begin
+        idx.cut_line <- -1;
+        up_to
+      end else begin
+        let input = st.input in
+        let stop = imin (up_to - st.base) (String.length input) in
+        if not known then idx.cut_chars <- 0;
+        let i = count_cut_chars idx input (from - st.base) stop in
+        idx.cut_line <- line_start;
+        idx.cut_at <- i + st.base;
+        if i < stop then
+          i + st.base
+        else
+          up_to
+      end
     end
-  end
+  end else
+    up_to
 
 let[@inline never] handle_location st =
   let idx =
@@ -732,7 +819,12 @@ let[@inline never] append st ~floor chunk n =
   let floor = imax 0 (floor - 1) in
   let cur_len = st.input_len - st.base in
   let drop = imin (imax 0 (floor - st.base)) cur_len in
-  if drop > 0 then ensure_line_index_preserved_through st floor;
+  let drop =
+    if drop > 0 then
+      ensure_line_index_preserved_through st floor - st.base
+    else
+      drop
+  in
   let kept = cur_len - drop in
   let buf = Bytes.create (kept + n) in
   Bytes.blit_string st.input drop buf 0 kept;
@@ -1848,7 +1940,7 @@ let[@inline] end_of_input () =
   let st = get_state () in
   if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
-let take_while ?(at_least = 0) ?label pred =
+let[@inline] take_while ?(at_least = 0) ?label pred =
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_while st ~keep_from:start start pred in
@@ -1892,17 +1984,20 @@ let[@inline] match_regex ?label re =
   let st = get_state () in
   handle_match_regex st re label
 
-let[@inline] fail ?(from = -1) ?(notes = []) msg =
+let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
   let st = get_state () in
   raise
-    (User_failure (st.pos, msg, { from; notes; depth = st.ctx_top; chain = [] }))
+    (User_failure
+       (st.pos, msg, { from; upto; notes; help; depth = st.ctx_top; chain = [] })
+    )
 
-let[@inline] error ?(from = -1) ?(notes = []) e =
+let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
   let st = get_state () in
-  if from < 0 && notes == [] then
+  if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
   else
-    fail_user st st.pos (Payload_ext (e, { from; notes; depth = 0; chain = [] }))
+    fail_user st st.pos
+      (Payload_ext (e, { from; upto; notes; help; depth = 0; chain = [] }))
 
 let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     (value : d) =
@@ -2038,10 +2133,9 @@ let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
     ignore (State.seal_frames st ~floor:0)
 
-let[@inline always] context_run st delimited name p =
+let[@inline always] context_run st delimited start name p =
   let d = st.ctx_top in
   if (d + 1) * ctx_stride > Array.length st.ctx then ctx_grow st;
-  let start = st.pos in
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
   Array.unsafe_set st.ctx (m + 1)
@@ -2081,10 +2175,9 @@ let[@inline never] trace_emit st f event =
       State.resume st;
       Printexc.raise_with_backtrace exn bt
 
-let[@inline never] context_traced st f delimited name p =
-  let start = st.pos in
+let[@inline never] context_traced st f delimited start name p =
   trace_emit st f (Enter { name; pos = start });
-  match context_run st delimited name p with
+  match context_run st delimited start name p with
   | v ->
       trace_emit st f (Exit { name; start; stop = st.pos });
       v
@@ -2096,13 +2189,21 @@ let[@inline never] context_traced st f delimited name p =
       trace_emit st f (Fail { name; start; pos = st.pos });
       Printexc.raise_with_backtrace exn bt
 
-let context ?(delimited = false) name p =
+let[@inline never] context_start st start =
+  if start < 0 || start > st.pos then
+    invalid_arg "Parseff.context: start is not between 0 and the position";
+  start
+
+let context ?(delimited = false) ?start name p =
   let st = get_state () in
+  let start =
+    match start with None -> st.pos | Some start -> context_start st start
+  in
   match st.trace with
   | None ->
-      context_run st delimited name p
+      context_run st delimited start name p
   | Some f ->
-      context_traced st f delimited name p
+      context_traced st f delimited start name p
 
 let print_trace ppf =
   let depth = ref 0 in
@@ -2772,10 +2873,8 @@ let hex_integer () =
   let st = get_state () in
   handle_hex_integer st
 
-let letter () =
-  satisfy
-    (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
-    ~label:"letter"
+let is_letter_char c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+let[@inline] letter () = satisfy is_letter_char ~label:"letter"
 
 let[@inline always] is_whitespace c =
   c <= ' ' && (c = ' ' || c = '\t' || c = '\n' || c = '\r')
@@ -2793,7 +2892,7 @@ let[@inline always] scan_whitespace st ~keep_from start =
   else
     scan_while_refilling st ~keep_from (!i + base) is_whitespace
 
-let whitespace ?(at_least = 0) () =
+let[@inline] whitespace ?(at_least = 0) () =
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_whitespace st ~keep_from:start start in
@@ -2819,7 +2918,7 @@ let[@inline] skip_whitespace () =
     st.pos <-
       scan_while_refilling st ~keep_from:no_keep (!i + base) is_whitespace
 
-let lexeme ?(skip = skip_whitespace) p =
+let[@inline] lexeme ?(skip = skip_whitespace) p =
   let v = p () in
   skip ();
   v
@@ -2848,14 +2947,13 @@ let keyword ?(is_ident = is_ident_byte) s =
   else
     fail_str_cold st pos tag_literal s
 
-let alphanum () =
-  satisfy
-    (fun c ->
-      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-    )
-    ~label:"alphanumeric"
+let is_alphanum_char c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+
+let[@inline] alphanum () = satisfy is_alphanum_char ~label:"alphanumeric"
 
 let label_any_char = "any character"
+let always_true _ = true
 
 let[@inline] any_char () =
   let st = get_state () in
@@ -2864,7 +2962,7 @@ let[@inline] any_char () =
     st.pos <- p + 1;
     char_at st p
   end else
-    satisfy_slow st (fun _ -> true) label_any_char
+    satisfy_slow st always_true label_any_char
 
 let[@inline] any_uint8 () =
   let st = get_state () in
@@ -2965,7 +3063,7 @@ module Utf8 = struct
       st.pos <- p + 1;
       Uchar.unsafe_of_int (Char.code (char_at st p))
     end else
-      satisfy_uchar_slow st (fun _ -> true) label_any_char
+      satisfy_uchar_slow st always_true label_any_char
 
   let take_while ?(at_least = 0) ?label pred =
     let st = get_state () in
@@ -3091,6 +3189,7 @@ type error = {
   location : location option;
   contexts : context list;
   notes : note list;
+  help : string option;
   excerpt : excerpt;
 }
 
@@ -3840,6 +3939,14 @@ let render ?name ?source ?custom e =
       add_text b n.text
     )
     loose;
+  ( match e.help with
+  | Some h ->
+      gutter_star ();
+      Buffer.add_string b "help:";
+      add_text b h
+  | None ->
+      ()
+  );
   ( match e.kind with
   | Depth_limit_exceeded _ ->
       gutter_star ();
@@ -4005,7 +4112,7 @@ let found_of_far st f pos =
     | _ ->
         found_of st pos
 
-let build st ~pos ?(notes = []) kind span frames =
+let build st ~pos ?(notes = []) ?help kind span frames =
   let idx =
     match st.line_index with
     | Some idx ->
@@ -4031,16 +4138,23 @@ let build st ~pos ?(notes = []) kind span frames =
       )
       here
   in
+  let char_column_of line_start p =
+    if p > st.input_len then
+      None
+    else if line_start >= st.base then
+      Some (1 + count_code_points st.input (line_start - st.base) (p - st.base))
+    else if
+      idx.cut_line = line_start && idx.cut_at >= st.base && p >= idx.cut_at
+    then
+      Some
+        (1 + idx.cut_chars
+        + count_code_points st.input (idx.cut_at - st.base) (p - st.base)
+        )
+    else
+      None
+  in
   let char_column =
-    Option.bind here (fun (_, line_start, _) ->
-        if line_start >= st.base then
-          Some
-            (1
-            + count_code_points st.input (line_start - st.base) (pos - st.base)
-            )
-        else
-          None
-    )
+    Option.bind here (fun (_, line_start, _) -> char_column_of line_start pos)
   in
   let source_open =
     match st.source with Some src -> not src.eof | None -> false
@@ -4113,19 +4227,7 @@ let build st ~pos ?(notes = []) kind span frames =
     List.map
       (fun (_, s, _) ->
         Option.map
-          (fun (l, c) ->
-            let first = s - c + 1 in
-            ( l,
-              c,
-              if first >= st.base && s <= st.input_len then
-                Some
-                  (1
-                  + count_code_points st.input (first - st.base) (s - st.base)
-                  )
-              else
-                None
-            )
-          )
+          (fun (l, c) -> (l, c, char_column_of (s - c + 1) s))
           (locate s)
       )
       frames
@@ -4251,14 +4353,24 @@ let build st ~pos ?(notes = []) kind span frames =
         (fun (name, start, delimited) -> { name; start; delimited })
         frames;
     notes;
+    help;
     excerpt = { views; frame_locs; char_column };
   }
 
 let extras_span pos (x : fail_extra) =
-  if x.from < 0 then
-    { start = pos; stop = pos }
-  else
-    { start = imin x.from pos; stop = imax x.from pos }
+  let a =
+    if x.from < 0 then
+      pos
+    else
+      x.from
+  in
+  let z =
+    if x.upto < 0 then
+      pos
+    else
+      x.upto
+  in
+  { start = imin a z; stop = imax a z }
 
 let error_of_far st outer =
   let f = st.far in
@@ -4271,7 +4383,8 @@ let error_of_far st outer =
       build st ~pos (Custom e) { start = pos; stop = pos } frames
   | Payload_ext (e, x) when f.special = special_user ->
       let span = extras_span pos x in
-      build st ~pos:span.start ~notes:x.notes (Custom e) span frames
+      build st ~pos:span.start ~notes:x.notes ?help:x.help (Custom e) span
+        frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
@@ -4288,7 +4401,8 @@ let error_plain st pos kind frames =
 
 let error_failure st pos msg (x : fail_extra) outer =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes (Failure msg) span (outer @ x.chain)
+  build st ~pos:span.start ~notes:x.notes ?help:x.help (Failure msg) span
+    (outer @ x.chain)
 
 let outer_contexts st pos =
   let acc = ref [] in
@@ -4328,6 +4442,39 @@ let capture p =
   | exception User_failure (pos, msg, x) ->
       capture_rewind st frame saved
         (error_failure st pos msg x (outer_contexts st pos))
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let rec take_entries l k acc =
+  if k = 0 then
+    acc
+  else
+    match l with x :: rest -> take_entries rest (k - 1) (x :: acc) | [] -> acc
+
+let removed_entries (type d) st frame (c : d diagnostics) e =
+  if st.diag == c.self then
+    (e, take_entries c.rev (st.diag_len - State.frame_diag_len st frame) [])
+  else
+    (e, [])
+
+let capture_with c p =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      Stdlib.Ok v
+  | exception Fail ->
+      let e = error_of_far st (outer_contexts st st.far.pos) in
+      capture_rewind st frame saved (removed_entries st frame c e)
+  | exception User_failure (pos, msg, x) ->
+      let e = error_failure st pos msg x (outer_contexts st pos) in
+      capture_rewind st frame saved (removed_entries st frame c e)
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -4491,7 +4638,7 @@ let parse_source_each ?(max_depth = 128)
 module Ref = struct
   type 'a t = 'a cell
 
-  let create value = { value; owner = idle_token }
+  let create value = { value; owner = idle_token; mark = 0 }
   let get c = c.value
 
   let set c value =
@@ -4518,22 +4665,23 @@ module Ref = struct
     if owner != token then begin
       if !owner then
         invalid_arg "Parseff.Ref.set: another running parse uses this cell";
-      c.owner <- token
+      c.owner <- token;
+      c.mark <- 0
     end;
-    if st.frames_top > 0 then begin
+    let top = st.frames_top in
+    if
+      top > 0
+      && c.mark
+         <= Array.unsafe_get st.frames (((top - 1) * frame_stride) + 1)
+            lsr frame_trail_shift
+    then begin
       let next = st.trail in
       let (Undo u) = next in
       if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
         u.next <- running_empty;
-      st.trail <-
-        Undo
-          {
-            cell = c;
-            old = c.value;
-            depth = State.trail_depth st + 1;
-            token;
-            next;
-          }
+      let depth = u.depth + 1 in
+      c.mark <- depth;
+      st.trail <- Undo { cell = c; old = c.value; depth; token; next }
     end;
     c.value <- value
 end
