@@ -2697,9 +2697,6 @@ let prec_lower st frame start top prec =
         State.pop_rewind_frame st frame
       else begin
         State.reset_repeat_frame st base start;
-        if flags land frame_committed_bit <> 0 then
-          Array.unsafe_set st.frames (base + 1)
-            (Array.unsafe_get st.frames (base + 1) lor frame_committed_bit);
         st.pos <- after
       end;
       top
@@ -2731,15 +2728,16 @@ let prec_fail st frame top =
   prec_stop st frame top
 
 let rec prec_loop st operand operator top =
-  let frame = State.push_rewind_frame st frame_repeat in
+  let frame = State.push_rewind_frame st frame_barrier in
   let start = st.pos in
   match operator () with
   | None ->
       prec_stop st frame top
   | Some (prec, op) ->
-      if prec >= prec_min top then
+      if prec >= prec_min top then begin
+        State.set_frame_kind st frame frame_repeat;
         prec_try st operand operator frame start top prec op
-      else
+      end else
         begin match (op, top) with
         | Prefix _, _ ->
             State.pop_rewind_frame st frame;

@@ -1162,6 +1162,11 @@ val precedence :
     error. Use {!peek_char}, or read a token and compare it, in place of one
     {!consume} for each operator.
 
+    [operator] is a lookup: a {!commit} or {!cut} in it stops there, as at a
+    {!look_ahead}, and has no effect. Thus [precedence] can always go back to
+    the position before the lookup, also in a streaming source. To commit to an
+    operator, call {!commit} in the token parser of [op].
+
     [min] is the lowest [prec] that [precedence] accepts. The default accepts
     all operators. Use it for a prefix operator: read the prefix token in
     [operand], then parse its operand with [precedence ~min] inside {!rec_}.
@@ -1175,6 +1180,13 @@ val precedence :
     {!infix_left} operator with [prec] of [max_int] runs immediately after its
     right operand, because no operator binds tighter. As in {!expression}, a
     {!commit} in a build function has no effect.
+
+    One difference from {!expression}: when a build function fails,
+    {!expression} stops before that operator. In [precedence], an infix build
+    function runs after the next lookup, so its failure is the failure of the
+    full [precedence] call. A {!postfix} build function, and the build function
+    of an {!infix_left} operator with [prec] of [max_int], run immediately, and
+    their failure stops the expression before that operator.
 
     Example:
     {@ocaml[

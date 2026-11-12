@@ -893,6 +893,140 @@ module Precedence = struct
       "Ref.set" "Ok ((1*2)+3), 4 lookups"
       (run (fun _ cell -> Parseff.Ref.set cell 1))
 
+  let test_commit_in_lookup () =
+    let run seal mode ~min ~noisy input =
+      let d = Parseff.Diagnostics.create () in
+      let less () = fun a b -> "(" ^ a ^ "<" ^ b ^ ")" in
+      let operator () =
+        match Parseff.peek_char () with
+        | Some '*' ->
+            Some (5, Parseff.infix_left (binary "*"))
+        | _ -> (
+            ignore (Parseff.char '<');
+            seal ();
+            for _ = 1 to 7 do
+              ignore (Parseff.char '<')
+            done;
+            if noisy then Parseff.warn d "seen";
+            match mode with
+            | `Low ->
+                Some (1, Parseff.infix_left less)
+            | `None ->
+                None
+            | `Fail ->
+                ignore (Parseff.char '#');
+                None
+          )
+      in
+      let p () =
+        let v =
+          Parseff.precedence ~min
+            ~operand:(fun () -> String.make 1 (Parseff.any_char ()))
+            ~operator ()
+        in
+        let stop = Parseff.position () in
+        let b = Buffer.create 16 in
+        while Parseff.peek_char () <> None do
+          Buffer.add_char b (Parseff.any_char ())
+        done;
+        Printf.sprintf "%s@%d %s" v stop (Buffer.contents b)
+      in
+      ( show (Parseff.parse ~diagnostics:d input p),
+        show
+          (Parseff.parse_source ~diagnostics:d ~backtrack_window:16
+             (chunked_source input) p
+          )
+      )
+    in
+    List.iter
+      (fun (seal_name, seal) ->
+        List.iter
+          (fun (name, mode, min, noisy, input, expected) ->
+            let from_string, from_source = run seal mode ~min ~noisy input in
+            let name = seal_name ^ ", " ^ name in
+            Alcotest.(check string) (name ^ ", parse") expected from_string;
+            Alcotest.(check string)
+              (name ^ ", parse_source") expected from_source
+          )
+          [
+            ("below min", `Low, 2, false, "1<<<<<<<<2", "Ok 1@1 <<<<<<<<2");
+            ("no operator", `None, 2, false, "1<<<<<<<<2", "Ok 1@1 <<<<<<<<2");
+            ("lookup fails", `Fail, 2, false, "1<<<<<<<<2", "Ok 1@1 <<<<<<<<2");
+            ( "no operator after an operator",
+              `None,
+              0,
+              false,
+              "1*2<<<<<<<<3",
+              "Ok (1*2)@3 <<<<<<<<3"
+            );
+            ( "lower operator",
+              `Low,
+              0,
+              false,
+              "1*2<<<<<<<<3",
+              "Ok ((1*2)<3)@12 "
+            );
+            ( "lower operator, lookup runs again",
+              `Low,
+              0,
+              true,
+              "1*2<<<<<<<<3",
+              "Ok ((1*2)<3)@12 "
+            );
+          ]
+      )
+      [ ("commit", Parseff.commit); ("cut", Parseff.cut) ]
+
+  let test_build_fails () =
+    let failing s () =
+      tok s ();
+      fun a b ->
+        ignore (Parseff.char '#');
+        "(" ^ a ^ s ^ b ^ ")"
+    in
+    let failing_post () =
+      tok "!" ();
+      fun a ->
+        ignore (Parseff.char '#');
+        "(" ^ a ^ "!)"
+    in
+    let table =
+      Parseff.[ [ infix_left (failing "+") ]; [ postfix failing_post ] ]
+    in
+    let operator () =
+      match Parseff.peek_char () with
+      | Some '+' ->
+          Some (1, Parseff.infix_left (failing "+"))
+      | Some '-' ->
+          Some (max_int, Parseff.infix_left (failing "-"))
+      | Some '!' ->
+          Some (2, Parseff.postfix failing_post)
+      | _ ->
+          None
+    in
+    let digit () = string_of_int (Parseff.digit ()) in
+    let run p input =
+      show
+        (Parseff.parse ~consume:`Partial input (fun () ->
+             let e = p () in
+             e ^ "@" ^ string_of_int (Parseff.position ())
+         )
+        )
+    in
+    let by_table = Parseff.expression ~operand:digit table in
+    let by_lookup = Parseff.precedence ~operand:digit ~operator in
+    Alcotest.(check string)
+      "expression drops the infix operator" "Ok 1@1" (run by_table "1+2");
+    Alcotest.(check string)
+      "expression drops the postfix operator" "Ok 1@1" (run by_table "1!");
+    Alcotest.(check string)
+      "precedence fails for a deferred build function"
+      "Error@3 expected '#', found end of input" (run by_lookup "1+2");
+    Alcotest.(check string)
+      "precedence drops the postfix operator" "Ok 1@1" (run by_lookup "1!");
+    Alcotest.(check string)
+      "precedence drops infix_left at max_int" "Ok 1@1" (run by_lookup "1-2")
+
   let test_build_effects () =
     let run ~noisy input =
       let d = Parseff.Diagnostics.create () in
@@ -1106,6 +1240,8 @@ module Precedence = struct
         test_precedence_limits;
       test_case "commit in build function" `Quick test_commit_in_build;
       test_case "lookup with effects runs again" `Quick test_lookup_again;
+      test_case "commit and cut in the lookup" `Quick test_commit_in_lookup;
+      test_case "build function fails" `Quick test_build_fails;
       test_case "build effects" `Quick test_build_effects;
       test_case "same as expression" `Quick test_same_as_expression;
       test_case "doc example" `Quick test_doc_example;
