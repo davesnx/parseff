@@ -38,6 +38,7 @@ type g =
   | Recognize of g
   | Expression of g * op list list
   | Capture of g
+  | Capture_release of g
   | Warn of int
   | Set of int
   | Get
@@ -140,6 +141,8 @@ let rec show_g = function
         (String.concat "; " (List.map level t))
   | Capture a ->
       Printf.sprintf "Capture (%s)" (show_g a)
+  | Capture_release a ->
+      Printf.sprintf "Capture_release (%s)" (show_g a)
   | Warn k ->
       Printf.sprintf "Warn %d" k
   | Set k ->
@@ -294,6 +297,13 @@ let rec run cx g =
       | Error e ->
           Cap_err (show_error e)
     )
+  | Capture_release a -> (
+      match Parseff.capture ~release:true (fun () -> run cx a) with
+      | Ok v ->
+          Cap_ok v
+      | Error e ->
+          Cap_err (show_error e)
+    )
   | Warn k ->
       Parseff.warn cx.diags k;
       Unit
@@ -415,11 +425,12 @@ let run_real ?(traced = false) ~partial runner g input =
    diagnostics recorded so far (newest first) and the value of the one Ref
    cell. Every backtracking point saves the state and gets back to it
    explicitly. A frame is a [bool ref] committed flag, so [commit] and [cut]
-   can seal the frames that are open around them. A [capture] frame holds the
-   state it goes back to, which [commit] and [cut] replace. A [cut] that
-   replaces it also gives that state to the sealed frames above the [capture]:
-   a frame that then drops a step without progress goes back to it, so nothing
-   recorded before the cut is lost. *)
+   can seal the frames that are open around them. A [capture] is a barrier
+   that goes back to its start. A [capture ~release:true] frame holds the state
+   it goes back to, which [commit] and [cut] replace. A [cut] that replaces it
+   also gives that state to the sealed frames above the [capture]: a frame that
+   then drops a step without progress goes back to it, so nothing recorded
+   before the cut is lost. *)
 
 type mst = { pos : int; diags : (int * int) list; cell : int }
 
@@ -724,6 +735,13 @@ let rec ev m env g st =
   | Expression (atom, table) ->
       expression m env atom table st
   | Capture a -> (
+      match ev m (push (Barrier st.pos) env) a st with
+      | v, st ->
+          (Cap_ok v, st)
+      | exception (M_fail _ | M_hard _) ->
+          (Cap_err "", st)
+    )
+  | Capture_release a -> (
       let saved = ref st in
       match ev m (push (Captured saved) env) a st with
       | v, st ->
@@ -1040,7 +1058,10 @@ let rec gen rs size =
     | 23 | 24 ->
         gen_expression rs n
     | 25 ->
-        Capture (gen rs n)
+        if int rs 2 = 0 then
+          Capture (gen rs n)
+        else
+          Capture_release (gen rs n)
     | 26 ->
         Try (gen rs h, gen rs h)
     | 27 ->
@@ -1109,6 +1130,8 @@ and unseal = function
       Expression (unseal a, List.map (List.map op) t)
   | Capture a ->
       Capture (unseal a)
+  | Capture_release a ->
+      Capture_release (unseal a)
   | Try (a, b) ->
       Try (unseal a, unseal b)
   | Rec a ->
