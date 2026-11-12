@@ -728,7 +728,7 @@ and expression m env atom table st =
   let prefixed =
     List.exists (List.exists (function Prefix _ -> true | _ -> false)) table
   in
-  let rec climb env levels st =
+  let rec parse_levels env levels st =
     let lhs, st = operand env st in
     loop env levels lhs st (-1)
   and operand env st =
@@ -748,7 +748,7 @@ and expression m env atom table st =
             match
               let ov, s1 = ev m envf t st in
               if s1.pos = st.pos then raise (M_fail s1);
-              let v, s2 = rec_ envf s1 (fun env -> climb env rest) in
+              let v, s2 = rec_ envf s1 (fun env -> parse_levels env rest) in
               (Pre (ov, v), s2)
             with
             | r ->
@@ -782,7 +782,7 @@ and expression m env atom table st =
                 match op with
                 | Infix_l t ->
                     let ov, s1 = ev m envr t st in
-                    let rhs, s2 = climb envr rest s1 in
+                    let rhs, s2 = parse_levels envr rest s1 in
                     (Bin (ov, lhs, rhs), s2)
                 | Infix_r t ->
                     let ov, s1 = ev m envr t st in
@@ -825,7 +825,7 @@ and expression m env atom table st =
             (lhs, st)
       )
   in
-  climb env table st
+  parse_levels env table st
 
 type model_outcome =
   | M_success of value * mst
