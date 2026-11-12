@@ -2105,39 +2105,21 @@ let look_ahead p =
 
 let peek_with p =
   let st = get_state () in
-  let start = st.pos in
+  let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match st.source with
-  | None -> (
-      match p () with
-      | v ->
-          let stop = st.pos in
-          st.pos <- start;
-          if st.far != saved then st.far <- saved;
-          (v, stop)
-      | exception exn ->
-          st.pos <- start;
-          far_merge st saved;
-          raise exn
-    )
-  | Some _ -> (
-      let frame =
-        State.push_rewind_frame st (frame_last_branch lor frame_pin_bit)
-      in
-      match p () with
-      | v ->
-          State.pop_rewind_frame st frame;
-          let stop = st.pos in
-          st.pos <- start;
-          if st.far != saved then st.far <- saved;
-          (v, stop)
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          st.pos <- start;
-          far_merge st saved;
-          raise exn
-    )
+  match p () with
+  | v ->
+      let stop = st.pos in
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      if st.far != saved then st.far <- saved;
+      (v, stop)
+  | exception exn ->
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
 
 let skip_to target =
   let st = get_state () in

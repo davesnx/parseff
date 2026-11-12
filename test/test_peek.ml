@@ -96,7 +96,12 @@ let test_earlier_failure_kept () =
       consume "c"
   )
 
-let test_diagnostics_kept () =
+let entries d =
+  List.map
+    (fun { Diagnostics.pos; value } -> (pos, value))
+    (Diagnostics.to_list d)
+
+let test_diagnostics_removed () =
   List.iter
     (fun (mode_name, mode) ->
       let d = Diagnostics.create () in
@@ -119,16 +124,13 @@ let test_diagnostics_kept () =
         (show (String.make 1) result);
       Alcotest.(check (list (pair int string)))
         ("diagnostics, " ^ mode_name)
-        [ (0, "before"); (0, "inside"); (1, "after") ]
-        (List.map
-           (fun { Diagnostics.pos; value } -> (pos, value))
-           (Diagnostics.to_list d)
-        )
+        [ (0, "before"); (1, "after") ]
+        (entries d)
     )
     modes
 
-let test_ref_kept () =
-  check_all "Ref.set with no enclosing combinator" string_of_int "a" "Ok 1"
+let test_ref_undone () =
+  check_all "Ref.set with no enclosing combinator" string_of_int "a" "Ok 0"
     (fun () ->
       let cell = Ref.create 0 in
       ignore
@@ -139,8 +141,7 @@ let test_ref_kept () =
         );
       Ref.get cell
   );
-  check_all "Ref.set in a failing peek, undone by optional" string_of_int "b"
-    "Ok 0" (fun () ->
+  check_all "Ref.set in a failing peek" string_of_int "b" "Ok 0" (fun () ->
       let cell = Ref.create 0 in
       ignore
         (optional
@@ -155,9 +156,8 @@ let test_ref_kept () =
       Ref.get cell
   )
 
-let test_commit_passes () =
-  check_all "commit inside the peek" Fun.id "a"
-    "Error at 0: expected \"b\", found 'a'" (fun () ->
+let test_commit_stops () =
+  check_all "commit inside the peek" Fun.id "a" "Ok a" (fun () ->
       or_
         (fun () ->
           ignore
@@ -173,9 +173,8 @@ let test_commit_passes () =
         ()
   )
 
-let test_cut_passes () =
-  check_all "cut inside the peek" Fun.id "a"
-    "Error at 0: expected \"b\", found 'a'" (fun () ->
+let test_cut_stops () =
+  check_all "cut inside the peek" Fun.id "a" "Ok a" (fun () ->
       or_
         (fun () ->
           ignore
@@ -207,16 +206,14 @@ let test_nested () =
 let test_exception_passes () =
   List.iter
     (fun (mode_name, mode) ->
-      let d = Diagnostics.create () in
       let cell = Ref.create 0 in
       let seen = ref (-1) in
       let result =
-        run ~diagnostics:d mode "ab" (fun () ->
+        run mode "ab" (fun () ->
             ( try
                 ignore
                   (peek_with (fun () ->
                        ignore (char 'a');
-                       warn d "inside";
                        Ref.set cell 1;
                        raise Exit
                    )
@@ -229,19 +226,162 @@ let test_exception_passes () =
         )
       in
       Alcotest.(check string)
-        ("Ref write kept, " ^ mode_name)
-        "Ok 1"
+        ("result, " ^ mode_name) "Ok 0"
         (show string_of_int result);
-      Alcotest.(check int) ("position, " ^ mode_name) 0 !seen;
-      Alcotest.(check (list (pair int string)))
-        ("diagnostic kept, " ^ mode_name)
-        [ (1, "inside") ]
-        (List.map
-           (fun { Diagnostics.pos; value } -> (pos, value))
-           (Diagnostics.to_list d)
-        )
+      Alcotest.(check int) ("position, " ^ mode_name) 0 !seen
     )
     modes
+
+let test_nested_rollback () =
+  List.iter
+    (fun (mode_name, mode) ->
+      let d = Diagnostics.create () in
+      let result =
+        run ~diagnostics:d mode "ab" (fun () ->
+            let cell = Ref.create 0 in
+            let (seen_inside, inner_stop), outer_stop =
+              peek_with (fun () ->
+                  ignore (char 'a');
+                  Ref.set cell 1;
+                  let _, inner_stop =
+                    peek_with (fun () ->
+                        warn d "inner";
+                        Ref.set cell 2;
+                        char 'b'
+                    )
+                  in
+                  warn d "outer";
+                  (Ref.get cell, inner_stop)
+              )
+            in
+            Printf.sprintf "%d %d %d %d %d" seen_inside inner_stop outer_stop
+              (Ref.get cell) (position ())
+        )
+      in
+      Alcotest.(check string)
+        ("result, " ^ mode_name) "Ok 1 2 1 0 0" (show Fun.id result);
+      Alcotest.(check (list (pair int string)))
+        ("diagnostics, " ^ mode_name)
+        [] (entries d)
+    )
+    modes
+
+let test_failure_inside_capture () =
+  List.iter
+    (fun (mode_name, mode) ->
+      let d = Diagnostics.create () in
+      let result =
+        run ~diagnostics:d mode "ab" (fun () ->
+            ignore (char 'a');
+            let cell = Ref.create 0 in
+            let failed =
+              capture (fun () ->
+                  peek_with (fun () ->
+                      warn d "inside";
+                      Ref.set cell 1;
+                      consume "x"
+                  )
+              )
+            in
+            let at = position () in
+            let _, stop = peek_with (fun () -> char 'b') in
+            skip_to stop;
+            Printf.sprintf "%s | %d %d %d"
+              (show (fun _ -> "value") failed)
+              at (Ref.get cell) (position ())
+        )
+      in
+      Alcotest.(check string)
+        ("result, " ^ mode_name)
+        "Ok Error at 1: expected \"x\", found 'b' | 1 0 2" (show Fun.id result);
+      Alcotest.(check (list (pair int string)))
+        ("diagnostics, " ^ mode_name)
+        [] (entries d)
+    )
+    modes
+
+let test_stop_after_backtrack () =
+  check_all "stop stays valid after a failed branch" string_of_int "abc" "Ok 2"
+    (fun () ->
+      let _, stop = peek_with (fun () -> consume "ab") in
+      ignore (optional (fun () -> consume "abx") ());
+      skip_to stop;
+      position ()
+  )
+
+let test_skip_past_peeked_end () =
+  Alcotest.(check string)
+    "string input" "Ok 3"
+    (show string_of_int
+       (parse ~consume:`Partial "abc" (fun () ->
+            let _, stop = peek_with (fun () -> char 'a') in
+            skip_to (stop + 2);
+            position ()
+        )
+       )
+    )
+
+let test_small_window_token_loop () =
+  let words = 500 in
+  let input = String.concat " " (List.init words (fun _ -> "abcdefgh")) in
+  let p () =
+    let rec go n =
+      let word, stop =
+        peek_with (fun () ->
+            skip_while (fun c -> c = ' ');
+            take_while is_alpha
+        )
+      in
+      if word = "" then
+        n
+      else begin
+        skip_to stop;
+        go (n + 1)
+      end
+    in
+    go 0
+  in
+  List.iter
+    (fun chunk_size ->
+      Alcotest.(check string)
+        (Printf.sprintf "chunk %d" chunk_size)
+        (Printf.sprintf "Ok %d" words)
+        (show string_of_int (run ~backtrack_window:16 (Some chunk_size) input p))
+    )
+    [ 1; 3; 64 ]
+
+let test_location_after_skip () =
+  let lines = 200 in
+  let input = String.concat "\n" (List.init lines (fun _ -> "abcdefgh ij")) in
+  let p () =
+    let rec go () =
+      let word, stop =
+        peek_with (fun () ->
+            skip_while (fun c -> c = ' ' || c = '\n');
+            take_while is_alpha
+        )
+      in
+      if word <> "" then begin
+        skip_to stop;
+        go ()
+      end
+    in
+    go ();
+    let { offset; line; col } = location () in
+    Printf.sprintf "%d %d:%d" offset line col
+  in
+  let expected = Printf.sprintf "Ok %d %d:12" (String.length input) lines in
+  Alcotest.(check string)
+    "string" expected
+    (show Fun.id (parse ~consume:`Partial input p));
+  List.iter
+    (fun chunk_size ->
+      Alcotest.(check string)
+        (Printf.sprintf "chunk %d" chunk_size)
+        expected
+        (show Fun.id (run ~backtrack_window:16 (Some chunk_size) input p))
+    )
+    [ 1; 3; 64 ]
 
 let invalid name f =
   match f () with
@@ -409,11 +549,16 @@ let () =
           test_case "probe failures forgotten" `Quick
             test_probe_failures_forgotten;
           test_case "earlier failure kept" `Quick test_earlier_failure_kept;
-          test_case "diagnostics kept" `Quick test_diagnostics_kept;
-          test_case "Ref writes kept" `Quick test_ref_kept;
-          test_case "commit acts outside the peek" `Quick test_commit_passes;
-          test_case "cut acts outside the peek" `Quick test_cut_passes;
+          test_case "diagnostics removed" `Quick test_diagnostics_removed;
+          test_case "Ref writes undone" `Quick test_ref_undone;
+          test_case "commit stops at the peek" `Quick test_commit_stops;
+          test_case "cut stops at the peek" `Quick test_cut_stops;
           test_case "nested" `Quick test_nested;
+          test_case "nested rollback" `Quick test_nested_rollback;
+          test_case "failure inside capture" `Quick test_failure_inside_capture;
+          test_case "stop after a backtrack" `Quick test_stop_after_backtrack;
+          test_case "small window token loop" `Quick
+            test_small_window_token_loop;
           test_case "exception passes" `Quick test_exception_passes;
           test_case "backtrack window" `Quick test_window;
           test_case "token cache" `Quick test_token_cache;
@@ -422,6 +567,8 @@ let () =
       ( "skip_to",
         [
           test_case "same position" `Quick test_skip_to_same_position;
+          test_case "past the peeked end" `Quick test_skip_past_peeked_end;
+          test_case "location after skip_to" `Quick test_location_after_skip;
           test_case "rejects bad targets" `Quick test_skip_to_rejects;
           test_case "unread stream bytes" `Quick test_skip_to_unread_stream;
           test_case "outside a parse" `Quick test_outside_parse;

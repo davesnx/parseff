@@ -108,7 +108,7 @@ Diagnostics are transactional with parser control flow:
 
 - `Parseff.or_`: diagnostics from failed branches are rolled back
 - `Parseff.many`: diagnostics from the final failing attempt are rolled back
-- `Parseff.look_ahead`: diagnostics are rolled back
+- `Parseff.look_ahead` and `Parseff.peek_with`: diagnostics are rolled back
 This prevents diagnostics from leaking out of speculative branches.
 
 

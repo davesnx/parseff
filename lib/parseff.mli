@@ -564,9 +564,9 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
     When a parser fails and the position goes back, the diagnostics recorded
     since that position are removed. This holds for a branch of {!or_} or
     {!one_of}, an iteration of {!many}, {!optional}, and a {!capture} or
-    {!recover} whose parser fails. It also holds for a successful {!look_ahead},
-    and for a repetition iteration that succeeds without consuming input. A
-    {!Ref.set} is undone in the same cases.
+    {!recover} whose parser fails. It also holds for a successful {!look_ahead}
+    or {!peek_with}, and for a repetition iteration that succeeds without
+    consuming input. A {!Ref.set} is undone in the same cases.
 
     Thus a diagnostic recorded inside a construct is lost when an enclosing
     {!capture} or {!recover} fails later: only the error of the enclosing
@@ -699,13 +699,10 @@ val peek_with : (unit -> 'a) -> 'a * int
     where it stopped. It consumes no input: the position stays where it was
     before. Fails if [parser] fails.
 
-    Only the position is put back. This differs from {!look_ahead}: diagnostics
-    recorded by [parser] with {!warn} and {!Ref} writes made by [parser] stay,
-    and a {!commit} or {!cut} inside [parser] acts as if it were called outside
-    it. The rule is the same when [parser] succeeds, fails or raises, and the
-    same in {!parse} and {!parse_source}. An enclosing combinator that
-    backtracks removes them, as it does for all parsers. When [parser] succeeds,
-    the failures of its probes are forgotten, as in {!look_ahead}.
+    It follows the rule of {!look_ahead}: diagnostics recorded by [parser] with
+    {!warn} and {!Ref} writes made by [parser] are removed, a {!commit} or
+    {!cut} inside [parser] has no effect outside it, and the failures of its
+    probes are forgotten when it succeeds.
 
     Use it with {!skip_to} to read a token once: look at the token, decide, then
     move after it without a second scan. A parser with one token of lookahead
@@ -748,10 +745,8 @@ val peek_with : (unit -> 'a) -> 'a * int
 
     Set [read_at] to [-1] before each parse.
 
-    With this cache, do not call {!warn} or {!Ref.set} in [token]. A rewind
-    removes what [token] recorded, and the cache then answers for that position
-    without a second run of [token]. Return the error of a token in its value,
-    and record it with {!warn} in [advance].
+    To report an error of a token, return it in the value of [token] and record
+    it with {!warn} in [advance].
 
     In {!parse_source}, the input that [parser] reads must fit in
     [~backtrack_window]. This includes the whitespace and comments that it skips
@@ -873,7 +868,8 @@ val commit : unit -> unit
     expected.
 
     [commit ()] does nothing outside any frame. It does nothing inside
-    {!look_ahead}, and it does not reach the frames outside the look-ahead.
+    {!look_ahead} or {!peek_with}, and it does not reach the frames outside the
+    look-ahead.
 
     [commit ()] does not seal or release outer frames. In
     [many (fun () -> or_ a b ())], a [commit ()] inside [a] seals the [or_]
@@ -940,7 +936,7 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead}.
+    backtracks after the cut. It stops at a {!look_ahead} or {!peek_with}.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
