@@ -2490,9 +2490,9 @@ type 'a expression = {
 
 exception Expr_stop
 
-let rec expr_climb c levels = expr_loop c levels (expr_operand c) (-1)
+let rec expr_level c levels = expr_loop c levels (expr_operand c) (-1)
 
-and expr_climb_right c here start =
+and expr_level_right c here start =
   let lhs = expr_operand c in
   expr_loop c here lhs
     ( if c.st.pos = start then
@@ -2537,7 +2537,7 @@ and expr_prefix_ops c frame start rest = function
           State.set_frame_kind c.st frame frame_choice;
           raise_notrace Fail
         end;
-        g (rec_ (fun () -> expr_climb c rest))
+        g (rec_ (fun () -> expr_level c rest))
       with
       | v ->
           v
@@ -2597,7 +2597,7 @@ and expr_try_ops c frame start stop_at lhs here rest = function
   | Infix_left f :: ops -> (
       match
         let g = f () in
-        g lhs (expr_climb c rest)
+        g lhs (expr_level c rest)
       with
       | v ->
           v
@@ -2608,7 +2608,7 @@ and expr_try_ops c frame start stop_at lhs here rest = function
       match
         let g = f () in
         if c.st.pos = stop_at then raise_notrace Expr_stop;
-        g lhs (rec_ (fun () -> expr_climb_right c here start))
+        g lhs (rec_ (fun () -> expr_level_right c here start))
       with
       | v ->
           v
@@ -2633,7 +2633,179 @@ and expr_next c frame start stop_at lhs here rest ops =
 
 let expression ~operand table () =
   let c = { st = get_state (); operand; table; prefixed = has_prefix table } in
-  expr_climb c table
+  expr_level c table
+
+type 'a prec_node =
+  | Prec_base of { min : int; value : 'a }
+  | Prec_node of {
+      min : int;
+      value : 'a;
+      build : 'a -> 'a -> 'a;
+      below : 'a prec_node;
+    }
+
+let[@inline] prec_min = function Prec_base b -> b.min | Prec_node n -> n.min
+
+let[@inline] prec_value = function
+  | Prec_base b ->
+      b.value
+  | Prec_node n ->
+      n.value
+
+let[@inline] prec_with top value =
+  match top with
+  | Prec_base b ->
+      Prec_base { b with value }
+  | Prec_node n ->
+      Prec_node { n with value }
+
+let rec prec_fold = function
+  | Prec_base b ->
+      b.value
+  | Prec_node n ->
+      prec_fold (prec_with n.below (n.build (prec_value n.below) n.value))
+
+let rec prec_reduce top prec =
+  match top with
+  | Prec_node n when prec < n.min ->
+      prec_reduce
+        (prec_with n.below (n.build (prec_value n.below) n.value))
+        prec
+  | _ ->
+      top
+
+let prec_shift st operand start top min build =
+  let value = operand () in
+  if st.pos = start then
+    top
+  else
+    Prec_node { min; value; build; below = top }
+
+let prec_tightest st operand start top build =
+  let value = operand () in
+  if st.pos = start then
+    top
+  else
+    prec_with top (build (prec_value top) value)
+
+let prec_prefix () =
+  invalid_arg "Parseff.precedence: operator returned a prefix operator"
+
+let prec_accept st operand start top prec = function
+  | Infix_left f ->
+      if prec = max_int then
+        prec_tightest st operand start top (f ())
+      else
+        prec_shift st operand start top (prec + 1) (f ())
+  | Infix_right f ->
+      prec_shift st operand start top prec (f ())
+  | Postfix f ->
+      let value = (f ()) (prec_value top) in
+      if st.pos = start then
+        top
+      else
+        prec_with top value
+  | Prefix _ ->
+      prec_prefix ()
+
+let prec_lower st frame start top prec =
+  let base = frame * frame_stride in
+  let flags = Array.unsafe_get st.frames (base + 1) in
+  let again =
+    st.diag_len <> Array.unsafe_get st.frames (base + 2)
+    || State.trail_depth st <> flags lsr frame_trail_shift
+  in
+  let after = st.pos in
+  if again then
+    restore_rewind_frame st frame
+  else
+    st.pos <- start;
+  match prec_reduce top prec with
+  | top ->
+      if again then
+        State.pop_rewind_frame st frame
+      else begin
+        State.reset_repeat_frame st base start;
+        st.pos <- after
+      end;
+      top
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let prec_stop st frame top =
+  restore_rewind_frame st frame;
+  match top with
+  | Prec_base b ->
+      State.pop_rewind_frame st frame;
+      b.value
+  | Prec_node _ -> (
+      match prec_fold top with
+      | value ->
+          State.pop_rewind_frame st frame;
+          value
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
+    )
+
+let prec_fail st frame top =
+  if State.frame_committed st frame then begin
+    State.pop_rewind_frame st frame;
+    raise_notrace Fail
+  end;
+  prec_stop st frame top
+
+let rec prec_loop st operand operator top =
+  let frame = State.push_rewind_frame st frame_barrier in
+  let start = st.pos in
+  match operator () with
+  | None ->
+      prec_stop st frame top
+  | Some (prec, op) ->
+      if prec >= prec_min top then begin
+        State.set_frame_kind st frame frame_repeat;
+        prec_try st operand operator frame start top prec op
+      end else
+        begin match (op, top) with
+        | Prefix _, _ ->
+            State.pop_rewind_frame st frame;
+            prec_prefix ()
+        | _, Prec_base _ ->
+            prec_stop st frame top
+        | _, Prec_node _ ->
+            let top = prec_lower st frame start top prec in
+            if st.frames_top = frame then
+              prec_loop st operand operator top
+            else if prec >= prec_min top then
+              prec_try st operand operator frame start top prec op
+            else
+              prec_stop st frame top
+      end
+  | exception Fail ->
+      prec_fail st frame top
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+and prec_try st operand operator frame start top prec op =
+  match prec_accept st operand start top prec op with
+  | next ->
+      if next == top then
+        prec_stop st frame top
+      else begin
+        State.pop_rewind_frame st frame;
+        prec_loop st operand operator next
+      end
+  | exception Fail ->
+      prec_fail st frame top
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let precedence ?(min = min_int) ~operand ~operator () =
+  let st = get_state () in
+  prec_loop st operand operator (Prec_base { min; value = operand () })
 
 let optional (p : unit -> 'a) () : 'a option =
   let st = get_state () in
@@ -4613,15 +4785,21 @@ let parse_source ?(max_depth = 128)
     ~consume ~diagnostics parser
 
 let parse_source_each ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     (src : Source.t) (parser : unit -> 'a) =
   check_backtrack_window ~name:"parse_source_each" backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let held = ref false in
   let element () =
     if have st 1 then
       Some (parser ())
     else
-      None
+      match pending with
+      | Some pending when pending () ->
+          held := true;
+          Some (parser ())
+      | _ ->
+          None
   in
   let forced = ref 0 in
   let ended = ref false in
@@ -4639,6 +4817,7 @@ let parse_source_each ?(max_depth = 128)
     end else begin
       st.far <- far_none;
       let start = st.pos in
+      held := false;
       raised := true;
       let r = run st ~consume:`Partial ~diagnostics element in
       raised := false;
@@ -4646,7 +4825,7 @@ let parse_source_each ?(max_depth = 128)
       | Ok None ->
           ended := true;
           Seq.Nil
-      | Ok (Some _) when st.pos = start ->
+      | Ok (Some _) when st.pos = start && not !held ->
           ended := true;
           Seq.Cons
             ( Error
