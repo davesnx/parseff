@@ -1479,6 +1479,7 @@ val parse_source_each :
   ?backtrack_window:int ->
   ?diagnostics:'d Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
+  ?pending:(unit -> bool) ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
@@ -1494,6 +1495,15 @@ val parse_source_each :
     [diagnostics] is emptied each time an element is forced, so read it before
     you force the next one. The sequence is ephemeral: forcing an element twice
     raises [Invalid_argument].
+
+    [parser] must not read past its value, unless you give [pending]. A parser
+    that keeps a lookahead, such as a lexer that reads the next token early, can
+    hold the start of the last value when no input remains. [pending] is called
+    before a run when no input remains, in the same run as [parser]. If it
+    returns [true], [parser] runs one more time, and that run may consume no
+    input. [pending] must return [false] after the held values are returned,
+    otherwise the sequence does not end. An [Error] ends the sequence also when
+    values are held.
 
     Example:
     {@ocaml[

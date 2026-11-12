@@ -12,6 +12,7 @@
 - **Add `lexeme` and `keyword`.** `lexeme p` skips whitespace after `p`. `keyword "let"` matches `let` but not `letter`.
 - **Add `integer`, `number` and `hex_integer`.** Parsers for decimal integers, JSON numbers and hexadecimal integers. For other formats, such as `2em`, write your own parser.
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
+- **Add `parse_source_each ?pending`.** A parser that keeps a lookahead, such as a lexer that reads the next token early, lost its last value: the sequence ended when no input remained. `~pending:(fun () -> ...)` is asked at that point; when it returns `true`, the parser runs one more time.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
 - **Add `context ~start`.** The position where the construct starts, for a parser that has already consumed the opening token.
 - **Add `?upto` to `fail` and `error`.** `~from` and `~upto` set the start and the end of the error range. Each defaults to the current position and can be before or after it. A reversed pair is swapped, so the range is never reversed.
