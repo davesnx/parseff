@@ -1100,8 +1100,8 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
     as [!] and [!=], list the longer token first. The loop stops after an
     operator and operand that together consume no input, as in {!fold_left}.
 
-    For a grammar with many precedence levels, {!climb} is faster: it looks for
-    the operator once after each operand.
+    For a grammar with many precedence levels, {!precedence} is faster: it looks
+    for the operator once after each operand.
 
     Example:
     {@ocaml[
@@ -1126,44 +1126,55 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
         number ()
     ]} *)
 
-val climb :
+val precedence :
   ?min:int ->
   operand:(unit -> 'a) ->
   operator:(unit -> (int * 'a operator) option) ->
   unit ->
   'a
-(** [climb ~operand ~operator] parses operands with [operand], joined by the
-    operators that [operator] finds. It does the work of {!expression} with one
-    operator lookup after each operand, where {!expression} tries each operator
-    of its table.
+(** [precedence ~operand ~operator] parses operands with [operand], joined by
+    the operators that [operator] finds. It does the work of {!expression} with
+    one operator lookup after each operand, where {!expression} tries each
+    operator of its table.
 
-    After each operand, [climb] calls [operator] once. [operator] looks at the
-    input and returns [Some (precedence, op)], or [None] when no operator is
-    next. A higher [precedence] binds tighter. [op] is {!infix_left},
-    {!infix_right} or {!postfix}; a {!prefix} raises [Invalid_argument].
+    After each operand, [precedence] calls [operator] once. [operator] looks at
+    the input and returns [Some (prec, op)], or [None] when no operator is next.
+    A higher [prec] binds tighter, and each [int] is a valid [prec]. [op] is
+    {!infix_left}, {!infix_right} or {!postfix}; a {!prefix} raises
+    [Invalid_argument].
 
-    When the operator belongs to the expression, [climb] runs the token parser
-    of [op] from the position where [operator] stopped. Thus [operator] can read
-    the token, and the token parser of [op] then reads nothing. Or [operator]
-    can only look at the token, and the token parser of [op] reads it. In all
-    other cases, [climb] goes back to the position before the call of
-    [operator]: when [operator] returns [None], when it fails, and when the
-    precedence is below [min].
+    There is one exception to the one call. When [operator] records a diagnostic
+    or sets a {!Ref}, and the operator that it returns binds less tightly than
+    the operator before it, [precedence] undoes those changes, runs the build
+    functions that are ready, and calls [operator] again at the same position.
+    Thus the changes of the build functions come first. An [operator] that only
+    looks at the input is called once.
+
+    When the operator belongs to the expression, [precedence] runs the token
+    parser of [op] from the position where [operator] stopped. Thus [operator]
+    can read the token, and the token parser of [op] then reads nothing. Or
+    [operator] can only look at the token, and the token parser of [op] reads
+    it. In all other cases, [precedence] goes back to the position before the
+    call of [operator]: when [operator] returns [None], when it fails, and when
+    [prec] is below [min].
 
     An [operator] that returns [None] adds nothing to the expected set of an
     error. Use {!peek_char}, or read a token and compare it, in place of one
     {!consume} for each operator.
 
-    [min] is the lowest precedence that [climb] accepts. The default accepts all
-    operators. Use it for a prefix operator: read the prefix token in [operand],
-    then parse its operand with [climb ~min] inside {!rec_}.
+    [min] is the lowest [prec] that [precedence] accepts. The default accepts
+    all operators. Use it for a prefix operator: read the prefix token in
+    [operand], then parse its operand with [precedence ~min] inside {!rec_}.
 
     A chain of operators uses no depth level of {!rec_}. As in {!expression},
     when the token parser of [op] or the operand after it fails, the expression
     stops before that operator, unless the token parser called {!commit}. The
     loop stops after an operator and operand that together consume no input. A
     build function runs when the operator after its right operand is known, with
-    {!position} at the end of that operand.
+    {!position} at the end of that operand. The build function of an
+    {!infix_left} operator with [prec] of [max_int] runs immediately after its
+    right operand, because no operator binds tighter. As in {!expression}, a
+    {!commit} in a build function has no effect.
 
     Example:
     {@ocaml[
@@ -1187,14 +1198,14 @@ val climb :
       | _ ->
           None
 
-    let rec expr () = climb ~operand ~operator ()
+    let rec expr () = precedence ~operand ~operator ()
 
     and operand () =
       skip_whitespace ();
       match peek_char () with
       | Some '-' ->
           ignore (any_char ());
-          -rec_ (climb ~min:3 ~operand ~operator)
+          -rec_ (precedence ~min:3 ~operand ~operator)
       | Some '(' ->
           ignore (any_char ());
           let e = rec_ expr in

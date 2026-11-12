@@ -2461,9 +2461,9 @@ type 'a expression = {
 
 exception Expr_stop
 
-let rec expr_climb c levels = expr_loop c levels (expr_operand c) (-1)
+let rec expr_level c levels = expr_loop c levels (expr_operand c) (-1)
 
-and expr_climb_right c here start =
+and expr_level_right c here start =
   let lhs = expr_operand c in
   expr_loop c here lhs
     ( if c.st.pos = start then
@@ -2508,7 +2508,7 @@ and expr_prefix_ops c frame start rest = function
           State.set_frame_kind c.st frame frame_choice;
           raise_notrace Fail
         end;
-        g (rec_ (fun () -> expr_climb c rest))
+        g (rec_ (fun () -> expr_level c rest))
       with
       | v ->
           v
@@ -2568,7 +2568,7 @@ and expr_try_ops c frame start stop_at lhs here rest = function
   | Infix_left f :: ops -> (
       match
         let g = f () in
-        g lhs (expr_climb c rest)
+        g lhs (expr_level c rest)
       with
       | v ->
           v
@@ -2579,7 +2579,7 @@ and expr_try_ops c frame start stop_at lhs here rest = function
       match
         let g = f () in
         if c.st.pos = stop_at then raise_notrace Expr_stop;
-        g lhs (rec_ (fun () -> expr_climb_right c here start))
+        g lhs (rec_ (fun () -> expr_level_right c here start))
       with
       | v ->
           v
@@ -2604,73 +2604,82 @@ and expr_next c frame start stop_at lhs here rest ops =
 
 let expression ~operand table () =
   let c = { st = get_state (); operand; table; prefixed = has_prefix table } in
-  expr_climb c table
+  expr_level c table
 
-type 'a climb_node =
-  | Climb_base of { min : int; value : 'a }
-  | Climb_node of {
+type 'a prec_node =
+  | Prec_base of { min : int; value : 'a }
+  | Prec_node of {
       min : int;
       value : 'a;
       build : 'a -> 'a -> 'a;
-      below : 'a climb_node;
+      below : 'a prec_node;
     }
 
-let[@inline] climb_min = function
-  | Climb_base b ->
-      b.min
-  | Climb_node n ->
-      n.min
+let[@inline] prec_min = function Prec_base b -> b.min | Prec_node n -> n.min
 
-let[@inline] climb_value = function
-  | Climb_base b ->
+let[@inline] prec_value = function
+  | Prec_base b ->
       b.value
-  | Climb_node n ->
+  | Prec_node n ->
       n.value
 
-let[@inline] climb_with top value =
+let[@inline] prec_with top value =
   match top with
-  | Climb_base b ->
-      Climb_base { b with value }
-  | Climb_node n ->
-      Climb_node { n with value }
+  | Prec_base b ->
+      Prec_base { b with value }
+  | Prec_node n ->
+      Prec_node { n with value }
 
-let rec climb_fold = function
-  | Climb_base b ->
+let rec prec_fold = function
+  | Prec_base b ->
       b.value
-  | Climb_node n ->
-      climb_fold (climb_with n.below (n.build (climb_value n.below) n.value))
+  | Prec_node n ->
+      prec_fold (prec_with n.below (n.build (prec_value n.below) n.value))
 
-let rec climb_reduce top prec =
+let rec prec_reduce top prec =
   match top with
-  | Climb_node n when prec < n.min ->
-      climb_reduce
-        (climb_with n.below (n.build (climb_value n.below) n.value))
+  | Prec_node n when prec < n.min ->
+      prec_reduce
+        (prec_with n.below (n.build (prec_value n.below) n.value))
         prec
   | _ ->
       top
 
-let climb_shift st operand start top min build =
+let prec_shift st operand start top min build =
   let value = operand () in
   if st.pos = start then
     top
   else
-    Climb_node { min; value; build; below = top }
+    Prec_node { min; value; build; below = top }
 
-let climb_accept st operand start top prec = function
+let prec_tightest st operand start top build =
+  let value = operand () in
+  if st.pos = start then
+    top
+  else
+    prec_with top (build (prec_value top) value)
+
+let prec_prefix () =
+  invalid_arg "Parseff.precedence: operator returned a prefix operator"
+
+let prec_accept st operand start top prec = function
   | Infix_left f ->
-      climb_shift st operand start top (prec + 1) (f ())
+      if prec = max_int then
+        prec_tightest st operand start top (f ())
+      else
+        prec_shift st operand start top (prec + 1) (f ())
   | Infix_right f ->
-      climb_shift st operand start top prec (f ())
+      prec_shift st operand start top prec (f ())
   | Postfix f ->
-      let value = (f ()) (climb_value top) in
+      let value = (f ()) (prec_value top) in
       if st.pos = start then
         top
       else
-        climb_with top value
+        prec_with top value
   | Prefix _ ->
-      invalid_arg "Parseff.climb: operator returned a prefix operator"
+      prec_prefix ()
 
-let climb_lower st frame start top prec =
+let prec_lower st frame start top prec =
   let base = frame * frame_stride in
   let flags = Array.unsafe_get st.frames (base + 1) in
   let again =
@@ -2682,7 +2691,7 @@ let climb_lower st frame start top prec =
     restore_rewind_frame st frame
   else
     st.pos <- start;
-  match climb_reduce top prec with
+  match prec_reduce top prec with
   | top ->
       if again then
         State.pop_rewind_frame st frame
@@ -2698,60 +2707,78 @@ let climb_lower st frame start top prec =
       State.pop_rewind_frame st frame;
       raise exn
 
-let rec climb_loop st operand operator top =
+let prec_stop st frame top =
+  restore_rewind_frame st frame;
+  match top with
+  | Prec_base b ->
+      State.pop_rewind_frame st frame;
+      b.value
+  | Prec_node _ -> (
+      match prec_fold top with
+      | value ->
+          State.pop_rewind_frame st frame;
+          value
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
+    )
+
+let prec_fail st frame top =
+  if State.frame_committed st frame then begin
+    State.pop_rewind_frame st frame;
+    raise_notrace Fail
+  end;
+  prec_stop st frame top
+
+let rec prec_loop st operand operator top =
   let frame = State.push_rewind_frame st frame_repeat in
   let start = st.pos in
   match operator () with
   | None ->
-      repeat_stop st frame;
-      top
+      prec_stop st frame top
   | Some (prec, op) ->
-      if prec >= climb_min top then
-        climb_try st operand operator frame start top prec op
+      if prec >= prec_min top then
+        prec_try st operand operator frame start top prec op
       else
-        begin match top with
-        | Climb_base _ ->
-            repeat_stop st frame;
-            top
-        | Climb_node _ ->
-            let top = climb_lower st frame start top prec in
+        begin match (op, top) with
+        | Prefix _, _ ->
+            State.pop_rewind_frame st frame;
+            prec_prefix ()
+        | _, Prec_base _ ->
+            prec_stop st frame top
+        | _, Prec_node _ ->
+            let top = prec_lower st frame start top prec in
             if st.frames_top = frame then
-              climb_loop st operand operator top
-            else if prec >= climb_min top then
-              climb_try st operand operator frame start top prec op
-            else begin
-              repeat_stop st frame;
-              top
-            end
+              prec_loop st operand operator top
+            else if prec >= prec_min top then
+              prec_try st operand operator frame start top prec op
+            else
+              prec_stop st frame top
       end
   | exception Fail ->
-      repeat_fail st frame;
-      top
+      prec_fail st frame top
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
 
-and climb_try st operand operator frame start top prec op =
-  match climb_accept st operand start top prec op with
+and prec_try st operand operator frame start top prec op =
+  match prec_accept st operand start top prec op with
   | next ->
-      if next == top then begin
-        repeat_stop st frame;
-        top
-      end else begin
+      if next == top then
+        prec_stop st frame top
+      else begin
         State.pop_rewind_frame st frame;
-        climb_loop st operand operator next
+        prec_loop st operand operator next
       end
   | exception Fail ->
-      repeat_fail st frame;
-      top
+      prec_fail st frame top
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
 
-let climb ?(min = min_int) ~operand ~operator () =
+let precedence ?(min = min_int) ~operand ~operator () =
   let st = get_state () in
-  climb_fold
-    (climb_loop st operand operator (Climb_base { min; value = operand () }))
+  prec_loop st operand operator (Prec_base { min; value = operand () })
 
 let optional (p : unit -> 'a) () : 'a option =
   let st = get_state () in

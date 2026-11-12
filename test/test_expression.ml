@@ -526,7 +526,7 @@ let test_guide_example () =
      'x'"
     (msg "(1+2x")
 
-module Climb = struct
+module Precedence = struct
   let lookups = ref 0
 
   let peeked table () =
@@ -556,7 +556,7 @@ module Climb = struct
       ]
 
   let rec expr operator () =
-    Parseff.climb ~operand:(operand operator) ~operator ()
+    Parseff.precedence ~operand:(operand operator) ~operator ()
 
   and operand operator () =
     ws ();
@@ -565,7 +565,7 @@ module Climb = struct
         ignore (Parseff.any_char ());
         let e =
           Parseff.rec_
-            (Parseff.climb ~min:3 ~operand:(operand operator) ~operator)
+            (Parseff.precedence ~min:3 ~operand:(operand operator) ~operator)
         in
         "(-" ^ e ^ ")"
     | Some '(' ->
@@ -672,7 +672,7 @@ module Climb = struct
           | _ ->
               None
         in
-        let p = Parseff.climb ~operand:Parseff.digit ~operator in
+        let p = Parseff.precedence ~operand:Parseff.digit ~operator in
         List.iter
           (fun (name, r) ->
             match r with
@@ -716,7 +716,7 @@ module Climb = struct
     let run kind =
       show
         (Parseff.parse ~consume:`Partial "12" (fun () ->
-             Parseff.climb
+             Parseff.precedence
                ~operand:(fun () ->
                  Parseff.optional Parseff.digit ()
                  |> Option.fold ~none:"_" ~some:string_of_int
@@ -731,11 +731,167 @@ module Climb = struct
   let test_prefix_rejected () =
     let operator () = Some (1, Parseff.prefix (fun () a -> a)) in
     Alcotest.check_raises "prefix"
-      (Invalid_argument "Parseff.climb: operator returned a prefix operator")
-      (fun () ->
+      (Invalid_argument
+         "Parseff.precedence: operator returned a prefix operator"
+      ) (fun () ->
         ignore
-          (Parseff.parse "1" (Parseff.climb ~operand:Parseff.digit ~operator))
+          (Parseff.parse "1"
+             (Parseff.precedence ~operand:Parseff.digit ~operator)
+          )
     )
+
+  let test_prefix_below_min () =
+    let operator () = Some (1, Parseff.prefix (fun () a -> a)) in
+    Alcotest.check_raises "prefix below min"
+      (Invalid_argument
+         "Parseff.precedence: operator returned a prefix operator"
+      ) (fun () ->
+        ignore
+          (Parseff.parse ~consume:`Partial "1+"
+             (Parseff.precedence ~min:2 ~operand:Parseff.digit ~operator)
+          )
+    )
+
+  let test_precedence_limits () =
+    let run left right input =
+      let operator () =
+        match Parseff.peek_char () with
+        | Some '-' ->
+            Some (left, Parseff.infix_left (binary "-"))
+        | Some '^' ->
+            Some (right, Parseff.infix_right (binary "^"))
+        | _ ->
+            None
+      in
+      show
+        (Parseff.parse input
+           (Parseff.precedence
+              ~operand:(fun () -> string_of_int (Parseff.digit ()))
+              ~operator
+           )
+        )
+    in
+    Alcotest.(check string)
+      "infix_left at max_int" "Ok ((1-2)-3)"
+      (run max_int min_int "1-2-3");
+    Alcotest.(check string)
+      "infix_left at max_int over infix_right" "Ok (1^((2-3)-4))"
+      (run max_int min_int "1^2-3-4");
+    Alcotest.(check string)
+      "infix_right at max_int" "Ok (1^(2^3))"
+      (run min_int max_int "1^2^3");
+    Alcotest.(check string)
+      "infix_right at min_int" "Ok (1^(2^3))"
+      (run max_int min_int "1^2^3");
+    Alcotest.(check string)
+      "infix_left at min_int" "Ok ((1-2)-3)"
+      (run min_int max_int "1-2-3");
+    Alcotest.(check string)
+      "both at max_int" "Ok ((1-2)^(3^4))"
+      (run max_int max_int "1-2^3^4")
+
+  let test_commit_in_build () =
+    let committing s () =
+      tok s ();
+      fun a b ->
+        Parseff.commit ();
+        "(" ^ a ^ s ^ b ^ ")"
+    in
+    let table =
+      Parseff.
+        [ [ infix_left (committing "+") ]; [ infix_left (committing "*") ] ]
+    in
+    let operator () =
+      ws ();
+      match Parseff.peek_char () with
+      | Some '+' ->
+          Some (1, Parseff.infix_left (committing "+"))
+      | Some '*' ->
+          Some (2, Parseff.infix_left (committing "*"))
+      | _ ->
+          None
+    in
+    let digit () =
+      ws ();
+      string_of_int (Parseff.digit ())
+    in
+    let by_table = Parseff.expression ~operand:digit table in
+    let by_lookup = Parseff.precedence ~operand:digit ~operator in
+    let run p input =
+      show
+        (Parseff.parse ~consume:`Partial input (fun () ->
+             Parseff.or_
+               (fun () ->
+                 let e = p () in
+                 let stop = Parseff.position () in
+                 ignore (Parseff.char ';');
+                 e ^ "@" ^ string_of_int stop
+               )
+               (fun () -> "other")
+               ()
+         )
+        )
+    in
+    let partial p =
+      show
+        (Parseff.parse ~consume:`Partial "1*2+)" (fun () ->
+             let e = p () in
+             e ^ "@" ^ string_of_int (Parseff.position ())
+         )
+        )
+    in
+    Alcotest.(check string) "expression stops" "Ok (1*2)@3" (partial by_table);
+    Alcotest.(check string) "precedence stops" "Ok (1*2)@3" (partial by_lookup);
+    List.iter
+      (fun (input, expected) ->
+        Alcotest.(check string)
+          ("expression " ^ input) expected (run by_table input);
+        Alcotest.(check string)
+          ("precedence " ^ input) expected (run by_lookup input)
+      )
+      [
+        ("1*2+);", "Ok other");
+        ("1*2+3;", "Ok ((1*2)+3)@5");
+        ("1*2+3", "Ok other");
+        ("1+2*3", "Ok other");
+        ("1*2", "Ok other");
+        ("1+2*)", "Ok other");
+      ]
+
+  let test_lookup_again () =
+    let run note =
+      let count = ref 0 in
+      let d = Parseff.Diagnostics.create () in
+      let cell = Parseff.Ref.create 0 in
+      let operator () =
+        incr count;
+        match Parseff.peek_char () with
+        | Some '+' ->
+            note d cell;
+            Some (1, Parseff.infix_left (binary "+"))
+        | Some '*' ->
+            Some (2, Parseff.infix_left (binary "*"))
+        | _ ->
+            None
+      in
+      let r =
+        Parseff.parse ~diagnostics:d "1*2+3"
+          (Parseff.precedence
+             ~operand:(fun () -> string_of_int (Parseff.digit ()))
+             ~operator
+          )
+      in
+      Printf.sprintf "%s, %d lookups" (show r) !count
+    in
+    Alcotest.(check string)
+      "no note" "Ok ((1*2)+3), 3 lookups"
+      (run (fun _ _ -> ()));
+    Alcotest.(check string)
+      "diagnostic" "Ok ((1*2)+3), 4 lookups"
+      (run (fun d _ -> Parseff.warn d "lookup"));
+    Alcotest.(check string)
+      "Ref.set" "Ok ((1*2)+3), 4 lookups"
+      (run (fun _ cell -> Parseff.Ref.set cell 1))
 
   let test_build_effects () =
     let run ~noisy input =
@@ -759,7 +915,7 @@ module Climb = struct
       in
       let r =
         Parseff.parse ~consume:`Partial ~diagnostics:d input (fun () ->
-            Parseff.climb
+            Parseff.precedence
               ~operand:
                 Parseff.(
                   fun () ->
@@ -852,7 +1008,8 @@ module Climb = struct
       let rec by_table () =
         Parseff.expression ~operand:(paren by_table) table ()
       and by_lookup () =
-        Parseff.climb ~operand:(paren by_lookup) ~operator:(peeked lookup) ()
+        Parseff.precedence ~operand:(paren by_lookup) ~operator:(peeked lookup)
+          ()
       and paren e () =
         ws ();
         Parseff.or_
@@ -900,14 +1057,14 @@ module Climb = struct
       | _ ->
           None
 
-    let rec expr () = climb ~operand ~operator ()
+    let rec expr () = precedence ~operand ~operator ()
 
     and operand () =
       skip_whitespace ();
       match peek_char () with
       | Some '-' ->
           ignore (any_char ());
-          -rec_ (climb ~min:3 ~operand ~operator)
+          -rec_ (precedence ~min:3 ~operand ~operator)
       | Some '(' ->
           ignore (any_char ());
           let e = rec_ expr in
@@ -944,6 +1101,11 @@ module Climb = struct
       test_case "commit in operator" `Quick test_commit_in_operator;
       test_case "operator and operand without progress" `Quick test_no_progress;
       test_case "prefix rejected" `Quick test_prefix_rejected;
+      test_case "prefix rejected below min" `Quick test_prefix_below_min;
+      test_case "precedence at max_int and min_int" `Quick
+        test_precedence_limits;
+      test_case "commit in build function" `Quick test_commit_in_build;
+      test_case "lookup with effects runs again" `Quick test_lookup_again;
       test_case "build effects" `Quick test_build_effects;
       test_case "same as expression" `Quick test_same_as_expression;
       test_case "doc example" `Quick test_doc_example;
@@ -1001,5 +1163,5 @@ let () =
           test_case "guide example" `Quick test_guide_example;
         ]
       );
-      ("climb", Climb.tests);
+      ("precedence", Precedence.tests);
     ]
