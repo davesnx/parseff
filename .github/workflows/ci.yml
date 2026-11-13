@@ -14,9 +14,6 @@ on:
 env:
   DUNE_PROFILE: release
   OCAMLRUNPARAM: b
-  PINS: |
-    odoc-parser https://github.com/davesnx/odoc.git#markdown-types
-    odoc https://github.com/davesnx/odoc.git#markdown-types
 
 permissions:
   contents: write
@@ -43,6 +40,7 @@ jobs:
           - ubuntu-latest
         ocaml-compiler:
           - 5.3.0
+          - 5.5.2
 
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +49,6 @@ jobs:
         uses: ml-in-barcelona/gh-ci-action@v1.2.0
         with:
           ocaml-compiler: ${{ matrix.ocaml-compiler }}
-          pins: ${{ env.PINS }}
           with-doc: true
           with-dev-setup: true
 
@@ -88,7 +85,6 @@ jobs:
         uses: ml-in-barcelona/gh-ci-action@v1.2.0
         with:
           ocaml-compiler: 5.3.0
-          pins: ${{ env.PINS }}
           with-doc: true
           with-dev-setup: true
 
@@ -141,7 +137,6 @@ jobs:
         uses: ml-in-barcelona/gh-ci-action@v1.2.0
         with:
           ocaml-compiler: 5.3.0
-          pins: ${{ env.PINS }}
           with-doc: true
           with-dev-setup: true
           extra-packages: dune-release

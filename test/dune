@@ -19,8 +19,10 @@
   test_range
   test_capture
   test_ref
+  test_ref_model
   test_source_each
   test_numbers
   test_sep_by_recover
+  test_peek
   test_differential)
  (libraries parseff alcotest re uucp))

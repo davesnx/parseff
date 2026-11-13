@@ -43,7 +43,7 @@ let () =
 Abort parsing with a message. The message is returned as `Error { kind = Failure msg; ... }`.
 
 ```ocaml
-val fail : ?from:int -> ?notes:note list -> string -> 'a
+val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
 ```
 ```ocaml
 let byte () =
@@ -105,7 +105,7 @@ address:1:4: [error] octet out of range
 Abort parsing with a custom error value. `Parseff.custom_error` is an extensible variant: declare your own cases and match them in `kind`.
 
 ```ocaml
-val error : ?from:int -> ?notes:note list -> custom_error -> 'a
+val error : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> custom_error -> 'a
 ```
 ```ocaml
 type Parseff.custom_error += Too_large of int | Negative of int
