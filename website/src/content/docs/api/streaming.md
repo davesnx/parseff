@@ -206,7 +206,7 @@ val of_seq : string Seq.t -> Source.t
 `Parseff.Source.of_function` creates a source from a low-level read function. The function signature matches POSIX `read(2)`: `read buf off len` fills `buf` starting at `off` with up to `len` bytes and returns the count actually written. Return `0` to signal EOF.
 
 ```ocaml
-val of_function : ?buf_size:int -> (bytes -> int -> int -> int) -> Source.t
+val of_function : ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> Source.t
 ```
 This is the low-level escape hatch for byte sources that natively fill a pre-allocated buffer. For most use cases, prefer `Parseff.Source.of_chunks` or `Parseff.Source.of_seq` which handle buffer management automatically.
 
@@ -224,10 +224,10 @@ This is the low-level escape hatch for byte sources that natively fill a pre-all
     Unix.recv socket buf off len []
   )
 ```
-The `~buf_size` parameter sets the size of the read buffer, which is the `len` of the first `read` call (default: 2040 bytes). After a read that fills the buffer, the buffer grows to 4096 bytes, or keeps `buf_size` when that is larger. A source made for one short message, such as an HTTP request head, allocates less with a `buf_size` near the size of the message:
+The `~initial_buffer_size` parameter sets the first size of the read buffer, which is the `len` of the first `read` call (default: 2040 bytes). After a read that fills the buffer, the buffer grows to 4096 bytes, or keeps `initial_buffer_size` when that is larger. A source made for one short message, such as an HTTP request head, allocates less with an `initial_buffer_size` near the size of the message:
 
 ```ocaml
-  let request_head = Parseff.Source.of_function ~buf_size:512 (fun buf off len ->
+  let request_head = Parseff.Source.of_function ~initial_buffer_size:512 (fun buf off len ->
     Unix.read fd buf off len
   )
 ```

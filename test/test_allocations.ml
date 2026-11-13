@@ -135,9 +135,9 @@ let request_head =
    Referer: https://www.example.com/items\r\n\
    \r\n"
 
-let head_source ?buf_size () =
+let head_source ?initial_buffer_size () =
   let pos = ref 0 in
-  Parseff.Source.of_function ?buf_size (fun buf off len ->
+  Parseff.Source.of_function ?initial_buffer_size (fun buf off len ->
       let n = min len (String.length request_head - !pos) in
       Bytes.blit_string request_head !pos buf off n;
       pos := !pos + n;
@@ -152,21 +152,24 @@ let rec head_lines count =
   else
     head_lines (count + 1)
 
-let parse_head ?buf_size () =
-  Parseff.parse_source ~consume:`Partial (head_source ?buf_size ()) (fun () ->
-      head_lines 0
+let parse_head ?initial_buffer_size () =
+  Parseff.parse_source ~consume:`Partial (head_source ?initial_buffer_size ())
+    (fun () -> head_lines 0
   )
 
 let test_small_buf_size () =
   Alcotest.(check (result int reject))
     "head lines" (Ok 11)
-    (parse_head ~buf_size:512 ());
+    (parse_head ~initial_buffer_size:512 ());
   let default = words_per_call (fun () -> parse_head ()) in
-  let small = words_per_call (fun () -> parse_head ~buf_size:512 ()) in
+  let small =
+    words_per_call (fun () -> parse_head ~initial_buffer_size:512 ())
+  in
   if small > default -. 150. then
     Alcotest.failf
-      "a request head allocated %.1f minor words per parse with ~buf_size:512 \
-       and %.1f with the default, expected at least 150 fewer"
+      "a request head allocated %.1f minor words per parse with \
+       ~initial_buffer_size:512 and %.1f with the default, expected at least \
+       150 fewer"
       small default
 
 let () =
@@ -182,7 +185,8 @@ let () =
       ( "source reads",
         [
           Alcotest.test_case "one byte per read" `Quick test_source_reads;
-          Alcotest.test_case "small buf_size" `Quick test_small_buf_size;
+          Alcotest.test_case "small initial_buffer_size" `Quick
+            test_small_buf_size;
         ]
       );
     ]

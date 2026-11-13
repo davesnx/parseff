@@ -1,6 +1,7 @@
 let chunked_source ?(chunk_size = 1) input =
   let pos = ref 0 in
-  Parseff.Source.of_function ?buf_size:Buf_size_env.buf_size (fun buf off len ->
+  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+    (fun buf off len ->
       let available = String.length input - !pos in
       let n = min (min chunk_size len) available in
       Bytes.blit_string input !pos buf off n;
@@ -888,11 +889,11 @@ let test_buf_size_sets_read_lengths () =
     String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
   in
   List.iter
-    (fun buf_size ->
+    (fun initial_buffer_size ->
       let pos = ref 0 in
       let lens = ref [] in
       let src =
-        Parseff.Source.of_function ~buf_size (fun buf off len ->
+        Parseff.Source.of_function ~initial_buffer_size (fun buf off len ->
             lens := len :: !lens;
             let n = min len (String.length input - !pos) in
             Bytes.blit_string input !pos buf off n;
@@ -900,16 +901,16 @@ let test_buf_size_sets_read_lengths () =
             n
         )
       in
-      let name = Printf.sprintf "buf_size %d" buf_size in
+      let name = Printf.sprintf "initial_buffer_size %d" initial_buffer_size in
       Alcotest.(check (result string reject))
         name (Ok input)
         (Parseff.parse_source src (fun () -> Parseff.take_while (fun _ -> true)));
       match List.rev !lens with
       | first :: rest ->
-          Alcotest.(check int) (name ^ ": first read") buf_size first;
+          Alcotest.(check int) (name ^ ": first read") initial_buffer_size first;
           Alcotest.(check (list int))
             (name ^ ": later reads")
-            (List.map (fun _ -> max buf_size 4096) rest)
+            (List.map (fun _ -> max initial_buffer_size 4096) rest)
             rest
       | [] ->
           Alcotest.fail "Expected reads"
@@ -918,10 +919,12 @@ let test_buf_size_sets_read_lengths () =
 
 let test_buf_size_rejected () =
   List.iter
-    (fun buf_size ->
-      match Parseff.Source.of_function ~buf_size (fun _ _ _ -> 0) with
+    (fun initial_buffer_size ->
+      match
+        Parseff.Source.of_function ~initial_buffer_size (fun _ _ _ -> 0)
+      with
       | _ ->
-          Alcotest.failf "buf_size %d accepted" buf_size
+          Alcotest.failf "initial_buffer_size %d accepted" initial_buffer_size
       | exception Invalid_argument _ ->
           ()
     )
@@ -1083,7 +1086,7 @@ let test_regex_lookbehind_window_accounting () =
 let test_regex_readahead_half_window () =
   let total = ref 0 in
   let src =
-    Parseff.Source.of_function ?buf_size:Buf_size_env.buf_size
+    Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
       (fun buf off len ->
         let remaining = 5000 - !total in
         let n = min (min 10 len) remaining in
@@ -1907,7 +1910,7 @@ let () =
             test_large_input_grows_read_buffer;
         ]
       );
-      ( "Source.of_function ~buf_size",
+      ( "Source.of_function ~initial_buffer_size",
         [
           test_case "sets the read lengths" `Quick
             test_buf_size_sets_read_lengths;

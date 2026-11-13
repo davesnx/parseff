@@ -1405,18 +1405,20 @@ module Source : sig
       [buf_size] controls the internal read buffer (default 4096). Raises
       [Invalid_argument] if [buf_size] is less than [1]. *)
 
-  val of_function : ?buf_size:int -> (bytes -> int -> int -> int) -> t
-  (** [of_function ?buf_size read] creates a source that calls
+  val of_function :
+    ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> t
+  (** [of_function ?initial_buffer_size read] creates a source that calls
       [read buf off len] to obtain up to [len] bytes starting at offset [off] in
       [buf]. Must return the number of bytes actually read; return [0] to signal
       EOF. A result outside [0..len] raises [Invalid_argument] from the parse.
 
-      [buf_size] is the size of the read buffer: the first [read] gets a [len]
-      of at most [buf_size] (default 2040, small enough for the minor heap).
-      After a read that fills the buffer, the buffer grows to the larger of
-      [buf_size] and 4096, and keeps that size. A [buf_size] near the size of a
-      short message, such as a request head, allocates less per source. Raises
-      [Invalid_argument] if [buf_size] is less than [1].
+      [initial_buffer_size] is the first size of the read buffer: the first
+      [read] gets a [len] of at most [initial_buffer_size] (default 2040, small
+      enough for the minor heap). After a read that fills the buffer, the buffer
+      grows to the larger of [initial_buffer_size] and 4096, and keeps that
+      size. An [initial_buffer_size] near the size of a short message, such as a
+      request head, allocates less per source. Raises [Invalid_argument] if
+      [initial_buffer_size] is less than [1].
 
       This is the low-level escape hatch for byte sources that fill a
       pre-allocated buffer, such as [Unix.read] or [Unix.recv]. For most use

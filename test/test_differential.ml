@@ -339,7 +339,8 @@ let window_exceeded = "backtrack window exceeded"
 let chunked input sizes =
   let pos = ref 0 in
   let turn = ref 0 in
-  Parseff.Source.of_function ?buf_size:Buf_size_env.buf_size (fun buf off len ->
+  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+    (fun buf off len ->
       let chunk = List.nth sizes (!turn mod List.length sizes) in
       incr turn;
       let n = min (min chunk len) (String.length input - !pos) in
