@@ -147,6 +147,26 @@ let peek_open_paren () =
 Useful for context-sensitive decisions: peek at what's coming, then choose which parser to run.
 
 
+### `peek_with` and `skip_to`
+
+`Parseff.peek_with` is `Parseff.look_ahead` that also returns the position where the parser stopped. `Parseff.skip_to` moves the cursor forward to that position, so the input is not read a second time.
+
+```ocaml
+val peek_with : (unit -> 'a) -> 'a * int
+```
+```ocaml
+val skip_to : int -> unit
+```
+```ocaml
+let keyword_or_name () =
+  let word, stop = Parseff.peek_with name in
+  if is_keyword word then Parseff.fail "expected a name"
+  else begin
+    Parseff.skip_to stop;
+    word
+  end
+```
+
 ## Error labeling
 
 
