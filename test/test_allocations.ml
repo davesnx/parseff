@@ -121,6 +121,54 @@ let test_source_reads () =
       "parse_source allocated %.6f minor words per read, expected at most 3"
       actual
 
+let request_head =
+  "GET /api/v1/items?page=2&limit=50 HTTP/1.1\r\n\
+   Host: api.example.com\r\n\
+   User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101\r\n\
+   Accept: application/json, text/plain, */*\r\n\
+   Accept-Language: en-US,en;q=0.5\r\n\
+   Accept-Encoding: gzip, deflate, br\r\n\
+   Connection: keep-alive\r\n\
+   Cookie: session=0123456789abcdef0123456789abcdef; theme=dark\r\n\
+   Cache-Control: no-cache\r\n\
+   X-Request-Id: 7f3c2a10-4b5e-4c1d-9a8b-0e6f5d4c3b2a\r\n\
+   Referer: https://www.example.com/items\r\n\
+   \r\n"
+
+let head_source ?buf_size () =
+  let pos = ref 0 in
+  Parseff.Source.of_function ?buf_size (fun buf off len ->
+      let n = min len (String.length request_head - !pos) in
+      Bytes.blit_string request_head !pos buf off n;
+      pos := !pos + n;
+      n
+  )
+
+let rec head_lines count =
+  let line = Parseff.take_while (fun c -> c <> '\r') in
+  ignore (Parseff.consume "\r\n");
+  if line = "" then
+    count
+  else
+    head_lines (count + 1)
+
+let parse_head ?buf_size () =
+  Parseff.parse_source ~consume:`Partial (head_source ?buf_size ()) (fun () ->
+      head_lines 0
+  )
+
+let test_small_buf_size () =
+  Alcotest.(check (result int reject))
+    "head lines" (Ok 11)
+    (parse_head ~buf_size:512 ());
+  let default = words_per_call (fun () -> parse_head ()) in
+  let small = words_per_call (fun () -> parse_head ~buf_size:512 ()) in
+  if small > default -. 150. then
+    Alcotest.failf
+      "a request head allocated %.1f minor words per parse with ~buf_size:512 \
+       and %.1f with the default, expected at least 150 fewer"
+      small default
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -132,6 +180,9 @@ let () =
         ]
       );
       ( "source reads",
-        [ Alcotest.test_case "one byte per read" `Quick test_source_reads ]
+        [
+          Alcotest.test_case "one byte per read" `Quick test_source_reads;
+          Alcotest.test_case "small buf_size" `Quick test_small_buf_size;
+        ]
       );
     ]

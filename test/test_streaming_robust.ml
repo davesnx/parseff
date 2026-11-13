@@ -34,7 +34,7 @@ let run () =
 
 let yielding_source ?(chunk = 2) data =
   let p = ref 0 in
-  Parseff.Source.of_function (fun b o len ->
+  Parseff.Source.of_function ?buf_size:Buf_size_env.buf_size (fun b o len ->
       perform Yield;
       let n = min (min chunk len) (String.length data - !p) in
       Bytes.blit_string data !p b o n;
@@ -179,7 +179,7 @@ let test_location_after_compaction () =
   in
   let chunked =
     let p = ref 0 in
-    Parseff.Source.of_function (fun b o len ->
+    Parseff.Source.of_function ?buf_size:Buf_size_env.buf_size (fun b o len ->
         let n = min (min 100 len) (String.length text - !p) in
         Bytes.blit_string text !p b o n;
         p := !p + n;
@@ -194,7 +194,7 @@ let test_location_after_compaction () =
 
 let fn_src data chunk =
   let p = ref 0 in
-  Parseff.Source.of_function (fun b o l ->
+  Parseff.Source.of_function ?buf_size:Buf_size_env.buf_size (fun b o l ->
       let n = min (min l chunk) (String.length data - !p) in
       Bytes.blit_string data !p b o n;
       p := !p + n;

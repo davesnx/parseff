@@ -301,10 +301,11 @@ module Source = struct
       ~read:(fun buf off len -> input ic buf off len)
       ~eof:false ~tmp:(Bytes.create buf_size) ~tmp_cap:buf_size
 
-  let of_function read =
-    make ~initial:"" ~read ~eof:false
-      ~tmp:(Bytes.create young_buf_size)
-      ~tmp_cap:default_buf_size
+  let of_function ?(buf_size = young_buf_size) read =
+    if buf_size < 1 then
+      invalid_arg "Parseff.Source.of_function: buf_size must be at least 1";
+    make ~initial:"" ~read ~eof:false ~tmp:(Bytes.create buf_size)
+      ~tmp_cap:(imax buf_size default_buf_size)
 
   let of_chunks read_chunk =
     let pending = ref "" in
