@@ -6,23 +6,26 @@
     {1 Quick Start}
 
     {@ocaml[
-      let number () =
-        let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
-        Char.code c - Char.code '0'
+    let digit_value () =
+      let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
+      Char.code c - Char.code '0'
 
-      let ip_address () =
-        let a = number () in
-        let _ = Parseff.consume "." in
-        let b = number () in
-        let _ = Parseff.consume "." in
-        let c = number () in
-        let _ = Parseff.consume "." in
-        let d = number () in
-        (a, b, c, d)
+    let ip_address () =
+      let a = digit_value () in
+      let _ = Parseff.consume "." in
+      let b = digit_value () in
+      let _ = Parseff.consume "." in
+      let c = digit_value () in
+      let _ = Parseff.consume "." in
+      let d = digit_value () in
+      (a, b, c, d)
 
-      match Parseff.parse "192.168.1.1" ip_address with
-      | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-      | Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
+    let () =
+      match Parseff.parse "1.2.3.4" ip_address with
+      | Ok (a, b, c, d) ->
+          Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
+      | Error e ->
+          prerr_endline (Parseff.render_error ~name:"address" e)
     ]} *)
 
 (** {1 Span Type} *)
@@ -107,6 +110,8 @@ type custom_error +=
             answer "header too large" and not "bad request". Unstable: this case
             can change in a 1.x release. *)
 
+(** What failed. These five cases are final until 2.0, so a match on all of them
+    needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
@@ -286,7 +291,10 @@ end
     abandoned, so a backtrack shows as an [Enter] before the end of the previous
     event. A [Captured] event shows a failure that {!val:capture},
     {!val:recover} or {!val:sep_by_recover} caught, so the parse continued.
-    Positions are absolute byte offsets. *)
+    Positions are absolute byte offsets.
+
+    A 1.x release can add events: end a match on [trace_event] with a [_] case.
+*)
 type trace_event = private
   | Enter of { name : string; pos : int }
       (** A {!val:context} named [name] started at byte offset [pos]. *)
@@ -310,7 +318,10 @@ val print_trace : Format.formatter -> trace_event -> unit
 
     Example:
     {@ocaml[
-    let _ = parse ~trace:(print_trace Format.std_formatter) input parser
+    let _ =
+      parse ~trace:(print_trace Format.std_formatter) "hello" (fun () ->
+          consume "hello"
+      )
     ]} *)
 
 (** {1 Runner} *)
@@ -387,8 +398,8 @@ val consume : string -> string
     Example:
     {@ocaml[
     let parser () =
-      consume "hello";
-      consume " ";
+      let _ = consume "hello" in
+      let _ = consume " " in
       consume "world"
     ]} *)
 
@@ -420,7 +431,7 @@ val regex : Re.t -> regex
 
     Example:
     {@ocaml[
-    let identifier_re = regex (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*")
+    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
     ]} *)
 
 val match_regex : ?label:string -> regex -> string
@@ -448,7 +459,7 @@ val match_regex : ?label:string -> regex -> string
 
     Example:
     {@ocaml[
-    let identifier_re = regex (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*")
+    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
     let identifier () = match_regex ~label:"identifier" identifier_re
     ]} *)
 
@@ -541,6 +552,8 @@ val fail :
     given. {!render_error} underlines up to the end of the line it can show.
 
     {@ocaml[
+    let is_digit c = c >= '0' && c <= '9'
+
     let byte () =
       let start = position () in
       let n = int_of_string (take_while ~at_least:1 is_digit ~label:"digit") in
@@ -583,21 +596,27 @@ val error :
     The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
     of {!type:custom_error} for rich error reporting:
     {@ocaml[
-      type custom_error += Out_of_range of int | Negative of int
+    type custom_error += Out_of_range of int | Negative of int
 
-      let number () =
-        let n = parse_int () in
-        if n > 255 then error (Out_of_range n)
-        else if n < 0 then error (Negative n)
-        else n
+    let octet () =
+      let n = integer () in
+      if n > 255 then
+        error (Out_of_range n)
+      else if n < 0 then
+        error (Negative n)
+      else
+        n
 
-      match parse input number with
-      | Ok n -> Printf.printf "Got %d\n" n
+    let () =
+      match parse "300" octet with
+      | Ok n ->
+          Printf.printf "Got %d\n" n
       | Error { kind = Custom (Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
       | Error { kind = Custom (Negative n); _ } ->
           Printf.printf "%d is negative\n" n
-      | Error _ -> Printf.printf "Parse error\n"
+      | Error _ ->
+          Printf.printf "Parse error\n"
     ]}
 
     {b Note:} Custom errors from [error] pass through {!val:expect} and
@@ -643,7 +662,7 @@ val with_range : (unit -> 'a) -> 'a * range
     Example:
     {@ocaml[
     let checked_number () =
-      let n, range = with_range number in
+      let n, range = with_range integer in
       if n > 255 then
         fail ~notes:[ { at = Some range; text = "this value" } ] "out of range";
       n
@@ -686,6 +705,8 @@ val end_of_input : unit -> unit
 
     Example:
     {@ocaml[
+    let some_parser () = consume "hello"
+
     let complete_parser () =
       let result = some_parser () in
       end_of_input ();
@@ -700,6 +721,10 @@ val peek_char : unit -> char option
 
     Example:
     {@ocaml[
+    let parse_array () = `Array (consume "[]")
+    let parse_string () = `String (consume "\"\"")
+    let parse_number () = `Number (number ())
+
     let value () =
       match peek_char () with
       | Some '[' ->
@@ -730,11 +755,11 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
     let bool_parser () =
       or_
         (fun () ->
-          consume "true";
+          let _ = consume "true" in
           true
         )
         (fun () ->
-          consume "false";
+          let _ = consume "false" in
           false
         )
         ()
@@ -872,7 +897,7 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
           warn ~pos:e.range.start errors e;
           skip_while (fun c -> c <> ';');
           let _ = char ';' in
-          Hole
+          `Hole
     ]} *)
 
 val recover :
@@ -901,7 +926,7 @@ val recover :
     For example, to keep the errors of [parser] and record [e] only when there
     are none:
     {@ocaml[
-    let record e inner =
+    let record errors e inner =
       List.iter
         (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
         inner;
@@ -934,7 +959,7 @@ val recover :
               ignore (optional (fun () -> char ';') ())
             )
             statement
-            (fun _ -> Hole)
+            (fun _ -> `Hole)
         )
         ()
     ]} *)
@@ -988,7 +1013,7 @@ val sep_by_recover :
         sep_by_recover errors
           ~sync:(skip_nested [ ('{', '}') ] (fun c -> c = ','))
           field separator
-          (fun _ -> Hole)
+          (fun _ -> `Hole)
           ()
       in
       skip_whitespace ();
@@ -1007,6 +1032,10 @@ val sep_by_recover :
 
     Example:
     {@ocaml[
+    let expr () =
+      skip_whitespace ();
+      `Int (integer ())
+
     let arguments errors () =
       let _ = char '(' in
       let args =
@@ -1017,12 +1046,12 @@ val sep_by_recover :
             ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
             expr
             (fun () -> char ',')
-            (fun _ -> Hole)
+            (fun _ -> `Hole)
             ()
       in
       let _ = char ')' in
       args
-    (* "(1, [2 3], 4)" -> [1; Hole; 4], with one error recorded *)
+    (* "(1, [2 3], 4)" -> [`Int 1; `Hole; `Int 4], with one error recorded *)
     ]} *)
 
 val skip_nested :
@@ -1043,17 +1072,22 @@ val skip_nested :
     Each kind of bracket is matched with its own kind. A closing character that
     does not match the innermost open bracket closes the nearest open bracket of
     its kind, and the brackets inside that one are taken as not closed. In
-    {v [1 2), 3 v} the closing parenthesis has no opening parenthesis, so the
-    skip stops before it.
+    [\[1 2), 3] the closing parenthesis has no opening parenthesis, so the skip
+    stops before it.
 
-    [~atom] is a parser for a piece of input that the skip must take as a
-    whole, such as a string literal or a comment, so that a bracket or a
-    separator inside it is not counted. The skip tries [atom] at each position;
-    where [atom] fails or consumes nothing, the skip reads the next character.
-    The failures of [atom] do not appear in later errors.
+    [~atom] is a parser for a piece of input that the skip must take as a whole,
+    such as a string literal or a comment, so that a bracket or a separator
+    inside it is not counted. The skip tries [atom] at each position; where
+    [atom] fails or consumes nothing, the skip reads the next character. The
+    failures of [atom] do not appear in later errors.
 
     Example:
     {@ocaml[
+    let string_literal () =
+      let _ = char '"' in
+      skip_while (fun c -> c <> '"');
+      ignore (char '"')
+
     let skip_argument =
       skip_nested ~atom:string_literal
         [ ('(', ')'); ('[', ']'); ('{', '}') ]
@@ -1142,13 +1176,15 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead} or {!peek_with}.
+    backtracks after the cut. It stops at a {!look_ahead}, {!peek_with} or
+    {!capture}. With [capture ~release:true], it moves the rewind point of the
+    [capture] to the position of the cut and continues.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
     failure. If the context ends without failing, the outer frames stay as they
-    were. Without an enclosing {!val:context}, [cut ()] seals every frame down
-    to the first {!look_ahead}.
+    were. Without an enclosing {!val:context}, [cut ()] seals the frames down to
+    the start of the parse, and stops at the same places.
 
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
@@ -1163,7 +1199,7 @@ val cut : unit -> unit
           (* from here on, a failure is an error of this statement *)
           let name = identifier () in
           let _ = consume "=" in
-          (name, expression ())
+          (name, expr ())
       )
     ]} *)
 
@@ -1174,13 +1210,18 @@ val rec_ : (unit -> 'a) -> 'a
 
     Example:
     {@ocaml[
-      let rec json () = Parseff.rec_ (fun () ->
-        Parseff.one_of [ array_parser; null_parser; ... ] ()
-      )
-      and array_parser () =
-        let _ = Parseff.consume "\[" in
-        let elements = ... json () ... in
-        ...
+    let rec json () =
+      Parseff.rec_ (fun () -> Parseff.one_of [ array_parser; null_parser ] ())
+
+    and array_parser () =
+      let _ = Parseff.consume "[" in
+      let elements = Parseff.sep_by json (fun () -> Parseff.char ',') () in
+      let _ = Parseff.consume "]" in
+      `Array elements
+
+    and null_parser () =
+      let _ = Parseff.consume "null" in
+      `Null
     ]} *)
 
 val expect : string -> (unit -> 'a) -> 'a
@@ -1205,7 +1246,7 @@ val expect : string -> (unit -> 'a) -> 'a
 
     let octet () =
       expect "an octet (0-255)" (fun () ->
-          let n = number () in
+          let n = integer () in
           if n > 255 then
             error (Out_of_range n)
           else
@@ -1230,7 +1271,7 @@ val one_of : (unit -> 'a) list -> unit -> 'a
 
     Example:
     {@ocaml[
-    let keyword () =
+    let reserved_word () =
       one_of
         [
           (fun () -> consume "if");
@@ -1251,6 +1292,10 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Example:
     {@ocaml[
+    let number_parser () = `Number (number ())
+    let string_parser () = `String (consume "\"\"")
+    let bool_parser () = `Bool (bool_parser ())
+
     let literal () =
       one_of_labeled
         [
@@ -1359,46 +1404,129 @@ val fold_right :
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
 
-type 'a operator
-(** An operator for {!expression}. Each constructor takes a parser for the
-    operator token. The parser returns the function that builds the result, as
-    the [op] argument of {!fold_left} does. *)
+type ('a, +'kind) operator
+(** An operator for {!expression} and {!precedence}. Each constructor takes a
+    parser for the operator token. The parser returns the build function, as the
+    [op] argument of {!fold_left} does.
 
-val infix_left : (unit -> 'a -> 'a -> 'a) -> 'a operator
+    ['kind] tells where the operator goes: [`Infix], [`Prefix] or [`Postfix].
+    {!expression} takes all three. {!precedence} reads prefix operators in its
+    [operand], so a {!prefix} operator in its [operator] is a type error.
+
+    When you write the type, keep ['kind] open, or the table does not
+    type-check: [(int, [ `Infix ]) operator] and [(int, [ `Prefix ]) operator]
+    have no common type. In an implementation, write [(int, _) operator]. In a
+    signature, write [(int, [> `Infix ]) operator]. A record field or a table
+    that holds operators of every kind takes the full set
+    [(int, [ `Infix | `Prefix | `Postfix ]) operator].
+
+    Example:
+    {@ocaml[
+    module Ops : sig
+      val add : (int, [> `Infix ]) operator
+      val neg : (int, [> `Prefix ]) operator
+    end = struct
+      let add : (int, _) operator =
+        infix_left (fun () ->
+            ignore (char '+');
+            ( + )
+        )
+
+      let neg : (int, _) operator =
+        prefix (fun () ->
+            ignore (char '-');
+            ( ~- )
+        )
+    end
+
+    type grammar = {
+      table : (int, [ `Infix | `Prefix | `Postfix ]) operator list list;
+    }
+
+    let grammar = { table = [ [ Ops.add ]; [ Ops.neg ] ] }
+
+    let expr () =
+      expression
+        ~operand:(fun () -> Char.code (digit ()) - Char.code '0')
+        grammar.table ()
+    ]} *)
+
+val infix_left : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
 (** [infix_left op] is a left-associative binary operator: [1-2-3] is [(1-2)-3].
 *)
 
-val infix_right : (unit -> 'a -> 'a -> 'a) -> 'a operator
+val infix_right : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
 (** [infix_right op] is a right-associative binary operator: [2^3^2] is
     [2^(3^2)]. *)
 
-val prefix : (unit -> 'a -> 'a) -> 'a operator
+val prefix : (unit -> 'a -> 'a) -> ('a, [> `Prefix ]) operator
 (** [prefix op] is a unary operator before its operand. It can repeat: [- - 1]
     is [-(-1)]. Its operand holds only operators of higher precedence, so with
-    [-] below [^], [-2^2] is [-(2^2)]. *)
+    [-] below [^], [-2^2] is [-(2^2)]. Only {!expression} takes it. *)
 
-val postfix : (unit -> 'a -> 'a) -> 'a operator
+val postfix : (unit -> 'a -> 'a) -> ('a, [> `Postfix ]) operator
 (** [postfix op] is a unary operator after its operand. It can repeat: [3!!] is
     [(3!)!]. *)
 
-val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression :
+  operand:(unit -> 'a) ->
+  ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
+  unit ->
+  'a
 (** [expression ~operand table] parses operands with [operand], joined by the
-    operators of [table].
+    operators of [table]. It is {!precedence} with a lookup made from [table]:
+    the operators of level [i] have the precedence [i].
 
     [table] lists the precedence levels from the lowest to the highest
     precedence. [operand] parses an operand; for parentheses, it calls the
     expression parser again inside {!rec_}. [expression] skips no whitespace:
     skip it in the token parsers and in [operand].
 
-    The operators are tried in table order. When one token starts another, such
-    as [!] and [!=], list the longer token first. The loop stops after an
-    operator and operand that together consume no input, as in {!fold_left}.
+    After each operand, [expression] runs token parsers until one succeeds. It
+    starts with the operators that bind to that operand: the levels above the
+    pending operator before it, and the level of that operator when it is an
+    {!infix_right}. When none of them matches, it runs the build function of
+    that pending operator and moves out to the operators that bind to its
+    result, and so on down to the lowest level. Each group is tried in table
+    order. Each token parser runs at most once for one operand, and the token
+    parser that succeeds is not run again: its diagnostics, {!Ref} changes and
+    {!commit} stay. The token parsers that fail add to the expected set of an
+    error.
 
-    For a grammar with many precedence levels, {!precedence} is faster: it looks
-    for the operator once after each operand.
+    When the token parser or the operand after it fails, [expression] continues
+    with the next operator in this order at the same position, and stops before
+    the operator when no other operator matches. Thus [<] can come before [<<]
+    in the table: in [1<<2], the operand after [<] fails, and [<<] is next. A
+    postfix operator has no operand, so when one token starts another, such as
+    [!] and [!=], list the longer token first. A {!commit} in a token parser
+    stops this search: when that operator or a later step fails, [expression]
+    fails.
+
+    A step whose operator and right operand together consume no input ends its
+    group: [expression] goes back before that operator and moves out to the
+    lower groups. The right operand includes the operators that bind to it: with
+    an operand that can be empty, an infix operator [""] below a postfix [^]
+    reads [2^] as [""] applied to [2] and to the empty operand with [^].
+
+    Where an operand starts, [expression] tries the {!prefix} operators in table
+    order, then [operand]. The operand of a prefix operator uses one depth level
+    of {!rec_}. A chain of infix operators uses no depth level. When a build
+    function fails, the expression fails, as in {!precedence}.
 
     Example:
     {@ocaml[
+    let token c () =
+      skip_whitespace ();
+      ignore (char c);
+      skip_whitespace ()
+
+    let op c f () =
+      token c ();
+      f
+    let add, sub, mul, div =
+      (op '+' ( +. ), op '-' ( -. ), op '*' ( *. ), op '/' ( /. ))
+    let neg, pow = (op '-' Float.neg, op '^' Float.pow)
+
     let table =
       [
         [ infix_left add; infix_left sub ];
@@ -1423,19 +1551,20 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
 val precedence :
   ?min:int ->
   operand:(unit -> 'a) ->
-  operator:(unit -> (int * 'a operator) option) ->
+  operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
   unit ->
   'a
 (** [precedence ~operand ~operator] parses operands with [operand], joined by
-    the operators that [operator] finds. It does the work of {!expression} with
-    one operator lookup after each operand, where {!expression} tries each
-    operator of its table.
+    the operators that [operator] finds. {!expression} uses the same loop. Where
+    {!expression} runs the token parsers of its table, [precedence] calls
+    [operator] once after each operand. For a grammar with many precedence
+    levels, this is faster.
 
-    After each operand, [precedence] calls [operator] once. [operator] looks at
-    the input and returns [Some (prec, op)], or [None] when no operator is next.
-    A higher [prec] binds tighter, and each [int] is a valid [prec]. [op] is
-    {!infix_left}, {!infix_right} or {!postfix}; a {!prefix} raises
-    [Invalid_argument].
+    [operator] looks at the input and returns [Some (prec, op)], or [None] when
+    no operator is next. A higher [prec] binds tighter, and each [int] is a
+    valid [prec]. [op] is {!infix_left}, {!infix_right} or {!postfix}. For a
+    prefix operator, read the token in [operand], then parse its operand with
+    [precedence ~min] inside {!rec_}.
 
     There is one exception to the one call. When [operator] records a diagnostic
     or sets a {!Ref}, and the operator that it returns binds less tightly than
@@ -1462,25 +1591,19 @@ val precedence :
     operator, call {!commit} in the token parser of [op].
 
     [min] is the lowest [prec] that [precedence] accepts. The default accepts
-    all operators. Use it for a prefix operator: read the prefix token in
-    [operand], then parse its operand with [precedence ~min] inside {!rec_}.
+    all operators.
 
-    A chain of operators uses no depth level of {!rec_}. As in {!expression},
-    when the token parser of [op] or the operand after it fails, the expression
-    stops before that operator, unless the token parser called {!commit}. The
-    loop stops after an operator and operand that together consume no input. A
-    build function runs when the operator after its right operand is known, with
-    {!position} at the end of that operand. The build function of an
-    {!infix_left} operator with [prec] of [max_int] runs immediately after its
-    right operand, because no operator binds tighter. As in {!expression}, a
+    A chain of operators uses no depth level of {!rec_}. When the token parser
+    of [op] or the operand after it fails, the expression stops before that
+    operator, unless the token parser called {!commit}; then [precedence] fails.
+    The loop stops after an operator and operand that together consume no input.
+
+    A build function runs when the operator after its right operand is known,
+    with {!position} at the end of that operand. A postfix build function, and
+    the build function of an {!infix_left} operator with [prec] of [max_int],
+    run immediately: no operator binds tighter. When a build function fails, the
+    expression fails at that position; it does not stop before the operator. A
     {!commit} in a build function has no effect.
-
-    One difference from {!expression}: when a build function fails,
-    {!expression} stops before that operator. In [precedence], an infix build
-    function runs after the next lookup, so its failure is the failure of the
-    full [precedence] call. A {!postfix} build function, and the build function
-    of an {!infix_left} operator with [prec] of [max_int], run immediately, and
-    their failure stops the expression before that operator.
 
     Example:
     {@ocaml[
@@ -1550,8 +1673,7 @@ val digit : unit -> char
 
     Example:
     {@ocaml[
-      let d = digit () in  (* parses "7" -> '7' *)
-      ...
+    let () = assert (parse "7" digit = Ok '7')
     ]} *)
 
 val integer : unit -> int
@@ -1560,8 +1682,7 @@ val integer : unit -> int
 
     Example:
     {@ocaml[
-      let n = integer () in  (* parses "-42" -> -42 *)
-      ...
+    let () = assert (parse "-42" integer = Ok (-42))
     ]} *)
 
 val number : unit -> float
@@ -1576,8 +1697,7 @@ val number : unit -> float
 
     Example:
     {@ocaml[
-      let x = number () in  (* parses "6.02e23" -> 6.02e23 *)
-      ...
+    let () = assert (parse "6.02e23" number = Ok 6.02e23)
     ]} *)
 
 val hex_integer : unit -> int
@@ -1587,8 +1707,7 @@ val hex_integer : unit -> int
 
     Example:
     {@ocaml[
-      let n = hex_integer () in  (* parses "ff" -> 255 *)
-      ...
+    let () = assert (parse "ff" hex_integer = Ok 255)
     ]} *)
 
 val letter : unit -> char
@@ -1808,7 +1927,7 @@ module Source : sig
       As with {!of_chunks}, a chunk must not change after the sequence returns
       it.
 
-      {@ocaml skip[
+      {@ocaml[
       let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])
       ]} *)
 end
@@ -1849,11 +1968,12 @@ val parse_source :
 
     Example:
     {@ocaml[
-    let ic = open_in "data.json" in
-    let source = Source.of_channel ic in
-    let result = parse_source source json in
-    close_in ic;
-    result
+    let read_json () =
+      let ic = open_in "data.json" in
+      let source = Source.of_channel ic in
+      let result = parse_source source json in
+      close_in ic;
+      result
     ]} *)
 
 val parse_source_each :
@@ -2062,7 +2182,7 @@ module Utf8 : sig
       [expected valid UTF-8], whatever [label] is.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let cjk () =
         Parseff.Utf8.satisfy ~label:"CJK character" (fun u ->
             Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF
@@ -2073,7 +2193,7 @@ module Utf8 : sig
   (** [char u] matches the exact Unicode code point [u].
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let lambda () = Parseff.Utf8.char (Uchar.of_int 0x03BB) (* λ *)
       ]} *)
 
@@ -2090,7 +2210,7 @@ module Utf8 : sig
       (not bytes) to match. Fails with [~label] if fewer match.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let unicode_word () =
         Parseff.Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic
           ~label:"letter"
@@ -2116,9 +2236,9 @@ module Utf8 : sig
       Greek, Cyrillic, CJK, Arabic, Devanagari, and all other Unicode scripts.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       (* Matches 'a', 'é', 'λ', '中', 'д', etc. *)
-      let l = Parseff.Utf8.letter ()
+      let l () = Parseff.Utf8.letter ()
       ]} *)
 
   val alphanum : unit -> Uchar.t

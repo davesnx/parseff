@@ -334,6 +334,61 @@ let test_full_first_read () =
   check "~initial_buffer_size:512" (Some 512);
   check "the default size" None
 
+let digit () = Char.code (Parseff.any_char ()) - Char.code '0'
+
+let token c build () =
+  ignore (Parseff.char c);
+  build
+
+let add = Parseff.infix_left (token '+' ( + ))
+let mul = Parseff.infix_left (token '*' ( * ))
+
+let table = Parseff.[ [ add; infix_left (token '-' ( - )) ]; [ mul ] ]
+
+let operator () =
+  match Parseff.peek_char () with
+  | Some '+' ->
+      Some (1, add)
+  | Some '*' ->
+      Some (2, mul)
+  | _ ->
+      None
+
+let parse_words input parser =
+  words_per_call (fun () -> Parseff.parse ~consume:`Partial input parser)
+
+let test_operators () =
+  let operand = parse_words "1" digit in
+  List.iter
+    (fun (name, maximum, input, parser) ->
+      let actual = parse_words input parser -. operand in
+      if actual > maximum then
+        Alcotest.failf
+          "%s on %S allocated %.6f minor words more than its operand, expected \
+           at most %.0f"
+          name input actual maximum
+    )
+    [
+      ("expression", 46., "1", Parseff.expression ~operand:digit table);
+      ("expression", 62., "1+2+3", Parseff.expression ~operand:digit table);
+      ("expression", 67., "1+2*3+4", Parseff.expression ~operand:digit table);
+      ( "precedence",
+        13.,
+        "1",
+        fun () -> Parseff.precedence ~operand:digit ~operator ()
+      );
+      ( "precedence",
+        39.,
+        "1+2+3",
+        fun () -> Parseff.precedence ~operand:digit ~operator ()
+      );
+      ( "precedence",
+        49.,
+        "1+2*3+4",
+        fun () -> Parseff.precedence ~operand:digit ~operator ()
+      );
+    ]
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -346,6 +401,9 @@ let () =
       );
       ( "success paths",
         [ Alcotest.test_case "consume" `Quick test_consume_success ]
+      );
+      ( "operators",
+        [ Alcotest.test_case "expression and precedence" `Quick test_operators ]
       );
       ( "source reads",
         [
