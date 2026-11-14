@@ -1732,6 +1732,9 @@ val parse_source :
     concurrently. A parser callback that suspends, such as a [satisfy] predicate
     or a [many] body, is not supported.
 
+    System threads that share a domain must not parse at the same time: the
+    runtime can switch threads inside a parser.
+
     Example:
     {@ocaml[
     let ic = open_in "data.json" in
