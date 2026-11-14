@@ -275,6 +275,8 @@ x = 1
 
 ## Limits
 
+**Recovery inside a choice takes the choice.** A `recover`, `require` or `list` in a branch of `or_`, `one_of` or `optional`, or inside `look_ahead`, recovers there: the branch succeeds with a recorded error and a hole, and the other alternatives do not run. Input that another alternative accepts is then reported as an error. Call recovery after the token that selects the branch, or around the whole choice, not inside a branch.
+
 **`recover` always consumes input.** Here `sync` does nothing, and `recover` skips the `;` where the second statement failed. To continue without consuming input, use `capture`.
 
 ```ocaml

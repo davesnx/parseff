@@ -943,6 +943,15 @@ val recover :
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
 
+    A recovery function recovers wherever it runs, also when an enclosing parser
+    could still try something else. So a [recover], {!require} or {!list} inside
+    a branch of {!or_}, {!one_of} or {!optional}, or inside {!look_ahead},
+    catches the failure itself: the branch succeeds with a recorded error and a
+    hole, the other alternatives do not run, and input that another alternative
+    accepts is reported as an error. Call recovery only after the choice is
+    decided: after the token that selects the branch, or around the whole {!or_}
+    or {!one_of}, not inside a branch.
+
     The errors that [parser] recorded in [errors] before it failed are removed,
     as with {!capture}: only [e] stays. To keep them, give [~record].
 
