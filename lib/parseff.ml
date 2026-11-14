@@ -1451,43 +1451,71 @@ let[@inline never] fail_literal st pos matched s =
   in
   fail_str st (pos + start) ((start lsl 3) lor tag_literal) s
 
-let[@inline never] handle_consume st s =
+let[@inline never] consume_refilling st s =
   let len = String.length s in
-  if len = 1 then begin
-    let c = String.unsafe_get s 0 in
-    if have st 1 then
-      if char_at st st.pos = c then begin
-        st.pos <- st.pos + 1;
-        s
-      end else
-        fail_str st st.pos tag_literal s
+  let complete = have st len in
+  let pos = st.pos in
+  let avail =
+    if complete then
+      len
     else
-      fail_str st st.pos tag_literal s
-  end else begin
-    let complete = have st len in
-    let pos = st.pos in
-    let avail =
-      if complete then
-        len
-      else
-        st.input_len - pos
-    in
+      st.input_len - pos
+  in
+  let i = ref 0 in
+  while !i < avail && char_at st (pos + !i) = String.unsafe_get s !i do
+    incr i
+  done;
+  if !i = len then begin
+    st.pos <- pos + len;
+    s
+  end else
+    fail_literal st pos !i s
+
+let[@inline never] consume_mismatch st s =
+  let pos = st.pos in
+  let i = ref 0 in
+  while char_at st (pos + !i) = String.unsafe_get s !i do
+    incr i
+  done;
+  fail_literal st pos !i s
+
+external bytes_get16 : bytes -> int -> int = "%caml_bytes_get16u"
+external string_get16 : string -> int -> int = "%caml_string_get16u"
+external bytes_get32 : bytes -> int -> int32 = "%caml_bytes_get32u"
+external string_get32 : string -> int -> int32 = "%caml_string_get32u"
+
+let[@inline always] literal_at_offset input off s len =
+  if len = 1 then
+    Bytes.unsafe_get input off = String.unsafe_get s 0
+  else if len = 2 then
+    bytes_get16 input off = string_get16 s 0
+  else if len = 3 then
+    bytes_get16 input off = string_get16 s 0
+    && Bytes.unsafe_get input (off + 2) = String.unsafe_get s 2
+  else if len <= 8 then
+    Int32.equal (bytes_get32 input off) (string_get32 s 0)
+    && Int32.equal (bytes_get32 input (off + len - 4)) (string_get32 s (len - 4))
+  else begin
     let i = ref 0 in
-    while !i < avail && char_at st (pos + !i) = String.unsafe_get s !i do
+    while
+      !i < len && Bytes.unsafe_get input (off + !i) = String.unsafe_get s !i
+    do
       incr i
     done;
-    let matched = !i in
-    if matched < avail || not complete then
-      begin if matched = 0 then
-        fail_str st pos tag_literal s
-      else
-        fail_literal st pos matched s
-    end
-    else begin
+    !i = len
+  end
+
+let[@inline] handle_consume st s =
+  let len = String.length s in
+  let pos = st.pos in
+  if len <= st.input_len - pos then
+    if len = 0 || literal_at_offset st.input (pos - st.base) s len then begin
       st.pos <- pos + len;
       s
-    end
-  end
+    end else
+      consume_mismatch st s
+  else
+    consume_refilling st s
 
 let[@inline never] satisfy_slow st pred label =
   if have st 1 then

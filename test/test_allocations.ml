@@ -86,6 +86,28 @@ let test_stopping_failures () =
       Parseff.or_ (fun () -> Parseff.char 'x') (fun () -> 'y') ()
   )
 
+let test_consume_success () =
+  List.iter
+    (fun literal ->
+      let input =
+        String.concat ""
+          (List.init (warmup_iterations + iterations) (fun _ -> literal))
+      in
+      match
+        Parseff.parse ~consume:`Partial input (fun () ->
+            words_per_call (fun () -> Parseff.consume literal)
+        )
+      with
+      | Ok actual ->
+          if actual > 0. then
+            Alcotest.failf
+              "consume %S allocated %.6f minor words per call, expected 0"
+              literal actual
+      | Error error ->
+          Alcotest.fail (Parseff.render_error error)
+    )
+    [ "\r\n"; "let"; "HTTP/"; "Content-Length" ]
+
 let reads = 100_000
 
 let one_byte_source () =
@@ -321,6 +343,9 @@ let () =
           Alcotest.test_case "failed parses" `Quick test_failed_parses;
           Alcotest.test_case "render_error" `Quick test_render_error;
         ]
+      );
+      ( "success paths",
+        [ Alcotest.test_case "consume" `Quick test_consume_success ]
       );
       ( "source reads",
         [
