@@ -6,23 +6,26 @@
     {1 Quick Start}
 
     {@ocaml[
-      let number () =
-        let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
-        Char.code c - Char.code '0'
+    let digit_value () =
+      let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
+      Char.code c - Char.code '0'
 
-      let ip_address () =
-        let a = number () in
-        let _ = Parseff.consume "." in
-        let b = number () in
-        let _ = Parseff.consume "." in
-        let c = number () in
-        let _ = Parseff.consume "." in
-        let d = number () in
-        (a, b, c, d)
+    let ip_address () =
+      let a = digit_value () in
+      let _ = Parseff.consume "." in
+      let b = digit_value () in
+      let _ = Parseff.consume "." in
+      let c = digit_value () in
+      let _ = Parseff.consume "." in
+      let d = digit_value () in
+      (a, b, c, d)
 
-      match Parseff.parse "192.168.1.1" ip_address with
-      | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-      | Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
+    let () =
+      match Parseff.parse "1.2.3.4" ip_address with
+      | Ok (a, b, c, d) ->
+          Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
+      | Error e ->
+          prerr_endline (Parseff.render_error ~name:"address" e)
     ]} *)
 
 (** {1 Span Type} *)
@@ -307,7 +310,10 @@ val print_trace : Format.formatter -> trace_event -> unit
 
     Example:
     {@ocaml[
-    let _ = parse ~trace:(print_trace Format.std_formatter) input parser
+    let _ =
+      parse ~trace:(print_trace Format.std_formatter) "hello" (fun () ->
+          consume "hello"
+      )
     ]} *)
 
 (** {1 Runner} *)
@@ -384,8 +390,8 @@ val consume : string -> string
     Example:
     {@ocaml[
     let parser () =
-      consume "hello";
-      consume " ";
+      let _ = consume "hello" in
+      let _ = consume " " in
       consume "world"
     ]} *)
 
@@ -417,7 +423,7 @@ val regex : Re.t -> regex
 
     Example:
     {@ocaml[
-    let identifier_re = regex (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*")
+    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
     ]} *)
 
 val match_regex : ?label:string -> regex -> string
@@ -445,7 +451,7 @@ val match_regex : ?label:string -> regex -> string
 
     Example:
     {@ocaml[
-    let identifier_re = regex (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*")
+    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
     let identifier () = match_regex ~label:"identifier" identifier_re
     ]} *)
 
@@ -520,6 +526,8 @@ val fail :
     given. {!render_error} underlines up to the end of the line it can show.
 
     {@ocaml[
+    let is_digit c = c >= '0' && c <= '9'
+
     let byte () =
       let start = position () in
       let n = int_of_string (take_while ~at_least:1 is_digit ~label:"digit") in
@@ -562,21 +570,27 @@ val error :
     The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
     of {!type:custom_error} for rich error reporting:
     {@ocaml[
-      type custom_error += Out_of_range of int | Negative of int
+    type custom_error += Out_of_range of int | Negative of int
 
-      let number () =
-        let n = parse_int () in
-        if n > 255 then error (Out_of_range n)
-        else if n < 0 then error (Negative n)
-        else n
+    let octet () =
+      let n = integer () in
+      if n > 255 then
+        error (Out_of_range n)
+      else if n < 0 then
+        error (Negative n)
+      else
+        n
 
-      match parse input number with
-      | Ok n -> Printf.printf "Got %d\n" n
+    let () =
+      match parse "300" octet with
+      | Ok n ->
+          Printf.printf "Got %d\n" n
       | Error { kind = Custom (Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
       | Error { kind = Custom (Negative n); _ } ->
           Printf.printf "%d is negative\n" n
-      | Error _ -> Printf.printf "Parse error\n"
+      | Error _ ->
+          Printf.printf "Parse error\n"
     ]}
 
     {b Note:} Custom errors from [error] pass through {!val:expect} and
@@ -665,6 +679,8 @@ val end_of_input : unit -> unit
 
     Example:
     {@ocaml[
+    let some_parser () = consume "hello"
+
     let complete_parser () =
       let result = some_parser () in
       end_of_input ();
@@ -679,6 +695,10 @@ val peek_char : unit -> char option
 
     Example:
     {@ocaml[
+    let parse_array () = `Array (consume "[]")
+    let parse_string () = `String (consume "\"\"")
+    let parse_number () = `Number (number ())
+
     let value () =
       match peek_char () with
       | Some '[' ->
@@ -709,11 +729,11 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
     let bool_parser () =
       or_
         (fun () ->
-          consume "true";
+          let _ = consume "true" in
           true
         )
         (fun () ->
-          consume "false";
+          let _ = consume "false" in
           false
         )
         ()
@@ -851,7 +871,7 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
           warn ~pos:e.range.start errors e;
           skip_while (fun c -> c <> ';');
           let _ = char ';' in
-          Hole
+          `Hole
     ]} *)
 
 val recover :
@@ -880,7 +900,7 @@ val recover :
     For example, to keep the errors of [parser] and record [e] only when there
     are none:
     {@ocaml[
-    let record e inner =
+    let record errors e inner =
       List.iter
         (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
         inner;
@@ -913,7 +933,7 @@ val recover :
               ignore (optional (fun () -> char ';') ())
             )
             statement
-            (fun _ -> Hole)
+            (fun _ -> `Hole)
         )
         ()
     ]} *)
@@ -967,7 +987,7 @@ val sep_by_recover :
         sep_by_recover errors
           ~sync:(skip_nested [ ('{', '}') ] (fun c -> c = ','))
           field separator
-          (fun _ -> Hole)
+          (fun _ -> `Hole)
           ()
       in
       skip_whitespace ();
@@ -986,6 +1006,10 @@ val sep_by_recover :
 
     Example:
     {@ocaml[
+    let expr () =
+      skip_whitespace ();
+      `Int (integer ())
+
     let arguments errors () =
       let _ = char '(' in
       let args =
@@ -996,12 +1020,12 @@ val sep_by_recover :
             ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
             expr
             (fun () -> char ',')
-            (fun _ -> Hole)
+            (fun _ -> `Hole)
             ()
       in
       let _ = char ')' in
       args
-    (* "(1, [2 3], 4)" -> [1; Hole; 4], with one error recorded *)
+    (* "(1, [2 3], 4)" -> [`Int 1; `Hole; `Int 4], with one error recorded *)
     ]} *)
 
 val skip_nested :
@@ -1033,6 +1057,11 @@ val skip_nested :
 
     Example:
     {@ocaml[
+    let string_literal () =
+      let _ = char '"' in
+      skip_while (fun c -> c <> '"');
+      ignore (char '"')
+
     let skip_argument =
       skip_nested ~atom:string_literal
         [ ('(', ')'); ('[', ']'); ('{', '}') ]
@@ -1144,7 +1173,7 @@ val cut : unit -> unit
           (* from here on, a failure is an error of this statement *)
           let name = identifier () in
           let _ = consume "=" in
-          (name, expression ())
+          (name, expr ())
       )
     ]} *)
 
@@ -1155,13 +1184,18 @@ val rec_ : (unit -> 'a) -> 'a
 
     Example:
     {@ocaml[
-      let rec json () = Parseff.rec_ (fun () ->
-        Parseff.one_of [ array_parser; null_parser; ... ] ()
-      )
-      and array_parser () =
-        let _ = Parseff.consume "\[" in
-        let elements = ... json () ... in
-        ...
+    let rec json () =
+      Parseff.rec_ (fun () -> Parseff.one_of [ array_parser; null_parser ] ())
+
+    and array_parser () =
+      let _ = Parseff.consume "[" in
+      let elements = Parseff.sep_by json (fun () -> Parseff.char ',') () in
+      let _ = Parseff.consume "]" in
+      `Array elements
+
+    and null_parser () =
+      let _ = Parseff.consume "null" in
+      `Null
     ]} *)
 
 val expect : string -> (unit -> 'a) -> 'a
@@ -1186,7 +1220,7 @@ val expect : string -> (unit -> 'a) -> 'a
 
     let octet () =
       expect "an octet (0-255)" (fun () ->
-          let n = number () in
+          let n = integer () in
           if n > 255 then
             error (Out_of_range n)
           else
@@ -1211,7 +1245,7 @@ val one_of : (unit -> 'a) list -> unit -> 'a
 
     Example:
     {@ocaml[
-    let keyword () =
+    let reserved_word () =
       one_of
         [
           (fun () -> consume "if");
@@ -1232,6 +1266,10 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Example:
     {@ocaml[
+    let number_parser () = `Number (number ())
+    let string_parser () = `String (consume "\"\"")
+    let bool_parser () = `Bool (bool_parser ())
+
     let literal () =
       one_of_labeled
         [
@@ -1439,6 +1477,18 @@ val expression :
 
     Example:
     {@ocaml[
+    let token c () =
+      skip_whitespace ();
+      ignore (char c);
+      skip_whitespace ()
+
+    let op c f () =
+      token c ();
+      f
+    let add, sub, mul, div =
+      (op '+' ( +. ), op '-' ( -. ), op '*' ( *. ), op '/' ( /. ))
+    let neg, pow = (op '-' Float.neg, op '^' Float.pow)
+
     let table =
       [
         [ infix_left add; infix_left sub ];
@@ -1585,8 +1635,7 @@ val digit : unit -> char
 
     Example:
     {@ocaml[
-      let d = digit () in  (* parses "7" -> '7' *)
-      ...
+    let () = assert (parse "7" digit = Ok '7')
     ]} *)
 
 val integer : unit -> int
@@ -1595,8 +1644,7 @@ val integer : unit -> int
 
     Example:
     {@ocaml[
-      let n = integer () in  (* parses "-42" -> -42 *)
-      ...
+    let () = assert (parse "-42" integer = Ok (-42))
     ]} *)
 
 val number : unit -> float
@@ -1611,8 +1659,7 @@ val number : unit -> float
 
     Example:
     {@ocaml[
-      let x = number () in  (* parses "6.02e23" -> 6.02e23 *)
-      ...
+    let () = assert (parse "6.02e23" number = Ok 6.02e23)
     ]} *)
 
 val hex_integer : unit -> int
@@ -1622,8 +1669,7 @@ val hex_integer : unit -> int
 
     Example:
     {@ocaml[
-      let n = hex_integer () in  (* parses "ff" -> 255 *)
-      ...
+    let () = assert (parse "ff" hex_integer = Ok 255)
     ]} *)
 
 val letter : unit -> char
@@ -1818,7 +1864,7 @@ module Source : sig
       As with {!of_chunks}, a chunk must not change after the sequence returns
       it.
 
-      {@ocaml skip[
+      {@ocaml[
       let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])
       ]} *)
 end
@@ -1859,11 +1905,12 @@ val parse_source :
 
     Example:
     {@ocaml[
-    let ic = open_in "data.json" in
-    let source = Source.of_channel ic in
-    let result = parse_source source json in
-    close_in ic;
-    result
+    let read_json () =
+      let ic = open_in "data.json" in
+      let source = Source.of_channel ic in
+      let result = parse_source source json in
+      close_in ic;
+      result
     ]} *)
 
 val parse_source_each :
@@ -2064,7 +2111,7 @@ module Utf8 : sig
       [expected valid UTF-8], whatever [label] is.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let cjk () =
         Parseff.Utf8.satisfy ~label:"CJK character" (fun u ->
             Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF
@@ -2075,7 +2122,7 @@ module Utf8 : sig
   (** [char u] matches the exact Unicode code point [u].
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let lambda () = Parseff.Utf8.char (Uchar.of_int 0x03BB) (* λ *)
       ]} *)
 
@@ -2092,7 +2139,7 @@ module Utf8 : sig
       (not bytes) to match. Fails with [~label] if fewer match.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let unicode_word () =
         Parseff.Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic
           ~label:"letter"
@@ -2118,9 +2165,9 @@ module Utf8 : sig
       Greek, Cyrillic, CJK, Arabic, Devanagari, and all other Unicode scripts.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       (* Matches 'a', 'é', 'λ', '中', 'д', etc. *)
-      let l = Parseff.Utf8.letter ()
+      let l () = Parseff.Utf8.letter ()
       ]} *)
 
   val alphanum : unit -> Uchar.t
