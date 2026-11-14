@@ -498,8 +498,22 @@ module State = struct
       (frame_repeat lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) t.diag_len
 
+  let[@inline always] reset_frame (t : t) frame kind =
+    let base = frame * frame_stride in
+    let frames = t.frames in
+    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames (base + 1)
+      (kind lor (trail_depth t lsl frame_trail_shift));
+    Array.unsafe_set frames (base + 2) t.diag_len
+
   let[@inline always] frame_diag_len (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 2)
+
+  let[@inline always] frame_trail_depth (t : t) frame =
+    Array.unsafe_get t.frames ((frame * frame_stride) + 1) lsr frame_trail_shift
+
+  let[@inline always] frame_pos (t : t) frame =
+    Array.unsafe_get t.frames (frame * frame_stride)
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
@@ -2782,13 +2796,23 @@ let prec_lower st frame start top prec =
       State.pop_rewind_frame st frame;
       raise exn
 
+let[@inline] prec_base_stop st frame start value =
+  if
+    st.diag_len = State.frame_diag_len st frame
+    && State.trail_depth st = State.frame_trail_depth st frame
+  then
+    st.pos <- start
+  else
+    restore_rewind_frame st frame;
+  State.pop_rewind_frame st frame;
+  value
+
 let prec_stop st frame top =
-  restore_rewind_frame st frame;
   match top with
   | Prec_base b ->
-      State.pop_rewind_frame st frame;
-      b.value
+      prec_base_stop st frame (State.frame_pos st frame) b.value
   | Prec_node _ -> (
+      restore_rewind_frame st frame;
       match prec_fold top with
       | value ->
           State.pop_rewind_frame st frame;
@@ -2806,7 +2830,9 @@ let prec_fail st frame top =
   prec_stop st frame top
 
 let rec prec_loop st operand operator top =
-  let frame = State.push_rewind_frame st frame_barrier in
+  prec_look st operand operator (State.push_rewind_frame st frame_barrier) top
+
+and prec_look st operand operator frame top =
   let start = st.pos in
   match operator () with
   | None ->
@@ -2816,26 +2842,28 @@ let rec prec_loop st operand operator top =
         State.set_frame_kind st frame frame_repeat;
         prec_try st operand operator frame start top prec op
       end else
-        begin match (op, top) with
-        | Prefix _, _ ->
-            State.pop_rewind_frame st frame;
-            prec_prefix ()
-        | _, Prec_base _ ->
-            prec_stop st frame top
-        | _, Prec_node _ ->
-            let top = prec_lower st frame start top prec in
-            if st.frames_top = frame then
-              prec_loop st operand operator top
-            else if prec >= prec_min top then
-              prec_try st operand operator frame start top prec op
-            else
-              prec_stop st frame top
-      end
+        prec_below st operand operator frame start top prec op
   | exception Fail ->
       prec_fail st frame top
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
+
+and prec_below st operand operator frame start top prec op =
+  match (op, top) with
+  | Prefix _, _ ->
+      State.pop_rewind_frame st frame;
+      prec_prefix ()
+  | _, Prec_base _ ->
+      prec_stop st frame top
+  | _, Prec_node _ ->
+      let top = prec_lower st frame start top prec in
+      if st.frames_top = frame then
+        prec_loop st operand operator top
+      else if prec >= prec_min top then
+        prec_try st operand operator frame start top prec op
+      else
+        prec_stop st frame top
 
 and prec_try st operand operator frame start top prec op =
   match prec_accept st operand start top prec op with
@@ -2843,8 +2871,8 @@ and prec_try st operand operator frame start top prec op =
       if next == top then
         prec_stop st frame top
       else begin
-        State.pop_rewind_frame st frame;
-        prec_loop st operand operator next
+        State.reset_frame st frame frame_barrier;
+        prec_look st operand operator frame next
       end
   | exception Fail ->
       prec_fail st frame top
@@ -2854,7 +2882,24 @@ and prec_try st operand operator frame start top prec op =
 
 let precedence ?(min = min_int) ~operand ~operator () =
   let st = get_state () in
-  prec_loop st operand operator (Prec_base { min; value = operand () })
+  let value = operand () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let start = st.pos in
+  match operator () with
+  | None ->
+      prec_base_stop st frame start value
+  | Some (prec, op) ->
+      let top = Prec_base { min; value } in
+      if prec >= min then begin
+        State.set_frame_kind st frame frame_repeat;
+        prec_try st operand operator frame start top prec op
+      end else
+        prec_below st operand operator frame start top prec op
+  | exception Fail ->
+      prec_fail st frame (Prec_base { min; value })
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
 
 let optional (p : unit -> 'a) () : 'a option =
   let st = get_state () in
