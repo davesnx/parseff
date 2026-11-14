@@ -1656,11 +1656,9 @@ module Source : sig
       enough for the minor heap). After a read that fills the buffer, the next
       read gets a buffer of the larger of [initial_buffer_size] and 4096, and
       the buffer keeps that size. The larger buffer is allocated only when that
-      read happens. A read that [match_regex] makes to look ahead does not use
-      the read buffer: its [len] can be as large as the backtrack window. An
-      [initial_buffer_size] near the size of a short message, such as a request
-      head, allocates less per source. Raises [Invalid_argument] if
-      [initial_buffer_size] is less than [1].
+      read happens. An [initial_buffer_size] near the size of a short message,
+      such as a request head, allocates less per source. Raises
+      [Invalid_argument] if [initial_buffer_size] is less than [1].
 
       This is the low-level escape hatch for byte sources that fill a
       pre-allocated buffer, such as [Unix.read] or [Unix.recv]. For most use

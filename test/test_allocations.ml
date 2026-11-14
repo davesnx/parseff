@@ -261,6 +261,30 @@ let test_small_buf_size () =
        150 fewer"
       small default
 
+let request_line = Re.compile (Re.Perl.re "[A-Z]+ [^ \r\n]+ HTTP/1\\.1\r\n")
+
+let test_regex_first_head () =
+  let parse () =
+    match
+      Parseff.parse_source ~consume:`Partial (head_function ()) (fun () ->
+          ignore (Parseff.match_regex request_line);
+          head_lines 0
+      )
+    with
+    | Ok 10 ->
+        ()
+    | Ok n ->
+        Alcotest.failf "parsed %d lines, expected 10" n
+    | Error error ->
+        Alcotest.fail (Parseff.render_error error)
+  in
+  let actual = direct_major_words_per_call parse in
+  if actual > 50. then
+    Alcotest.failf
+      "a request head that starts with match_regex allocated %.1f words \
+       directly on the major heap per parse, expected at most 50"
+      actual
+
 let head_and_body = head ^ String.make 4000 'x'
 
 let full_source ?initial_buffer_size () =
@@ -308,6 +332,8 @@ let () =
           Alcotest.test_case "small initial_buffer_size" `Quick
             test_small_buf_size;
           Alcotest.test_case "full first read" `Quick test_full_first_read;
+          Alcotest.test_case "head that starts with match_regex" `Quick
+            test_regex_first_head;
         ]
       );
     ]
