@@ -172,14 +172,18 @@ val render_error :
     character column, because Parseff counts the characters of the line that it
     drops. The excerpt of the error line is then cut on the left with [...], and
     a [* while parsing] line for a context that starts in the dropped part of
-    the line says [from byte N]. Carets count terminal cells, so a wide
-    character such as [名] takes two and a combining mark takes none, and a
-    control byte, an invalid UTF-8 byte or a C1 control prints in the excerpt as
-    the escape {!val:error_message} uses, such as [\x1B], with as many carets as
-    the escape has characters. An error with a [help] text ends with a [* help:]
-    line, and so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded]
-    error. The rows the renderer adds never end with a space, and source text is
-    printed byte for byte. The result has no trailing newline. *)
+    the line says [from byte N]. When the error starts in the dropped part of
+    its line, the header column is [location.col], which counts bytes, the
+    excerpt shows the kept part of the line, and carets mark only the kept part
+    of the range, with no caret row when the whole range is dropped. Carets
+    count terminal cells, so a wide character such as [名] takes two and a
+    combining mark takes none, and a control byte, an invalid UTF-8 byte or a C1
+    control prints in the excerpt as the escape {!val:error_message} uses, such
+    as [\x1B], with as many carets as the escape has characters. An error with a
+    [help] text ends with a [* help:] line, and so does a [Depth_limit_exceeded]
+    or [Backtrack_window_exceeded] error. The rows the renderer adds never end
+    with a space, and source text is printed byte for byte. The result has no
+    trailing newline. *)
 
 (** {1 Diagnostics} *)
 
@@ -477,10 +481,12 @@ val fail :
     parsed value is out of range).
 
     In streaming, a range start older than the buffered input is kept as the
-    position of the error. Its line cannot be known, so {!render_error} prints
-    [byte N] instead of a line and column and shows no excerpt, unless [~source]
-    is given. A range end past the buffered input is kept as given.
-    {!render_error} underlines up to the end of the line it can show.
+    position of the error. Unless [~source] is given, {!render_error} prints
+    [byte N] and no excerpt when the line is not known. When the line is known,
+    it prints the line and the byte column, shows the kept part of the line, and
+    puts carets only under the kept part of the range, with no caret row when no
+    part of the range is kept. A range end past the buffered input is kept as
+    given. {!render_error} underlines up to the end of the line it can show.
 
     {@ocaml[
     let byte () =

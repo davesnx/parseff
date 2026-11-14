@@ -3947,7 +3947,7 @@ let render ?name ?source ?custom e =
               )
           )
     | None, Some l ->
-        Some (l, e.excerpt.char_column)
+        Some (l, Some (Option.value e.excerpt.char_column ~default:l.col))
     | None, None ->
         None
   in
@@ -4225,7 +4225,11 @@ let render ?name ?source ?custom e =
               line_row v;
               if is_opener v && framed then opener_row v;
               if v.number = line then begin
-                caret_row v;
+                if
+                  framed
+                  || not (e.range.start < v.first && e.range.stop <= v.first)
+                then
+                  caret_row v;
                 if framed then
                   bar :=
                     if !bar = "" then

@@ -2976,6 +2976,113 @@ let test_cut_line_context_column () =
            (String.split_on_char '\n' rendered)
         )
 
+let test_error_start_in_dropped_input () =
+  let ascii = "x := 1\nelse := some long value here\n" in
+  let wide = "x := 1\n\xC3\xA9\xC3\xA9 else := some long value here\n" in
+  let error_line prefix finish () =
+    ignore (Parseff.consume prefix);
+    let start = Parseff.position () in
+    ignore (Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c <> ' '));
+    finish start
+  in
+  let reserved start =
+    Parseff.skip_while (fun c -> c <> '\n');
+    Parseff.fail ~from:start ~upto:(start + 4) "this name is reserved"
+  in
+  let reaching start =
+    Parseff.skip_while (fun c -> c <> 'h');
+    Parseff.fail ~from:start ~upto:(Parseff.position () + 2) "too long"
+  in
+  let noted start =
+    Parseff.skip_while (fun c -> c <> '\n');
+    let p = Parseff.position () in
+    Parseff.fail ~from:start ~upto:(start + 4)
+      ~notes:[ { at = Some { start = p - 2; stop = p }; text = "this" } ]
+      "this name is reserved"
+  in
+  let render ?source ?chunk input parser =
+    let s =
+      match chunk with
+      | Some chunk ->
+          source_of_chunks ~chunk input
+      | None ->
+          Parseff.Source.of_string input
+    in
+    match Parseff.parse_source ~consume:`Partial s parser with
+    | Stdlib.Ok () ->
+        Alcotest.fail "expected an error"
+    | Stdlib.Error (e : Parseff.error) ->
+        Parseff.render_error ~name:"input" ?source e
+  in
+  let whole =
+    lines
+      [
+        "input:2:1: [error] this name is reserved";
+        "1 | x := 1";
+        "2 | else := some long value here";
+        "  | ^^^^";
+      ]
+  in
+  let issue = error_line "x := 1\n" reserved in
+  Alcotest.(check string) "one read" whole (render ascii issue);
+  Alcotest.(check string)
+    "3-byte reads with ~source" whole
+    (render ~source:ascii ~chunk:3 ascii issue);
+  Alcotest.(check string)
+    "range all dropped: no caret row"
+    (lines [ "input:2:1: [error] this name is reserved"; "2 | ...ere" ])
+    (render ~chunk:3 ascii issue);
+  Alcotest.(check string)
+    "range reaches kept text: carets under the kept part"
+    (lines
+       [ "input:2:1: [error] too long"; "2 | ...alue he..."; "  |    ^^^^^^^" ]
+    )
+    (render ~chunk:3 ascii (error_line "x := 1\n" reaching));
+  Alcotest.(check string)
+    "note in kept text keeps its underline"
+    (lines
+       [
+         "input:2:1: [error] this name is reserved";
+         "2 | ...ere";
+         "  |     -- this";
+       ]
+    )
+    (render ~chunk:3 ascii (error_line "x := 1\n" noted));
+  let wide_issue = error_line "x := 1\n\xC3\xA9\xC3\xA9 " reserved in
+  Alcotest.(check string)
+    "non-ASCII line: byte column"
+    (lines [ "input:2:6: [error] this name is reserved"; "2 | ...re" ])
+    (render ~chunk:3 wide wide_issue);
+  Alcotest.(check string)
+    "non-ASCII line with ~source: character column"
+    "input:2:4: [error] this name is reserved"
+    (header_of (render ~source:wide ~chunk:3 wide wide_issue));
+  let framed_input = "{\n" ^ String.make 300 '\x80' ^ "tail\n" in
+  let framed () =
+    Parseff.context ~delimited:true "block" (fun () ->
+        ignore (Parseff.consume "{\n");
+        ignore (Parseff.take 100);
+        Parseff.fail "here"
+    )
+  in
+  let framed_render =
+    lines
+      [
+        "input:2:101: [error] here";
+        "1 |   {";
+        "  | \xE2\x95\xAD\xE2\x94\x80\xE2\x95\xAF";
+        "2 | \xE2\x94\x82 ...tail";
+        "  | \xE2\x95\xB0\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80^";
+        "  * while parsing block, from 1:1";
+      ]
+  in
+  Alcotest.(check string)
+    "framed, no ~source" framed_render
+    (render framed_input framed);
+  Alcotest.(check string)
+    "framed, ~source" framed_render
+    (render ~source:framed_input framed_input framed)
+
 let test_location_after_dropped_lines () =
   let input = "ab\ncd\n" ^ String.make 50 'e' ^ "\nf" in
   let parser () =
@@ -4088,6 +4195,8 @@ let () =
             test_cut_line_column_random_bytes;
           test_case "cut line context column" `Quick
             test_cut_line_context_column;
+          test_case "error start in dropped input" `Quick
+            test_error_start_in_dropped_input;
           test_case "location after dropped lines" `Quick
             test_location_after_dropped_lines;
           test_case "context column in code points" `Quick
