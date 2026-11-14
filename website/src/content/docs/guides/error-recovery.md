@@ -311,6 +311,10 @@ x = 1
 (Error "expected integer, found end of input", 0)
 ```
 
+**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~record:(fun e inner -> ...)`: it replaces the recording of `e`, and `inner` holds the removed errors.
+
+**A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error. Pass `~outer:false` to keep only the contexts that the parser opened.
+
 **The collector must be the one given to the runner.** Otherwise `recover` raises `Invalid_argument`:
 
 ```ocaml

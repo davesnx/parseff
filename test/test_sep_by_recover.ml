@@ -296,6 +296,223 @@ let test_rollback () =
   Alcotest.(check string) "value" "Ok _" (show_result r);
   Alcotest.check errs "errors of the abandoned branch are removed" [] (errors d)
 
+let note ?from msg =
+  match capture (fun () -> (fail ?from msg : unit)) with
+  | Error e ->
+      e
+  | Ok () ->
+      Alcotest.fail "expected a failure"
+
+let issue_60_list ?record ?(source = false) input =
+  let d = Diagnostics.create () in
+  let element () =
+    ws ();
+    let start = position () in
+    ignore (char '"');
+    skip_while (fun c -> c <> '"' && c <> '\n');
+    ( match peek_char () with
+    | Some '"' ->
+        ()
+    | _ ->
+        warn ~pos:start d (note ~from:start "unfinished string")
+    );
+    ignore (char '"');
+    Str ""
+  in
+  let list () =
+    ignore (char '[');
+    let xs =
+      sep_by_recover
+        ?record:(Option.map (fun f -> f d) record)
+        d
+        ~sync:(fun () -> skip_nested [ ('[', ']') ] (fun c -> c = ','))
+        element comma
+        (fun _ -> Hole)
+        ()
+    in
+    ws ();
+    ignore (char ']');
+    List xs
+  in
+  let r =
+    if source then
+      parse_source ~diagnostics:d
+        (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
+        list
+    else
+      parse ~diagnostics:d input list
+  in
+  (show_result r, errors d)
+
+let keep_inner d e inner =
+  List.iter (fun (x : _ Diagnostics.entry) -> warn ~pos:x.pos d x.value) inner;
+  if inner = [] then warn ~pos:e.range.start d e
+
+let test_record () =
+  let input = "[\"a\", \"bc\n, \"d\"]" in
+  let check name expected actual =
+    Alcotest.(check (pair string errs)) name expected actual
+  in
+  check "default records only the failure"
+    ("Ok [\"\"; _; \"\"]", [ (9, "expected '\"', found '\\n'") ])
+    (issue_60_list input);
+  check "the documented record keeps the inner error"
+    ("Ok [\"\"; _; \"\"]", [ (6, "unfinished string") ])
+    (issue_60_list ~record:keep_inner input);
+  check "parse_source, one byte per read"
+    ("Ok [\"\"; _; \"\"]", [ (6, "unfinished string") ])
+    (issue_60_list ~source:true ~record:keep_inner input);
+  check "record replaces the default" ("Ok [\"\"; _; \"\"]", [])
+    (issue_60_list ~record:(fun _ _ _ -> ()) input)
+
+let test_record_arguments () =
+  let d = Diagnostics.create () in
+  let seen = ref [] in
+  let element () =
+    ignore (char 'a');
+    warn d (note "first");
+    ignore (char 'b');
+    warn ~pos:0 d (note "second");
+    ignore (char '!');
+    Hole
+  in
+  let r =
+    parse ~diagnostics:d ~consume:`Partial "x,ab?" (fun () ->
+        ignore (char 'x');
+        ignore (char ',');
+        sep_by_recover d
+          ~record:(fun e inner ->
+            seen :=
+              (e.range.start, error_message e)
+              :: List.map
+                   (fun (x : _ Diagnostics.entry) ->
+                     (x.pos, error_message x.value)
+                   )
+                   inner
+          )
+          ~sync:(fun () -> skip_while (fun c -> c <> ','))
+          element comma
+          (fun _ -> Hole)
+          ()
+    )
+  in
+  Alcotest.(check string)
+    "value" "Ok"
+    (match r with Ok _ -> "Ok" | Error _ -> "Error");
+  Alcotest.check errs "the failure, then the removed entries in order"
+    [ (4, "expected '!', found '?'"); (3, "first"); (0, "second") ]
+    !seen;
+  Alcotest.check errs "nothing recorded" [] (errors d)
+
+let test_outer_false () =
+  let d = Diagnostics.create () in
+  let run outer =
+    let r =
+      parse ~diagnostics:d "[ab, ax]" (fun () ->
+          context ~delimited:true "list" (fun () ->
+              ignore (char '[');
+              let xs =
+                sep_by_recover ?outer d ~sync:skip_value
+                  (fun () ->
+                    context "element" (fun () ->
+                        ignore (char 'a');
+                        ignore (char 'b');
+                        Int 0
+                    )
+                  )
+                  comma
+                  (fun _ -> Hole)
+                  ()
+              in
+              ignore (char ']');
+              xs
+          )
+      )
+    in
+    ignore r;
+    List.concat_map
+      (fun { Diagnostics.value = (e : error); _ } ->
+        List.map (fun (c : context) -> c.name) e.contexts
+      )
+      (Diagnostics.to_list d)
+  in
+  Alcotest.(check (list string)) "default" [ "list"; "element" ] (run None);
+  Alcotest.(check (list string)) "~outer:false" [ "element" ] (run (Some false))
+
+let separator () =
+  skip_whitespace ();
+  let _ = char ',' in
+  skip_whitespace ();
+  ignore (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"field"))
+
+let table errors field () =
+  let _ = char '{' in
+  skip_whitespace ();
+  let fields =
+    sep_by_recover errors
+      ~sync:(fun () -> skip_nested [ ('{', '}') ] (fun c -> c = ','))
+      field separator
+      (fun _ -> Hole)
+      ()
+  in
+  skip_whitespace ();
+  let _ = optional (fun () -> char ',') () in
+  skip_whitespace ();
+  let _ = char '}' in
+  fields
+
+let run_table input =
+  let d = Diagnostics.create () in
+  let integer () =
+    Int (int_of_string (take_while ~at_least:1 ~label:"integer" is_digit))
+  in
+  let r = parse ~diagnostics:d input (fun () -> List (table d integer ())) in
+  (show_result r, errors d)
+
+let test_trailing_separator () =
+  let check input expected =
+    Alcotest.(check (pair string errs)) input expected (run_table input)
+  in
+  check "{1, 2,}" ("Ok [1; 2]", []);
+  check "{1, 2, }" ("Ok [1; 2]", []);
+  check "{1, 2 , }" ("Ok [1; 2]", []);
+  check "{ 1, 2, }" ("Ok [1; 2]", []);
+  check "{1, , 3}" ("Ok [1; _; 3]", [ (4, "expected integer, found ','") ])
+
+let test_record_not_called () =
+  let d = Diagnostics.create () in
+  let calls = ref 0 in
+  let run input =
+    calls := 0;
+    let r =
+      parse ~diagnostics:d input (fun () ->
+          ignore (char '[');
+          let xs =
+            sep_by_recover d
+              ~record:(fun _ _ -> incr calls)
+              ~sync:skip_value
+              (fun () ->
+                Int
+                  (int_of_string
+                     (take_while ~at_least:1 ~label:"integer" is_digit)
+                  )
+              )
+              comma
+              (fun _ -> Hole)
+              ()
+          in
+          ignore (char ']');
+          List xs
+      )
+    in
+    (show_result r, !calls)
+  in
+  Alcotest.(check (pair string int)) "success" ("Ok [1; 2]", 0) (run "[1, 2]");
+  Alcotest.(check (pair string int))
+    "failure at the end of the input"
+    ("Error at 4: expected integer, found end of input", 0)
+    (run "[1, ")
+
 let () =
   let open Alcotest in
   run "Sep_by_recover"
@@ -316,6 +533,11 @@ let () =
           test_case "same as sep_by" `Quick test_same_as_sep_by;
           test_case "wrong collector" `Quick test_wrong_collector;
           test_case "rollback" `Quick test_rollback;
+          test_case "record" `Quick test_record;
+          test_case "record: arguments" `Quick test_record_arguments;
+          test_case "outer:false" `Quick test_outer_false;
+          test_case "trailing separator" `Quick test_trailing_separator;
+          test_case "record: not called" `Quick test_record_not_called;
         ]
       );
       ( "skip_nested",
