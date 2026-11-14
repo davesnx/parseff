@@ -1845,7 +1845,7 @@ let regex_frame_text st fr =
   then begin
     let from =
       if fr.text_from > want then
-        before fr.first
+        imax st.base (before fr.first)
       else
         want
     in
@@ -5188,7 +5188,7 @@ let found_of_far st f pos =
   let stop =
     match far_over f with
     | Some o when o.on = f.n ->
-        imin o.oend st.input_len
+        imax st.base (imin o.oend st.input_len)
     | Some _ | None ->
         st.input_len
   in

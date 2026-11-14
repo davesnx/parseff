@@ -67,6 +67,52 @@ let regex_frames () = Parseff.many regex_frame ()
 let regex_valid =
   [ "\x03abc\x06ab cd\n\x04 12\n\x05#AB c"; "\x02zz\x07 99\n#xy"; "" ]
 
+let words = Parseff.regex Re.(rep1 (rg 'a' 'z'))
+
+let backtracking_item seal () =
+  let c = Parseff.any_char () in
+  seal ();
+  Parseff.or_
+    (fun () ->
+      ignore (Parseff.take_while (fun c -> c >= 'a' && c <= 'c'));
+      ignore (Parseff.match_regex words);
+      ignore (Parseff.char '!');
+      c
+    )
+    (fun () ->
+      ignore (Parseff.optional (fun () -> Parseff.match_regex words) ());
+      c
+    )
+    ()
+
+let sealed_frame () =
+  let len = Parseff.any_uint8 () in
+  let seal =
+    if len land 1 = 0 then
+      Parseff.commit
+    else
+      Parseff.cut
+  in
+  let v = Parseff.within len (Parseff.many (backtracking_item seal)) in
+  ignore (Parseff.take_while (fun _ -> true));
+  v
+
+let sealed_valid =
+  let body n =
+    String.init n (fun i ->
+        if i mod 6 = 5 then
+          ' '
+        else
+          "abcde".[i mod 5]
+    )
+  in
+  [
+    "\x50" ^ body 80;
+    "\x51" ^ body 81;
+    "\x48" ^ body 72 ^ "\x05ab cd";
+    "\x5b" ^ String.concat "" (List.init 13 (fun _ -> "abcdef!")) ^ "\x02xy";
+  ]
+
 let http_valid =
   [
     "GET / HTTP/1.1\r\nHost: a\r\n\r\n";
@@ -283,7 +329,7 @@ let check_case t seed case =
 let seeds = [ 1; 2; 3; 4 ]
 let cases_per_seed = 2_000
 
-let fuzz t () =
+let fuzz ?(seeds = seeds) t () =
   let ok = ref 0 in
   List.iter
     (fun seed ->
@@ -338,6 +384,16 @@ let () =
                  parser = regex_frames;
                  each = false;
                  valid = regex_valid;
+               }
+            );
+          Alcotest.test_case "commit or cut before a backtracking regex" `Quick
+            (fuzz
+               ~seeds:(List.init 16 (fun i -> i + 1))
+               {
+                 name = "sealed";
+                 parser = sealed_frame;
+                 each = false;
+                 valid = sealed_valid;
                }
             );
           Alcotest.test_case "binary frames" `Quick

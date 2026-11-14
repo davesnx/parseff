@@ -788,11 +788,12 @@ let regex_words n =
   );
   Gc.allocated_bytes () -. before
 
-let regex_stepping_back n =
+let regex_stepping_back ~stream n =
   let input = String.make n 'a' in
   let letter = Parseff.regex Re.(rg 'a' 'z') in
   let parser () =
     Parseff.within n (fun () ->
+        ignore (Parseff.look_ahead (fun () -> Parseff.skip_while always));
         for i = n - 1 downto 0 do
           ignore
             (Parseff.look_ahead (fun () ->
@@ -805,7 +806,12 @@ let regex_stepping_back n =
     )
   in
   let before = Gc.allocated_bytes () in
-  ( match Parseff.parse input parser with
+  ( match
+      if stream then
+        Parseff.parse_source (chunked_source ~chunk_size:7 input) parser
+      else
+        Parseff.parse input parser
+    with
   | Ok () ->
       ()
   | Error e ->
@@ -814,13 +820,62 @@ let regex_stepping_back n =
   Gc.allocated_bytes () -. before
 
 let test_regex_going_back_is_linear () =
-  let small = regex_stepping_back 4_000
-  and large = regex_stepping_back 16_000 in
-  if large > 6. *. small then
-    Alcotest.failf
-      "allocation grows faster than the input: %.0f bytes for 4000, %.0f for \
-       16000"
-      small large
+  List.iter
+    (fun stream ->
+      let small = regex_stepping_back ~stream 4_000
+      and large = regex_stepping_back ~stream 16_000 in
+      if large > 6. *. small then
+        Alcotest.failf
+          "%s: allocation grows faster than the input: %.0f bytes for 4000, \
+           %.0f for 16000"
+          ( if stream then
+              "stream"
+            else
+              "string"
+          )
+          small large
+    )
+    [ false; true ]
+
+let letter = Parseff.regex (Re.rg 'a' 'z')
+
+let regex_after_commit () =
+  ignore (Parseff.take 40);
+  Parseff.commit ();
+  ignore (Parseff.take 10);
+  let v =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.take 5);
+        ignore (Parseff.match_regex letter);
+        ignore (Parseff.char '!');
+        "left"
+      )
+      (fun () -> Parseff.match_regex letter)
+      ()
+  in
+  Parseff.skip_while always;
+  v
+
+let test_regex_before_a_dropped_frame_start () =
+  let input = String.make 100 'a' ^ "tail" in
+  let parser () = Parseff.within 100 regex_after_commit in
+  check_ok "string" Alcotest.string "a"
+    (Parseff.parse ~consume:`Partial input parser);
+  List.iter
+    (fun (window, chunk_size) ->
+      let name = Printf.sprintf "window %d, reads of %d" window chunk_size in
+      match
+        Parseff.parse_source ~consume:`Partial ~backtrack_window:window
+          (chunked_source ~chunk_size input)
+          parser
+      with
+      | r ->
+          check_ok name Alcotest.string "a" r
+      | exception exn ->
+          Alcotest.failf "%s: %s" name (Printexc.to_string exn)
+    )
+    [ (64, 1); (64, 7); (65_536, 1); (65_536, 7) ]
 
 let test_regex_in_frame_is_linear () =
   let small = regex_words 2_000 and large = regex_words 8_000 in
@@ -1117,6 +1172,8 @@ let () =
             test_found_text_at_capacity;
           Alcotest.test_case "regex going back in a frame is linear" `Quick
             test_regex_going_back_is_linear;
+          Alcotest.test_case "regex before a dropped frame start" `Quick
+            test_regex_before_a_dropped_frame_start;
           Alcotest.test_case "take_while at_least above at_most" `Quick
             test_take_while_at_least_above_at_most;
           Alcotest.test_case "limit with a parse in the trace function" `Quick
