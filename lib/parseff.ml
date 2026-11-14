@@ -4822,7 +4822,13 @@ let capture_rewind st frame saved e =
   st.far <- saved;
   Stdlib.Error e
 
-let capture ?(release = false) p =
+let outer_of st outer pos =
+  if outer then
+    outer_contexts st pos
+  else
+    []
+
+let capture ?(release = false) ?(outer = true) p =
   let st = get_state () in
   let frame =
     State.push_rewind_frame st
@@ -4841,10 +4847,10 @@ let capture ?(release = false) p =
       Stdlib.Ok v
   | exception Fail ->
       capture_rewind st frame saved
-        (error_of_far st (outer_contexts st st.far.pos))
+        (error_of_far st (outer_of st outer st.far.pos))
   | exception User_failure (pos, msg, x) ->
       capture_rewind st frame saved
-        (error_failure st pos msg x (outer_contexts st pos))
+        (error_failure st pos msg x (outer_of st outer pos))
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -4856,13 +4862,49 @@ let rec take_entries l k acc =
   else
     match l with x :: rest -> take_entries rest (k - 1) (x :: acc) | [] -> acc
 
-let removed_entries (type d) st frame (c : d diagnostics) e =
+let removed_entries (type d) st frame (c : d diagnostics) =
   if st.diag == c.self then
-    (e, take_entries c.rev (st.diag_len - State.frame_diag_len st frame) [])
+    take_entries c.rev (st.diag_len - State.frame_diag_len st frame) []
   else
-    (e, [])
+    []
 
-let capture_with c p =
+let capture_entries st frame saved ~keep c e =
+  let inner =
+    if keep then
+      removed_entries st frame c
+    else
+      []
+  in
+  capture_rewind st frame saved (e, inner)
+
+let capture_in st ~release ~outer ~keep c p =
+  let frame =
+    State.push_rewind_frame st
+      ( if release then
+          frame_capture
+        else
+          frame_barrier
+      )
+  in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      Stdlib.Ok v
+  | exception Fail ->
+      let e = error_of_far st (outer_of st outer st.far.pos) in
+      capture_entries st frame saved ~keep c e
+  | exception User_failure (pos, msg, x) ->
+      let e = error_failure st pos msg x (outer_of st outer pos) in
+      capture_entries st frame saved ~keep c e
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let capture_with ?(outer = true) c p =
   let st = get_state () in
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
@@ -4873,17 +4915,25 @@ let capture_with c p =
       far_merge st saved;
       Stdlib.Ok v
   | exception Fail ->
-      let e = error_of_far st (outer_contexts st st.far.pos) in
-      capture_rewind st frame saved (removed_entries st frame c e)
+      let e = error_of_far st (outer_of st outer st.far.pos) in
+      capture_entries st frame saved ~keep:true c e
   | exception User_failure (pos, msg, x) ->
-      let e = error_failure st pos msg x (outer_contexts st pos) in
-      capture_rewind st frame saved (removed_entries st frame c e)
+      let e = error_failure st pos msg x (outer_of st outer pos) in
+      capture_entries st frame saved ~keep:true c e
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
       raise exn
 
-let recover ?release errors ~sync parser hole =
+let record_error errors st record e inner =
+  match record with
+  | None ->
+      record_diagnostic errors st e.range.start e
+  | Some f ->
+      f e inner
+
+let recover ?(release = false) ?(outer = true) ?record errors ~sync parser hole
+    =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4892,11 +4942,13 @@ let recover ?release errors ~sync parser hole =
     parser ()
   else
     let start = st.pos in
-    match capture ?release parser with
+    match
+      capture_in st ~release ~outer ~keep:(record != None) errors parser
+    with
     | Ok v ->
         v
-    | Error e ->
-        record_diagnostic errors st e.range.start e;
+    | Error (e, inner) ->
+        record_error errors st record e inner;
         sync ();
         if st.pos = start then begin
           let p = imax start e.range.start in
@@ -4966,7 +5018,7 @@ let skip_nested ?atom pairs stop =
       far_merge st saved;
       raise exn
 
-let sep_by_recover errors ~sync elem sep hole () =
+let sep_by_recover ?(outer = true) ?record errors ~sync elem sep hole () =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4981,10 +5033,17 @@ let sep_by_recover errors ~sync elem sep hole () =
       if saved != far_none then st.far <- far_none;
       let more pos = fill st ~keep_from:start (pos + 1) || pos < st.input_len in
       let fill_hole e =
+        let inner =
+          match record with
+          | None ->
+              []
+          | Some _ ->
+              removed_entries st frame errors
+        in
         restore_rewind_frame st frame;
         State.pop_rewind_frame st frame;
         st.far <- saved;
-        record_diagnostic errors st e.range.start e;
+        record_error errors st record e inner;
         sync ();
         hole e
       in
@@ -4999,9 +5058,9 @@ let sep_by_recover errors ~sync elem sep hole () =
           far_merge st saved;
           v
       | exception Fail when more st.far.pos ->
-          fill_hole (error_of_far st (outer_contexts st st.far.pos))
+          fill_hole (error_of_far st (outer_of st outer st.far.pos))
       | exception User_failure (pos, msg, x) when more pos ->
-          fill_hole (error_failure st pos msg x (outer_contexts st pos))
+          fill_hole (error_failure st pos msg x (outer_of st outer pos))
       | exception exn ->
           leave exn
   in

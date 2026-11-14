@@ -766,7 +766,7 @@ val skip_to : int -> unit
     input that the parse has read. Each offset from the position to one that
     {!peek_with} returned is in the input read. *)
 
-val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
+val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
 
@@ -793,6 +793,12 @@ val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
     that calls {!cut} after each decided part can be longer than the window. The
     default is [false].
 
+    With [~outer:false], [e] keeps only the contexts that [parser] opened, as if
+    the parse started at [capture]: the contexts open around [capture] are not
+    in [e.contexts] and {!render_error} does not show them. Use it for an error
+    that is recorded and parsed past, whose construct is [parser]. The default
+    is [true].
+
     Example:
     {@ocaml[
     let statement_or_hole errors () =
@@ -807,6 +813,7 @@ val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
     ]} *)
 
 val capture_with :
+  ?outer:bool ->
   'd Diagnostics.t ->
   (unit -> 'a) ->
   ('a, error * 'd Diagnostics.entry list) result
@@ -814,7 +821,8 @@ val capture_with :
     returns the diagnostics that [parser] recorded in [diagnostics] and that the
     failure removed, in the order they were recorded. The diagnostics are
     removed as with {!capture}. To keep one, record it again:
-    [warn ~pos:d.pos diagnostics d.value] gives the same entry.
+    [warn ~pos:d.pos diagnostics d.value] gives the same entry. [~outer] is as
+    in {!capture}.
 
     The list is empty when [diagnostics] is not the collector given to the
     runner.
@@ -837,6 +845,8 @@ val capture_with :
 
 val recover :
   ?release:bool ->
+  ?outer:bool ->
+  ?record:(error -> error Diagnostics.entry list -> unit) ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -848,11 +858,25 @@ val recover :
     [hole e].
 
     The errors that [parser] recorded in [errors] before it failed are removed,
-    as with {!capture}: only [e] stays. To keep them, use {!capture_with}.
+    as with {!capture}: only [e] stays. To keep them, give [~record].
 
-    [~release] is given to {!capture}. With [~release:true], [sync] starts at
-    the last {!commit} or {!cut} that reached [recover], and the errors recorded
-    before that call stay.
+    [~record] replaces the recording of [e]: [recover] calls [record e inner]
+    where [inner] is the list of removed errors that {!capture_with} returns.
+    With [~release:true], [inner] holds only the errors recorded after the last
+    {!commit} or {!cut} that reached [recover], since the errors before it stay.
+    For example, to keep the errors of [parser] and record [e] only when there
+    are none:
+    {@ocaml[
+    let record e inner =
+      List.iter
+        (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
+        inner;
+      if inner = [] then warn ~pos:e.range.start errors e
+    ]}
+
+    [~release] and [~outer] are given to {!capture}. With [~release:true],
+    [sync] starts at the last {!commit} or {!cut} that reached [recover], and
+    the errors recorded before that call stay.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
@@ -878,6 +902,8 @@ val recover :
     ]} *)
 
 val sep_by_recover :
+  ?outer:bool ->
+  ?record:(error -> error Diagnostics.entry list -> unit) ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -889,12 +915,45 @@ val sep_by_recover :
     occurrences of [element] with [separator] between each pair, as {!sep_by}
     does, and recovers from each [element] that fails. For a failure [e], it
     records [e] in [errors], goes back to the start of the element, calls
-    [sync ()] to skip the broken element, and puts [hole e] in the list.
+    [sync ()] to skip the broken element, and puts [hole e] in the list. The
+    errors that the element recorded in [errors] before it failed are removed;
+    [~record] is as in {!recover}, and [~outer] is as in {!capture}.
 
     [sync] must stop before the next separator and before the token that closes
     the list: {!skip_nested} does this for lists in brackets. Unlike {!recover},
     [sep_by_recover] does not consume input when [sync] consumes nothing, so a
     hole can be empty, as in [f(1, , 3)]. The list ends where [separator] fails.
+
+    A separator before the closing token, as in [{1, 2,}], is read as a
+    separator and an empty element, which is recorded as an error. When the
+    grammar allows it, make [separator] fail when the closing token follows, and
+    parse an optional separator before the closing token. The failure must be
+    one that {!sep_by} goes back from, such as a {!look_ahead} of {!satisfy}: a
+    {!fail} is not undone, so the parse fails.
+    {@ocaml[
+    let separator () =
+      skip_whitespace ();
+      let _ = char ',' in
+      skip_whitespace ();
+      ignore (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"field"))
+
+    let table errors field () =
+      let _ = char '{' in
+      skip_whitespace ();
+      let fields =
+        sep_by_recover errors
+          ~sync:(fun () -> skip_nested [ ('{', '}') ] (fun c -> c = ','))
+          field separator
+          (fun _ -> Hole)
+          ()
+      in
+      skip_whitespace ();
+      let _ = optional (fun () -> char ',') () in
+      skip_whitespace ();
+      let _ = char '}' in
+      fields
+    (* "{1, 2, }" -> [1; 2], with no error recorded *)
+    ]}
 
     A failure at the end of the input is not recovered: the parse fails there,
     as with {!sep_by}. A failing first element gives a list with one hole, so
