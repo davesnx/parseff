@@ -1,6 +1,6 @@
 type route = Home | About | Terms | Blog_home | Blog_article of string
 
-let slug_re = Re.compile (Re.Posix.re ".+")
+let slug_re = Parseff.regex (Re.Posix.re ".+")
 
 let home () =
   let _ = Parseff.consume "/" in

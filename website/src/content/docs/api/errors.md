@@ -19,7 +19,7 @@ Parseff exposes four main APIs for error handling:
 
 A parse fails with one of two sorts of error.
 
-**Built-in errors** come from Parseff itself: a primitive such as `Parseff.char` does not match, `Parseff.fail` stops with a message, or a limit such as `max_depth` is reached. Their `kind` is `Expected`, `Failure`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`. You do not declare them, and `Parseff.render_error` prints them with a full message.
+**Built-in errors** come from Parseff itself: a primitive such as `Parseff.char` does not match, `Parseff.fail` stops with a message, or a limit such as `max_depth` is reached. Their `kind` is `Expected`, `Failed`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`. You do not declare them, and `Parseff.render_error` prints them with a full message.
 
 **Custom errors** are cases you add to `Parseff.custom_error`. You raise them with `Parseff.error` and get them back in `kind` as `Custom`. Use them when the input has the right shape but a wrong value, such as a number out of range, and the caller must handle that case in code, not only print it. Give `Parseff.render_error` a `~custom` printer to print them.
 
@@ -27,7 +27,7 @@ A parse fails with one of two sorts of error.
 type Parseff.custom_error += Out_of_range of int
 
 let rating () =
-  let n = Parseff.digit () in
+  let n = Char.code (Parseff.digit ()) - Char.code '0' in
   if n < 1 || n > 5 then Parseff.error (Out_of_range n) else n
 
 let () =
@@ -40,7 +40,7 @@ let () =
 
 ## `fail`
 
-Abort parsing with a message. The message is returned as `Error { kind = Failure msg; ... }`.
+Abort parsing with a message. The message is returned as `Error { kind = Failed msg; ... }`.
 
 ```ocaml
 val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
@@ -58,7 +58,7 @@ let byte () =
 
 let () =
   match Parseff.parse "300" byte with
-  | Error { kind = Failure msg; range; _ } ->
+  | Error { kind = Failed msg; range; _ } ->
       (* range.start = 3, msg = "number must be between 0 and 255" *)
       Printf.printf "Error at %d: %s\n" range.start msg
   | Ok n -> Printf.printf "Got: %d\n" n
@@ -222,7 +222,7 @@ type error = {
 `kind` says what happened:
 
 - `Expected { items; found; more }`: a primitive failed. `items` is everything that was expected at the furthest failure position, sorted and without duplicates: `Char`, `Literal`, `Label` or `End_of_input`. `found` is `Text` with the text at that position, `End` at the end of the input, `Short n` when a read of a fixed number of bytes, such as `take`, found only `n` bytes before the end of the input, or `Value` with the integer read in the same width when `BE.int16` and its relatives do not match. Characters print as `'x'`, literals as `"abc"` and labels as written. `items` holds at most 64 items; `more` counts the alternatives past that, `0` otherwise.
-- `Failure msg`: a failure raised with `Parseff.fail`, or `"no alternative matched"` when `one_of []` is the only failure at the furthest position. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. Unlike `Expected`, `fail` is not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
+- `Failed msg`: a failure raised with `Parseff.fail`, or `"no alternative matched"` when `one_of []` is the only failure at the furthest position. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. Unlike `Expected`, `fail` is not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
 - `Custom e`: a value given to `Parseff.error`.
 - `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
 - `Backtrack_window_exceeded { limit; oldest }`: a streaming parser needed more rewind history than `~backtrack_window` allows.
@@ -288,7 +288,7 @@ Custom errors move from the variant row into `kind`, with `type Parseff.custom_e
 | Error { error = `Unexpected_end_of_input; _ } -> ...
 (* after *)
 | Error { kind = Custom (Too_large n); _ } -> ...
-| Error { kind = Failure msg; _ } -> ...
+| Error { kind = Failed msg; _ } -> ...
 | Error { kind = Expected { found = End; _ }; _ } -> ...
 ```
 The 0\.4 messages of primitives that were not expectations (invalid UTF-8, failed regex, mismatched `BE.int16`) are now `Expected` items: `valid UTF-8`, `text matching the pattern` and `int16be 0xFFFE`. An error at the end of the input now says what was expected. The position is `e.range.start`.

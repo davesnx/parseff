@@ -6,36 +6,47 @@
     {1 Quick Start}
 
     {@ocaml[
-      let number () =
-        let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
-        Char.code c - Char.code '0'
+    let digit_value () =
+      let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
+      Char.code c - Char.code '0'
 
-      let ip_address () =
-        let a = number () in
-        let _ = Parseff.consume "." in
-        let b = number () in
-        let _ = Parseff.consume "." in
-        let c = number () in
-        let _ = Parseff.consume "." in
-        let d = number () in
-        (a, b, c, d)
+    let ip_address () =
+      let a = digit_value () in
+      let _ = Parseff.consume "." in
+      let b = digit_value () in
+      let _ = Parseff.consume "." in
+      let c = digit_value () in
+      let _ = Parseff.consume "." in
+      let d = digit_value () in
+      (a, b, c, d)
 
-      match Parseff.parse "192.168.1.1" ip_address with
-      | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
-      | Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
+    let () =
+      match Parseff.parse "1.2.3.4" ip_address with
+      | Ok (a, b, c, d) ->
+          Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
+      | Error e ->
+          prerr_endline (Parseff.render_error ~name:"address" e)
     ]} *)
 
 (** {1 Span Type} *)
 
-type span = { buf : string; off : int; len : int }
-(** A slice of the input string. With [parse] it is zero-copy: [buf] is the
-    input string. With [parse_source] it is an owned copy with [off = 0]. Use
-    [span_to_string] to materialize when needed. *)
+type span
+(** A slice of the input. With [parse] it is zero-copy: it points into the input
+    string. With [parse_source] it is an owned copy. Use [span_length] and
+    [span_get] to read it without a copy, and [span_to_string] to materialize it
+    when needed. *)
 
 val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
-    actually need the string value. Raises [Invalid_argument] if the span is not
-    a valid range of its buffer. *)
+    actually need the string value. *)
+
+val span_length : span -> int
+(** [span_length s] is the number of bytes in [s]. *)
+
+val span_get : span -> int -> char
+(** [span_get s i] is the byte at index [i] of [s], counted from the start of
+    the span. Raises [Invalid_argument] if [i] is not in
+    [0 .. span_length s - 1]. *)
 
 (** {1 Location Type} *)
 
@@ -91,19 +102,32 @@ type custom_error = ..
     own cases with [type Parseff.custom_error += Too_large of int] and match
     them as [Custom (Too_large n)]. *)
 
+type custom_error +=
+  | Limit_exceeded of { limit : int }
+        (** The input went over a limit given with [~at_most] to
+            {!val:take_while} or {!val:many}. [limit] is that value. The error
+            range covers the run or the item that went over it, so a server can
+            answer "header too large" and not "bad request". It is an ordinary
+            failure: when a failure is recorded farther in the input, the parse
+            reports that one; see {!val:take_while} for how {!commit} keeps the
+            limit. Unstable: this case can change in a 1.x release. *)
+
+(** What failed. These five cases are final until 2.0, so a match on all of them
+    needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
           furthest failure position, sorted and without duplicates, up to 64
           items. [more] is how many further alternatives were expected and are
           not in [items], [0] unless more than 64 were. *)
-  | Failure of string
+  | Failed of string
       (** A failure raised with {!val:fail}, or ["no alternative matched"] when
           [one_of []] is the only failure at the furthest position. Failures of
           primitives are otherwise [Expected]. *)
   | Custom of custom_error  (** A value given to {!val:error}. *)
   | Depth_limit_exceeded of { limit : int }
-      (** {!val:rec_} nested deeper than [max_depth]. *)
+      (** {!val:rec_} nested deeper than [max_depth], or a {!val:fold_right}
+          chain longer than its limit. *)
   | Backtrack_window_exceeded of { limit : int; oldest : int }
       (** A streaming parser needed more rewind history than the window.
           [oldest] is the earliest position the runtime still needs to rewind to
@@ -138,7 +162,7 @@ val error_message : ?custom:(custom_error -> string) -> error -> string
     [expected "else", "if", or "while", found 'xyz']. A message lists at most 8
     expected items, then [, or N more alternatives]. [custom] prints [Custom]
     errors, without it the message is [custom error (no ~custom printer given)].
-*)
+    {!Limit_exceeded} always prints as [limit of N exceeded]. *)
 
 val render_error :
   ?name:string ->
@@ -265,17 +289,36 @@ end
 (** An event of a traced parse, see the [trace] argument of {!val:parse}.
 
     Each {!val:context} call gives one [Enter], then the events nested in it,
-    then one [Exit] or [Fail]. Events also come from branches that are later
+    then one [Return] or [Fail]. Events also come from branches that are later
     abandoned, so a backtrack shows as an [Enter] before the end of the previous
-    event. Positions are absolute byte offsets. *)
+    event. A [Captured] event shows a failure that {!val:capture},
+    {!val:recover} or {!val:sep_by_recover} caught, so the parse continued.
+    Positions are absolute byte offsets.
+
+    A 1.x release can add events: end a match on [trace_event] with a [_] case.
+*)
 type trace_event = private
   | Enter of { name : string; pos : int }
       (** A {!val:context} named [name] started at byte offset [pos]. *)
-  | Exit of { name : string; start : int; stop : int }
+  | Return of { name : string; start : int; stop : int }
       (** The construct returned. It read the bytes from [start] to [stop]. *)
   | Fail of { name : string; start : int; pos : int }
       (** The construct failed or raised. [pos] is the parser position when it
           ended. The error position is in the {!type:error}. *)
+  | Captured of { start : int; error : error }
+      (** A {!val:capture}, {!val:recover} or {!val:sep_by_recover} caught
+          [error] and went back to [start]: the start of its parser, or with
+          [~release:true] the last {!val:commit}, {!val:cut} or value given out
+          by {!val:many_iter}, {!val:sep_by_iter}, {!val:take_iter} or
+          {!val:take_while_iter} that reached it. {!val:require} and {!val:list}
+          give it for each error that they record, with [start] where the
+          missing part was inserted. A recovery inside a parser that is later
+          undone, such as the [close] of {!val:list} or a branch of {!val:or_},
+          still gives its event. [capture] gives the event when it returns
+          [Error error]. [recover] and [sep_by_recover] give it after [sync],
+          [~record] and [hole] return, so the events of [sync] and [hole] come
+          first. When one of them fails, the failure was not recovered and no
+          event is given. Unstable: this event can change in a 1.x release. *)
 
 val print_trace : Format.formatter -> trace_event -> unit
 (** [print_trace ppf] is a [trace] callback that prints each event on its own
@@ -283,7 +326,10 @@ val print_trace : Format.formatter -> trace_event -> unit
 
     Example:
     {@ocaml[
-    let _ = parse ~trace:(print_trace Format.std_formatter) input parser
+    let _ =
+      parse ~trace:(print_trace Format.std_formatter) "hello" (fun () ->
+          consume "hello"
+      )
     ]} *)
 
 (** {1 Runner} *)
@@ -306,10 +352,13 @@ val parse :
     from the start of a buffer. With [`Partial], the result does not say where
     the parser stopped; call {!position} at the end of the parser to read it.
 
-    [diagnostics] is the collector given to {!warn}. The runner empties it
-    before the parser starts. Read it with {!Diagnostics.to_list} after the
-    parse, whether the result is [Ok] or [Error]. {!warn} into any other
-    collector does nothing.
+    [diagnostics] is the collector given to {!warn}, {!recover} and
+    {!sep_by_recover}. The runner empties it before the parser starts. Read it
+    with {!Diagnostics.to_list} after the parse, whether the result is [Ok] or
+    [Error]. With any other collector, {!warn} records nothing, and {!recover}
+    and {!sep_by_recover} do not recover: the parse fails at the first error, as
+    without them. Thus the same parser can report every error with
+    [~diagnostics] and stop at the first one without it.
 
     [trace] receives a {!type:trace_event} when a {!val:context} starts, returns
     and fails. {!print_trace} prints the events as a tree. An exception from
@@ -328,7 +377,7 @@ val parse :
     [Depth_limit_exceeded] instead of risking a stack overflow.
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
-    {!type:error}. [e.kind] is [Expected] for a mismatch, [Failure] for
+    {!type:error}. [e.kind] is [Expected] for a mismatch, [Failed] for
     {!val:fail}, [Custom] for {!val-error}, [Depth_limit_exceeded] when
     recursion nested deeper than [max_depth], and [Backtrack_window_exceeded]
     for streaming.
@@ -338,7 +387,7 @@ val parse :
     match parse "hello" (fun () -> consume "hello") with
     | Ok s ->
         Printf.printf "Matched %S\n" s
-    | Error { kind = Failure msg; _ } ->
+    | Error { kind = Failed msg; _ } ->
         Printf.printf "Failed: %s\n" msg
     | Error e ->
         prerr_endline (render_error ~name:"input" e)
@@ -357,19 +406,20 @@ val consume : string -> string
     Example:
     {@ocaml[
     let parser () =
-      consume "hello";
-      consume " ";
+      let _ = consume "hello" in
+      let _ = consume " " in
       consume "world"
     ]} *)
 
-val satisfy : (char -> bool) -> label:string -> char
-(** [satisfy fun ~label] matches the next character if [fun] returns [true] for
-    it. If the character doesn't match or input is empty, fails with [label] in
-    the error message.
+val satisfy : ?label:string -> (char -> bool) -> char
+(** [satisfy ?label fun] matches the next character if [fun] returns [true] for
+    it. If the character doesn't match or input is empty, fails with
+    [expected <label>]. Without [~label] the label is ["at least 1 character"],
+    as for [take_while ~at_least:1].
 
     Example:
     {@ocaml[
-    let vowel () = satisfy (fun c -> String.contains "aeiou" c) ~label:"vowel"
+    let vowel () = satisfy ~label:"vowel" (fun c -> String.contains "aeiou" c)
     ]} *)
 
 val char : char -> char
@@ -380,34 +430,49 @@ val char : char -> char
     let comma () = char ','
     ]} *)
 
-val match_regex : ?label:string -> Re.re -> string
-(** [match_regex ?label re] matches a regular expression. The regex must be
-    compiled with [Re.compile].
+type regex
+(** A regular expression for {!match_regex}. Build it with {!val:regex}. *)
+
+val regex : Re.t -> regex
+(** [regex r] compiles [r] for {!match_regex}, anchored at the position where
+    the match starts. Compile once, outside the parser, and reuse the value.
+
+    Example:
+    {@ocaml[
+    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
+    ]} *)
+
+val match_regex : ?label:string -> regex -> string
+(** [match_regex ?label re] matches [re] at the current position and returns the
+    matched text.
 
     When the regex does not match, the parse fails with [expected <label>] if
     [~label] is given, so the failure merges with the other alternatives
     expected at the same position like any other primitive. Without [~label] the
     label is ["text matching the pattern"].
 
+    A failed match examines only the bytes that the regex needs to fail, not the
+    rest of the input. [Re.bol] and word boundaries see the byte before the
+    current position.
+
     In streaming mode, a match and the byte after it must fit in the backtrack
     window, unless the source ends after the match. Otherwise the parse fails
     with [Backtrack_window_exceeded]. A regex that needs later bytes to choose a
     longer match can return the shorter one when the window is small: [a(bc)?]
-    on ["abc"] can return ["a"] with a window below [6]. The byte before the
-    current position stays visible to [Re.bol] and word boundaries.
-
-    The match must start at the current position, but [Re] searches forward when
-    it does not. A failed match therefore scans the rest of the input, and a
-    loop that fails at each position takes quadratic time.
+    on ["abc"] can return ["a"] with a window below [6]. Before it matches, a
+    streaming [match_regex] reads ahead up to half the backtrack window, also
+    when the match then fails. A regex that can still match with more input, for
+    example one with a leading [.*], reads until the window is full and then
+    fails with [Backtrack_window_exceeded].
 
     Example:
     {@ocaml[
-    let identifier () =
-      let re = Re.compile (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*") in
-      match_regex re
+    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
+    let identifier () = match_regex ~label:"identifier" identifier_re
     ]} *)
 
-val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
+val take_while :
+  ?at_least:int -> ?at_most:int -> ?label:string -> (char -> bool) -> string
 (** [take_while fun] reads characters one by one as long as [fun] returns [true]
     for each one. Returns the matched string (may be empty if the very first
     character doesn't match). Much faster than regex for simple character
@@ -417,6 +482,29 @@ val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
     match. Fails with [expected <label>] if fewer characters match, or with
     [expected at least n characters] when [~label] is missing. The failure
     position is the end of the characters that matched.
+
+    When [~at_most] is specified, the run may have at most that many characters.
+    When character [at_most + 1] matches too, the parse fails with
+    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
+    the [at_most + 1] characters read. [take_while] reads at most [at_most + 1]
+    characters. On a stream, these characters must fit in the backtrack window
+    together with the input that the parser still keeps; when they do not, the
+    parse fails with [Backtrack_window_exceeded] first. So keep [at_most] well
+    below [~backtrack_window].
+
+    The limit failure follows the rule of every failure: the parse reports the
+    furthest failure. A failure that an earlier abandoned branch recorded
+    farther in the input, or an alternative that fails farther afterwards, is
+    reported in its place, and {!or_}, {!optional} and {!many} recover from it
+    as from any failure. A parser that must report the limit calls {!commit}
+    before the run, inside the {!or_}, {!optional} or other frame around it:
+    [commit] forgets the failures recorded at or beyond the current position and
+    seals that frame, so its alternatives are not tried. Outside any frame
+    [commit] does nothing. {!cut} seals the frames of the enclosing
+    {!val:context} but forgets no failure.
+
+    Raises [Invalid_argument] when [at_most] is negative or below [at_least].
+    Unstable: [~at_most] can change in a 1.x release.
 
     Example:
     {@ocaml[
@@ -436,38 +524,27 @@ val skip_while : (char -> bool) -> unit
     let skip_spaces () = skip_while (fun c -> c = ' ')
     ]} *)
 
-val skip_while_then_char : (char -> bool) -> char -> unit
-(** [skip_while_then_char fun c] skips characters where [fun] returns [true],
-    then matches the exact character [c]. More efficient than calling
-    {!skip_while} followed by {!char} separately. *)
-
-val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
-(** [sep_by_take is_whitespace separator is_value_char] parses a list of values
-    separated by [separator]. Whitespace (characters where [is_whitespace]
-    returns [true]) is skipped around each separator. Each value consists of
-    characters where [is_value_char] returns [true]. Returns a list of matched
-    strings. Runs entirely in a single operation for maximum efficiency. *)
+val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
+(** [sep_by_take ~ws ~sep is_value_char] parses a list of values separated by
+    [sep]. Characters where [ws] returns [true] are skipped around each
+    separator. Each value consists of characters where [is_value_char] returns
+    [true]. Returns a list of matched strings. Runs entirely in a single
+    operation for maximum efficiency. *)
 
 val take_while_span : (char -> bool) -> span
 (** [take_while_span fun] like {!take_while} but returns a zero-copy
     {!type:span} instead of allocating a string. No memory allocation until you
     call {!span_to_string}. *)
 
-val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
-(** [sep_by_take_span is_whitespace separator is_value_char] like {!sep_by_take}
-    but returns zero-copy {!type:span}s instead of strings. No [String.sub]
-    allocations per element. *)
-
-val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
-(** [fused_sep_take is_whitespace separator is_value_char] skips whitespace,
-    matches [separator], skips whitespace again, then reads one or more
-    characters where [is_value_char] returns [true]. All steps run in a single
-    operation. Returns the taken string. Much more efficient than calling each
-    step separately when parsing separated values. *)
+val sep_by_take_span :
+  ws:(char -> bool) -> sep:char -> (char -> bool) -> span list
+(** [sep_by_take_span ~ws ~sep is_value_char] like {!sep_by_take} but returns
+    zero-copy {!type:span}s instead of strings. No [String.sub] allocations per
+    element. *)
 
 val fail :
   ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
-(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failure msg]
+(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failed msg]
     error.
 
     [~from] and [~upto] make the error cover the bytes from [from] to [upto]
@@ -489,6 +566,8 @@ val fail :
     given. {!render_error} underlines up to the end of the line it can show.
 
     {@ocaml[
+    let is_digit c = c >= '0' && c <= '9'
+
     let byte () =
       let start = position () in
       let n = int_of_string (take_while ~at_least:1 is_digit ~label:"digit") in
@@ -531,21 +610,27 @@ val error :
     The error is returned as [Error { kind = Custom e; _ }]. Declare the cases
     of {!type:custom_error} for rich error reporting:
     {@ocaml[
-      type custom_error += Out_of_range of int | Negative of int
+    type custom_error += Out_of_range of int | Negative of int
 
-      let number () =
-        let n = parse_int () in
-        if n > 255 then error (Out_of_range n)
-        else if n < 0 then error (Negative n)
-        else n
+    let octet () =
+      let n = integer () in
+      if n > 255 then
+        error (Out_of_range n)
+      else if n < 0 then
+        error (Negative n)
+      else
+        n
 
-      match parse input number with
-      | Ok n -> Printf.printf "Got %d\n" n
+    let () =
+      match parse "300" octet with
+      | Ok n ->
+          Printf.printf "Got %d\n" n
       | Error { kind = Custom (Out_of_range n); _ } ->
           Printf.printf "%d is too large\n" n
       | Error { kind = Custom (Negative n); _ } ->
           Printf.printf "%d is negative\n" n
-      | Error _ -> Printf.printf "Parse error\n"
+      | Error _ ->
+          Printf.printf "Parse error\n"
     ]}
 
     {b Note:} Custom errors from [error] pass through {!val:expect} and
@@ -564,7 +649,7 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
     parsing. [warn ~pos diagnostics d] records it at the byte offset [pos].
     [diagnostics] must be the collector given to the runner as [~diagnostics];
-    for any other collector [warn] does nothing.
+    for any other collector [warn] records nothing.
 
     A diagnostic lives as long as the input position that it was recorded at.
     When a parser fails and the position goes back, the diagnostics recorded
@@ -576,8 +661,8 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 
     Thus a diagnostic recorded inside a construct is lost when an enclosing
     {!capture} or {!recover} fails later: only the error of the enclosing
-    construct stays. This rule is final. To keep the inner diagnostics, use
-    {!capture_with}. *)
+    construct stays. This rule is final. To keep the inner diagnostics, give
+    [~record] to {!recover} or {!sep_by_recover}. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -634,6 +719,8 @@ val end_of_input : unit -> unit
 
     Example:
     {@ocaml[
+    let some_parser () = consume "hello"
+
     let complete_parser () =
       let result = some_parser () in
       end_of_input ();
@@ -648,6 +735,10 @@ val peek_char : unit -> char option
 
     Example:
     {@ocaml[
+    let parse_array () = `Array (consume "[]")
+    let parse_string () = `String (consume "\"\"")
+    let parse_number () = `Number (number ())
+
     let value () =
       match peek_char () with
       | Some '[' ->
@@ -678,11 +769,11 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
     let bool_parser () =
       or_
         (fun () ->
-          consume "true";
+          let _ = consume "true" in
           true
         )
         (fun () ->
-          consume "false";
+          let _ = consume "false" in
           false
         )
         ()
@@ -770,7 +861,10 @@ val skip_to : int -> unit
 
     Raises [Invalid_argument] if [target] is before the position, or after the
     input that the parse has read. Each offset from the position to one that
-    {!peek_with} returned is in the input read. *)
+    {!peek_with} returned is in the input read, except inside {!within}: there
+    the input ends at the frame end, and a target past it raises
+    [Invalid_argument], also one that {!peek_with} returned outside the frame.
+*)
 
 val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
@@ -781,23 +875,29 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
     furthest failure inside [parser], built as {!parse} builds an error. The
     position then goes back to where [capture] started, and the diagnostics that
     [parser] recorded are removed, also those of a {!capture} or {!recover}
-    inside [parser] that recovered. This rule is final; {!capture_with} returns
-    the removed diagnostics. A {!cut} or {!commit} in [parser] does not reach
-    past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
-    not caught. In {!parse_source}, the input that [parser] reads must fit in
-    [~backtrack_window].
+    inside [parser] that recovered. This rule is final; the [~record] of
+    {!recover} gets the removed diagnostics. A {!cut} or {!commit} in [parser]
+    does not reach past [capture]. [Depth_limit_exceeded] and
+    [Backtrack_window_exceeded] are not caught. In {!parse_source}, the input
+    that [parser] reads must fit in [~backtrack_window]. A traced parse gets a
+    [Captured] event for [Error e].
+
+    [capture] also returns a failure at the end of the input. A parser that
+    records it and continues usually fails again at the end, so the input gets
+    two errors. {!recover} and {!sep_by_recover} do not recover such a failure.
 
     With [~release:true], a {!commit} or {!cut} in [parser] that reaches
-    [capture] moves the rewind point to the position of that call. A later
-    failure of [parser] then goes back to that position, not to the start. It
-    removes only the diagnostics and the {!Ref} changes made after that call;
-    those made before it stay, as after a success. Do not parse the same input
-    again with another parser after [Error e]: skip from the current position,
-    and from [e.range.start] when it is later. A {!cut} also continues to the
-    frames outside [capture]. In {!parse_source}, only the input that [parser]
-    reads after the rewind point must fit in [~backtrack_window], so a parser
-    that calls {!cut} after each decided part can be longer than the window. The
-    default is [false].
+    [capture], or a value that {!many_iter}, {!sep_by_iter}, {!take_iter} or
+    {!take_while_iter} gives out in [parser], moves the rewind point to the
+    position of that call. A later failure of [parser] then goes back to that
+    position, not to the start. It removes only the diagnostics and the {!Ref}
+    changes made after that call; those made before it stay, as after a success.
+    Do not parse the same input again with another parser after [Error e]: skip
+    from the current position, and from [e.range.start] when it is later. A
+    {!cut} also continues to the frames outside [capture]. In {!parse_source},
+    only the input that [parser] reads after the rewind point must fit in
+    [~backtrack_window], so a parser that calls {!cut} after each decided part
+    can be longer than the window. The default is [false].
 
     With [~outer:false], [e] keeps only the contexts that [parser] opened, as if
     the parse started at [capture]: the contexts open around [capture] are not
@@ -815,38 +915,7 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
           warn ~pos:e.range.start errors e;
           skip_while (fun c -> c <> ';');
           let _ = char ';' in
-          Hole
-    ]} *)
-
-val capture_with :
-  ?outer:bool ->
-  'd Diagnostics.t ->
-  (unit -> 'a) ->
-  ('a, error * 'd Diagnostics.entry list) result
-(** [capture_with diagnostics parser] is {!capture}, and on failure it also
-    returns the diagnostics that [parser] recorded in [diagnostics] and that the
-    failure removed, in the order they were recorded. The diagnostics are
-    removed as with {!capture}. To keep one, record it again:
-    [warn ~pos:d.pos diagnostics d.value] gives the same entry. [~outer] is as
-    in {!capture}.
-
-    The list is empty when [diagnostics] is not the collector given to the
-    runner.
-
-    Example:
-    {@ocaml[
-    let statement_or_hole errors () =
-      match capture_with errors statement with
-      | Ok s ->
-          s
-      | Error (e, inner) ->
-          List.iter
-            (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
-            inner;
-          if inner = [] then warn ~pos:e.range.start errors e;
-          skip_while (fun c -> c <> ';');
-          let _ = char ';' in
-          Hole
+          `Hole
     ]} *)
 
 val recover :
@@ -858,7 +927,9 @@ val recover :
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
+(** Unstable: this function can change in a 1.x release.
+
+    [recover errors ~sync parser hole] runs [parser] with {!capture}. If
     [parser] fails with the error [e], [recover] records [e] in [errors], calls
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
@@ -867,13 +938,16 @@ val recover :
     as with {!capture}: only [e] stays. To keep them, give [~record].
 
     [~record] replaces the recording of [e]: [recover] calls [record e inner]
-    where [inner] is the list of removed errors that {!capture_with} returns.
-    With [~release:true], [inner] holds only the errors recorded after the last
-    {!commit} or {!cut} that reached [recover], since the errors before it stay.
-    For example, to keep the errors of [parser] and record [e] only when there
-    are none:
+    where [inner] holds the errors that [parser] recorded in [errors] and that
+    the failure removed, in the order they were recorded. To keep one, record it
+    again: [warn ~pos:d.pos errors d.value] gives the same entry. With
+    [~release:true], [inner] holds only the errors recorded after the last
+    {!commit}, {!cut} or value given out by a [*_iter] function, such as
+    {!many_iter}, that reached [recover], since the errors before it stay. For
+    example, to keep the errors of [parser] and record [e] only when there are
+    none:
     {@ocaml[
-    let record e inner =
+    let record errors e inner =
       List.iter
         (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
         inner;
@@ -881,14 +955,19 @@ val recover :
     ]}
 
     [~release] and [~outer] are given to {!capture}. With [~release:true],
-    [sync] starts at the last {!commit} or {!cut} that reached [recover], and
-    the errors recorded before that call stay.
+    [sync] starts at the last {!commit}, {!cut} or value given out by a [*_iter]
+    function that reached [recover], and the errors recorded before that call
+    stay.
 
     [errors] must be the collector given to the runner as [~diagnostics];
-    otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
-    [recover] still consumes input, so a loop around it always moves forward. To
-    continue without consuming input, use {!capture}. At the end of the input,
-    [recover] calls [parser] directly, so the parse fails as without [recover].
+    otherwise [recover] calls [parser] directly, so the parse fails as without
+    [recover]. If [sync] consumes nothing, [recover] still consumes input, so a
+    loop around it always moves forward: it moves to the start of the error
+    range and one character past it, but never past the end of the input. To
+    continue without consuming input, use {!capture}. A failure at the end of
+    the input is not recovered: the parse fails there, as without [recover].
+    Thus an element that is cut short by the end of the input gives one error,
+    not a second one where the enclosing construct expects more input.
 
     Example:
     {@ocaml[
@@ -902,12 +981,13 @@ val recover :
               ignore (optional (fun () -> char ';') ())
             )
             statement
-            (fun _ -> Hole)
+            (fun _ -> `Hole)
         )
         ()
     ]} *)
 
 val sep_by_recover :
+  ?release:bool ->
   ?outer:bool ->
   ?record:(error -> error Diagnostics.entry list -> unit) ->
   error Diagnostics.t ->
@@ -917,18 +997,26 @@ val sep_by_recover :
   (error -> 'a) ->
   unit ->
   'a list
-(** [sep_by_recover errors ~sync element separator hole] parses one or more
+(** Unstable: this function can change in a 1.x release.
+
+    [sep_by_recover errors ~sync element separator hole] parses one or more
     occurrences of [element] with [separator] between each pair, as {!sep_by}
     does, and recovers from each [element] that fails. For a failure [e], it
     records [e] in [errors], goes back to the start of the element, calls
     [sync ()] to skip the broken element, and puts [hole e] in the list. The
     errors that the element recorded in [errors] before it failed are removed;
-    [~record] is as in {!recover}, and [~outer] is as in {!capture}.
+    [~release], [~outer] and [~record] are as in {!recover}. With
+    [~release:true], a failure goes back to the last {!commit}, {!cut} or value
+    given out by a [*_iter] function that reached [sep_by_recover], not to the
+    start of the element.
 
     [sync] must stop before the next separator and before the token that closes
     the list: {!skip_nested} does this for lists in brackets. Unlike {!recover},
     [sep_by_recover] does not consume input when [sync] consumes nothing, so a
     hole can be empty, as in [f(1, , 3)]. The list ends where [separator] fails.
+    If [sync], [~record] or [hole] fails, the element fails as in {!sep_by}:
+    after the first element, the list ends before it, and the failure is
+    reported only if the parse then fails.
 
     A separator before the closing token, as in [{1, 2,}], is read as a
     separator and an empty element, which is recorded as an error. When the
@@ -941,16 +1029,16 @@ val sep_by_recover :
       skip_whitespace ();
       let _ = char ',' in
       skip_whitespace ();
-      ignore (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"field"))
+      ignore (look_ahead (fun () -> satisfy ~label:"field" (fun c -> c <> '}')))
 
     let table errors field () =
       let _ = char '{' in
       skip_whitespace ();
       let fields =
         sep_by_recover errors
-          ~sync:(fun () -> skip_nested [ ('{', '}') ] (fun c -> c = ','))
+          ~sync:(skip_nested [ ('{', '}') ] (fun c -> c = ','))
           field separator
-          (fun _ -> Hole)
+          (fun _ -> `Hole)
           ()
       in
       skip_whitespace ();
@@ -965,10 +1053,14 @@ val sep_by_recover :
     as with {!sep_by}. A failing first element gives a list with one hole, so
     for a list that can be empty, test for the closing token first. [errors]
     must be the collector given to the runner as [~diagnostics]; otherwise
-    [sep_by_recover] raises [Invalid_argument].
+    [sep_by_recover] is [sep_by ~at_least:1 element separator ()].
 
     Example:
     {@ocaml[
+    let expr () =
+      skip_whitespace ();
+      `Int (integer ())
+
     let arguments errors () =
       let _ = char '(' in
       let args =
@@ -976,23 +1068,234 @@ val sep_by_recover :
           []
         else
           sep_by_recover errors
-            ~sync:(fun () ->
-              skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ',')
-            )
+            ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
             expr
             (fun () -> char ',')
-            (fun _ -> Hole)
+            (fun _ -> `Hole)
             ()
       in
       let _ = char ')' in
       args
-    (* "(1, [2 3], 4)" -> [1; Hole; 4], with one error recorded *)
+    (* "(1, [2 3], 4)" -> [`Int 1; `Hole; `Int 4], with one error recorded *)
+    ]} *)
+
+val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
+(** [require errors parser missing] runs [parser]. If the furthest failure of
+    [parser] is at the position where [require] started, [require] records the
+    error [e] in [errors], goes back to that position and returns [missing e]:
+    it inserts the missing part, consumes nothing and the parse goes on. Use it
+    for a token that the grammar needs at this point, such as [then], [;], or
+    the [)] that closes a list, and for a missing expression.
+
+    The furthest failure decides, not the position where [parser] stopped. A
+    branch of [parser] that read further and failed means that the construct is
+    there and broken, not missing: the failure goes on, as without [require],
+    and an enclosing {!recover} or {!list} handles it. On ["ax"],
+    [require errors (fun () -> ignore (optional ab ()); ignore (char ')'))
+     ignore] with [ab] reading ['a'] then ['b'] does not insert: [ab] failed at
+    1. With [capture ab] in place of [optional ab ()], the failure of [ab] is
+    not counted, and [require] inserts the [)] at 0. The same rule holds for a
+    failure of {!fail} or {!val-error}: it is inserted only when no branch of
+    [parser] read further.
+
+    A failure at the end of the input is inserted too, so a missing closing
+    token at the end gives one error. [e] keeps the contexts open around
+    [require], so {!render_error} shows the construct that the token closes. [e]
+    also lists what other parsers expected at the same position, such as the
+    separator that a {!list} tried before it stopped, as {!parse} would report
+    it. After the insertion, those expectations are dropped, as after reading a
+    token, for a primitive failure and for {!fail}. An error of {!fail} has its
+    message and no expected set, so it does not list them.
+
+    With the collector, a {!commit} or {!cut} in [parser] does not reach the
+    frames outside [require], as with {!recover}; without the collector it does.
+    So an {!or_} around [require] can take its other branch with the collector
+    and not without it. An insertion undoes all that [parser] did: the position,
+    the diagnostics and the {!Ref} changes.
+
+    In byte mode, a token parser usually skips the whitespace after it. Then [e]
+    points after that whitespace, not at the end of the previous token.
+
+    [errors] must be the collector given to the runner as [~diagnostics];
+    otherwise [require] calls [parser] directly. A traced parse gets a
+    [Captured] event for each insertion. Unstable: this function can change in a
+    1.x release.
+
+    Example:
+    {@ocaml[
+    type call = Call of string * int list
+
+    let call errors () =
+      let name =
+        take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
+      in
+      let _ = char '(' in
+      let args =
+        list
+          ~sep:(fun () ->
+            let _ = char ',' in
+            skip_whitespace ()
+          )
+          errors
+          ~close:(fun () -> peek_char () = Some ')')
+          ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ','))
+          (fun () ->
+            let n = integer () in
+            skip_whitespace ();
+            n
+          )
+          (fun _ -> 0)
+          ()
+      in
+      require errors (fun () -> ignore (char ')')) ignore;
+      Call (name, args)
+
+    let () =
+      let errors = Diagnostics.create () in
+      let r = parse ~diagnostics:errors "f(1, 2" (call errors) in
+      assert (r = Ok (Call ("f", [ 1; 2 ])));
+      match Diagnostics.to_list errors with
+      | [ { Diagnostics.value = e; _ } ] ->
+          assert (error_message e = "expected ')' or ',', found end of input")
+      | _ ->
+          assert false
+    ]} *)
+
+val list :
+  ?release:bool ->
+  ?outer:bool ->
+  ?record:(error -> error Diagnostics.entry list -> unit) ->
+  ?sep:(unit -> unit) ->
+  ?trailing:bool ->
+  error Diagnostics.t ->
+  close:(unit -> bool) ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (error -> 'a) ->
+  unit ->
+  'a list
+(** [list errors ~close ~sync element hole ()] parses [element] until [close ()]
+    is [true] or the input ends, and recovers from each [element] that fails. It
+    is one loop for a list of statements and, with [~sep], for a list with
+    separators. It does not read the closing token: follow it with {!require}.
+
+    [close] tells where the list ends. Its changes are undone, as with
+    {!look_ahead}, so it can read the closing token. A failing [close] makes
+    [list] fail. At the end of the input [list] does not call it.
+
+    When [element] fails with the error [e], [list] records [e], calls [sync ()]
+    and puts [hole e] in the list, as {!recover} does. [~release], [~outer] and
+    [~record] are as in {!recover}.
+
+    Without [~sep], [close] runs before each element. When [sync] consumes
+    nothing, [list] skips one character past the error, as {!recover} does. An
+    element that consumes nothing ends the list, as in {!many}, unless it
+    recorded a diagnostic, such as an insertion of {!require}: then [list] keeps
+    its value, calls [sync ()], and when [sync] consumes nothing, skips one
+    character. Thus each element moves the position, or ends the list.
+
+    With [~sep], [list] reads as {!sep_by}: an element, then a separator and an
+    element, again and again. An element that succeeds on no input is a value,
+    as in {!sep_by}. [close] runs before the first element, and after an element
+    when the separator fails. The list ends where the separator fails at [close]
+    or at the end of the input, or where a separator and an element together
+    consume nothing.
+    - When [close] is [true] before the first element, [element] runs without
+      recovery: if it succeeds, its value is the first element; if it fails, the
+      list is empty. A failure of {!fail} there is recorded first, since
+      {!sep_by} does not catch it and the plain parse fails.
+    - [list] does not skip, as {!sep_by_recover}: [sync] must stop before the
+      next separator and before the closing token, and {!skip_nested} does this.
+      Thus a hole can be empty, as in [f(1, , 3)].
+    - After a separator before the closing token, as in [{1, 2,}], [element]
+      runs: a failure is recorded and gives [hole e], as with {!sep_by}, which
+      rejects this input. At the end of the input the parse fails there. With
+      [~trailing:true], [close] runs after each separator, and a separator after
+      an element can come before the closing token, with no error and no element
+      after it. A separator with no element before it, as in [{,}], is still an
+      error.
+    - When the separator is missing and an element follows, as in [f(1 2)],
+      [list] records the error of the separator and goes on with the element.
+      When no element follows, as in [f(1 ?)], [list] calls [sync ()]. If [sync]
+      consumes input, [list] records the error of the separator and goes on.
+      Otherwise the list ends there, and the {!require} of the closing token
+      reports the error. The element after a missing separator runs once, under
+      recovery, as any element. The error of the separator goes through
+      [~record], with no inner diagnostics. It is recorded, and its [Captured]
+      event is given, after those of that element, and only when that step
+      succeeds.
+
+    To find the next element when a separator is missing, [element] and [sep]
+    must skip the whitespace after them, not before.
+
+    A failure at the end of the input is not recovered: the parse fails there,
+    as with {!recover}. [errors] must be the collector given to the runner as
+    [~diagnostics]; otherwise [list] is the plain parser: {!many} [element]
+    without [~sep], {!sep_by} [element] [sep] with it, and with [~trailing:true]
+    also an optional separator after a list that is not empty. [close] is not
+    used then. For valid input, [list] with the collector gives the same list as
+    the plain parser, and records nothing.
+
+    As with {!look_ahead} and {!or_}, [close] and the first element at the
+    closing token can give trace events for work that is undone. Unstable: this
+    function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    type stmt = Assign of string * int | Bad
+
+    let statement () =
+      let name =
+        take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
+      in
+      skip_whitespace ();
+      let _ = char '=' in
+      skip_whitespace ();
+      let value = integer () in
+      skip_whitespace ();
+      let _ = char ';' in
+      skip_whitespace ();
+      Assign (name, value)
+
+    let skip_statement () =
+      skip_while (fun c -> c <> ';' && c <> '}');
+      ignore (optional (fun () -> char ';') ());
+      skip_whitespace ()
+
+    let block errors () =
+      context ~delimited:true "block" (fun () ->
+          let _ = char '{' in
+          skip_whitespace ();
+          let stmts =
+            list errors
+              ~close:(fun () -> peek_char () = Some '}')
+              ~sync:skip_statement statement
+              (fun _ -> Bad)
+              ()
+          in
+          require errors (fun () -> ignore (char '}')) ignore;
+          stmts
+      )
+
+    let () =
+      let errors = Diagnostics.create () in
+      let r = parse ~diagnostics:errors "{ x = 1; y = ; " (block errors) in
+      assert (r = Ok [ Assign ("x", 1); Bad ]);
+      assert (
+        List.map
+          (fun { Diagnostics.value = e; _ } -> error_message e)
+          (Diagnostics.to_list errors)
+        = [ "expected integer, found ';'"; "expected '}', found end of input" ]
+      )
     ]} *)
 
 val skip_nested :
-  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit
-(** [skip_nested pairs stop] skips input up to the end of a broken list element.
-    It is made for the [~sync] of {!sep_by_recover} and {!recover}.
+  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit -> unit
+(** Unstable: this function can change in a 1.x release.
+
+    [skip_nested pairs stop ()] skips input up to the end of a broken list
+    element. It is made for the [~sync] of {!sep_by_recover} and {!recover}:
+    [~sync:(skip_nested pairs stop)].
 
     [pairs] gives the brackets of the grammar as [(opening, closing)]
     characters. The skip stops, without consuming, before the first of:
@@ -1017,7 +1320,12 @@ val skip_nested :
 
     Example:
     {@ocaml[
-    let skip_argument () =
+    let string_literal () =
+      let _ = char '"' in
+      skip_while (fun c -> c <> '"');
+      ignore (char '"')
+
+    let skip_argument =
       skip_nested ~atom:string_literal
         [ ('(', ')'); ('[', ']'); ('{', '}') ]
         (fun c -> c = ',')
@@ -1128,7 +1436,7 @@ val cut : unit -> unit
           (* from here on, a failure is an error of this statement *)
           let name = identifier () in
           let _ = consume "=" in
-          (name, expression ())
+          (name, expr ())
       )
     ]} *)
 
@@ -1139,13 +1447,18 @@ val rec_ : (unit -> 'a) -> 'a
 
     Example:
     {@ocaml[
-      let rec json () = Parseff.rec_ (fun () ->
-        Parseff.one_of [ array_parser; null_parser; ... ] ()
-      )
-      and array_parser () =
-        let _ = Parseff.consume "\[" in
-        let elements = ... json () ... in
-        ...
+    let rec json () =
+      Parseff.rec_ (fun () -> Parseff.one_of [ array_parser; null_parser ] ())
+
+    and array_parser () =
+      let _ = Parseff.consume "[" in
+      let elements = Parseff.sep_by json (fun () -> Parseff.char ',') () in
+      let _ = Parseff.consume "]" in
+      `Array elements
+
+    and null_parser () =
+      let _ = Parseff.consume "null" in
+      `Null
     ]} *)
 
 val expect : string -> (unit -> 'a) -> 'a
@@ -1170,7 +1483,7 @@ val expect : string -> (unit -> 'a) -> 'a
 
     let octet () =
       expect "an octet (0-255)" (fun () ->
-          let n = number () in
+          let n = integer () in
           if n > 255 then
             error (Out_of_range n)
           else
@@ -1195,7 +1508,7 @@ val one_of : (unit -> 'a) list -> unit -> 'a
 
     Example:
     {@ocaml[
-    let keyword () =
+    let reserved_word () =
       one_of
         [
           (fun () -> consume "if");
@@ -1216,6 +1529,10 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Example:
     {@ocaml[
+    let number_parser () = `Number (number ())
+    let string_parser () = `String (consume "\"\"")
+    let bool_parser () = `Bool (bool_parser ())
+
     let literal () =
       one_of_labeled
         [
@@ -1229,7 +1546,7 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
 (** {1 Repetition Combinators} *)
 
-val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
+val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
 (** [many parser] applies [parser] repeatedly until it fails. Returns a list of
     all successful results. Always succeeds (returns [[]] if [parser] fails
     immediately).
@@ -1240,9 +1557,20 @@ val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
     The loop also stops after an iteration that consumes no input, and that
     iteration's result is dropped.
 
+    When [~at_most] is specified, [many] returns at most that many results.
+    After [at_most] results, it runs [parser] once more. When that run succeeds
+    and consumes input, the parse fails with
+    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
+    the extra item. The limit failure follows the rule of every failure, as for
+    {!take_while}: a failure recorded farther in the input is reported in its
+    place, also one that the extra item records in a branch it abandons. A
+    {!commit} in [parser] once it has decided forgets those. Raises
+    [Invalid_argument] when [at_most] is negative or below [at_least]. Unstable:
+    [~at_most] can change in a 1.x release.
+
     Example:
     {@ocaml[
-    let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
+    let digits () = many digit () (* parses "123" -> ['1'; '2'; '3'] *)
     let non_empty_digits () = many ~at_least:1 digit ()
     ]} *)
 
@@ -1259,12 +1587,12 @@ val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     {@ocaml[
     let csv_line () =
       sep_by
-        (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
+        (fun () -> match_regex (regex (Re.Posix.re "[^,]+")))
         (fun () -> char ',')
         ()
     let csv_line_nonempty () =
       sep_by ~at_least:1
-        (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
+        (fun () -> match_regex (regex (Re.Posix.re "[^,]+")))
         (fun () -> char ',')
         ()
     ]} *)
@@ -1279,6 +1607,98 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
 
     When [~at_least] is specified, requires at least that many elements. The
     loop stops after an iteration that consumes no input, as in {!many}. *)
+
+val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
+(** [many_iter parser f] is {!many} that builds no list: it gives each value of
+    [parser] to [f], in order, and returns [()]. The stop rules and [~at_least]
+    are the same as in {!many}.
+
+    Before it gives a value, [many_iter] seals every open frame, as {!cut} does
+    with no enclosing {!val:context}: no {!or_}, {!many}, {!optional} or similar
+    frame outside it can rewind before that value, and a streaming source can
+    drop the input before it. Thus with {!parse_source} memory is bounded by the
+    size of one element, not by the number of elements. The exception is
+    {!recognize} and {!recognize_span}: they keep their input, so inside them
+    the parse fails with [Backtrack_window_exceeded] when that input is larger
+    than the window. {!with_range} keeps no input.
+
+    A failure after a value is given out is an error of the whole parse, unless
+    a {!capture} or {!recover} with [~release:true] is open: then the parse goes
+    back to the point after the last value, and {!capture} returns [Error] or
+    {!recover} gives its hole there. See {!section-streaming} for the rule.
+
+    A value of an element that consumed no input is given out too, as {!many}
+    keeps it with [~at_least]. An outer {!many} or {!sep_by} can then stop at
+    that position and drop its own element, but the value stays given.
+
+    [f] runs outside the parse. A parser or {!warn} called in [f] raises an
+    exception. {!Ref.get} in [f] reads the current value. {!Ref.set} in [f] on a
+    cell that the parse has set raises [Invalid_argument]; on another cell it
+    sets the value as outside any parse, and no rewind undoes it. A value given
+    to [f] is never undone, so keep the state of [f] in plain OCaml values. An
+    exception from [f] stops the parse, and the runner raises it again.
+
+    [many_iter] raises [Invalid_argument] when it is called inside
+    {!look_ahead}, {!peek_with}, an operator lookup of {!precedence}, or
+    {!capture} without [~release:true]. These always rewind on failure, or also
+    on success, so [f] could get a value that the parse then undoes. Inside
+    {!require}, or inside {!recover}, {!sep_by_recover} or an element of {!list}
+    without [~release:true], it raises when that call can recover: when the
+    runner got its collector as [~diagnostics] and input remains. Without the
+    collector, these run their parser directly and [many_iter] does not raise.
+    So test a parser that uses [many_iter] there with [~diagnostics].
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let sum = ref 0
+
+    let () =
+      let r =
+        parse "1 2 3 "
+          (many_iter
+             (fun () ->
+               let n = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+               let _ = char ' ' in
+               int_of_string n
+             )
+             (fun n -> sum := !sum + n)
+          )
+      in
+      assert (Result.is_ok r && !sum = 6)
+    ]} *)
+
+val sep_by_iter :
+  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit -> unit
+(** [sep_by_iter element separator f] is {!sep_by} that builds no list: it gives
+    each [element] value to [f], as {!many_iter} does. The stop rules and
+    [~at_least] are the same as in {!sep_by}. A failure in [separator] after a
+    value is given out cannot rewind before that value. As in {!sep_by}, the
+    first element is kept when it consumes no input, so [f] can get a value of
+    an element that consumed no input, as described in {!many_iter}. It raises
+    [Invalid_argument] in the same cases as {!many_iter}.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let elements = ref 0
+
+    let () =
+      let r =
+        parse "[1,2,3]" (fun () ->
+            let _ = char '[' in
+            sep_by_iter
+              (fun () -> take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
+              (fun () -> char ',')
+              (fun _ -> incr elements)
+              ();
+            char ']'
+        )
+      in
+      assert (Result.is_ok r && !elements = 3)
+    ]} *)
 
 val fold_left :
   (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
@@ -1298,52 +1718,143 @@ val fold_right :
     [op], combining them right-associatively. Fails if there are zero [element]
     values.
 
+    Each operand takes a level of the stack. When the runtime reports a stack
+    limit, a chain longer than [(Gc.get ()).stack_limit / 32] operands, with
+    [stack_limit] read when Parseff is loaded ([4194304] with the default
+    [OCAMLRUNPARAM=l]), fails with [Depth_limit_exceeded] instead of a stack
+    overflow. Each combinator that keeps a rewind point open around the chain,
+    such as [or_], [optional], [look_ahead], [capture], [recover] or an outer
+    [fold_right], counts as one more operand.
+
     When [~otherwise] is specified, returns [otherwise] if there are zero
     [element] values instead of failing.
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
 
-type 'a operator
-(** An operator for {!expression}. Each constructor takes a parser for the
-    operator token. The parser returns the function that builds the result, as
-    the [op] argument of {!fold_left} does. *)
+type ('a, +'kind) operator
+(** An operator for {!expression} and {!precedence}. Each constructor takes a
+    parser for the operator token. The parser returns the build function, as the
+    [op] argument of {!fold_left} does.
 
-val infix_left : (unit -> 'a -> 'a -> 'a) -> 'a operator
+    ['kind] tells where the operator goes: [`Infix], [`Prefix] or [`Postfix].
+    {!expression} takes all three. {!precedence} reads prefix operators in its
+    [operand], so a {!prefix} operator in its [operator] is a type error.
+
+    When you write the type, keep ['kind] open, or the table does not
+    type-check: [(int, [ `Infix ]) operator] and [(int, [ `Prefix ]) operator]
+    have no common type. In an implementation, write [(int, _) operator]. In a
+    signature, write [(int, [> `Infix ]) operator]. A record field or a table
+    that holds operators of every kind takes the full set
+    [(int, [ `Infix | `Prefix | `Postfix ]) operator].
+
+    Example:
+    {@ocaml[
+    module Ops : sig
+      val add : (int, [> `Infix ]) operator
+      val neg : (int, [> `Prefix ]) operator
+    end = struct
+      let add : (int, _) operator =
+        infix_left (fun () ->
+            ignore (char '+');
+            ( + )
+        )
+
+      let neg : (int, _) operator =
+        prefix (fun () ->
+            ignore (char '-');
+            ( ~- )
+        )
+    end
+
+    type grammar = {
+      table : (int, [ `Infix | `Prefix | `Postfix ]) operator list list;
+    }
+
+    let grammar = { table = [ [ Ops.add ]; [ Ops.neg ] ] }
+
+    let expr () =
+      expression
+        ~operand:(fun () -> Char.code (digit ()) - Char.code '0')
+        grammar.table ()
+    ]} *)
+
+val infix_left : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
 (** [infix_left op] is a left-associative binary operator: [1-2-3] is [(1-2)-3].
 *)
 
-val infix_right : (unit -> 'a -> 'a -> 'a) -> 'a operator
+val infix_right : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
 (** [infix_right op] is a right-associative binary operator: [2^3^2] is
     [2^(3^2)]. *)
 
-val prefix : (unit -> 'a -> 'a) -> 'a operator
+val prefix : (unit -> 'a -> 'a) -> ('a, [> `Prefix ]) operator
 (** [prefix op] is a unary operator before its operand. It can repeat: [- - 1]
     is [-(-1)]. Its operand holds only operators of higher precedence, so with
-    [-] below [^], [-2^2] is [-(2^2)]. *)
+    [-] below [^], [-2^2] is [-(2^2)]. Only {!expression} takes it. *)
 
-val postfix : (unit -> 'a -> 'a) -> 'a operator
+val postfix : (unit -> 'a -> 'a) -> ('a, [> `Postfix ]) operator
 (** [postfix op] is a unary operator after its operand. It can repeat: [3!!] is
     [(3!)!]. *)
 
-val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression :
+  operand:(unit -> 'a) ->
+  ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
+  unit ->
+  'a
 (** [expression ~operand table] parses operands with [operand], joined by the
-    operators of [table].
+    operators of [table]. It is {!precedence} with a lookup made from [table]:
+    the operators of level [i] have the precedence [i].
 
     [table] lists the precedence levels from the lowest to the highest
     precedence. [operand] parses an operand; for parentheses, it calls the
     expression parser again inside {!rec_}. [expression] skips no whitespace:
     skip it in the token parsers and in [operand].
 
-    The operators are tried in table order. When one token starts another, such
-    as [!] and [!=], list the longer token first. The loop stops after an
-    operator and operand that together consume no input, as in {!fold_left}.
+    After each operand, [expression] runs token parsers until one succeeds. It
+    starts with the operators that bind to that operand: the levels above the
+    pending operator before it, and the level of that operator when it is an
+    {!infix_right}. When none of them matches, it runs the build function of
+    that pending operator and moves out to the operators that bind to its
+    result, and so on down to the lowest level. Each group is tried in table
+    order. Each token parser runs at most once for one operand, and the token
+    parser that succeeds is not run again: its diagnostics, {!Ref} changes and
+    {!commit} stay. The token parsers that fail add to the expected set of an
+    error.
 
-    For a grammar with many precedence levels, {!precedence} is faster: it looks
-    for the operator once after each operand.
+    When the token parser or the operand after it fails, [expression] continues
+    with the next operator in this order at the same position, and stops before
+    the operator when no other operator matches. Thus [<] can come before [<<]
+    in the table: in [1<<2], the operand after [<] fails, and [<<] is next. A
+    postfix operator has no operand, so when one token starts another, such as
+    [!] and [!=], list the longer token first. A {!commit} in a token parser
+    stops this search: when that operator or a later step fails, [expression]
+    fails.
+
+    A step whose operator and right operand together consume no input ends its
+    group: [expression] goes back before that operator and moves out to the
+    lower groups. The right operand includes the operators that bind to it: with
+    an operand that can be empty, an infix operator [""] below a postfix [^]
+    reads [2^] as [""] applied to [2] and to the empty operand with [^].
+
+    Where an operand starts, [expression] tries the {!prefix} operators in table
+    order, then [operand]. The operand of a prefix operator uses one depth level
+    of {!rec_}. A chain of infix operators uses no depth level. When a build
+    function fails, the expression fails, as in {!precedence}.
 
     Example:
     {@ocaml[
+    let token c () =
+      skip_whitespace ();
+      ignore (char c);
+      skip_whitespace ()
+
+    let op c f () =
+      token c ();
+      f
+    let add, sub, mul, div =
+      (op '+' ( +. ), op '-' ( -. ), op '*' ( *. ), op '/' ( /. ))
+    let neg, pow = (op '-' Float.neg, op '^' Float.pow)
+
     let table =
       [
         [ infix_left add; infix_left sub ];
@@ -1368,19 +1879,20 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
 val precedence :
   ?min:int ->
   operand:(unit -> 'a) ->
-  operator:(unit -> (int * 'a operator) option) ->
+  operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
   unit ->
   'a
 (** [precedence ~operand ~operator] parses operands with [operand], joined by
-    the operators that [operator] finds. It does the work of {!expression} with
-    one operator lookup after each operand, where {!expression} tries each
-    operator of its table.
+    the operators that [operator] finds. {!expression} uses the same loop. Where
+    {!expression} runs the token parsers of its table, [precedence] calls
+    [operator] once after each operand. For a grammar with many precedence
+    levels, this is faster.
 
-    After each operand, [precedence] calls [operator] once. [operator] looks at
-    the input and returns [Some (prec, op)], or [None] when no operator is next.
-    A higher [prec] binds tighter, and each [int] is a valid [prec]. [op] is
-    {!infix_left}, {!infix_right} or {!postfix}; a {!prefix} raises
-    [Invalid_argument].
+    [operator] looks at the input and returns [Some (prec, op)], or [None] when
+    no operator is next. A higher [prec] binds tighter, and each [int] is a
+    valid [prec]. [op] is {!infix_left}, {!infix_right} or {!postfix}. For a
+    prefix operator, read the token in [operand], then parse its operand with
+    [precedence ~min] inside {!rec_}.
 
     There is one exception to the one call. When [operator] records a diagnostic
     or sets a {!Ref}, and the operator that it returns binds less tightly than
@@ -1407,25 +1919,19 @@ val precedence :
     operator, call {!commit} in the token parser of [op].
 
     [min] is the lowest [prec] that [precedence] accepts. The default accepts
-    all operators. Use it for a prefix operator: read the prefix token in
-    [operand], then parse its operand with [precedence ~min] inside {!rec_}.
+    all operators.
 
-    A chain of operators uses no depth level of {!rec_}. As in {!expression},
-    when the token parser of [op] or the operand after it fails, the expression
-    stops before that operator, unless the token parser called {!commit}. The
-    loop stops after an operator and operand that together consume no input. A
-    build function runs when the operator after its right operand is known, with
-    {!position} at the end of that operand. The build function of an
-    {!infix_left} operator with [prec] of [max_int] runs immediately after its
-    right operand, because no operator binds tighter. As in {!expression}, a
+    A chain of operators uses no depth level of {!rec_}. When the token parser
+    of [op] or the operand after it fails, the expression stops before that
+    operator, unless the token parser called {!commit}; then [precedence] fails.
+    The loop stops after an operator and operand that together consume no input.
+
+    A build function runs when the operator after its right operand is known,
+    with {!position} at the end of that operand. A postfix build function, and
+    the build function of an {!infix_left} operator with [prec] of [max_int],
+    run immediately: no operator binds tighter. When a build function fails, the
+    expression fails at that position; it does not stop before the operator. A
     {!commit} in a build function has no effect.
-
-    One difference from {!expression}: when a build function fails,
-    {!expression} stops before that operator. In [precedence], an infix build
-    function runs after the next lookup, so its failure is the failure of the
-    full [precedence] call. A {!postfix} build function, and the build function
-    of an {!infix_left} operator with [prec] of [max_int], run immediately, and
-    their failure stops the expression before that operator.
 
     Example:
     {@ocaml[
@@ -1464,7 +1970,7 @@ val precedence :
           ignore (char ')');
           e
       | _ ->
-          digit ()
+          integer ()
     ]} *)
 
 val optional : (unit -> 'a) -> unit -> 'a option
@@ -1488,13 +1994,14 @@ val count : int -> (unit -> 'a) -> unit -> 'a list
 
 (** {1 Convenience Combinators} *)
 
-val digit : unit -> int
-(** [digit ()] parses a decimal digit (0-9) and returns its integer value.
+val digit : unit -> char
+(** [digit ()] parses an ASCII decimal digit, ['0'] to ['9'], and returns it.
+    Use {!integer} for the value of a number, or [Char.code c - Char.code '0']
+    for the value of one digit.
 
     Example:
     {@ocaml[
-      let d = digit () in  (* parses "7" -> 7 *)
-      ...
+    let () = assert (parse "7" digit = Ok '7')
     ]} *)
 
 val integer : unit -> int
@@ -1503,8 +2010,7 @@ val integer : unit -> int
 
     Example:
     {@ocaml[
-      let n = integer () in  (* parses "-42" -> -42 *)
-      ...
+    let () = assert (parse "-42" integer = Ok (-42))
     ]} *)
 
 val number : unit -> float
@@ -1519,8 +2025,7 @@ val number : unit -> float
 
     Example:
     {@ocaml[
-      let x = number () in  (* parses "6.02e23" -> 6.02e23 *)
-      ...
+    let () = assert (parse "6.02e23" number = Ok 6.02e23)
     ]} *)
 
 val hex_integer : unit -> int
@@ -1530,8 +2035,7 @@ val hex_integer : unit -> int
 
     Example:
     {@ocaml[
-      let n = hex_integer () in  (* parses "ff" -> 255 *)
-      ...
+    let () = assert (parse "ff" hex_integer = Ok 255)
     ]} *)
 
 val letter : unit -> char
@@ -1621,7 +2125,97 @@ val take_span : int -> span
       take_span len
     ]} *)
 
-(** {1 Streaming} *)
+val within : int -> (unit -> 'a) -> 'a
+(** [within n parser] runs [parser] on the next [n] bytes exactly, as the
+    payload of a frame with a length prefix. [parser] sees the end of the input
+    after [n] bytes: {!end_of_input} succeeds there, and a read past it fails
+    with [found end of input].
+
+    When [parser] returns before the end of the [n] bytes, [within] fails with
+    [expected end of input] at the first byte left. When the input ends before
+    [n] bytes, [parser] sees the end where the input ends, and if it succeeds
+    there, [within] fails with [expected k bytes, found end of input], where [k]
+    is the number of bytes missing. A negative [n] fails like {!take}. A
+    [within] inside another one ends at the end of the outer one at the latest.
+
+    [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
+    be larger than [~backtrack_window] when [parser] calls {!commit} as it
+    reads. Two things copy inside a frame. {!match_regex} works on a copy of the
+    frame bytes read so far, from the byte before the position of the first
+    call. When a later call is at a position before the copy, the copy is made
+    again from the start of the frame, so on string input it is made at most
+    twice per frame. On a stream it is also made again after each read, from the
+    position, which costs the bytes read ahead of the position. On string input,
+    {!take_span}, {!take_while_span} and {!recognize_span} return copies, as
+    they do with {!parse_source}.
+
+    Inside the frame the input ends at the frame end, so {!skip_to} raises
+    [Invalid_argument] for a target past it, also for a position that
+    {!peek_with} returned outside the frame. Unstable: this function can change
+    in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let frame () =
+      let len = BE.any_uint24 () in
+      let kind = any_uint8 () in
+      within len (fun () -> (kind, take_while (fun _ -> true)))
+    ]} *)
+
+val take_iter : int -> (span -> unit) -> unit
+(** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
+    in pieces, in order, with no empty piece. Joined, the pieces are the [n]
+    bytes. With {!parse} there is one piece. With {!parse_source} a piece is the
+    part of the [n] bytes that is in the input buffer, so the [n] bytes are
+    never held whole and [n] can be larger than [~backtrack_window]. Inside
+    {!recognize} or {!recognize_span} the input is kept: when [n] is larger than
+    the window, the parse fails with [Backtrack_window_exceeded] after [f] got
+    the bytes that fit.
+
+    A piece points into the input buffer with no copy. It is valid only while
+    [f] runs: use {!span_to_string} to keep it.
+
+    [take_iter] gives out values as {!many_iter} does: it seals every open frame
+    before each piece, [f] runs outside the parse, an exception from [f] stops
+    the parse, and the same frames make it raise [Invalid_argument]. If the
+    input ends before [n] bytes, the parse fails after [f] got the bytes that
+    were there. The error counts the missing bytes, as in
+    [expected 2 bytes, found end of input]. A negative [n] fails as in {!take}.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let body out () =
+      let len = BE.any_uint16 () in
+      take_iter len (fun piece ->
+          for i = 0 to span_length piece - 1 do
+            Buffer.add_char out (span_get piece i)
+          done
+      )
+    ]} *)
+
+val take_while_iter : (char -> bool) -> (span -> unit) -> unit
+(** [take_while_iter pred f] reads bytes while [pred] holds, like {!take_while},
+    and gives them to [f] in pieces as {!take_iter} does. It never fails. When
+    the first byte does not match, [f] is not called.
+
+    Unstable: this function can change in a 1.x release. *)
+
+(** {1:streaming Streaming}
+
+    A rewind does not undo a call to your code. {!or_}, {!many}, {!optional},
+    {!look_ahead} and the other frames go back to an earlier position when a
+    parser fails, but a value that was given to a function outside the parse
+    stays given. So give a value out only at a point that no open frame can
+    rewind before, for example after a {!cut} outside any {!val:context}.
+    {!many_iter}, {!sep_by_iter}, {!take_iter} and {!take_while_iter} follow
+    this rule by themselves: they seal every open frame before each value, and
+    raise [Invalid_argument] inside a frame that cannot be sealed. Sealing is
+    also what lets a source drop the input before that point, so a parse that
+    gives its values out this way can read input much larger than
+    [~backtrack_window]. The exception is {!recognize} and {!recognize_span},
+    which keep all the input that they read. *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
     — a channel, file descriptor, or custom reader — behind a uniform interface.
@@ -1687,13 +2281,46 @@ module Source : sig
           end)
       ]} *)
 
+  type bigstring =
+    (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+  (** The buffer type of [Bigstringaf.t], [Cstruct.buffer] and
+      [Unix.read_bigarray]. *)
+
+  val of_bigstring_chunks : (unit -> (bigstring * int * int) option) -> t
+  (** [of_bigstring_chunks read] creates a source that calls [read ()] to obtain
+      the next chunk of input as a slice of a bigstring. Return
+      [Some (buf, off, len)] for the [len] bytes of [buf] that start at [off],
+      or [None] to signal EOF. Slices with [len = 0] are skipped, whatever their
+      [off]. Any other slice outside [buf] raises [Invalid_argument] from the
+      parse.
+
+      Parseff parses bytes, not bigstrings: it copies a slice into its input
+      buffer, at most 2040 bytes at a time, as the parser needs them. The bytes
+      of a slice must not change until the next call to [read], but [read] can
+      write the next chunk into the same buffer.
+
+      This fits I/O that reads into a bigstring, such as [Eio.Flow.single_read]
+      with a [Cstruct.t], or a network library that hands its read buffer to the
+      parser:
+
+      {@ocaml skip[
+      let buf = Cstruct.create 4096 in
+      let source =
+        Source.of_bigstring_chunks (fun () ->
+            match Eio.Flow.single_read flow buf with
+            | n -> Some (buf.buffer, buf.off, n)
+            | exception End_of_file -> None)
+      ]}
+
+      To parse a whole bigstring, give it as a single slice. *)
+
   val of_seq : string Seq.t -> t
   (** [of_seq seq] creates a source from a lazy sequence of string chunks. Each
       element is a chunk of input; the sequence ending ([Seq.Nil]) signals EOF.
       As with {!of_chunks}, a chunk must not change after the sequence returns
       it.
 
-      {@ocaml skip[
+      {@ocaml[
       let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])
       ]} *)
 end
@@ -1734,11 +2361,12 @@ val parse_source :
 
     Example:
     {@ocaml[
-    let ic = open_in "data.json" in
-    let source = Source.of_channel ic in
-    let result = parse_source source json in
-    close_in ic;
-    result
+    let read_json () =
+      let ic = open_in "data.json" in
+      let source = Source.of_channel ic in
+      let result = parse_source source json in
+      close_in ic;
+      result
     ]} *)
 
 val parse_source_each :
@@ -1785,6 +2413,112 @@ val parse_source_each :
       |> List.of_seq
     ]}
     Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
+
+(** Push input: the caller gives the input in chunks, and each call returns
+    [Await] when the parser needs more input or [Done] with the result. Use it
+    when your code owns the read loop, as with Lwt, Async or a callback API.
+
+    The parser is the same [unit -> 'a] function as for {!parse}. [Feed] runs it
+    on a source like {!Source.of_chunks} whose read performs an effect when it
+    needs a chunk that the caller has not given yet. The parse stops there, and
+    the next {!Feed.feed} resumes it with the chunk. This is one effect for each
+    chunk that the parser waits for. {!parse} and {!parse_source} use no
+    effects, and [Feed] does not change them. A 454-byte HTTP request head in
+    one chunk takes about 15000 instructions with [Feed] and 13800 with
+    {!parse_source}, 9% more.
+
+    A parse with [Feed] always stops after the value and returns the bytes that
+    follow it. To require the whole input, end the parser with {!end_of_input}:
+    [Done] then comes at {!Feed.finish}.
+
+    Only the read of the source may stop the parser, as for {!parse_source}. Two
+    feeds and calls to {!parse} can run in turn on one domain. A feed that waits
+    holds the {!Ref} cells that it set and its [diagnostics] collector until it
+    ends or {!Feed.finish} is called, as a {!parse_source} that waits in an Eio
+    fiber does: another parse cannot use them. A feed can continue on another
+    domain, but only one domain may use a feed at a time; the result of two
+    domains that use one feed at the same time is not defined.
+
+    Unstable: this module can change in a 0.x release.
+
+    Example:
+    {@ocaml[
+    let line () =
+      let s = take_while (fun c -> c <> '\n') in
+      let _ = char '\n' in
+      s
+
+    let lines chunks =
+      let rec go t = function
+        | [] ->
+            Feed.finish t
+        | chunk :: rest ->
+            begin match Feed.feed t chunk with
+            | Feed.Await ->
+                go t rest
+            | Feed.Done r ->
+                r
+            end
+      in
+      go (Feed.start line) chunks
+    ]}
+    Here [lines [ "ab"; "c\nde" ]] is [Ok ("abc", "de")]. *)
+module Feed : sig
+  type 'a t
+  (** A parse that takes its input in chunks. *)
+
+  type 'a step =
+    | Await  (** The parser needs more input: call {!feed} or {!finish}. *)
+    | Done of ('a * string, error) Stdlib.result
+        (** The parse ended. [Ok (v, leftover)] has the value and the
+            [leftover]: the bytes after the value in the chunks given so far.
+            For a pipelined protocol, give the [leftover] to the next parse,
+            before its next chunk. *)
+
+  val start :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:'d Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    (unit -> 'a) ->
+    'a t
+  (** [start parser] is a parse of [parser] that has no input yet. The parser
+      starts at the first {!feed} or {!finish}. The arguments are those of
+      {!parse_source}, without [consume]. Positions count from the first byte of
+      the first chunk.
+
+      [diagnostics] stays in use from the first {!feed} until the parse ends. *)
+
+  val feed : 'a t -> string -> 'a step
+  (** [feed t chunk] gives [chunk] to the parse and runs the parser until it
+      needs more input or ends. An empty [chunk] gives no input and returns
+      [Await] when the parse waits.
+
+      Parseff can keep [chunk] as its input with no copy, and a value of the
+      parser can be [chunk] itself. So [chunk] must not change while the parse
+      runs or while a value taken from it is in use. This matters only for a
+      string made with [Bytes.unsafe_to_string] from bytes that are written
+      again.
+
+      An exception that the parser raises comes out of [feed], and the parse
+      ends. Raises [Invalid_argument] after the parse ended, and when called
+      from inside a parser. A function that runs outside the parse, such as a
+      [trace] callback or the function given to {!take_iter} or {!many_iter},
+      may feed another feed, but its own feed raises [Invalid_argument]. *)
+
+  val finish : 'a t -> ('a * string, error) Stdlib.result
+  (** [finish t] tells the parse that the input ended, and runs the parser to
+      the end. A parser that waits for more input then succeeds or fails as
+      {!parse_source} does at the end of its source. [finish] on a parse with no
+      chunk parses the empty input.
+
+      A feed that you drop before it ends is collected by the GC, and nothing in
+      the parser runs again: no exception handler and no cleanup. Its
+      [diagnostics] stays in use, and the {!Ref} cells that it set cannot be set
+      by another parse. Call [finish] to end the parse and release them.
+
+      Raises [Invalid_argument] as {!feed} does. *)
+end
 
 (** {1 Binary Parsing}
 
@@ -1838,6 +2572,10 @@ module BE : sig
   val any_uint16 : unit -> int
   (** Read 2 bytes as a big-endian unsigned 16-bit integer. *)
 
+  val any_uint24 : unit -> int
+  (** Read 3 bytes as a big-endian unsigned 24-bit integer, from [0] to
+      [16777215], such as the length of an HTTP/2 frame. *)
+
   val any_int32 : unit -> int32
   (** Read 4 bytes as a big-endian signed 32-bit integer. *)
 
@@ -1880,6 +2618,10 @@ module LE : sig
 
   val any_uint16 : unit -> int
   (** Read 2 bytes as a little-endian unsigned 16-bit integer. *)
+
+  val any_uint24 : unit -> int
+  (** Read 3 bytes as a little-endian unsigned 24-bit integer, from [0] to
+      [16777215]. *)
 
   val any_int32 : unit -> int32
   (** Read 4 bytes as a little-endian signed 32-bit integer. *)
@@ -1930,26 +2672,27 @@ end
     same parser. Position tracking remains in bytes. *)
 
 module Utf8 : sig
-  val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t
-  (** [satisfy pred ~label] decodes the next UTF-8 code point and checks it
+  val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t
+  (** [satisfy ?label pred] decodes the next UTF-8 code point and checks it
       against [pred]. Advances by the number of bytes in the UTF-8 encoding
-      (1--4). Fails with [label] if the predicate returns [false] or the input
-      ends. Invalid UTF-8 fails with [expected valid UTF-8], whatever [label]
-      is.
+      (1--4). Fails with [expected <label>] if the predicate returns [false] or
+      the input ends. Without [~label] the label is ["at least 1 character"], as
+      for [take_while ~at_least:1]. Invalid UTF-8 fails with
+      [expected valid UTF-8], whatever [label] is.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let cjk () =
-        Parseff.Utf8.satisfy
-          (fun u -> Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF)
-          ~label:"CJK character"
+        Parseff.Utf8.satisfy ~label:"CJK character" (fun u ->
+            Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF
+        )
       ]} *)
 
   val char : Uchar.t -> Uchar.t
   (** [char u] matches the exact Unicode code point [u].
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let lambda () = Parseff.Utf8.char (Uchar.of_int 0x03BB) (* λ *)
       ]} *)
 
@@ -1966,7 +2709,7 @@ module Utf8 : sig
       (not bytes) to match. Fails with [~label] if fewer match.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       let unicode_word () =
         Parseff.Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic
           ~label:"letter"
@@ -1980,11 +2723,6 @@ module Utf8 : sig
   (** [take_while_span pred] like {!take_while} but returns a zero-copy
       {!type:span}. *)
 
-  val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit
-  (** [skip_while_then_char pred u] skips code points where [pred] returns
-      [true], then matches the exact code point [u]. More efficient than calling
-      {!skip_while} followed by {!char} separately. *)
-
   val is_whitespace : Uchar.t -> bool
   (** [is_whitespace u] returns [true] for Unicode whitespace characters, using
       the full Unicode White_Space property. This includes ASCII whitespace plus
@@ -1997,9 +2735,9 @@ module Utf8 : sig
       Greek, Cyrillic, CJK, Arabic, Devanagari, and all other Unicode scripts.
 
       Example:
-      {@ocaml skip[
+      {@ocaml[
       (* Matches 'a', 'é', 'λ', '中', 'д', etc. *)
-      let l = Parseff.Utf8.letter ()
+      let l () = Parseff.Utf8.letter ()
       ]} *)
 
   val alphanum : unit -> Uchar.t

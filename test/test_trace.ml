@@ -2,10 +2,13 @@ let show (e : Parseff.trace_event) =
   match e with
   | Enter { name; pos } ->
       Printf.sprintf "enter %s %d" name pos
-  | Exit { name; start; stop } ->
+  | Return { name; start; stop } ->
       Printf.sprintf "exit %s %d %d" name start stop
   | Fail { name; start; pos } ->
       Printf.sprintf "fail %s %d %d" name start pos
+  | Captured { start; error } ->
+      Printf.sprintf "captured %d %d %s" start error.range.start
+        (Parseff.error_message error)
 
 let one_byte_source s =
   let i = ref 0 in
@@ -204,6 +207,157 @@ let test_callback_cannot_run_parsers () =
     )
     !seen
 
+let recovery_events input parser =
+  let errors = Parseff.Diagnostics.create () in
+  let count r = (r, Parseff.Diagnostics.length errors) in
+  let r1, e1 =
+    record (fun trace ->
+        count
+          (Result.is_ok
+             (Parseff.parse ~diagnostics:errors ~trace input (parser errors))
+          )
+    )
+  in
+  let r2, e2 =
+    record (fun trace ->
+        count
+          (Result.is_ok
+             (Parseff.parse_source ~diagnostics:errors ~trace
+                (one_byte_source input) (parser errors)
+             )
+          )
+    )
+  in
+  Alcotest.(check (list string)) "parse_source gives the same events" e1 e2;
+  Alcotest.(check (pair bool int)) "parse_source gives the same result" r1 r2;
+  (r1, e1)
+
+let test_captured () =
+  let check name input parser expected_result expected =
+    let r, e = recovery_events input parser in
+    Alcotest.(check (list string)) (name ^ ": events") expected e;
+    Alcotest.(check (pair bool int)) (name ^ ": result") expected_result r
+  in
+  check "recover in a context" "?x"
+    (fun errors () ->
+      Parseff.context "item" (fun () ->
+          Parseff.recover errors ~sync:ignore
+            (fun () -> ignore (Parseff.char 'a'))
+            ignore
+      );
+      ignore (Parseff.char 'x')
+    )
+    (true, 1)
+    [ "enter item 0"; "captured 0 0 expected 'a', found '?'"; "exit item 0 1" ];
+  check "capture" "ab"
+    (fun _ () ->
+      ignore (Parseff.capture (fun () -> Parseff.char 'a'));
+      ignore
+        (Parseff.capture (fun () ->
+             ignore (Parseff.char 'b');
+             Parseff.char 'c'
+         )
+        );
+      ignore (Parseff.consume "b")
+    )
+    (true, 0)
+    [ "captured 1 2 expected 'c', found end of input" ];
+  check "sep_by_recover" "1,?,x,2"
+    (fun errors () ->
+      ignore
+        (Parseff.sep_by_recover errors
+           ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
+           Parseff.digit
+           (fun () -> Parseff.char ',')
+           (fun _ -> '?')
+           ()
+        )
+    )
+    (true, 2)
+    [
+      "captured 2 2 expected digit, found '?'";
+      "captured 4 4 expected digit, found 'x'";
+    ];
+  check "not at the end of the input" "1"
+    (fun errors () ->
+      ignore (Parseff.char '1');
+      Parseff.recover errors ~sync:ignore
+        (fun () -> ignore (Parseff.char 'a'))
+        ignore
+    )
+    (false, 0) []
+
+let test_captured_only_when_continued () =
+  let check name input parser expected_result expected =
+    let r, e = recovery_events input parser in
+    Alcotest.(check (list string)) (name ^ ": events") expected e;
+    Alcotest.(check (pair bool int)) (name ^ ": result") expected_result r
+  in
+  check "sync fails" "xb"
+    (fun errors () ->
+      ignore
+        (Parseff.or_
+           (fun () ->
+             Parseff.recover errors
+               ~sync:(fun () -> ignore (Parseff.char 'z'))
+               (fun () -> Parseff.char 'a')
+               (fun _ -> 'h')
+           )
+           (fun () -> Parseff.char 'x')
+           ()
+        );
+      ignore (Parseff.char 'b')
+    )
+    (true, 0) [];
+  check "hole fails" "xb"
+    (fun errors () ->
+      ignore
+        (Parseff.or_
+           (fun () ->
+             Parseff.recover errors ~sync:ignore
+               (fun () -> Parseff.char 'a')
+               (fun _ -> Parseff.char 'z')
+           )
+           (fun () -> Parseff.char 'x')
+           ()
+        );
+      ignore (Parseff.char 'b')
+    )
+    (true, 0) [];
+  check "record fails" "1,?,2"
+    (fun errors () ->
+      ignore
+        (Parseff.or_
+           (fun () ->
+             ignore
+               (Parseff.sep_by_recover errors
+                  ~record:(fun _ _ -> ignore (Parseff.char 'z'))
+                  ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
+                  Parseff.digit
+                  (fun () -> Parseff.char ',')
+                  (fun _ -> '?')
+                  ()
+               );
+             Parseff.end_of_input ()
+           )
+           (fun () -> ignore (Parseff.take_while (fun _ -> true)))
+           ()
+        )
+    )
+    (true, 0) [];
+  check "after sync and hole" "?x;"
+    (fun errors () ->
+      Parseff.recover errors
+        ~sync:(fun () ->
+          ignore (Parseff.context "skip" (fun () -> Parseff.char '?'))
+        )
+        (fun () -> ignore (Parseff.char 'a'))
+        ignore;
+      ignore (Parseff.consume "x;")
+    )
+    (true, 1)
+    [ "enter skip 0"; "exit skip 0 1"; "captured 0 0 expected 'a', found '?'" ]
+
 let printed run =
   let buf = Buffer.create 64 in
   let ppf = Format.formatter_of_buffer buf in
@@ -242,6 +396,20 @@ let test_printed_tree () =
          Parseff.parse_source ~trace (one_byte_source "[1,x]") list
      )
     )
+
+let test_printed_captured () =
+  let errors = Parseff.Diagnostics.create () in
+  let item () =
+    Parseff.context "item" (fun () ->
+        Parseff.recover errors ~sync:ignore
+          (fun () -> ignore (Parseff.char 'a'))
+          ignore
+    );
+    ignore (Parseff.char 'x')
+  in
+  Alcotest.(check string)
+    "parse" "item @0\n  captured @0: expected 'a', found '?'\nitem ok @0..1\n"
+    (printed (fun trace -> Parseff.parse ~diagnostics:errors ~trace "?x" item))
 
 let test_trace_keeps_the_error () =
   let rendered = function
@@ -337,6 +505,9 @@ let () =
             test_trace_keeps_the_error;
           Alcotest.test_case "backtrack window through a context" `Quick
             test_backtrack_window_through_context;
+          Alcotest.test_case "captured" `Quick test_captured;
+          Alcotest.test_case "captured only when the parse continues" `Quick
+            test_captured_only_when_continued;
         ]
       );
       ( "callback",
@@ -347,5 +518,10 @@ let () =
             test_callback_cannot_run_parsers;
         ]
       );
-      ("printer", [ Alcotest.test_case "printed tree" `Quick test_printed_tree ]);
+      ( "printer",
+        [
+          Alcotest.test_case "printed tree" `Quick test_printed_tree;
+          Alcotest.test_case "printed capture" `Quick test_printed_captured;
+        ]
+      );
     ]

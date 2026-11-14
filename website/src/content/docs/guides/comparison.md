@@ -60,7 +60,7 @@ On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result
 
 **Direct character scanning.** `Parseff.take_while` runs a tight `while` loop with character predicates. No regex compilation, no automaton overhead.
 
-**Fewer allocations.** Span-based APIs return `{ buf; off; len }` slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
+**Fewer allocations.** Span-based APIs return slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
 
 **Fused operations.** `Parseff.sep_by_take_span` parses an entire separated list in one fused operation. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
 
@@ -176,7 +176,7 @@ and factor () =
       let e = expr () in
       let _ = Parseff.char ')' in
       e)
-    (fun () -> Parseff.digit ())
+    (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     ()
 ```
 

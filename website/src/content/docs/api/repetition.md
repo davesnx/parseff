@@ -23,9 +23,9 @@ val many : (unit -> 'a) -> unit -> 'a list
 ```
 ```ocaml
 let digits () = Parseff.many Parseff.digit ()
-(* "123"  -> [1; 2; 3]  *)
-(* ""     -> []         *)
-(* "abc"  -> []         *)
+(* "123"  -> ['1'; '2'; '3'] *)
+(* ""     -> []              *)
+(* "abc"  -> []              *)
 ```
 
 ### `many ~at_least:1`
@@ -37,7 +37,7 @@ val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
 ```
 ```ocaml
 let digits1 () = Parseff.many ~at_least:1 Parseff.digit ()
-(* "123" -> [1; 2; 3]  *)
+(* "123" -> ['1'; '2'; '3'] *)
 (* ""    -> Error      *)
 (* "abc" -> Error      *)
 ```
@@ -51,19 +51,17 @@ val count : int -> (unit -> 'a) -> unit -> 'a list
 ```
 ```ocaml
 let three_digits () = Parseff.count 3 Parseff.digit ()
-(* "123"  -> [1; 2; 3]  *)
-(* "12"   -> Error      *)
+(* "123"  -> ['1'; '2'; '3'] *)
+(* "12"   -> Error           *)
 ```
 Useful for fixed-width formats:
 
 ```ocaml
 let hex_digit () =
-  Parseff.satisfy
-    (fun c ->
+  Parseff.satisfy ~label:"hex digit" (fun c ->
       (c >= '0' && c <= '9')
       || (c >= 'a' && c <= 'f')
       || (c >= 'A' && c <= 'F'))
-    ~label:"hex digit"
 
 (* Parse #RRGGBB color *)
 let hex_color () =
@@ -142,12 +140,13 @@ let parenthesized_digit () =
   parens
     (fun () ->
       Parseff.skip_whitespace ();
-      let n = Parseff.digit () in
+      let n = Char.code (Parseff.digit ()) - Char.code '0' in
       Parseff.skip_whitespace ();
       n)
     ()
-(* "(42)"   -> 42 *)
-(* "( 42 )" -> Error (only parses one digit) *)
+(* "(4)"   -> 4 *)
+(* "( 4 )" -> 4 *)
+(* "(42)"  -> Error (only parses one digit) *)
 ```
 Works well for bracketed structures:
 
@@ -210,7 +209,7 @@ val fold_left : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> uni
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
 let subtraction () =
   Parseff.fold_left
-    (fun () -> Parseff.digit ())
+    (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
@@ -222,7 +221,7 @@ With `~otherwise`, returns the fallback if zero elements match:
 ```ocaml
 let maybe_subtract () =
   Parseff.fold_left
-    (fun () -> Parseff.digit ())
+    (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
@@ -243,7 +242,7 @@ val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> un
 (* Parse "2^3^2" as 2^(3^2) = 512 *)
 let power () =
   Parseff.fold_right
-    (fun () -> Parseff.digit ())
+    (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     (fun () ->
       let _ = Parseff.char '^' in
       fun a b -> int_of_float (float_of_int a ** float_of_int b))
@@ -258,7 +257,24 @@ let power () =
 As in `fold_left`, the loop stops after an infix operator and its right operand that together consume no input, and that operator is not applied. This also applies to `infix_right`.
 
 ```ocaml
-val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression :
+  operand:(unit -> 'a) ->
+  ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
+  unit ->
+  'a
+```
+
+### `precedence`
+
+`Parseff.precedence` runs the loop of `expression` with a lookup function in place of a table. After each operand, the lookup returns the precedence and the operator, or `None`. It takes infix and postfix operators only; a prefix operator is a type error. Parse a prefix operator in `operand`.
+
+```ocaml
+val precedence :
+  ?min:int ->
+  operand:(unit -> 'a) ->
+  operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
+  unit ->
+  'a
 ```
 
 ## Complete example: JSON array

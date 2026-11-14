@@ -339,14 +339,16 @@ type outcome = {
 let show_event = function
   | Parseff.Enter { name; pos } ->
       Printf.sprintf "enter %s@%d" name pos
-  | Exit { name; start; stop } ->
+  | Return { name; start; stop } ->
       Printf.sprintf "exit %s@%d..%d" name start stop
   | Fail { name; start; pos } ->
       Printf.sprintf "fail %s@%d from %d" name pos start
+  | Captured { start; error } ->
+      Printf.sprintf "captured @%d: %s" start (show_error error)
 
 let window_exceeded = "backtrack window exceeded"
 
-type feed = Function | Seq
+type feed = Function | Seq | Bigstring | Push
 
 let chunked feed input sizes =
   let pos = ref 0 in
@@ -376,8 +378,67 @@ let chunked feed input sizes =
           Seq.Cons (String.sub input p n, seq)
       in
       Parseff.Source.of_seq seq
+  | Push ->
+      invalid_arg "chunked: Push is not a source"
+  | Bigstring ->
+      let shift = 3 in
+      let len = String.length input in
+      let buf =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout (len + 5)
+      in
+      Bigarray.Array1.fill buf '#';
+      String.iteri (fun i c -> buf.{shift + i} <- c) input;
+      Parseff.Source.of_bigstring_chunks (fun () ->
+          if !pos >= len then
+            None
+          else
+            let p, n = next max_int in
+            Some (buf, shift + p, n)
+      )
 
 type runner = Memory | Stream of feed * int list * int
+
+let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
+  let p () =
+    let v = p () in
+    if consume = `All then Parseff.end_of_input ();
+    v
+  in
+  let t =
+    Parseff.Feed.start ~max_depth ~backtrack_window ~diagnostics ?trace p
+  in
+  let len = String.length input in
+  let check fed = function
+    | Ok (v, leftover) ->
+        let stop =
+          match (consume, v) with
+          | `Partial, Pair (_, Int stop) ->
+              stop
+          | _ ->
+              len
+        in
+        if leftover <> String.sub input stop (fed - stop) then
+          failwith
+            (Printf.sprintf "Feed: leftover %S after %d of %d fed bytes"
+               leftover stop fed
+            );
+        Ok v
+    | Error e ->
+        Error e
+  in
+  let rec go pos turn =
+    if pos >= len then
+      check pos (Parseff.Feed.finish t)
+    else
+      let size = List.nth sizes (turn mod List.length sizes) in
+      let n = min size (len - pos) in
+      match Parseff.Feed.feed t (String.sub input pos n) with
+      | Parseff.Feed.Await ->
+          go (pos + n) (turn + 1)
+      | Parseff.Feed.Done r ->
+          check (pos + n) r
+  in
+  go 0 0
 
 let run_real ?(traced = false) ~partial runner g input =
   let cx =
@@ -412,6 +473,9 @@ let run_real ?(traced = false) ~partial runner g input =
       match runner with
       | Memory ->
           Parseff.parse ~max_depth ~consume ~diagnostics:cx.diags ?trace input p
+      | Stream (Push, sizes, backtrack_window) ->
+          pushed ~backtrack_window ~consume ~diagnostics:cx.diags ?trace input
+            sizes p
       | Stream (feed, sizes, backtrack_window) ->
           Parseff.parse_source ~max_depth ~backtrack_window ~consume
             ~diagnostics:cx.diags ?trace (chunked feed input sizes) p
@@ -420,7 +484,7 @@ let run_real ?(traced = false) ~partial runner g input =
         (Success, Ok v)
     | Error { kind = Backtrack_window_exceeded _; _ } ->
         (Window, Error window_exceeded)
-    | Error ({ kind = Failure "hard"; _ } as e) ->
+    | Error ({ kind = Failed "hard"; _ } as e) ->
         (Hard e.range.start, Error (show_error e))
     | Error ({ kind = Depth_limit_exceeded _; _ } as e) ->
         (Depth e.range.start, Error (show_error e))
@@ -1201,11 +1265,24 @@ let streams =
   in
   List.map (fun (s, w) -> (Function, s, w)) sizes
   @ List.map (fun (s, w) -> (Seq, s, w)) sizes
+  @ List.map (fun (s, w) -> (Bigstring, s, w)) sizes
+  @ [ (Bigstring, [ 0; 2; 0; 0; 3 ], large_window) ]
   @ [ (Seq, [ 0; 2; 0; 0; 3 ], large_window); (Seq, [ 0; 1; 3 ], 3) ]
+  @ List.map (fun (s, w) -> (Push, s, w)) sizes
+  @ [ (Push, [ 0; 2; 0; 0; 3 ], large_window); (Push, [ 0; 1; 3 ], 3) ]
 
 let show_stream (feed, sizes, window) =
-  Printf.sprintf "parse_source, %s, chunks [%s], backtrack_window %d"
-    (match feed with Function -> "of_function" | Seq -> "of_seq")
+  Printf.sprintf "%s, chunks [%s], backtrack_window %d"
+    ( match feed with
+    | Function ->
+        "parse_source, of_function"
+    | Seq ->
+        "parse_source, of_seq"
+    | Bigstring ->
+        "parse_source, of_bigstring_chunks"
+    | Push ->
+        "Feed"
+    )
     (String.concat "; " (List.map string_of_int sizes))
     window
 
@@ -1307,7 +1384,7 @@ let () =
     [
       ( "random grammars",
         [
-          Alcotest.test_case "model, parse and parse_source agree" `Quick
+          Alcotest.test_case "model, parse, parse_source and Feed agree" `Quick
             test_random_grammars;
         ]
       );

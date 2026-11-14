@@ -236,7 +236,7 @@ let test_fold_left () =
   check_final "fold_left" "1+2+" "ok" 1
     (with_cell (fun c () ->
          ignore
-           (fold_left digit
+           (fold_left integer
               (fun () ->
                 incr_cell c;
                 let _ = char '+' in
@@ -555,7 +555,10 @@ let test_set_while_parse_suspended () =
   Alcotest.(check int) "set outside the parse kept" 42 (Ref.get free);
   Alcotest.(check string)
     "cell of the suspended parse"
-    "Parseff.Ref.set: another running parse uses this cell" !other;
+    "Parseff.Ref.set: the cell belongs to a running parse, and this call is \
+     outside that parse, for example in a function given to a *_iter function \
+     or to ~trace"
+    !other;
   Alcotest.(check int)
     "cell of the suspended parse rolled back" 0 (Ref.get owned)
 

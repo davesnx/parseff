@@ -14,7 +14,7 @@ A parse fails with one of two sorts of error.
 {b Built-in errors} come from Parseff itself: a primitive such as
 {!val:Parseff.char} does not match, {!val:Parseff.fail} stops with a message,
 or a limit such as [max_depth] is reached. Their [kind] is [Expected],
-[Failure], [Depth_limit_exceeded] or [Backtrack_window_exceeded]. You do not
+[Failed], [Depth_limit_exceeded] or [Backtrack_window_exceeded]. You do not
 declare them, and {!val:Parseff.render_error} prints them with a full message.
 
 {b Custom errors} are cases you add to {!type:Parseff.custom_error}. You raise
@@ -27,7 +27,7 @@ range, and the caller must handle that case in code, not only print it. Give
 type Parseff.custom_error += Out_of_range of int
 
 let rating () =
-  let n = Parseff.digit () in
+  let n = Char.code (Parseff.digit ()) - Char.code '0' in
   if n < 1 || n > 5 then Parseff.error (Out_of_range n) else n
 
 let () =
@@ -41,7 +41,7 @@ let () =
 {1 [fail]}
 
 Abort parsing with a message. The message is returned as
-[Error { kind = Failure msg; ... }].
+[Error { kind = Failed msg; ... }].
 
 {@ocaml skip[val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a]}
 
@@ -58,7 +58,7 @@ let byte () =
 
 let () =
   match Parseff.parse "300" byte with
-  | Error { kind = Failure msg; range; _ } ->
+  | Error { kind = Failed msg; range; _ } ->
       (* range.start = 3, msg = "number must be between 0 and 255" *)
       Printf.printf "Error at %d: %s\n" range.start msg
   | Ok n -> Printf.printf "Got: %d\n" n
@@ -268,7 +268,7 @@ buildable, for [~notes] of {!val:Parseff.fail}.
   [BE.int16] and its relatives do not match. Characters print as ['x'],
   literals as ["abc"] and labels as written. [items] holds at most 64 items;
   [more] counts the alternatives past that, [0] otherwise.
-- [Failure msg]: a failure raised with {!val:Parseff.fail}, or ["no alternative
+- [Failed msg]: a failure raised with {!val:Parseff.fail}, or ["no alternative
   matched"] when [one_of []] is the only failure at the furthest position.
   Failures of primitives are always [Expected], so they merge with the other
   alternatives that were expected at the same position. Unlike [Expected],
@@ -391,7 +391,7 @@ of [kind] too:
 | Error { error = `Unexpected_end_of_input; _ } -> ...
 (* after *)
 | Error { kind = Custom (Too_large n); _ } -> ...
-| Error { kind = Failure msg; _ } -> ...
+| Error { kind = Failed msg; _ } -> ...
 | Error { kind = Expected { found = End; _ }; _ } -> ...
 ]}
 

@@ -54,36 +54,30 @@ let pair () =
   let _ = right_paren () in
   (a, b)
 
-(* Matches "(1,2)" -> (1, 2) *)
+(* Matches "(1,2)" -> ('1', '2') *)
 ```
 **Tip:** Use `char` for single characters and `consume` for multi-character strings. They both match literals, but `char` makes the intent clear and avoids a string allocation for a single byte.
 
 
 ### `satisfy`
 
-`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages.
+`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages. Without it, the error says `expected at least 1 character`, as for `take_while ~at_least:1`.
 
 ```ocaml
-val satisfy : (char -> bool) -> label:string -> char
+val satisfy : ?label:string -> (char -> bool) -> char
 ```
 ```ocaml
 (* Match any vowel *)
 let vowel () =
-  Parseff.satisfy
-    (fun c -> String.contains "aeiouAEIOU" c)
-    ~label:"vowel"
+  Parseff.satisfy ~label:"vowel" (fun c -> String.contains "aeiouAEIOU" c)
 
 (* Match any digit *)
 let digit_char () =
-  Parseff.satisfy
-    (fun c -> c >= '0' && c <= '9')
-    ~label:"digit"
+  Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
 
 (* Match any uppercase letter *)
 let uppercase () =
-  Parseff.satisfy
-    (fun c -> c >= 'A' && c <= 'Z')
-    ~label:"uppercase letter"
+  Parseff.satisfy ~label:"uppercase letter" (fun c -> c >= 'A' && c <= 'Z')
 ```
 **Tip:** The label parameter is shown in error messages. Prefer descriptive labels.
 
@@ -107,9 +101,7 @@ let digits () = Parseff.take_while (fun c -> c >= '0' && c <= '9')
 (* Parse identifier *)
 let identifier () =
   let first =
-    Parseff.satisfy
-      (fun c -> c = '_' || (c >= 'a' && c <= 'z'))
-      ~label:"letter"
+    Parseff.satisfy ~label:"letter" (fun c -> c = '_' || (c >= 'a' && c <= 'z'))
   in
   let rest =
     Parseff.take_while (fun c ->
@@ -172,20 +164,21 @@ let csv_value () =
 
 ### `match_regex`
 
-`Parseff.match_regex` matches a compiled regular expression. The regex must be compiled with `Re.compile`.
+`Parseff.match_regex` matches a regular expression at the current position. Build the regex with `Parseff.regex`, which compiles an `Re.t` anchored at the position where the match starts, so a failed match examines only the bytes that the regex needs to fail, not the rest of the input. In streaming mode, `match_regex` still reads ahead up to half the backtrack window.
 
 ```ocaml
-val match_regex : ?label:string -> Re.re -> string
+val regex : Re.t -> Parseff.regex
+val match_regex : ?label:string -> Parseff.regex -> string
 ```
 ```ocaml
 (* Pre-compile at module level. Never inside a parser function *)
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number_from_re () = Parseff.match_regex number_re
 ```
 Without `~label`, a failed match expects `"text matching the pattern"`. With `~label`, it reports `expected <label>` and merges with what the other alternatives expected at the same position, like `satisfy` and `take_while ~label`:
 
 ```ocaml
-let identifier_re = Re.compile (Re.Posix.re "[a-z]+")
+let identifier_re = Parseff.regex (Re.Posix.re "[a-z]+")
 
 let value () =
   Parseff.or_
@@ -198,7 +191,7 @@ let value () =
 
 ```ocaml
 (* Regex. Use for complex patterns (alternation, grouping) *)
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 
 (* take_while. No regex overhead for simple predicates *)
@@ -289,7 +282,7 @@ let complete_number () =
   Parseff.end_of_input ();
   n
 
-(* Matches: "5" -> 5 *)
+(* Matches: "5" -> '5' *)
 (* Fails: "52" -> Error: expected end of input *)
 
 (* parse already requires all input by default. end_of_input is for
@@ -376,7 +369,8 @@ type expr =
 let number () =
   let loc = Parseff.location () in
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   Num (n, loc)
 
 (* Convert error positions after parsing *)

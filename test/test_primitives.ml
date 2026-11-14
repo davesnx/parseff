@@ -1,3 +1,5 @@
+let digit_value () = Char.code (Parseff.digit ()) - Char.code '0'
+
 let parse_with_pos input parser =
   Parseff.parse ~consume:`Partial input (fun () ->
       let value = parser () in
@@ -36,7 +38,7 @@ let test_char_success () =
 let test_satisfy () =
   let is_digit c = c >= '0' && c <= '9' in
   match
-    Parseff.parse "7" (fun () -> Parseff.satisfy is_digit ~label:"digit")
+    Parseff.parse "7" (fun () -> Parseff.satisfy ~label:"digit" is_digit)
   with
   | Ok c ->
       Alcotest.(check char) "matched digit" '7' c
@@ -45,8 +47,8 @@ let test_satisfy () =
 
 let test_digit () =
   match Parseff.parse "9" Parseff.digit with
-  | Ok n ->
-      Alcotest.(check int) "parsed digit" 9 n
+  | Ok c ->
+      Alcotest.(check char) "parsed digit" '9' c
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -142,7 +144,7 @@ let test_many_empty () =
 let test_many_several () =
   match parse_with_pos "123" (Parseff.many Parseff.digit) with
   | Ok (lst, pos) ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst;
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst;
       Alcotest.(check int) "final position" 3 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -150,7 +152,7 @@ let test_many_several () =
 let test_many1_success () =
   match Parseff.parse "456" (Parseff.many ~at_least:1 Parseff.digit) with
   | Ok lst ->
-      Alcotest.(check (list int)) "digits" [ 4; 5; 6 ] lst
+      Alcotest.(check (list char)) "digits" [ '4'; '5'; '6' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -212,8 +214,8 @@ let test_look_ahead_success () =
     d
   in
   match Parseff.parse "5" parser with
-  | Ok n ->
-      Alcotest.(check int) "digit" 5 n
+  | Ok c ->
+      Alcotest.(check char) "digit" '5' c
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -309,7 +311,7 @@ let test_sep_by_empty () =
     Parseff.parse "" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
-      Alcotest.(check (list int)) "empty" [] lst
+      Alcotest.(check (list char)) "empty" [] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -318,7 +320,7 @@ let test_sep_by_one () =
     Parseff.parse "5" (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
-      Alcotest.(check (list int)) "one element" [ 5 ] lst
+      Alcotest.(check (list char)) "one element" [ '5' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -328,7 +330,7 @@ let test_sep_by_several () =
       (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
-      Alcotest.(check (list int)) "three elements" [ 1; 2; 3 ] lst
+      Alcotest.(check (list char)) "three elements" [ '1'; '2'; '3' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -340,8 +342,8 @@ let test_between () =
       Parseff.digit
   in
   match parse_with_pos "(7)" parser with
-  | Ok (n, pos) ->
-      Alcotest.(check int) "parsed value" 7 n;
+  | Ok (c, pos) ->
+      Alcotest.(check char) "parsed value" '7' c;
       Alcotest.(check int) "final position" 3 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -369,7 +371,7 @@ let test_end_by () =
   let parser = Parseff.end_by Parseff.digit (fun () -> Parseff.char ',') in
   match parse_with_pos "1,2,3," parser with
   | Ok (lst, pos) ->
-      Alcotest.(check (list int)) "parsed list" [ 1; 2; 3 ] lst;
+      Alcotest.(check (list char)) "parsed list" [ '1'; '2'; '3' ] lst;
       Alcotest.(check int) "final position" 6 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -378,7 +380,7 @@ let test_end_by_empty () =
   let parser = Parseff.end_by Parseff.digit (fun () -> Parseff.char ',') in
   match parse_with_pos "" parser with
   | Ok (lst, pos) ->
-      Alcotest.(check (list int)) "empty" [] lst;
+      Alcotest.(check (list char)) "empty" [] lst;
       Alcotest.(check int) "final position" 0 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -405,13 +407,13 @@ let test_end_by1_success () =
   in
   match parse_with_pos "1,2,3," parser with
   | Ok (lst, pos) ->
-      Alcotest.(check (list int)) "parsed list" [ 1; 2; 3 ] lst;
+      Alcotest.(check (list char)) "parsed list" [ '1'; '2'; '3' ] lst;
       Alcotest.(check int) "final position" 6 pos
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_fold_left_left_assoc () =
-  let num = Parseff.digit in
+  let num = Parseff.integer in
   let sub_op () =
     let _ = Parseff.char '-' in
     ( - )
@@ -424,7 +426,7 @@ let test_fold_left_left_assoc () =
       Alcotest.fail "Expected success"
 
 let test_fold_right_right_assoc () =
-  let num = Parseff.digit in
+  let num = Parseff.integer in
   let sub_op () =
     let _ = Parseff.char '-' in
     ( - )
@@ -438,7 +440,7 @@ let test_fold_right_right_assoc () =
 
 let test_fold_left_otherwise () =
   let parser =
-    Parseff.fold_left Parseff.digit
+    Parseff.fold_left Parseff.integer
       (fun () ->
         let _ = Parseff.char '+' in
         ( + )
@@ -454,7 +456,7 @@ let test_fold_left_otherwise () =
 
 let test_fold_left_non_otherwise () =
   let parser =
-    Parseff.fold_left Parseff.digit
+    Parseff.fold_left Parseff.integer
       (fun () ->
         let _ = Parseff.char '+' in
         ( + )
@@ -470,7 +472,7 @@ let test_fold_left_non_otherwise () =
 
 let test_fold_right_otherwise () =
   let parser =
-    Parseff.fold_right Parseff.digit
+    Parseff.fold_right Parseff.integer
       (fun () ->
         let _ = Parseff.char '+' in
         ( + )
@@ -486,7 +488,7 @@ let test_fold_right_otherwise () =
 
 let test_fold_right_non_otherwise () =
   let parser =
-    Parseff.fold_right Parseff.digit
+    Parseff.fold_right Parseff.integer
       (fun () ->
         let _ = Parseff.char '^' in
         fun l r -> int_of_float (float_of_int l ** float_of_int r)
@@ -500,9 +502,42 @@ let test_fold_right_non_otherwise () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_fold_right_failing_build () =
+  let parser =
+    Parseff.fold_right digit_value (fun () ->
+        let _ = Parseff.char '^' in
+        fun l r ->
+          if l = 0 then
+            Char.code (Parseff.char '!')
+          else
+            (l * 10) + r
+    )
+  in
+  match parse_with_pos "1^2^0^3" parser with
+  | Ok (value, pos) ->
+      Alcotest.(check int) "chain stops before the third '^'" 30 value;
+      Alcotest.(check int) "final position" 5 pos
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_fold_right_long_chain () =
+  let n = 10_000 in
+  let input = String.concat "^" (List.init n (fun _ -> "1")) in
+  let parser =
+    Parseff.fold_right digit_value (fun () ->
+        let _ = Parseff.char '^' in
+        ( + )
+    )
+  in
+  match Parseff.parse input parser with
+  | Ok value ->
+      Alcotest.(check int) "sum" n value
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
 let test_fold_left_requires_one () =
   let parser =
-    Parseff.fold_left Parseff.digit (fun () ->
+    Parseff.fold_left digit_value (fun () ->
         let _ = Parseff.char '+' in
         ( + )
     )
@@ -521,7 +556,7 @@ let test_fold_left_requires_one () =
 
 let test_fold_right_requires_one () =
   let parser =
-    Parseff.fold_right Parseff.digit (fun () ->
+    Parseff.fold_right digit_value (fun () ->
         let _ = Parseff.char '+' in
         ( + )
     )
@@ -673,7 +708,7 @@ let test_diagnostics_rollback_on_many_stop () =
   let outcome = Parseff.parse ~diagnostics "12a" parser in
   match outcome with
   | Ok ds ->
-      Alcotest.(check (list int)) "digits" [ 1; 2 ] ds;
+      Alcotest.(check (list char)) "digits" [ '1'; '2' ] ds;
       Alcotest.(check int)
         "only successful iterations" 2
         (Parseff.Diagnostics.length diagnostics)
@@ -752,7 +787,7 @@ let test_parse_consume_all_preserves_end_of_input_semantics () =
 let test_satisfy_failure () =
   match
     Parseff.parse "a" (fun () ->
-        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+        Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
     )
   with
   | Ok _ ->
@@ -769,7 +804,7 @@ let test_satisfy_failure () =
 let test_satisfy_eof () =
   match
     Parseff.parse "" (fun () ->
-        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+        Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
     )
   with
   | Ok _ ->
@@ -1097,8 +1132,8 @@ let test_expect_success () =
   match
     Parseff.parse "5" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
   with
-  | Ok n ->
-      Alcotest.(check int) "digit value" 5 n
+  | Ok c ->
+      Alcotest.(check char) "digit" '5' c
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1111,7 +1146,7 @@ let test_expect_custom_error_passthrough () =
   match
     Parseff.parse "5" (fun () ->
         Parseff.expect "a small number" (fun () ->
-            let n = Parseff.digit () in
+            let n = Parseff.integer () in
             if n > 3 then
               Parseff.error (Too_big n)
             else
@@ -1198,7 +1233,7 @@ let test_one_of_labeled_custom_error_passthrough () =
          [
            ( "validated",
              fun () ->
-               let n = Parseff.digit () in
+               let n = Parseff.integer () in
                if n > 3 then
                  Parseff.error (Too_big n)
                else
@@ -1242,10 +1277,10 @@ let test_error_distinct_from_fail () =
     Parseff.parse "" (fun () -> Parseff.error (Boom_msg "boom"))
   in
   ( match fail_result with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "fail message" "boom" msg
   | _ ->
-      Alcotest.fail "Expected Failure from fail"
+      Alcotest.fail "Expected Failed from fail"
   );
   match error_result with
   | Error { kind = Custom (Boom_msg msg); _ } ->
@@ -1253,19 +1288,19 @@ let test_error_distinct_from_fail () =
   | _ ->
       Alcotest.fail "Expected `Boom from error"
 
-(* --- fail / Failure semantics --- *)
+(* --- fail / Failed semantics --- *)
 
-(* fail produces `Failure, not `Expected *)
+(* fail produces `Failed, not `Expected *)
 let test_fail_produces_failure () =
   match Parseff.parse "abc" (fun () -> Parseff.fail "bad value") with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "bad value" msg
   | Error { kind = Expected { found = Text _; _ }; _ } ->
       Alcotest.fail "fail should not produce `Expected"
   | _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
 
-(* Failure punches through or_ *)
+(* Failed punches through or_ *)
 let test_failure_punches_through_or () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1278,15 +1313,15 @@ let test_failure_punches_through_or () =
           ()
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "validation failed" msg
   | Ok v ->
       Alcotest.fail
         (Printf.sprintf
-           "Expected Failure but got Ok %S — or_ should not catch Failure" v
+           "Expected Failed but got Ok %S — or_ should not catch Failed" v
         )
   | Error _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
 
 (* Expected IS caught by or_ (backtracking still works for Expected) *)
 let test_expected_caught_by_or () =
@@ -1303,7 +1338,7 @@ let test_expected_caught_by_or () =
   | Error _ ->
       Alcotest.fail "Expected success from or_ backtracking"
 
-(* Failure punches through many *)
+(* Failed punches through many *)
 let test_failure_punches_through_many () =
   let counter = ref 0 in
   match
@@ -1319,15 +1354,14 @@ let test_failure_punches_through_many () =
           ()
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "too many" msg
   | Ok _ ->
-      Alcotest.fail
-        "Expected Failure but got Ok — many should not catch Failure"
+      Alcotest.fail "Expected Failed but got Ok — many should not catch Failed"
   | Error _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
 
-(* Failure punches through optional *)
+(* Failed punches through optional *)
 let test_failure_punches_through_optional () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1339,15 +1373,15 @@ let test_failure_punches_through_optional () =
           ()
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "nope" msg
   | Ok _ ->
       Alcotest.fail
-        "Expected Failure but got Ok — optional should not catch Failure"
+        "Expected Failed but got Ok — optional should not catch Failed"
   | Error _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
 
-(* Failure punches through look_ahead *)
+(* Failed punches through look_ahead *)
 let test_failure_punches_through_look_ahead () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1357,15 +1391,15 @@ let test_failure_punches_through_look_ahead () =
         )
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "look_ahead fail" msg
   | Ok _ ->
       Alcotest.fail
-        "Expected Failure but got Ok — look_ahead should not catch Failure"
+        "Expected Failed but got Ok — look_ahead should not catch Failed"
   | Error _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
 
-(* Failure punches through expect *)
+(* Failed punches through expect *)
 let test_failure_punches_through_expect () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1375,16 +1409,16 @@ let test_failure_punches_through_expect () =
         )
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "not a valid number" msg
   | Error { kind = Expected { found = Text _; _ }; _ } ->
-      Alcotest.fail "expect should not catch Failure"
+      Alcotest.fail "expect should not catch Failed"
   | Ok _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* Failure punches through one_of_labeled *)
+(* Failed punches through one_of_labeled *)
 let test_failure_punches_through_one_of_labeled () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1400,12 +1434,12 @@ let test_failure_punches_through_one_of_labeled () =
           ()
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "bad value" msg
   | Error { kind = Expected { found = Text _; _ }; _ } ->
-      Alcotest.fail "one_of_labeled should not catch Failure"
+      Alcotest.fail "one_of_labeled should not catch Failed"
   | Ok _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -1420,7 +1454,7 @@ let test_consume_produces_expected () =
 let test_satisfy_produces_expected () =
   match
     Parseff.parse "a" (fun () ->
-        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+        Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
     )
   with
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
@@ -1457,7 +1491,7 @@ let test_take_while_at_least_produces_expected () =
   | _ ->
       Alcotest.fail "take_while ~at_least failure should produce `Expected"
 
-(* Failure works with parse_source (streaming) *)
+(* Failed works with parse_source (streaming) *)
 let test_failure_with_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
@@ -1466,14 +1500,14 @@ let test_failure_with_streaming () =
         Parseff.fail "stream fail"
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "stream fail" msg
   | Ok _ ->
-      Alcotest.fail "Expected Failure error"
+      Alcotest.fail "Expected Failed error"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* Failure punches through or_ in streaming mode *)
+(* Failed punches through or_ in streaming mode *)
 let test_failure_punches_through_or_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
@@ -1487,11 +1521,11 @@ let test_failure_punches_through_or_streaming () =
           ()
     )
   with
-  | Error { kind = Failure msg; _ } ->
+  | Error { kind = Failed msg; _ } ->
       Alcotest.(check string) "failure message" "stream validation failed" msg
   | Ok _ ->
       Alcotest.fail
-        "Expected Failure — or_ should not catch Failure in streaming mode"
+        "Expected Failed — or_ should not catch Failed in streaming mode"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
@@ -1571,7 +1605,7 @@ let test_alphanum_failure () =
 (* --- match_regex --- *)
 
 let test_match_regex_success () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   match
     Parseff.parse ~consume:`Partial "12345abc" (fun () -> Parseff.match_regex re)
   with
@@ -1581,7 +1615,7 @@ let test_match_regex_success () =
       Alcotest.fail "Expected success"
 
 let test_match_regex_failure () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   match Parseff.parse "abc" (fun () -> Parseff.match_regex re) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
@@ -1595,7 +1629,7 @@ let test_match_regex_failure () =
       Alcotest.fail "Unexpected error type"
 
 let test_match_regex_anchored () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   match
     parse_with_pos "abc123" (fun () ->
         let _ = Parseff.consume "abc" in
@@ -1608,13 +1642,49 @@ let test_match_regex_anchored () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let failing_regex_loop parse =
+  let n = 1 lsl 18 in
+  let budget = 1.0 in
+  let re = Parseff.regex (Re.char 'b') in
+  let start = Sys.time () in
+  let steps = ref 0 in
+  let step () =
+    Parseff.or_
+      (fun () -> ignore (Parseff.match_regex re))
+      (fun () ->
+        incr steps;
+        if !steps land 1023 = 0 && Sys.time () -. start > budget then
+          Parseff.fail "over budget";
+        ignore (Parseff.any_char ())
+      )
+      ()
+  in
+  let result =
+    parse (String.make n 'a') (fun () -> List.length (Parseff.many step ()))
+  in
+  let elapsed = Sys.time () -. start in
+  Alcotest.(check bool)
+    (Printf.sprintf "%d failed matches within %.1f s (took %.3f s)" !steps
+       budget elapsed
+    )
+    true
+    (result = Ok n && elapsed <= budget)
+
+let test_match_regex_failure_constant_time () =
+  failing_regex_loop (fun input p -> Parseff.parse input p)
+
+let test_match_regex_failure_constant_time_source () =
+  failing_regex_loop (fun input p ->
+      Parseff.parse_source (Parseff.Source.of_string input) p
+  )
+
 (* --- sep_by_take --- *)
 
 let test_sep_by_take_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "" (fun () ->
-        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1626,7 +1696,7 @@ let test_sep_by_take_single () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "hello" (fun () ->
-        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1638,7 +1708,7 @@ let test_sep_by_take_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "a , b , c" (fun () ->
-        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1652,7 +1722,7 @@ let test_sep_by_take_span_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "" (fun () ->
-        Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1664,69 +1734,16 @@ let test_sep_by_take_span_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "aa , bb , cc" (fun () ->
-        Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok spans ->
       let strs = List.map Parseff.span_to_string spans in
       Alcotest.(check (list string)) "three items" [ "aa"; "bb"; "cc" ] strs;
-      let offsets = List.map (fun (s : Parseff.span) -> s.off) spans in
-      Alcotest.(check (list int)) "offsets" [ 0; 5; 10 ] offsets;
-      let lengths = List.map (fun (s : Parseff.span) -> s.len) spans in
+      let lengths = List.map Parseff.span_length spans in
       Alcotest.(check (list int)) "lengths" [ 2; 2; 2 ] lengths
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* --- fused_sep_take --- *)
-
-let test_fused_sep_take_success () =
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  match
-    Parseff.parse ", hello" (fun () ->
-        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
-    )
-  with
-  | Ok s ->
-      Alcotest.(check string) "taken value" "hello" s
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_fused_sep_take_missing_sep () =
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  match
-    Parseff.parse "abc" (fun () ->
-        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.range.start in
-      let expected = Parseff.error_message e in
-      Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string)
-        "error message" "expected ',', found 'abc'" expected
-  | Error _ ->
-      Alcotest.fail "Unexpected error type"
-
-let test_fused_sep_take_missing_value () =
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  match
-    Parseff.parse ", " (fun () ->
-        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check string)
-        "expected items" "expected value, found end of input"
-        (Parseff.error_message e);
-      (* After ",_" whitespace is skipped, pos is at EOF *)
-      Alcotest.(check int) "error position" 2 pos
-  | Error _ ->
-      Alcotest.fail "Expected an end of input error"
 
 (* --- take_while_span --- *)
 
@@ -1734,12 +1751,11 @@ let test_take_while_span () =
   match
     parse_with_pos "aaabbb" (fun () ->
         let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        (Parseff.span_to_string sp, sp.off, sp.len)
+        (Parseff.span_to_string sp, Parseff.span_length sp)
     )
   with
-  | Ok ((s, off, len), pos) ->
+  | Ok ((s, len), pos) ->
       Alcotest.(check string) "span string" "aaa" s;
-      Alcotest.(check int) "span offset" 0 off;
       Alcotest.(check int) "span length" 3 len;
       Alcotest.(check int) "parser position" 3 pos
   | Error _ ->
@@ -1749,7 +1765,7 @@ let test_take_while_span_empty () =
   match
     Parseff.parse ~consume:`Partial "xyz" (fun () ->
         let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        (Parseff.span_to_string sp, sp.len)
+        (Parseff.span_to_string sp, Parseff.span_length sp)
     )
   with
   | Ok (s, len) ->
@@ -1758,6 +1774,18 @@ let test_take_while_span_empty () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let span_at buf off len =
+  match
+    Parseff.parse ~consume:`Partial buf (fun () ->
+        ignore (Parseff.take off);
+        Parseff.take_span len
+    )
+  with
+  | Ok sp ->
+      sp
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
 let test_span_to_string_valid () =
   let buf = "abcdefghijk" in
   List.iter
@@ -1765,7 +1793,7 @@ let test_span_to_string_valid () =
       Alcotest.(check string)
         (Printf.sprintf "off %d len %d" off len)
         expected
-        (Parseff.span_to_string { buf; off; len })
+        (Parseff.span_to_string (span_at buf off len))
     )
     [
       (3, 0, "");
@@ -1777,26 +1805,19 @@ let test_span_to_string_valid () =
       (0, 11, buf);
     ]
 
-let test_span_to_string_invalid () =
+let test_span_get () =
+  let sp = span_at "abcdef" 2 3 in
+  Alcotest.(check (list char))
+    "bytes" [ 'c'; 'd'; 'e' ]
+    (List.init (Parseff.span_length sp) (Parseff.span_get sp));
   List.iter
-    (fun (off, len) ->
-      Alcotest.check_raises (Printf.sprintf "off %d len %d" off len)
-        (Invalid_argument "Parseff.span_to_string") (fun () ->
-          ignore (Parseff.span_to_string { buf = "abc"; off; len })
+    (fun i ->
+      Alcotest.check_raises (Printf.sprintf "index %d" i)
+        (Invalid_argument "Parseff.span_get") (fun () ->
+          ignore (Parseff.span_get sp i)
       )
     )
-    [
-      (5, 1);
-      (3, 1);
-      (-1, 1);
-      (2, 2);
-      (-8, 8);
-      (0, -1);
-      (100, 8);
-      (1 lsl 40, 8);
-      (max_int, 2);
-      (1, max_int);
-    ]
+    [ -1; 3; 4; max_int; min_int ]
 
 let check_location msg expected actual =
   Alcotest.(check int)
@@ -2015,6 +2036,9 @@ let () =
           test_case "fold_right otherwise" `Quick test_fold_right_otherwise;
           test_case "fold_right non-otherwise" `Quick
             test_fold_right_non_otherwise;
+          test_case "fold_right failing build" `Quick
+            test_fold_right_failing_build;
+          test_case "fold_right long chain" `Quick test_fold_right_long_chain;
           test_case "fold_left requires one" `Quick test_fold_left_requires_one;
           test_case "fold_right requires one" `Quick
             test_fold_right_requires_one;
@@ -2062,21 +2086,21 @@ let () =
           test_case "distinct from fail" `Quick test_error_distinct_from_fail;
         ]
       );
-      ( "fail / Failure semantics",
+      ( "fail / Failed semantics",
         [
-          test_case "fail produces Failure" `Quick test_fail_produces_failure;
-          test_case "Failure punches through or_" `Quick
+          test_case "fail produces Failed" `Quick test_fail_produces_failure;
+          test_case "Failed punches through or_" `Quick
             test_failure_punches_through_or;
           test_case "Expected caught by or_" `Quick test_expected_caught_by_or;
-          test_case "Failure punches through many" `Quick
+          test_case "Failed punches through many" `Quick
             test_failure_punches_through_many;
-          test_case "Failure punches through optional" `Quick
+          test_case "Failed punches through optional" `Quick
             test_failure_punches_through_optional;
-          test_case "Failure punches through look_ahead" `Quick
+          test_case "Failed punches through look_ahead" `Quick
             test_failure_punches_through_look_ahead;
-          test_case "Failure punches through expect" `Quick
+          test_case "Failed punches through expect" `Quick
             test_failure_punches_through_expect;
-          test_case "Failure punches through one_of_labeled" `Quick
+          test_case "Failed punches through one_of_labeled" `Quick
             test_failure_punches_through_one_of_labeled;
           test_case "consume produces Expected" `Quick
             test_consume_produces_expected;
@@ -2086,8 +2110,8 @@ let () =
             test_one_of_produces_expected;
           test_case "take_while at_least produces Expected" `Quick
             test_take_while_at_least_produces_expected;
-          test_case "Failure with streaming" `Quick test_failure_with_streaming;
-          test_case "Failure punches through or_ streaming" `Quick
+          test_case "Failed with streaming" `Quick test_failure_with_streaming;
+          test_case "Failed punches through or_ streaming" `Quick
             test_failure_punches_through_or_streaming;
         ]
       );
@@ -2104,6 +2128,10 @@ let () =
           test_case "success" `Quick test_match_regex_success;
           test_case "failure" `Quick test_match_regex_failure;
           test_case "anchored at position" `Quick test_match_regex_anchored;
+          test_case "failure takes constant time" `Quick
+            test_match_regex_failure_constant_time;
+          test_case "failure takes constant time on a source" `Quick
+            test_match_regex_failure_constant_time_source;
         ]
       );
       ( "fused operations",
@@ -2114,15 +2142,10 @@ let () =
           test_case "sep_by_take_span empty" `Quick test_sep_by_take_span_empty;
           test_case "sep_by_take_span several" `Quick
             test_sep_by_take_span_several;
-          test_case "fused_sep_take success" `Quick test_fused_sep_take_success;
-          test_case "fused_sep_take missing sep" `Quick
-            test_fused_sep_take_missing_sep;
-          test_case "fused_sep_take missing value" `Quick
-            test_fused_sep_take_missing_value;
           test_case "take_while_span" `Quick test_take_while_span;
           test_case "take_while_span empty" `Quick test_take_while_span_empty;
           test_case "span_to_string valid" `Quick test_span_to_string_valid;
-          test_case "span_to_string invalid" `Quick test_span_to_string_invalid;
+          test_case "span_get" `Quick test_span_get;
         ]
       );
       ( "diagnostics",

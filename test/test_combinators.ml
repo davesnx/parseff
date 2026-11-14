@@ -6,8 +6,8 @@ let show_error (e : Parseff.error) =
       "E"
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.error_message e)
-  | Failure s ->
-      Printf.sprintf "Failure %S" s
+  | Failed s ->
+      Printf.sprintf "Failed %S" s
   | _ ->
       "other"
 
@@ -108,7 +108,7 @@ let test_many_stops_after_consuming () =
         (fun () ->
           match Parseff.optional Parseff.digit () with
           | Some d ->
-              d
+              Char.code d - Char.code '0'
           | None ->
               -1
         )
@@ -152,7 +152,7 @@ let tree a b = "(" ^ a ^ "^" ^ b ^ ")"
 let digit_or_dash () =
   match Parseff.optional Parseff.digit () with
   | Some d ->
-      string_of_int d
+      String.make 1 d
   | None ->
       "-"
 
@@ -190,7 +190,7 @@ let test_fold_right_right_assoc () =
   both show_string "1^2^3"
     (fun () ->
       Parseff.fold_right
-        (fun () -> string_of_int (Parseff.digit ()))
+        (fun () -> String.make 1 (Parseff.digit ()))
         (fun () ->
           ignore (Parseff.char '^');
           tree
@@ -322,6 +322,51 @@ let test_consume_or_mismatch () =
     "parse_source" expected
     (show show_string (Parseff.parse_source (chunked_source "no") p))
 
+let test_consume_each_length_and_offset () =
+  for len = 1 to 10 do
+    let literal = String.init len (fun i -> Char.chr (Char.code 'a' + i)) in
+    let p () = Parseff.consume literal in
+    let results input =
+      [
+        show show_string (Parseff.parse ~consume:`Partial input p);
+        show show_string
+          (Parseff.parse_source ~consume:`Partial
+             (Parseff.Source.of_string input)
+             p
+          );
+        show show_string
+          (Parseff.parse_source ~consume:`Partial (chunked_source input) p);
+      ]
+    in
+    let ok = show show_string (Ok literal) in
+    Alcotest.(check (list string))
+      (Printf.sprintf "match %S" literal)
+      [ ok; ok; ok ]
+      (results (literal ^ "!"));
+    for k = 0 to len - 1 do
+      let input =
+        String.mapi
+          (fun i c ->
+            if i = k then
+              'X'
+            else
+              c
+          )
+          literal
+      in
+      let first = Parseff.parse ~consume:`Partial (input ^ "!") p in
+      let at = match first with Ok _ -> -1 | Error e -> e.range.start in
+      Alcotest.(check int)
+        (Printf.sprintf "%S on %S fails at the mismatch" literal input)
+        k at;
+      let expected = show show_string first in
+      Alcotest.(check (list string))
+        (Printf.sprintf "%S on %S" literal input)
+        [ expected; expected; expected ]
+        (results (input ^ "!"))
+    done
+  done
+
 let test_consume_streaming_slow_source () =
   let r =
     Parseff.parse_source (chunked_source "true") (fun () ->
@@ -371,6 +416,8 @@ let () =
         [
           test_case "prefix mismatch" `Quick test_consume_prefix_mismatch;
           test_case "or_ mismatch" `Quick test_consume_or_mismatch;
+          test_case "each length and offset" `Quick
+            test_consume_each_length_and_offset;
           test_case "slow source" `Quick test_consume_streaming_slow_source;
         ]
       );

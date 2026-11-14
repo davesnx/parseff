@@ -34,18 +34,18 @@ let field () =
 {2 [satisfy]}
 
 {!val:Parseff.Utf8.satisfy} decodes the next UTF-8 code point and tests it
-against a predicate. Advances by 1--4 bytes depending on the encoding.
+against a predicate. Advances by 1--4 bytes depending on the encoding. The
+[~label] is used in error messages; without it, the error says
+[expected at least 1 character].
 
-{@ocaml skip[val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t]}
+{@ocaml skip[val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t]}
 
 {@ocaml skip[
 (* Match any CJK Unified Ideograph *)
 let cjk_char () =
-  Parseff.Utf8.satisfy
-    (fun u ->
+  Parseff.Utf8.satisfy ~label:"CJK character" (fun u ->
       let i = Uchar.to_int u in
       i >= 0x4E00 && i <= 0x9FFF)
-    ~label:"CJK character"
 ]}
 
 {2 [char]}
@@ -94,14 +94,6 @@ of allocating a new string. Use {!val:Parseff.span_to_string} to materialize
 when needed.
 
 {@ocaml skip[val take_while_span : (Uchar.t -> bool) -> span]}
-
-{2 [skip_while_then_char]}
-
-{!val:Parseff.Utf8.skip_while_then_char} skips code points matching a predicate,
-then matches a specific terminating code point. More efficient than calling
-{!val:Parseff.Utf8.skip_while} followed by {!val:Parseff.Utf8.char} separately.
-
-{@ocaml skip[val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit]}
 
 {1 Convenience combinators}
 

@@ -26,7 +26,8 @@ An IPv4 address looks like `192.168.1.1`: four numbers from 0 to 255, separated 
 (* Parse a single octet: one or more digits, validated to 0-255 *)
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.fail (Printf.sprintf "number out of range: %d" n)
 
@@ -42,7 +43,7 @@ let ip_address () =
   (a, b, c, d)
 ```
 
-`Parseff.digit` parses a single digit and returns its integer value (0-9). `many ~at_least:1` applies it one or more times, producing a list like `[1; 9; 2]`. The `fold_left` converts that to `192`. Then we validate: if the number isn't in range, `Parseff.fail` reports it. This is the parse-then-validate pattern.
+`Parseff.digit` parses a single digit and returns it as a character (`'0'` to `'9'`). `many ~at_least:1` applies it one or more times, producing a list like `['1'; '9'; '2']`. The `fold_left` converts that to `192`. Then we validate: if the number isn't in range, `Parseff.fail` reports it. This is the parse-then-validate pattern. `Parseff.integer` reads a number in one call, but it also accepts a leading `-`, which an octet must not have.
 
 The `ip_address` parser reads like the format itself: number, dot, number, dot, number, dot, number. `parse` requires all input to be consumed, so `"1.2.3.4 extra"` fails instead of silently succeeding.
 
@@ -77,7 +78,8 @@ let digit_val () =
 
 let number_0_255 () =
   let digits = Parseff.many ~at_least:1 digit_val () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.fail (Printf.sprintf "number %d is out of range (must be 0-255)" n)
 
@@ -103,7 +105,8 @@ type Parseff.custom_error += Out_of_range of int
 
 let number_0_255_typed () =
   let digits = Parseff.many ~at_least:1 digit_val () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.error (Out_of_range n)
 ```

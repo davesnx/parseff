@@ -12,7 +12,7 @@ let parse_with_pos input parser =
 let test_satisfy_ascii () =
   match
     Parseff.parse "a" (fun () ->
-        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u = 0x61) ~label:"'a'"
+        Parseff.Utf8.satisfy ~label:"'a'" (fun u -> Uchar.to_int u = 0x61)
     )
   with
   | Ok u ->
@@ -24,7 +24,7 @@ let test_satisfy_multibyte () =
   (* λ = U+03BB, encoded as 0xCE 0xBB (2 bytes) *)
   match
     parse_with_pos "\xCE\xBB" (fun () ->
-        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u = 0x03BB) ~label:"lambda"
+        Parseff.Utf8.satisfy ~label:"lambda" (fun u -> Uchar.to_int u = 0x03BB)
     )
   with
   | Ok (u, pos) ->
@@ -37,7 +37,7 @@ let test_satisfy_3byte () =
   (* 中 = U+4E2D, encoded as 0xE4 0xB8 0xAD (3 bytes) *)
   match
     parse_with_pos "\xE4\xB8\xAD" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok (u, pos) ->
@@ -50,7 +50,7 @@ let test_satisfy_4byte () =
   (* 😀 = U+1F600, encoded as 0xF0 0x9F 0x98 0x80 (4 bytes) *)
   match
     parse_with_pos "\xF0\x9F\x98\x80" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok (u, pos) ->
@@ -62,7 +62,7 @@ let test_satisfy_4byte () =
 let test_satisfy_failure () =
   match
     Parseff.parse "a" (fun () ->
-        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u > 0x7F) ~label:"non-ASCII"
+        Parseff.Utf8.satisfy ~label:"non-ASCII" (fun u -> Uchar.to_int u > 0x7F)
     )
   with
   | Ok _ ->
@@ -79,7 +79,7 @@ let test_satisfy_failure () =
 let test_satisfy_eof () =
   match
     Parseff.parse "" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok _ ->
@@ -97,7 +97,7 @@ let test_satisfy_invalid_utf8 () =
   (* 0xFF is never valid in UTF-8 *)
   match
     Parseff.parse "\xFF" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok _ ->
@@ -356,79 +356,16 @@ let test_take_while_span () =
               not (Uucp.White.is_white_space u)
           )
         in
-        (Parseff.span_to_string sp, sp.off, sp.len)
+        (Parseff.span_to_string sp, Parseff.span_length sp)
     )
   with
-  | Ok ((s, off, len), pos) ->
+  | Ok ((s, len), pos) ->
       Alcotest.(check string) "span string" "héllo" s;
-      Alcotest.(check int) "span offset" 0 off;
       (* "héllo" = 6 bytes: é is 2 bytes + 4 ASCII *)
       Alcotest.(check int) "span length" 6 len;
       Alcotest.(check int) "parser position" 6 pos
   | Error _ ->
       Alcotest.fail "Expected success"
-
-let test_skip_while_then_char () =
-  match
-    parse_with_pos "  :value" (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x3A);
-        Parseff.consume "value"
-    )
-  with
-  | Ok (s, pos) ->
-      Alcotest.(check string) "matched" "value" s;
-      Alcotest.(check int) "position" 8 pos
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_skip_while_then_char_unicode_term () =
-  (* Skip whitespace then match → U+2192 (3 bytes: 0xE2 0x86 0x92) *)
-  match
-    parse_with_pos "  \xE2\x86\x92ok" (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x2192);
-        Parseff.consume "ok"
-    )
-  with
-  | Ok (s, pos) ->
-      Alcotest.(check string) "matched" "ok" s;
-      Alcotest.(check int) "position" 7 pos
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_skip_while_then_char_failure () =
-  match
-    Parseff.parse "  x" (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x3A)
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check int) "error at non-matching char" 2 pos
-  | Error _ ->
-      Alcotest.fail "Unexpected error type"
-
-let test_skip_while_then_char_eof () =
-  match
-    Parseff.parse "  " (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x3A)
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check string)
-        "expected items" "expected ':', found end of input"
-        (Parseff.error_message e);
-      Alcotest.(check int) "error at eof" 2 pos
-  | Error _ ->
-      Alcotest.fail "Expected an end of input error"
 
 let test_letter_ascii () =
   match Parseff.parse "a" Parseff.Utf8.letter with
@@ -600,7 +537,7 @@ let test_streaming_satisfy () =
   in
   match
     Parseff.parse_source source (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok u ->
@@ -689,15 +626,6 @@ let () =
         ]
       );
       ("take_while_span", [ test_case "basic" `Quick test_take_while_span ]);
-      ( "skip_while_then_char",
-        [
-          test_case "basic" `Quick test_skip_while_then_char;
-          test_case "unicode terminator" `Quick
-            test_skip_while_then_char_unicode_term;
-          test_case "failure" `Quick test_skip_while_then_char_failure;
-          test_case "eof" `Quick test_skip_while_then_char_eof;
-        ]
-      );
       ( "letter",
         [
           test_case "ASCII" `Quick test_letter_ascii;

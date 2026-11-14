@@ -20,9 +20,9 @@ type json =
   | Array of json list
   | Object of (string * json) list
 
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-let string_content_re = Re.compile (Re.Posix.re "[^\"]*")
+let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
+let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
 let ws () = Parseff.match_regex ws_re
 
 let null_parser () =
@@ -317,7 +317,7 @@ let test_complex_combinators_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "%d,%d,%d" i (i + 1) (i + 2) in
         let parser =
-          Parseff.sep_by Parseff.digit (fun () -> Parseff.char ',')
+          Parseff.sep_by Parseff.integer (fun () -> Parseff.char ',')
         in
         (i, Parseff.parse input parser)
     )

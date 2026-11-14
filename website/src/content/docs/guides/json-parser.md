@@ -63,7 +63,7 @@ let bool_parser () =
 ### Numbers
 
 ```ocaml
-let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
 
 let number_parser () =
   let s = Parseff.match_regex number_re in
@@ -75,7 +75,7 @@ We match the number as a string with a regex, then convert it. The regex handles
 ### Strings
 
 ```ocaml
-let string_content_re = Re.compile (Re.Posix.re "[^\"]*")
+let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
 
 let string_parser () =
   let _ = Parseff.char '"' in

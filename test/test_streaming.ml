@@ -17,7 +17,11 @@ let parse_source_with_pos src parser =
 
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let n =
+    List.fold_left
+      (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
+      0 digits
+  in
   if n >= 0 && n <= 255 then
     n
   else
@@ -34,9 +38,9 @@ let ip_address () =
   Parseff.end_of_input ();
   (a, b, c, d)
 
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-let string_content_re = Re.compile (Re.Posix.re "[^\"]*")
+let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
+let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
 
 type json =
   | Null
@@ -162,7 +166,7 @@ let test_of_string_satisfy () =
   let src = Parseff.Source.of_string "7" in
   match
     Parseff.parse_source src (fun () ->
-        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+        Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
     )
   with
   | Ok c ->
@@ -188,7 +192,7 @@ let test_of_string_many () =
   let src = Parseff.Source.of_string "123" in
   match parse_source_with_pos src (Parseff.many Parseff.digit) with
   | Ok (lst, pos) ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst;
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst;
       Alcotest.(check int) "pos" 3 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -265,7 +269,7 @@ let test_of_string_end_of_input () =
       Alcotest.fail "Expected success"
 
 let test_of_string_regex () =
-  let re = Re.compile (Re.Posix.re "[a-z]+") in
+  let re = Parseff.regex (Re.Posix.re "[a-z]+") in
   let src = Parseff.Source.of_string "hello" in
   match Parseff.parse_source src (fun () -> Parseff.match_regex re) with
   | Ok s ->
@@ -280,7 +284,7 @@ let test_of_string_sep_by () =
       (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -381,7 +385,7 @@ let test_chunked_alternation () =
       Alcotest.fail "Expected success"
 
 let test_chunked_regex () =
-  let re = Re.compile (Re.Posix.re "[a-z]+") in
+  let re = Parseff.regex (Re.Posix.re "[a-z]+") in
   let src = chunked_source ~chunk_size:2 "hello world" in
   match
     Parseff.parse_source src (fun () ->
@@ -397,11 +401,12 @@ let test_chunked_regex () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chunked_skip_while_then_char () =
+let test_chunked_skip_while_char () =
   let src = chunked_source ~chunk_size:2 "   :" in
   match
     parse_source_with_pos src (fun () ->
-        Parseff.skip_while_then_char Parseff.is_whitespace ':'
+        Parseff.skip_while Parseff.is_whitespace;
+        ignore (Parseff.char ':')
     )
   with
   | Ok ((), pos) ->
@@ -557,12 +562,12 @@ let test_many_across_chunks () =
   let src = chunked_source ~chunk_size:1 "12345" in
   match Parseff.parse_source src (Parseff.many Parseff.digit) with
   | Ok lst ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3; 4; 5 ] lst
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3'; '4'; '5' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_regex_across_chunks () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   let src = chunked_source ~chunk_size:2 "12345abc" in
   match
     Parseff.parse_source src (fun () ->
@@ -837,6 +842,159 @@ let test_of_chunks_backtrack () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let bigstring_source ~size input =
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout (size + 5) in
+  let pos = ref 0 in
+  Parseff.Source.of_bigstring_chunks (fun () ->
+      let n = min size (String.length input - !pos) in
+      if n = 0 then
+        None
+      else begin
+        Bigarray.Array1.fill buf '#';
+        for i = 0 to n - 1 do
+          buf.{3 + i} <- input.[!pos + i]
+        done;
+        pos := !pos + n;
+        Some (buf, 3, n)
+      end
+  )
+
+let bigstring_sizes = [ 1; 7; 65_536 ]
+
+let bytes_source ~size input =
+  let pos = ref 0 in
+  Parseff.Source.of_function (fun buf off len ->
+      let n = min (min size len) (String.length input - !pos) in
+      Bytes.blit_string input !pos buf off n;
+      pos := !pos + n;
+      n
+  )
+
+let show_result show = function
+  | Ok v ->
+      "Ok " ^ show v
+  | Error e ->
+      "Error " ^ Parseff.render_error e
+
+let check_bigstring_like_string ?(consume = `All) name show parser input =
+  let in_memory = Parseff.parse ~consume input parser in
+  List.iter
+    (fun size ->
+      let expected =
+        Parseff.parse_source ~consume (bytes_source ~size input) parser
+      in
+      let got =
+        Parseff.parse_source ~consume (bigstring_source ~size input) parser
+      in
+      if got <> expected then
+        Alcotest.failf
+          "%s, slices of %d: of_function gives %s, of_bigstring_chunks gives %s"
+          name size
+          (show_result show expected)
+          (show_result show got);
+      match (in_memory, got) with
+      | Ok a, Ok b when a = b ->
+          ()
+      | Error _, Error _ ->
+          ()
+      | _ ->
+          Alcotest.failf "%s, slices of %d: parse gives %s, bigstring gives %s"
+            name size
+            (show_result show in_memory)
+            (show_result show got)
+    )
+    bigstring_sizes
+
+let request_line () =
+  let meth = Parseff.take_while ~at_least:1 (fun c -> c >= 'A' && c <= 'Z') in
+  let _ = Parseff.char ' ' in
+  let target = Parseff.take_while ~at_least:1 (fun c -> c <> ' ') in
+  let _ = Parseff.char ' ' in
+  let _ = Parseff.consume "HTTP/1.1" in
+  let _ = Parseff.consume "\r\n" in
+  (meth, target)
+
+let show_pair (a, b) = Printf.sprintf "(%S, %S)" a b
+
+let test_bigstring_literal_and_token_split () =
+  check_bigstring_like_string "request line" show_pair request_line
+    "GET /index.html HTTP/1.1\r\n";
+  check_bigstring_like_string "long token" show_pair request_line
+    ("POST /" ^ String.make 5000 'x' ^ " HTTP/1.1\r\n")
+
+let test_bigstring_errors () =
+  check_bigstring_like_string "literal mismatch" show_pair request_line
+    "GET / HTTP/1.0\r\n";
+  check_bigstring_like_string "early end" show_pair request_line "GET / HTT";
+  check_bigstring_like_string "trailing input" show_pair request_line
+    "GET / HTTP/1.1\r\nextra";
+  check_bigstring_like_string "empty token" show_pair request_line " / x";
+  check_bigstring_like_string "json error"
+    (fun _ -> "json")
+    json "{\"a\": [1, 2,, null]}";
+  check_bigstring_like_string "json"
+    (fun _ -> "json")
+    json "{\"a\": [1, 2, null], \"b\": \"text\"}"
+
+let test_bigstring_partial_and_backtrack () =
+  let parser () =
+    let s =
+      Parseff.or_
+        (fun () -> Parseff.consume "foobar")
+        (fun () -> Parseff.consume "foobaz")
+        ()
+    in
+    (s, Parseff.position ())
+  in
+  check_bigstring_like_string ~consume:`Partial "or_"
+    (fun (s, p) -> Printf.sprintf "(%S, %d)" s p)
+    parser "foobaz and more"
+
+let test_bigstring_large_input () =
+  let input =
+    String.init 60_003 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  check_bigstring_like_string "take_while"
+    (fun s -> Printf.sprintf "%d bytes" (String.length s))
+    (fun () -> Parseff.take_while (fun _ -> true))
+    input
+
+let test_bigstring_empty_slices_skipped () =
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 5 in
+  String.iteri (fun i c -> buf.{i} <- c) "hello";
+  let slices = ref [ (buf, 0, 0); (buf, 5, 0); (buf, 0, 2); (buf, 2, 3) ] in
+  let src =
+    Parseff.Source.of_bigstring_chunks (fun () ->
+        match !slices with
+        | [] ->
+            None
+        | x :: rest ->
+            slices := rest;
+            Some x
+    )
+  in
+  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_bigstring_slice_outside () =
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 4 in
+  List.iter
+    (fun (off, len) ->
+      let src =
+        Parseff.Source.of_bigstring_chunks (fun () -> Some (buf, off, len))
+      in
+      match Parseff.parse_source src Parseff.any_char with
+      | exception Invalid_argument _ ->
+          ()
+      | _ ->
+          Alcotest.failf "slice off %d len %d: expected Invalid_argument" off
+            len
+    )
+    [ (-1, 2); (0, 5); (3, 2); (1, -1) ]
+
 let test_large_input_grows_read_buffer () =
   let input =
     String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
@@ -929,7 +1087,7 @@ let regex_read_lengths ?backtrack_window ~initial_buffer_size input =
         n
     )
   in
-  let letters = Re.compile (Re.rep1 (Re.rg 'a' 'z')) in
+  let letters = Parseff.regex (Re.rep1 (Re.rg 'a' 'z')) in
   Alcotest.(check (result string reject))
     (Printf.sprintf "initial_buffer_size %d" initial_buffer_size)
     (Ok input)
@@ -1043,8 +1201,8 @@ let norm : (_, Parseff.error) Result.t -> _ = function
         match e.kind with
         | Expected _ ->
             "Expected " ^ Parseff.error_message e
-        | Failure m ->
-            "Failure " ^ m
+        | Failed m ->
+            "Failed " ^ m
         | Custom _ ->
             "Custom"
         | Depth_limit_exceeded _ ->
@@ -1088,18 +1246,21 @@ let test_regex_lookbehind_after_peek () =
   let cases =
     [
       ( "bol",
-        Re.(compile (seq [ bol; str "ab" ])),
+        Parseff.regex Re.(seq [ bol; str "ab" ]),
         Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ( "bow",
-        Re.(compile (seq [ bow; str "ab" ])),
+        Parseff.regex Re.(seq [ bow; str "ab" ]),
         Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ( "bos",
-        Re.(compile (seq [ bos; str "ab" ])),
+        Parseff.regex Re.(seq [ bos; str "ab" ]),
         Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
-      ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
+      ( "not_boundary",
+        Parseff.regex Re.(seq [ not_boundary; str "ab" ]),
+        Ok "ab"
+      );
     ]
   in
   List.iter
@@ -1117,7 +1278,7 @@ let test_regex_lookbehind_window_accounting () =
   let parser () =
     ignore (Parseff.consume "xy");
     ignore (Parseff.peek_char ());
-    Parseff.match_regex Re.(compile (str "ab"))
+    Parseff.match_regex (Parseff.regex Re.(str "ab"))
   in
   match
     Parseff.parse_source ~consume:`Partial ~backtrack_window:8
@@ -1144,7 +1305,7 @@ let test_regex_readahead_half_window () =
   let seen = ref (-1) in
   let _ =
     Parseff.parse_source ~backtrack_window:1000 src (fun () ->
-        ignore (Parseff.match_regex Re.(compile (str "aa")));
+        ignore (Parseff.match_regex (Parseff.regex Re.(str "aa")));
         seen := !total
     )
   in
@@ -1152,10 +1313,10 @@ let test_regex_readahead_half_window () =
   if !seen > 510 then
     Alcotest.failf "read %d bytes ahead, expected about 500" !seen
 
-let regex_token = Re.compile Re.(seq [ rg 'a' 'z'; rep1 digit ])
-let regex_digits = Re.compile Re.(rep digit)
-let regex_runs = Re.compile Re.(alt [ rep1 (rg 'a' 'c'); rep1 digit ])
-let regex_opt_tail = Re.compile Re.(seq [ char 'a'; opt (str "bc") ])
+let regex_token = Parseff.regex Re.(seq [ rg 'a' 'z'; rep1 digit ])
+let regex_digits = Parseff.regex Re.(rep digit)
+let regex_runs = Parseff.regex Re.(alt [ rep1 (rg 'a' 'c'); rep1 digit ])
+let regex_opt_tail = Parseff.regex Re.(seq [ char 'a'; opt (str "bc") ])
 let regex_windows = List.init 19 (fun i -> i + 2)
 let regex_chunks input = [ 1; 2; 3; max 1 (String.length input) ]
 
@@ -1294,7 +1455,7 @@ let test_regex_in_or_and_many () =
   let or_parser () =
     [
       Parseff.or_
-        (regex_then_semi (Re.compile Re.(rep1 digit)))
+        (regex_then_semi (Parseff.regex Re.(rep1 digit)))
         (regex_then_semi regex_token)
         ();
     ]
@@ -1413,13 +1574,13 @@ let is_space c = c = ' '
 let is_lower c = c >= 'a' && c <= 'z'
 
 let sep_take_position_take () =
-  let l = Parseff.sep_by_take is_space ',' is_lower in
+  let l = Parseff.sep_by_take ~ws:is_space ~sep:',' is_lower in
   let pos = Parseff.position () in
   let rest = Parseff.take 3 in
   (l, pos, rest)
 
 let sep_take_span_position_take () =
-  let l = Parseff.sep_by_take_span is_space ',' is_lower in
+  let l = Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower in
   let pos = Parseff.position () in
   let rest = Parseff.take 3 in
   (List.map Parseff.span_to_string l, pos, rest)
@@ -1433,11 +1594,11 @@ let test_sep_by_take_long_whitespace () =
 
 let test_sep_by_take_leading_whitespace () =
   let with_pos l = (l, Parseff.position ()) in
-  let take () = with_pos (Parseff.sep_by_take is_space ',' is_lower) in
+  let take () = with_pos (Parseff.sep_by_take ~ws:is_space ~sep:',' is_lower) in
   let take_span () =
     with_pos
       (List.map Parseff.span_to_string
-         (Parseff.sep_by_take_span is_space ',' is_lower)
+         (Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower)
       )
   in
   let expect name input expected parser =
@@ -1538,23 +1699,28 @@ let test_streaming_matches_parse () =
             (fun () -> Parseff.consume "aby")
             ()
       );
-      ( "skip_while_then_char",
+      ( "skip_while then char",
         "   ;x",
         fun () ->
-          Parseff.skip_while_then_char is_space ';';
+          Parseff.skip_while is_space;
+          ignore (Parseff.char ';');
           letters ()
       );
-      ( "fused_sep_take",
+      ( "separator then value",
         "  : value",
-        fun () -> Parseff.fused_sep_take is_space ':' is_lower
+        fun () ->
+          Parseff.skip_while is_space;
+          ignore (Parseff.char ':');
+          Parseff.skip_while is_space;
+          Parseff.take_while ~at_least:1 is_lower
       );
       ( "regex",
         "123abc",
-        fun () -> Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+        fun () -> Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
       );
       ( "regex failure",
         "abc",
-        fun () -> Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+        fun () -> Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
       );
       ( "binary",
         "\x01\x02\x03\x04\x05\x06\x07\x08\x09",
@@ -1590,7 +1756,7 @@ let test_streaming_matches_parse () =
     (fun (name, input, parser) -> check_matches_parse name input parser)
     cases
 
-let re_str s = Parseff.match_regex (Re.compile s)
+let re_str s = Parseff.match_regex (Parseff.regex s)
 
 let test_regex_needs_more_input () =
   check_matches_parse "str" "abcd" (fun () -> re_str (Re.str "abcd"));
@@ -2121,7 +2287,7 @@ let test_each_across_chunk_borders () =
 
 exception Read_failed
 
-let digits_re = Re.compile Re.(rep1 (rg '0' '9'))
+let digits_re = Parseff.regex Re.(rep1 (rg '0' '9'))
 
 let read_after_failed_regex src =
   Parseff.parse_source src (fun () ->
@@ -2278,8 +2444,8 @@ let () =
           test_case "take_while 2-byte" `Quick test_chunked_take_while;
           test_case "alternation 2-byte" `Quick test_chunked_alternation;
           test_case "regex 2-byte" `Quick test_chunked_regex;
-          test_case "skip_while_then_char 2-byte" `Quick
-            test_chunked_skip_while_then_char;
+          test_case "skip_while then char 2-byte" `Quick
+            test_chunked_skip_while_char;
         ]
       );
       ( "edge cases",
@@ -2406,6 +2572,20 @@ let () =
             test_backtrack_across_chunk_borders;
           test_case "parse_source_each across chunk borders" `Quick
             test_each_across_chunk_borders;
+        ]
+      );
+      ( "Source.of_bigstring_chunks",
+        [
+          test_case "literal and token split across slices" `Quick
+            test_bigstring_literal_and_token_split;
+          test_case "same errors as parse" `Quick test_bigstring_errors;
+          test_case "partial and backtrack" `Quick
+            test_bigstring_partial_and_backtrack;
+          test_case "large input" `Quick test_bigstring_large_input;
+          test_case "empty slices skipped" `Quick
+            test_bigstring_empty_slices_skipped;
+          test_case "slice outside the bigstring" `Quick
+            test_bigstring_slice_outside;
         ]
       );
       ( "Source.of_seq",

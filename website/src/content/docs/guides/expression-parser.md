@@ -90,7 +90,7 @@ and factor () =
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
-      Num d)
+      Num (Char.code d - Char.code '0'))
     ()
 ```
 
@@ -172,7 +172,7 @@ and factor () =
       Parseff.skip_whitespace ();
       let _ = Parseff.char ')' in
       e)
-    (fun () -> Num (Parseff.digit ()))
+    (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
     ()
 ```
 
@@ -211,13 +211,54 @@ and factor () =
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
-      Num d)
+      Num (Char.code d - Char.code '0'))
     ()
 ```
 
 Each operator parser parses its token and returns the function that builds the node, as the `op` argument of `fold_left` does. `factor` calls `expr` again for parentheses.
 
-A table also takes `Parseff.infix_right` operators such as `^`, `Parseff.prefix` operators such as unary `-`, and `Parseff.postfix` operators such as `!`. When one token starts another, such as `!` and `!=`, put the longer token first.
+A table also takes `Parseff.infix_right` operators such as `^`, `Parseff.prefix` operators such as unary `-`, and `Parseff.postfix` operators such as `!`. After each operand, `expression` uses the first operator whose token parser succeeds, starting with the operators that bind tightest to that operand. When the operand after it fails, it tries the next operator, so `<` can come before `<<`. A postfix operator has no operand: when one postfix token starts another token, such as `!` and `!=`, put the longer token first.
+
+## One lookup per operand: `precedence`
+
+`Parseff.precedence` runs the same loop as `expression`. In place of a table, it takes a lookup function. After each operand, the lookup looks at the input once and returns the precedence and the operator, or `None`. With many precedence levels, this is faster than a table, which runs the token parsers one by one:
+
+```ocaml
+let operator () =
+  Parseff.skip_whitespace ();
+  match Parseff.peek_char () with
+  | Some '+' -> Some (1, Parseff.infix_left add)
+  | Some '*' -> Some (2, Parseff.infix_left mul)
+  | _ -> None
+
+let rec expr () = Parseff.precedence ~operand:factor ~operator ()
+
+and factor () =
+  Parseff.skip_whitespace ();
+  Parseff.or_
+    (fun () ->
+      let _ = Parseff.char '(' in
+      let e = Parseff.rec_ expr in
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char ')' in
+      e)
+    (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
+    ()
+```
+
+`precedence` takes infix and postfix operators only. For a prefix operator, read its token in `operand`, then parse its operand with `Parseff.precedence ~min`, where `min` is the lowest precedence that the operand can hold. A prefix operator in the lookup is a type error:
+
+```ocaml
+# let negate () = Some (3, Parseff.prefix (fun () e -> Mul (Num (-1), e))) in
+  Parseff.precedence ~operand:factor ~operator:negate ();;
+Line 2, characters 48-54:
+Error: The value negate has type
+         unit -> (int * (expr, [> `Prefix ]) Parseff.operator) option
+       but an expression was expected of type
+         unit ->
+         (int * (expr, [< `Infix | `Postfix ]) Parseff.operator) option
+       The second variant type does not allow tag(s) `Prefix
+```
 
 ## Printing the AST
 
