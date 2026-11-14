@@ -149,7 +149,6 @@ type source = {
   feed : feed;
   mutable eof : bool;
   mutable window : int;
-  mutable rx : bytes;
 }
 
 and feed =
@@ -300,7 +299,7 @@ module Source = struct
   type t = source
 
   let make ~initial ~eof feed : t =
-    { initial; feed; eof; window = default_backtrack_window; rx = Bytes.empty }
+    { initial; feed; eof; window = default_backtrack_window }
 
   let of_string s =
     make ~initial:s ~eof:true
@@ -950,16 +949,6 @@ let chunk_avail st c len =
   if c.pending_pos = String.length c.pending then next_chunk st c;
   imin len (String.length c.pending - c.pending_pos)
 
-let read_any st src buf off len =
-  match src.feed with
-  | Read r ->
-      read_source st r.read buf off len
-  | Chunks c ->
-      let n = chunk_avail st c len in
-      Bytes.blit_string c.pending c.pending_pos buf off n;
-      c.pending_pos <- c.pending_pos + n;
-      n
-
 let[@inline never] rec fill st ~keep_from need =
   match st.source with
   | None ->
@@ -1575,30 +1564,8 @@ let regex_read_ahead st src ahead =
   if room <= 0 then
     false
   else begin
-    if Bytes.length src.rx < room then src.rx <- Bytes.create room;
-    let chunk = src.rx in
-    let got = ref 0 in
     let want = imin room (ahead - (st.input_len - st.pos)) in
-    let flush () =
-      if !got > 0 then
-        append st ~floor ~spare:false ~own:false
-          (Bytes.unsafe_to_string chunk)
-          0 !got
-    in
-    begin try
-      while !got < want && not src.eof do
-        let n = read_any st src chunk !got (room - !got) in
-        if n = 0 then
-          src.eof <- true
-        else
-          got := !got + n
-      done
-    with exn ->
-      let bt = Printexc.get_raw_backtrace () in
-      flush ();
-      Printexc.raise_with_backtrace exn bt
-    end;
-    flush ();
+    ignore (fill st ~keep_from:st.pos (st.input_len + want));
     true
   end
 
