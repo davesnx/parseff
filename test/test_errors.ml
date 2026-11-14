@@ -2761,8 +2761,8 @@ let test_known_line_without_a_buffered_start () =
         (lines
            [
              "input:1:61: [error] expected 'a' or 'b', found '!'";
-             "1 | ...aaaaa!...";
-             "  |         ^";
+             "1 | ...aaaaaaaaaaaa!...";
+             "  |                ^";
            ]
         )
         (Parseff.render_error ~name:"input" e)

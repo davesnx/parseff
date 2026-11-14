@@ -1750,6 +1750,281 @@ let test_error_on_open_source_shows_only_input () =
   | _ ->
       Alcotest.fail "expected a failure with found text"
 
+let chunks_of list = Parseff.Source.of_seq (List.to_seq list)
+
+let all_chars () =
+  let b = Buffer.create 16 in
+  while Parseff.peek_char () <> None do
+    Buffer.add_char b (Parseff.any_char ())
+  done;
+  Buffer.contents b
+
+let test_chunk_larger_than_window () =
+  List.iter
+    (fun window ->
+      Alcotest.(check (result string reject))
+        (Printf.sprintf "window %d" window)
+        (Ok "abcdefghij")
+        (Parseff.parse_source ~backtrack_window:window
+           (chunks_of [ "abcdefg"; "hij" ])
+           all_chars
+        )
+    )
+    [ 2; 3; 5 ]
+
+let test_rest_of_split_chunk () =
+  let parser () =
+    let a =
+      Parseff.or_
+        (fun () -> Parseff.consume "abx")
+        (fun () -> Parseff.consume "abc")
+        ()
+    in
+    a ^ "|" ^ all_chars ()
+  in
+  Alcotest.(check (result string reject))
+    "window 4" (Ok "abc|defgh")
+    (Parseff.parse_source ~backtrack_window:4 (chunks_of [ "abcdefgh" ]) parser)
+
+let test_split_chunk_keeps_the_window () =
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.consume "abcdex")
+      (fun () -> Parseff.consume "abcdefgh")
+      ()
+  in
+  match
+    Parseff.parse_source ~backtrack_window:4 (chunks_of [ "abcdefgh" ]) parser
+  with
+  | Error { kind = Backtrack_window_exceeded { limit = 4; _ }; _ } ->
+      ()
+  | Ok s ->
+      Alcotest.failf "parsed %S past a backtrack window of 4" s
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_empty_chunks_between_data () =
+  Alcotest.(check (result string reject))
+    "chars" (Ok "abc")
+    (Parseff.parse_source ~backtrack_window:2
+       (chunks_of [ ""; "a"; ""; ""; "bc"; "" ])
+       all_chars
+    )
+
+let test_none_is_final () =
+  let calls = ref 0 in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        incr calls;
+        if !calls = 1 then
+          Some "ab"
+        else
+          None
+    )
+  in
+  let parser () =
+    let s = Parseff.consume "ab" in
+    let c = Parseff.optional (fun () -> Parseff.char 'c') () in
+    Parseff.end_of_input ();
+    (s, c)
+  in
+  Alcotest.(check (result (pair string (option char)) reject))
+    "value"
+    (Ok ("ab", None))
+    (Parseff.parse_source src parser);
+  Alcotest.(check int) "calls" 2 !calls
+
+let test_none_at_once () =
+  let calls = ref 0 in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        incr calls;
+        None
+    )
+  in
+  let parser () =
+    let c = Parseff.optional Parseff.any_char () in
+    Parseff.end_of_input ();
+    c
+  in
+  Alcotest.(check (result (option char) reject))
+    "value" (Ok None)
+    (Parseff.parse_source src parser);
+  Alcotest.(check int) "calls" 1 !calls
+
+exception Chunk_failed
+
+let test_chunk_function_raises () =
+  let calls = ref 0 in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        incr calls;
+        if !calls = 1 then
+          Some "ab"
+        else
+          raise Chunk_failed
+    )
+  in
+  Alcotest.check_raises "parse_source" Chunk_failed (fun () ->
+      ignore (Parseff.parse_source src all_chars)
+  );
+  ( match Parseff.position () with
+  | _ ->
+      Alcotest.fail "state leaked after parse"
+  | exception _ ->
+      ()
+  );
+  Alcotest.(check (result string reject))
+    "later parse" (Ok "xy")
+    (Parseff.parse "xy" (fun () -> Parseff.consume "xy"))
+
+let test_parser_catches_chunk_exception () =
+  let calls = ref 0 in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        incr calls;
+        if !calls = 1 then
+          Some "ab"
+        else
+          raise Chunk_failed
+    )
+  in
+  let parser () =
+    match Parseff.take 3 with
+    | s ->
+        s
+    | exception Chunk_failed ->
+        let p = Parseff.position () in
+        Printf.sprintf "caught at %d, then %s" p (Parseff.take 2)
+  in
+  Alcotest.(check (result string reject))
+    "value" (Ok "caught at 0, then ab")
+    (Parseff.parse_source ~consume:`Partial src parser)
+
+type _ Effect.t += Chunk_wait : unit Effect.t
+
+let waiting = Queue.create ()
+
+let spawn_waiting f =
+  Queue.add
+    (fun () ->
+      Effect.Deep.match_with f ()
+        {
+          retc = (fun () -> ());
+          exnc = raise;
+          effc =
+            (fun (type a) (e : a Effect.t) ->
+              match e with
+              | Chunk_wait ->
+                  Some
+                    (fun (k : (a, _) Effect.Deep.continuation) ->
+                      Queue.add (fun () -> Effect.Deep.continue k ()) waiting
+                    )
+              | _ ->
+                  None
+            );
+        }
+    )
+    waiting
+
+let waiting_chunks data =
+  let p = ref 0 in
+  Parseff.Source.of_chunks (fun () ->
+      Effect.perform Chunk_wait;
+      if !p >= String.length data then
+        None
+      else begin
+        let n = min 3 (String.length data - !p) in
+        let s = String.sub data !p n in
+        p := !p + n;
+        Some s
+      end
+  )
+
+let test_chunk_function_suspends () =
+  let fields () =
+    String.concat "|"
+      (Parseff.sep_by
+         (fun () -> Parseff.take_while ~at_least:1 (fun c -> c <> ','))
+         (fun () -> Parseff.char ',')
+         ()
+      )
+  in
+  let a = ref (Ok "unset") and b = ref (Ok "unset") in
+  spawn_waiting (fun () ->
+      a := Parseff.parse_source (waiting_chunks "aa,bbb,c") fields
+  );
+  spawn_waiting (fun () ->
+      b := Parseff.parse_source (waiting_chunks "11,2,3333,4") fields
+  );
+  while not (Queue.is_empty waiting) do
+    ( match Parseff.position () with
+    | _ ->
+        Alcotest.fail "parse state installed while the parse waits"
+    | exception _ ->
+        ()
+    );
+    (Queue.pop waiting) ()
+  done;
+  Alcotest.(check (result string reject)) "first" (Ok "aa|bbb|c") !a;
+  Alcotest.(check (result string reject)) "second" (Ok "11|2|3333|4") !b;
+  match Parseff.position () with
+  | _ ->
+      Alcotest.fail "state leaked after parse"
+  | exception _ ->
+      ()
+
+let test_regex_reads_ahead_across_chunks () =
+  let parser () =
+    let n = Parseff.match_regex number_re in
+    n ^ "|" ^ all_chars ()
+  in
+  Alcotest.(check (result string reject))
+    "small chunks" (Ok "1234.56| x")
+    (Parseff.parse_source (chunks_of [ "12"; "3"; "4."; "5"; "6 x" ]) parser);
+  Alcotest.(check (result string reject))
+    "chunk larger than the window" (Ok "12.5| 34 and more")
+    (Parseff.parse_source ~backtrack_window:6
+       (chunks_of [ "12.5 34 and"; " more" ])
+       parser
+    )
+
+let test_backtrack_across_chunk_borders () =
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.consume "abcdx")
+      (fun () -> Parseff.consume "abcde")
+      ()
+  in
+  List.iter
+    (fun chunks ->
+      Alcotest.(check (result string reject))
+        (String.concat "," chunks) (Ok "abcde")
+        (Parseff.parse_source (chunks_of chunks) parser)
+    )
+    [ [ "abcde" ]; [ "ab"; "c"; "de" ]; [ "a"; "bcde" ] ]
+
+let test_each_across_chunk_borders () =
+  let line () =
+    let v = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+    ignore (Parseff.char '\n');
+    v
+  in
+  List.iter
+    (fun chunks ->
+      Alcotest.(check (list (result string reject)))
+        (String.concat "," (List.map String.escaped chunks))
+        [ Ok "1"; Ok "22"; Ok "333" ]
+        (List.of_seq
+           (Parseff.parse_source_each ~backtrack_window:4 (chunks_of chunks)
+              line
+           )
+        )
+    )
+    [
+      [ "1\n22\n333\n" ]; [ "1\n2"; "2\n33"; "3\n" ]; [ "1"; "\n22\n3"; "33\n" ];
+    ]
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -1901,6 +2176,30 @@ let () =
             test_slice_is_not_changed_by_later_reads;
           test_case "error on an open source shows only input" `Quick
             test_error_on_open_source_shows_only_input;
+        ]
+      );
+      ( "chunk input",
+        [
+          test_case "chunk larger than the window" `Quick
+            test_chunk_larger_than_window;
+          test_case "rest of a split chunk" `Quick test_rest_of_split_chunk;
+          test_case "split chunk keeps the window" `Quick
+            test_split_chunk_keeps_the_window;
+          test_case "empty chunks between data" `Quick
+            test_empty_chunks_between_data;
+          test_case "None is final" `Quick test_none_is_final;
+          test_case "None at once" `Quick test_none_at_once;
+          test_case "chunk function raises" `Quick test_chunk_function_raises;
+          test_case "parser catches the chunk exception" `Quick
+            test_parser_catches_chunk_exception;
+          test_case "chunk function suspends" `Quick
+            test_chunk_function_suspends;
+          test_case "regex reads ahead across chunks" `Quick
+            test_regex_reads_ahead_across_chunks;
+          test_case "backtrack across chunk borders" `Quick
+            test_backtrack_across_chunk_borders;
+          test_case "parse_source_each across chunk borders" `Quick
+            test_each_across_chunk_borders;
         ]
       );
       ( "Source.of_seq",
