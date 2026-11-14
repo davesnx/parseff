@@ -149,6 +149,7 @@ type source = {
   mutable eof : bool;
   mutable tmp : bytes;
   tmp_cap : int;
+  mutable grow : bool;
   mutable window : int;
   mutable rx : bytes;
 }
@@ -287,6 +288,7 @@ module Source = struct
       eof;
       tmp;
       tmp_cap;
+      grow = false;
       window = default_backtrack_window;
       rx = Bytes.empty;
     }
@@ -863,6 +865,12 @@ let[@inline never] rec fill st ~keep_from need =
       else if src.eof then
         false
       else
+        let () =
+          if src.grow then begin
+            src.grow <- false;
+            src.tmp <- Bytes.create src.tmp_cap
+          end
+        in
         let floor = State.reclaim_floor st ~keep_from in
         let limit = src.window in
         let max_bytes =
@@ -880,8 +888,7 @@ let[@inline never] rec fill st ~keep_from need =
             false
           end else begin
             append st ~floor src.tmp n;
-            if n = Bytes.length src.tmp && n < src.tmp_cap then
-              src.tmp <- Bytes.create src.tmp_cap;
+            if n = Bytes.length src.tmp && n < src.tmp_cap then src.grow <- true;
             fill st ~keep_from need
           end
 
