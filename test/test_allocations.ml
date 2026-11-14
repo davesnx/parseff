@@ -204,6 +204,49 @@ let test_head_in_large_chunk () =
        most 30000"
       (String.length chunk) actual
 
+let first_read_source data first =
+  let sent = ref 0 in
+  Parseff.Source.of_function (fun buf off len ->
+      let want =
+        if !sent = 0 then
+          first
+        else
+          len
+      in
+      let n = min (min want len) (String.length data - !sent) in
+      Bytes.blit_string data !sent buf off n;
+      sent := !sent + n;
+      n
+  )
+
+let direct_major_words () =
+  let _, promoted, major = Gc.counters () in
+  major -. promoted
+
+let direct_major_words_per_call f =
+  run_n warmup_iterations f;
+  Gc.full_major ();
+  let before = direct_major_words () in
+  run_n iterations f;
+  (direct_major_words () -. before) /. Float.of_int iterations
+
+let check_first_read first =
+  let data = head ^ String.make (4 * first) 'x' in
+  let actual =
+    direct_major_words_per_call (fun () ->
+        parse_head (first_read_source data first)
+    )
+  in
+  if actual > 50. then
+    Alcotest.failf
+      "a first read of %d bytes allocated %.1f words on the major heap per \
+       parse, expected at most 50"
+      first actual
+
+let test_short_message () =
+  check_first_read 1100;
+  check_first_read 1500
+
 let test_small_buf_size () =
   let default = words_per_call (fun () -> parse_head (head_function ())) in
   let small =
@@ -229,34 +272,21 @@ let full_source ?initial_buffer_size () =
       n
   )
 
-let direct_major_words () =
-  let _, promoted, major = Gc.counters () in
-  major -. promoted
-
-let direct_major_words_per_call f =
-  run_n warmup_iterations f;
-  Gc.full_major ();
-  let before = direct_major_words () in
-  run_n iterations f;
-  let after = direct_major_words () in
-  (after -. before) /. Float.of_int iterations
-
 let test_full_first_read () =
-  let check name initial_buffer_size at_most =
+  let check name initial_buffer_size =
     let actual =
       direct_major_words_per_call (fun () ->
           parse_head (full_source ?initial_buffer_size ())
       )
     in
-    if actual > at_most then
+    if actual > 50. then
       Alcotest.failf
         "a request head after a full first read allocated %.1f words directly \
-         on the major heap per parse with %s, expected at most %.0f"
-        actual name at_most
+         on the major heap per parse with %s, expected at most 50"
+        actual name
   in
-  let input_with_room bytes = Float.of_int (2 * bytes / (Sys.word_size / 8)) in
-  check "~initial_buffer_size:512" (Some 512) 50.;
-  check "the default size" None (input_with_room 2040 +. 50.)
+  check "~initial_buffer_size:512" (Some 512);
+  check "the default size" None
 
 let () =
   Alcotest.run "Allocations"
@@ -274,6 +304,7 @@ let () =
           Alcotest.test_case "head as one chunk" `Quick test_one_chunk_head;
           Alcotest.test_case "head in a large chunk" `Quick
             test_head_in_large_chunk;
+          Alcotest.test_case "short message" `Quick test_short_message;
           Alcotest.test_case "small initial_buffer_size" `Quick
             test_small_buf_size;
           Alcotest.test_case "full first read" `Quick test_full_first_read;

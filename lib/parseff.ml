@@ -886,10 +886,15 @@ let[@inline never] append st ~floor ~spare ~own chunk off n =
       st.input <- Bytes.unsafe_of_string chunk
     else begin
       let room =
-        if spare then
-          imax kept n
-        else
+        if not spare then
           0
+        else if
+          kept + n + imax kept n > young_buf_size
+          && (2 * kept) + n <= young_buf_size
+        then
+          young_buf_size - kept - n
+        else
+          imax kept n
       in
       let buf = Bytes.create (kept + n + room) in
       Bytes.blit st.input drop buf 0 kept;
@@ -1574,17 +1579,26 @@ let regex_read_ahead st src ahead =
     let chunk = src.rx in
     let got = ref 0 in
     let want = imin room (ahead - (st.input_len - st.pos)) in
-    while !got < want && not src.eof do
-      let n = read_any st src chunk !got (room - !got) in
-      if n = 0 then
-        src.eof <- true
-      else
-        got := !got + n
-    done;
-    if !got > 0 then
-      append st ~floor ~spare:false ~own:false
-        (Bytes.unsafe_to_string chunk)
-        0 !got;
+    let flush () =
+      if !got > 0 then
+        append st ~floor ~spare:false ~own:false
+          (Bytes.unsafe_to_string chunk)
+          0 !got
+    in
+    begin try
+      while !got < want && not src.eof do
+        let n = read_any st src chunk !got (room - !got) in
+        if n = 0 then
+          src.eof <- true
+        else
+          got := !got + n
+      done
+    with exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      flush ();
+      Printexc.raise_with_backtrace exn bt
+    end;
+    flush ();
     true
   end
 
