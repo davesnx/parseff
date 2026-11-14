@@ -3,9 +3,9 @@ type Parseff.custom_error += Lua of { msg : string; eof : bool }
 let error ?from ?upto ?notes ?help ?(eof = false) msg : 'a =
   Parseff.error ?from ?upto ?notes ?help (Lua { msg; eof })
 
-let make_error ?from ?notes ?help ?eof msg =
+let make_error ?from ?upto ?notes ?help ?eof msg =
   match
-    Parseff.capture (fun () -> (error ?from ?notes ?help ?eof msg : unit))
+    Parseff.capture (fun () -> (error ?from ?upto ?notes ?help ?eof msg : unit))
   with
   | Error e ->
       e
@@ -470,6 +470,7 @@ let is_lexical (e : Parseff.error) =
       false
 
 let lines : int Dynarray.t = Dynarray.create ()
+let indents : int Dynarray.t = Dynarray.create ()
 let first_line = ref 1
 let scan = ref 0
 let breaks = ref 0
@@ -494,7 +495,21 @@ let loc i =
     let j = line_index i in
     Printf.sprintf "%d:%d" (!first_line + j) (i - Dynarray.get lines j + 1)
 
-let line_start () = Dynarray.get_last lines
+let last_line = ref 0
+
+let add_line p =
+  if p > !last_line then begin
+    last_line := p;
+    Dynarray.add_last lines p;
+    Dynarray.add_last indents (-1)
+  end
+
+let line_of i =
+  if i >= !last_line then
+    Dynarray.length lines - 1
+  else
+    line_index i
+
 let window () = (Dynarray.get lines 0, !first_line)
 
 let space c =
@@ -502,7 +517,7 @@ let space c =
   | '\n' ->
       incr scan;
       incr breaks;
-      Dynarray.add_last lines !scan;
+      add_line !scan;
       true
   | '\r' ->
       incr scan;
@@ -522,11 +537,11 @@ let newline () =
   let p = Parseff.position () in
   let c = Parseff.any_char () in
   incr breaks;
-  if c = '\n' then Dynarray.add_last lines (p + 1);
+  if c = '\n' then add_line (p + 1);
   match Parseff.peek_char () with
   | Some (('\n' | '\r') as d) when d <> c ->
       ignore (Parseff.any_char ());
-      if d = '\n' then Dynarray.add_last lines (p + 2)
+      if d = '\n' then add_line (p + 2)
   | _ ->
       ()
 
@@ -902,6 +917,8 @@ let lx_start = ref 0
 let lx_stop = ref 0
 let lx_comment = ref (-1)
 let lx_breaks_before = ref 0
+let lx_breaks_tok = ref 0
+let carry = ref (-1)
 
 let other_char () =
   let c = Parseff.any_char () in
@@ -925,6 +942,7 @@ let two c s1 s2 =
 
 let rec lex () =
   skip_space ();
+  lx_breaks_tok := !breaks;
   let p = Parseff.position () in
   lx_start := p;
   let tok =
@@ -1093,7 +1111,6 @@ type state = {
   mutable indent : int;
   mutable prev : token;
   mutable prev_stop : int;
-  mutable ahead : state option;
 }
 
 let st =
@@ -1106,10 +1123,13 @@ let st =
     indent = 0;
     prev = Eof;
     prev_stop = 0;
-    ahead = None;
   }
 
-let lex_into (s : state) ~indent =
+let ahead = { st with tok = Eof }
+let read_at = ref (-1)
+let ahead_at = ref (-1)
+
+let fill ?(first = false) (s : state) =
   let breaks_before = !breaks in
   lx_breaks_before := breaks_before;
   lx_comment := -1;
@@ -1117,69 +1137,69 @@ let lex_into (s : state) ~indent =
   s.tok <- !lx_tok;
   s.start <- !lx_start;
   s.stop <- !lx_stop;
-  s.nl <- !breaks > breaks_before;
+  s.nl <- first || !breaks > breaks_before;
   s.comment <- !lx_comment;
-  s.indent <-
-    ( if s.nl then
-        s.start - line_start ()
-      else
-        indent
-    )
+  let multi = !breaks > !lx_breaks_tok in
+  if s.nl || !carry < 0 || multi then begin
+    let j = line_of s.start in
+    if s.nl then Dynarray.set indents j (s.start - Dynarray.get lines j);
+    s.indent <- Dynarray.get indents j;
+    if multi then
+      for k = j + 1 to line_of s.stop do
+        Dynarray.set indents k s.indent
+      done
+  end else
+    s.indent <- !carry
+
+let fill_st () = fill st
+
+let fill_ahead () =
+  Parseff.skip_to st.stop;
+  fill ahead
 
 let advance () =
   st.prev <- st.tok;
   st.prev_stop <- st.stop;
-  match st.ahead with
-  | Some a ->
-      st.tok <- a.tok;
-      st.start <- a.start;
-      st.stop <- a.stop;
-      st.nl <- a.nl;
-      st.comment <- a.comment;
-      st.indent <- a.indent;
-      st.ahead <- None
-  | None ->
-      lex_into st ~indent:st.indent
+  Parseff.skip_to st.stop;
+  read_at := st.stop;
+  if !ahead_at = st.stop then begin
+    st.tok <- ahead.tok;
+    st.start <- ahead.start;
+    st.stop <- ahead.stop;
+    st.nl <- ahead.nl;
+    st.comment <- ahead.comment;
+    st.indent <- ahead.indent
+  end else begin
+    carry := st.indent;
+    ignore (Parseff.peek_with fill_st)
+  end
 
 let peek2 () =
-  match st.ahead with
-  | Some a ->
-      a.tok
-  | None ->
-      let a = { st with ahead = None } in
-      lex_into a ~indent:st.indent;
-      st.ahead <- Some a;
-      a.tok
+  if !ahead_at <> st.stop then begin
+    carry := st.indent;
+    ignore (Parseff.peek_with fill_ahead);
+    ahead_at := st.stop
+  end;
+  ahead.tok
 
-type snapshot = { saved : state; saved_lines : int; saved_first : int }
-
-let save () =
-  {
-    saved =
-      { st with ahead = Option.map (fun a -> { a with tok = a.tok }) st.ahead };
-    saved_lines = Dynarray.length lines;
-    saved_first = !first_line;
-  }
-
-let restore s =
-  let v = s.saved in
-  st.tok <- v.tok;
-  st.start <- v.start;
-  st.stop <- v.stop;
-  st.nl <- v.nl;
-  st.comment <- v.comment;
-  st.indent <- v.indent;
-  st.prev <- v.prev;
-  st.prev_stop <- v.prev_stop;
-  st.ahead <- v.ahead;
-  Dynarray.truncate lines s.saved_lines;
-  first_line := s.saved_first
+let refresh () =
+  let here = Parseff.position () in
+  if !read_at <> here then begin
+    read_at := here;
+    st.prev <- Eof;
+    st.prev_stop <- here;
+    carry := -1;
+    ignore (Parseff.peek_with fill_st)
+  end
 
 let start () =
   Hashtbl.reset lexical_errors;
   fresh_lexical := [];
   Dynarray.clear lines;
   Dynarray.add_last lines 0;
+  last_line := 0;
+  Dynarray.clear indents;
+  Dynarray.add_last indents (-1);
   first_line := 1;
   ignore (Parseff.optional (fun () -> Parseff.consume "\xEF\xBB\xBF") ());
   ( match Parseff.peek_char () with
@@ -1190,21 +1210,23 @@ let start () =
   );
   st.prev <- Eof;
   st.prev_stop <- 0;
-  st.ahead <- None;
-  lex_into st ~indent:0;
-  st.nl <- true;
-  st.indent <- st.start - line_start ()
+  ahead_at := -1;
+  read_at := Parseff.position ();
+  carry := -1;
+  ignore (Parseff.peek_with (fun () -> fill ~first:true st))
 
 let trim_lines () =
   let j = max 0 (line_index st.start - 1) in
   if j > 0 then begin
-    let kept =
-      Dynarray.init
-        (Dynarray.length lines - j)
-        (fun i -> Dynarray.get lines (i + j))
+    let keep a =
+      let kept =
+        Dynarray.init (Dynarray.length a - j) (fun i -> Dynarray.get a (i + j))
+      in
+      Dynarray.clear a;
+      Dynarray.append a kept
     in
-    Dynarray.clear lines;
-    Dynarray.append lines kept;
+    keep lines;
+    keep indents;
     first_line := !first_line + j
   end
 

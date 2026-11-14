@@ -17,21 +17,12 @@ let is_eof () = match st.tok with Lexer.Eof -> true | _ -> false
 let is_kw k = match st.tok with Lexer.Kw k' -> k' == k | _ -> false
 let is_sym s = match st.tok with Lexer.Sym s' -> s' == s | _ -> false
 
-let last_cut = ref None
-
 let attempt f =
-  let snap = Lexer.save () in
-  let start = Parseff.position () in
   match Parseff.capture ~release:true f with
   | Ok v ->
       Ok v
   | Error e ->
-      ( match !last_cut with
-      | Some (p, s) when p > start && p = Parseff.position () ->
-          Lexer.restore s
-      | _ ->
-          Lexer.restore snap
-      );
+      Lexer.refresh ();
       Error e
 
 let caused_by_lexical ?word ~region (e : Parseff.error) =
@@ -64,16 +55,17 @@ let report ?word ?region (e : Parseff.error) =
 let fail_here ?notes ?help msg : 'a =
   match st.tok with
   | Lexer.Eof ->
-      Lexer.error ~from:st.prev_stop ?notes ?help ~eof:true msg
+      Lexer.error ~from:st.prev_stop ~upto:st.stop ?notes ?help ~eof:true msg
   | _ ->
-      Lexer.error ~from:st.start ?notes ?help msg
+      Lexer.error ~from:st.start ~upto:st.stop ?notes ?help msg
 
 let error_here ?notes ?help msg =
   match st.tok with
   | Lexer.Eof ->
-      Lexer.make_error ~from:st.prev_stop ?notes ?help ~eof:true msg
+      Lexer.make_error ~from:st.prev_stop ~upto:st.stop ?notes ?help ~eof:true
+        msg
   | _ ->
-      Lexer.make_error ~from:st.start ?notes ?help msg
+      Lexer.make_error ~from:st.start ~upto:st.stop ?notes ?help msg
 
 let soft_here ?word ?region ?notes ?help msg =
   report ?word ?region (error_here ?notes ?help msg)
@@ -273,7 +265,7 @@ let expect_kw ~kw opener =
     advance ()
   else if is_eof () || st.nl then
     report ~region:opener.at.start
-      (Lexer.make_error ~from:st.prev_stop
+      (Lexer.make_error ~from:st.prev_stop ~upto:st.stop
          ~help:
            (Printf.sprintf "add \"%s\" at the end of %s" name
               (what_header opener.kind)
@@ -800,7 +792,6 @@ and block closer opener : block =
             after_return returned t;
             let s = statement_rec opener in
             Parseff.cut ();
-            last_cut := Some (Parseff.position (), Lexer.save ());
             let returned =
               match s.sdesc with
               | Return _ ->
@@ -1170,7 +1161,7 @@ and local_function start =
                     Buffer.add_string text part;
                     err :=
                       Some
-                        (Lexer.make_error ~from:r_name.start
+                        (Lexer.make_error ~from:r_name.start ~upto:st.stop
                            ~help:
                              "write \"function a.b()\" without \"local\" to \
                               set a field, or \"local function b()\" for a \
@@ -1265,8 +1256,6 @@ and local_stat () =
     )
 
 and parses_as_statement () =
-  let snap = Lexer.save () in
-  let cut = !last_cut in
   let before = Parseff.Diagnostics.length errors in
   let valid =
     Parseff.look_ahead (fun () ->
@@ -1281,8 +1270,7 @@ and parses_as_statement () =
             false
     )
   in
-  Lexer.restore snap;
-  last_cut := cut;
+  Lexer.refresh ();
   valid
 
 and local_name closes () =
@@ -1425,14 +1413,14 @@ and not_a_statement e =
       advance ();
       match st.tok with
       | Lexer.Sym (Lexer.Assign | Lexer.Eq) when st.start = st.prev_stop ->
-          Lexer.error ~from:op_start
+          Lexer.error ~from:op_start ~upto:st.stop
             ~help:
               (Printf.sprintf "write %s = %s %s ..." target target
                  (Lexer.sym_text s)
               )
             (Printf.sprintf "Lua has no '%s=' operator" (Lexer.sym_text s))
       | Lexer.Sym Lexer.Plus when s == Lexer.Plus && st.start = st.prev_stop ->
-          Lexer.error ~from:op_start
+          Lexer.error ~from:op_start ~upto:st.stop
             ~help:(Printf.sprintf "write %s = %s + 1" target target)
             "Lua has no '++' operator"
       | _ ->
@@ -1477,6 +1465,7 @@ let one () =
   Parseff.Ref.set else_ifs [];
   match st.tok with
   | Lexer.Eof ->
+      Parseff.skip_to st.stop;
       None
   | Lexer.Sym Lexer.Semi ->
       advance ();
@@ -1500,8 +1489,6 @@ let top () =
   end;
   Lexer.trim_lines ();
   one ()
-
-let pending () = !started && not (is_eof ())
 
 let error_at source (r : range) ?notes ?help msg =
   match
