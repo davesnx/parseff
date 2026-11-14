@@ -17,10 +17,10 @@ call) so hoisting it out gives roughly a 100x improvement:
 {@ocaml skip[
 let number () =
   (* compiles on every call *)
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   Parseff.match_regex re
 
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 ]}
 
@@ -32,7 +32,7 @@ pattern-matching power (alternation, repetition, grouping). For "all characters
 matching a predicate," [take_while] is the right tool:
 
 {@ocaml skip[
-let digits_with_regex () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+let digits_with_regex () = Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
 let digits_with_take_while () = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ]}
 

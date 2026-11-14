@@ -18,10 +18,10 @@ Compile regexes once at module level, not inside parser functions. Regex compila
 ```ocaml
 let number () =
   (* compiles on every call *)
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   Parseff.match_regex re
 
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 ```
 
@@ -30,7 +30,7 @@ let number () = Parseff.match_regex number_re
 For simple character classes, `Parseff.take_while` runs a tight loop with no regex overhead, giving a 5-10x improvement. Use regex only when you need its pattern-matching power (alternation, repetition, grouping). For "all characters matching a predicate," `take_while` is the right tool:
 
 ```ocaml
-let digits_with_regex () = Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+let digits_with_regex () = Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
 let digits_with_take_while () = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 ```
 

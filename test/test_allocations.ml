@@ -283,7 +283,7 @@ let test_small_buf_size () =
        150 fewer"
       small default
 
-let request_line = Re.compile (Re.Perl.re "[A-Z]+ [^ \r\n]+ HTTP/1\\.1\r\n")
+let request_line = Parseff.regex (Re.Perl.re "[A-Z]+ [^ \r\n]+ HTTP/1\\.1\r\n")
 
 let test_regex_first_head () =
   let parse () =

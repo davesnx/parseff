@@ -205,7 +205,7 @@ let fn_src data chunk =
   )
 
 let test_regex_window_pinned () =
-  let re = Re.compile (Re.rep1 (Re.char 'a')) in
+  let re = Parseff.regex (Re.rep1 (Re.char 'a')) in
   let data = String.make 16 'x' ^ String.make 8 'a' in
   let r =
     Parseff.parse_source ~backtrack_window:16 (fn_src data 4) (fun () ->
@@ -236,7 +236,7 @@ let pinned_regex_parser re () =
     ()
 
 let test_regex_pinned_complete_match () =
-  let re = Re.compile (Re.rep1 (Re.char 'a')) in
+  let re = Parseff.regex (Re.rep1 (Re.char 'a')) in
   let data = String.make 10 'x' ^ "aabccc" in
   let expected =
     match Parseff.parse ~consume:`Partial data (pinned_regex_parser re) with
@@ -260,7 +260,7 @@ let test_regex_pinned_complete_match () =
     [ 1; 3; 4; 4096 ]
 
 let test_regex_pinned_match_at_buffer_end () =
-  let re = Re.compile (Re.rep1 (Re.char 'a')) in
+  let re = Parseff.regex (Re.rep1 (Re.char 'a')) in
   let data = String.make 10 'x' ^ "aaaaaab" in
   match
     Parseff.parse_source ~backtrack_window:16 (fn_src data 4096)
@@ -279,7 +279,7 @@ let test_small_window_rejected () =
       match
         Parseff.parse_source ~consume:`Partial ~backtrack_window:w
           (fn_src "hello" 5) (fun () ->
-            Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
+            Parseff.match_regex (Parseff.regex (Re.rep1 Re.alpha))
         )
       with
       | _ ->
@@ -290,7 +290,7 @@ let test_small_window_rejected () =
     [ -5; 0; 1 ];
   match
     Parseff.parse_source ~consume:`Partial ~backtrack_window:2 (fn_src "hello" 5)
-      (fun () -> Parseff.match_regex (Re.compile (Re.rep1 Re.alpha))
+      (fun () -> Parseff.match_regex (Parseff.regex (Re.rep1 Re.alpha))
     )
   with
   | Error

@@ -164,14 +164,20 @@ let csv_value () =
 
 {2 [match_regex]}
 
-{!val:Parseff.match_regex} matches a compiled regular expression. The regex must
-be compiled with [Re.compile].
+{!val:Parseff.match_regex} matches a regular expression at the current
+position. Build the regex with {!val:Parseff.regex}, which compiles an [Re.t]
+anchored at the position where the match starts, so a failed match examines
+only the bytes that the regex needs to fail, not the rest of the input. In
+streaming mode, [match_regex] still reads ahead up to half the backtrack window.
 
-{@ocaml skip[val match_regex : ?label:string -> Re.re -> string]}
+{@ocaml skip[
+val regex : Re.t -> Parseff.regex
+val match_regex : ?label:string -> Parseff.regex -> string
+]}
 
 {@ocaml[
 (* Pre-compile at module level. Never inside a parser function *)
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number_from_re () = Parseff.match_regex number_re
 ]}
 
@@ -180,7 +186,7 @@ it reports [expected <label>] and merges with what the other alternatives
 expected at the same position, like [satisfy] and [take_while ~label]:
 
 {@ocaml[
-let identifier_re = Re.compile (Re.Posix.re "[a-z]+")
+let identifier_re = Parseff.regex (Re.Posix.re "[a-z]+")
 
 let value () =
   Parseff.or_
@@ -196,7 +202,7 @@ classes, prefer {!val:Parseff.take_while} which avoids regex overhead entirely:
 
 {@ocaml skip[
 (* Regex. Use for complex patterns (alternation, grouping) *)
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 
 (* take_while. No regex overhead for simple predicates *)

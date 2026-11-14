@@ -246,7 +246,7 @@ let test_location_after_compaction () =
   | _ ->
       Alcotest.fail "expected one error after 1000 values"
 
-let token = Re.compile (Re.seq [ Re.rg 'a' 'z'; Re.rep1 Re.digit ])
+let token = Parseff.regex (Re.seq [ Re.rg 'a' 'z'; Re.rep1 Re.digit ])
 
 let regex_value () =
   let v = Parseff.match_regex token in

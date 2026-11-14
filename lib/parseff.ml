@@ -1681,18 +1681,11 @@ let rec match_regex_source st src re label =
   match
     Re.exec_partial_detailed ~pos:off re (Bytes.unsafe_to_string st.input)
   with
-  | `Full g
-    when Re.Group.start g 0 = off
-         && (src.eof || st.base + Re.Group.stop g 0 < st.input_len) ->
+  | `Full g when src.eof || st.base + Re.Group.stop g 0 < st.input_len ->
       let match_start = st.pos in
       let match_end = st.base + Re.Group.stop g 0 in
       st.pos <- match_end;
       slice st match_start (match_end - match_start)
-  | `Full g
-    when Re.Group.start g 0 <> off && (src.eof || ahead >= src.window / 2) ->
-      regex_failure st label
-  | `Partial p when p > off ->
-      regex_failure st label
   | `Mismatch ->
       regex_failure st label
   | _ when src.eof ->
@@ -1717,14 +1710,10 @@ let[@inline never] handle_match_regex st re label =
         Re.exec ~pos:(st.pos - st.base) re (Bytes.unsafe_to_string st.input)
       with
       | groups ->
-          let match_start = st.base + Re.Group.start groups 0 in
+          let match_start = st.pos in
           let match_end = st.base + Re.Group.stop groups 0 in
-          if match_start <> st.pos then
-            regex_failure st label
-          else begin
-            st.pos <- match_end;
-            slice st match_start (match_end - match_start)
-          end
+          st.pos <- match_end;
+          slice st match_start (match_end - match_start)
       | exception Not_found ->
           regex_failure st label
     )
@@ -2176,6 +2165,10 @@ let[@inline] sep_by_take ~ws:ws_pred ~sep:sep_char take_pred =
 let[@inline] sep_by_take_span ~ws:ws_pred ~sep:sep_char take_pred =
   let st = get_state () in
   handle_sep_by_take_span st ws_pred sep_char take_pred
+
+type regex = Re.re
+
+let regex r = Re.compile (Re.seq [ Re.start; r ])
 
 let[@inline] match_regex ?label re =
   let st = get_state () in

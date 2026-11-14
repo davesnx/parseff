@@ -1572,7 +1572,7 @@ let test_alphanum_failure () =
 (* --- match_regex --- *)
 
 let test_match_regex_success () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   match
     Parseff.parse ~consume:`Partial "12345abc" (fun () -> Parseff.match_regex re)
   with
@@ -1582,7 +1582,7 @@ let test_match_regex_success () =
       Alcotest.fail "Expected success"
 
 let test_match_regex_failure () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   match Parseff.parse "abc" (fun () -> Parseff.match_regex re) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
@@ -1596,7 +1596,7 @@ let test_match_regex_failure () =
       Alcotest.fail "Unexpected error type"
 
 let test_match_regex_anchored () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   match
     parse_with_pos "abc123" (fun () ->
         let _ = Parseff.consume "abc" in
@@ -1608,6 +1608,42 @@ let test_match_regex_anchored () =
       Alcotest.(check int) "final position" 6 pos
   | Error _ ->
       Alcotest.fail "Expected success"
+
+let failing_regex_loop parse =
+  let n = 1 lsl 18 in
+  let budget = 1.0 in
+  let re = Parseff.regex (Re.char 'b') in
+  let start = Sys.time () in
+  let steps = ref 0 in
+  let step () =
+    Parseff.or_
+      (fun () -> ignore (Parseff.match_regex re))
+      (fun () ->
+        incr steps;
+        if !steps land 1023 = 0 && Sys.time () -. start > budget then
+          Parseff.fail "over budget";
+        ignore (Parseff.any_char ())
+      )
+      ()
+  in
+  let result =
+    parse (String.make n 'a') (fun () -> List.length (Parseff.many step ()))
+  in
+  let elapsed = Sys.time () -. start in
+  Alcotest.(check bool)
+    (Printf.sprintf "%d failed matches within %.1f s (took %.3f s)" !steps
+       budget elapsed
+    )
+    true
+    (result = Ok n && elapsed <= budget)
+
+let test_match_regex_failure_constant_time () =
+  failing_regex_loop (fun input p -> Parseff.parse input p)
+
+let test_match_regex_failure_constant_time_source () =
+  failing_regex_loop (fun input p ->
+      Parseff.parse_source (Parseff.Source.of_string input) p
+  )
 
 (* --- sep_by_take --- *)
 
@@ -2056,6 +2092,10 @@ let () =
           test_case "success" `Quick test_match_regex_success;
           test_case "failure" `Quick test_match_regex_failure;
           test_case "anchored at position" `Quick test_match_regex_anchored;
+          test_case "failure takes constant time" `Quick
+            test_match_regex_failure_constant_time;
+          test_case "failure takes constant time on a source" `Quick
+            test_match_regex_failure_constant_time_source;
         ]
       );
       ( "fused operations",

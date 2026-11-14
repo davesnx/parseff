@@ -1900,8 +1900,8 @@ let test_fail_frames () =
   Alcotest.(check string)
     "contexts" "outer@0!; inner@1" (contexts_of "abc" parser)
 
-let id_re = Re.compile (Re.Posix.re "[a-z]+")
-let digit_re = Re.compile (Re.Posix.re "[0-9]+")
+let id_re = Parseff.regex (Re.Posix.re "[a-z]+")
+let digit_re = Parseff.regex (Re.Posix.re "[0-9]+")
 
 let test_match_regex_label () =
   let parser () = ignore (Parseff.match_regex ~label:"identifier" id_re) in
@@ -2624,7 +2624,7 @@ let test_built_in_failures_are_expected_items () =
     (message "?" (fun () ->
          ignore
            (Parseff.or_
-              (fun () -> Parseff.match_regex (Re.compile (Re.rep1 Re.digit)))
+              (fun () -> Parseff.match_regex (Parseff.regex (Re.rep1 Re.digit)))
               (fun () -> Parseff.consume "x")
               ()
            )
@@ -3582,7 +3582,7 @@ let test_regex_label_without_label () =
   Alcotest.(check string)
     "unlabeled regex" "expected text matching the pattern, found '!'"
     (message_of "!" (fun () ->
-         ignore (Parseff.match_regex (Re.compile (Re.rep1 Re.digit)))
+         ignore (Parseff.match_regex (Parseff.regex (Re.rep1 Re.digit)))
      )
     )
 

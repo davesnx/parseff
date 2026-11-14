@@ -38,9 +38,9 @@ let ip_address () =
   Parseff.end_of_input ();
   (a, b, c, d)
 
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-let string_content_re = Re.compile (Re.Posix.re "[^\"]*")
+let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
+let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
 
 type json =
   | Null
@@ -269,7 +269,7 @@ let test_of_string_end_of_input () =
       Alcotest.fail "Expected success"
 
 let test_of_string_regex () =
-  let re = Re.compile (Re.Posix.re "[a-z]+") in
+  let re = Parseff.regex (Re.Posix.re "[a-z]+") in
   let src = Parseff.Source.of_string "hello" in
   match Parseff.parse_source src (fun () -> Parseff.match_regex re) with
   | Ok s ->
@@ -385,7 +385,7 @@ let test_chunked_alternation () =
       Alcotest.fail "Expected success"
 
 let test_chunked_regex () =
-  let re = Re.compile (Re.Posix.re "[a-z]+") in
+  let re = Parseff.regex (Re.Posix.re "[a-z]+") in
   let src = chunked_source ~chunk_size:2 "hello world" in
   match
     Parseff.parse_source src (fun () ->
@@ -567,7 +567,7 @@ let test_many_across_chunks () =
       Alcotest.fail "Expected success"
 
 let test_regex_across_chunks () =
-  let re = Re.compile (Re.Posix.re "[0-9]+") in
+  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
   let src = chunked_source ~chunk_size:2 "12345abc" in
   match
     Parseff.parse_source src (fun () ->
@@ -1087,7 +1087,7 @@ let regex_read_lengths ?backtrack_window ~initial_buffer_size input =
         n
     )
   in
-  let letters = Re.compile (Re.rep1 (Re.rg 'a' 'z')) in
+  let letters = Parseff.regex (Re.rep1 (Re.rg 'a' 'z')) in
   Alcotest.(check (result string reject))
     (Printf.sprintf "initial_buffer_size %d" initial_buffer_size)
     (Ok input)
@@ -1246,18 +1246,21 @@ let test_regex_lookbehind_after_peek () =
   let cases =
     [
       ( "bol",
-        Re.(compile (seq [ bol; str "ab" ])),
+        Parseff.regex Re.(seq [ bol; str "ab" ]),
         Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ( "bow",
-        Re.(compile (seq [ bow; str "ab" ])),
+        Parseff.regex Re.(seq [ bow; str "ab" ]),
         Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
       ( "bos",
-        Re.(compile (seq [ bos; str "ab" ])),
+        Parseff.regex Re.(seq [ bos; str "ab" ]),
         Error (2, "Expected expected text matching the pattern, found 'ab'")
       );
-      ("not_boundary", Re.(compile (seq [ not_boundary; str "ab" ])), Ok "ab");
+      ( "not_boundary",
+        Parseff.regex Re.(seq [ not_boundary; str "ab" ]),
+        Ok "ab"
+      );
     ]
   in
   List.iter
@@ -1275,7 +1278,7 @@ let test_regex_lookbehind_window_accounting () =
   let parser () =
     ignore (Parseff.consume "xy");
     ignore (Parseff.peek_char ());
-    Parseff.match_regex Re.(compile (str "ab"))
+    Parseff.match_regex (Parseff.regex Re.(str "ab"))
   in
   match
     Parseff.parse_source ~consume:`Partial ~backtrack_window:8
@@ -1302,7 +1305,7 @@ let test_regex_readahead_half_window () =
   let seen = ref (-1) in
   let _ =
     Parseff.parse_source ~backtrack_window:1000 src (fun () ->
-        ignore (Parseff.match_regex Re.(compile (str "aa")));
+        ignore (Parseff.match_regex (Parseff.regex Re.(str "aa")));
         seen := !total
     )
   in
@@ -1310,10 +1313,10 @@ let test_regex_readahead_half_window () =
   if !seen > 510 then
     Alcotest.failf "read %d bytes ahead, expected about 500" !seen
 
-let regex_token = Re.compile Re.(seq [ rg 'a' 'z'; rep1 digit ])
-let regex_digits = Re.compile Re.(rep digit)
-let regex_runs = Re.compile Re.(alt [ rep1 (rg 'a' 'c'); rep1 digit ])
-let regex_opt_tail = Re.compile Re.(seq [ char 'a'; opt (str "bc") ])
+let regex_token = Parseff.regex Re.(seq [ rg 'a' 'z'; rep1 digit ])
+let regex_digits = Parseff.regex Re.(rep digit)
+let regex_runs = Parseff.regex Re.(alt [ rep1 (rg 'a' 'c'); rep1 digit ])
+let regex_opt_tail = Parseff.regex Re.(seq [ char 'a'; opt (str "bc") ])
 let regex_windows = List.init 19 (fun i -> i + 2)
 let regex_chunks input = [ 1; 2; 3; max 1 (String.length input) ]
 
@@ -1452,7 +1455,7 @@ let test_regex_in_or_and_many () =
   let or_parser () =
     [
       Parseff.or_
-        (regex_then_semi (Re.compile Re.(rep1 digit)))
+        (regex_then_semi (Parseff.regex Re.(rep1 digit)))
         (regex_then_semi regex_token)
         ();
     ]
@@ -1713,11 +1716,11 @@ let test_streaming_matches_parse () =
       );
       ( "regex",
         "123abc",
-        fun () -> Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+        fun () -> Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
       );
       ( "regex failure",
         "abc",
-        fun () -> Parseff.match_regex (Re.compile (Re.Posix.re "[0-9]+"))
+        fun () -> Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
       );
       ( "binary",
         "\x01\x02\x03\x04\x05\x06\x07\x08\x09",
@@ -1753,7 +1756,7 @@ let test_streaming_matches_parse () =
     (fun (name, input, parser) -> check_matches_parse name input parser)
     cases
 
-let re_str s = Parseff.match_regex (Re.compile s)
+let re_str s = Parseff.match_regex (Parseff.regex s)
 
 let test_regex_needs_more_input () =
   check_matches_parse "str" "abcd" (fun () -> re_str (Re.str "abcd"));
@@ -2284,7 +2287,7 @@ let test_each_across_chunk_borders () =
 
 exception Read_failed
 
-let digits_re = Re.compile Re.(rep1 (rg '0' '9'))
+let digits_re = Parseff.regex Re.(rep1 (rg '0' '9'))
 
 let read_after_failed_regex src =
   Parseff.parse_source src (fun () ->

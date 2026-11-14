@@ -20,9 +20,9 @@ type json =
   | Array of json list
   | Object of (string * json) list
 
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let number_re = Re.compile (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-let string_content_re = Re.compile (Re.Posix.re "[^\"]*")
+let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
+let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
+let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
 let ws () = Parseff.match_regex ws_re
 
 let null_parser () =

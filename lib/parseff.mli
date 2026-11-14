@@ -389,31 +389,45 @@ val char : char -> char
     let comma () = char ','
     ]} *)
 
-val match_regex : ?label:string -> Re.re -> string
-(** [match_regex ?label re] matches a regular expression. The regex must be
-    compiled with [Re.compile].
+type regex
+(** A regular expression for {!match_regex}. Build it with {!val:regex}. *)
+
+val regex : Re.t -> regex
+(** [regex r] compiles [r] for {!match_regex}, anchored at the position where
+    the match starts. Compile once, outside the parser, and reuse the value.
+
+    Example:
+    {@ocaml[
+    let identifier_re = regex (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*")
+    ]} *)
+
+val match_regex : ?label:string -> regex -> string
+(** [match_regex ?label re] matches [re] at the current position and returns the
+    matched text.
 
     When the regex does not match, the parse fails with [expected <label>] if
     [~label] is given, so the failure merges with the other alternatives
     expected at the same position like any other primitive. Without [~label] the
     label is ["text matching the pattern"].
 
+    A failed match examines only the bytes that the regex needs to fail, not the
+    rest of the input. [Re.bol] and word boundaries see the byte before the
+    current position.
+
     In streaming mode, a match and the byte after it must fit in the backtrack
     window, unless the source ends after the match. Otherwise the parse fails
     with [Backtrack_window_exceeded]. A regex that needs later bytes to choose a
     longer match can return the shorter one when the window is small: [a(bc)?]
-    on ["abc"] can return ["a"] with a window below [6]. The byte before the
-    current position stays visible to [Re.bol] and word boundaries.
-
-    The match must start at the current position, but [Re] searches forward when
-    it does not. A failed match therefore scans the rest of the input, and a
-    loop that fails at each position takes quadratic time.
+    on ["abc"] can return ["a"] with a window below [6]. Before it matches, a
+    streaming [match_regex] reads ahead up to half the backtrack window, also
+    when the match then fails. A regex that can still match with more input, for
+    example one with a leading [.*], reads until the window is full and then
+    fails with [Backtrack_window_exceeded].
 
     Example:
     {@ocaml[
-    let identifier () =
-      let re = Re.compile (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*") in
-      match_regex re
+    let identifier_re = regex (Re.Posix.re "[a-zA-Z_][a-zA-Z0-9_]*")
+    let identifier () = match_regex ~label:"identifier" identifier_re
     ]} *)
 
 val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
@@ -1255,12 +1269,12 @@ val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     {@ocaml[
     let csv_line () =
       sep_by
-        (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
+        (fun () -> match_regex (regex (Re.Posix.re "[^,]+")))
         (fun () -> char ',')
         ()
     let csv_line_nonempty () =
       sep_by ~at_least:1
-        (fun () -> match_regex (Re.compile (Re.Posix.re "[^,]+")))
+        (fun () -> match_regex (regex (Re.Posix.re "[^,]+")))
         (fun () -> char ',')
         ()
     ]} *)
