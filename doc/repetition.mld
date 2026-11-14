@@ -217,7 +217,9 @@ let subtraction () =
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ]}
 
-With [~otherwise], returns the fallback if zero elements match:
+With [~otherwise], returns the fallback if zero elements match. Only a
+failure of the first element gives the fallback: a later failure after a
+{!val:Parseff.commit} or {!val:Parseff.cut} is the failure of the fold.
 
 {@ocaml[
 let maybe_subtract () =
@@ -236,7 +238,8 @@ let maybe_subtract () =
 
 {!val:Parseff.fold_right} is like {!val:Parseff.fold_left} but combines
 {b right-associatively}. Use [~otherwise] to provide a fallback value when no
-elements match. The loop stops after an operator and element that together
+elements match; as for [fold_left], only a failure of the first element gives
+it. The loop stops after an operator and element that together
 consume no input, and that pair is not applied.
 
 {@ocaml skip[val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a]}

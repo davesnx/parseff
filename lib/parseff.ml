@@ -3075,10 +3075,9 @@ let take_while_iter pred (f : span -> unit) =
   in
   ignore (iter_input st max_int scan f : int)
 
-let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
-    =
-  let st = get_state () in
-  let acc = ref (p ()) in
+let[@inline always] fold_left_from st (p : unit -> 'a)
+    (op : unit -> 'a -> 'a -> 'a) first : 'a =
+  let acc = ref first in
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
   let top = frame + 1 in
@@ -3110,13 +3109,40 @@ let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
       if st.frames_top > frame then State.pop_rewind_frame st frame;
       raise exn
 
+let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
+    =
+  let st = get_state () in
+  fold_left_from st p op (p ())
+
+let[@inline never] no_first_element st frame otherwise =
+  if State.frame_committed st frame then begin
+    State.pop_rewind_frame st frame;
+    raise_notrace Fail
+  end;
+  restore_rewind_frame st frame;
+  State.pop_rewind_frame st frame;
+  otherwise
+
+let fold_left_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise : 'a =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_choice in
+  match p () with
+  | first ->
+      State.pop_rewind_frame st frame;
+      fold_left_from st p op first
+  | exception Fail ->
+      no_first_element st frame otherwise
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
 let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
   match otherwise with
   | None ->
       fold_left_one_or_more p op ()
   | Some d ->
-      or_ (fold_left_one_or_more p op) (fun () -> d) ()
+      fold_left_or p op d
 
 (* A level takes 10 stack words native, 15 bytecode (OCaml 5.3). js_of_ocaml
    and wasm_of_ocaml report [stack_limit = 0] (runtime gc.js, gc.wat). *)
@@ -3161,13 +3187,27 @@ let fold_right_one_or_more p op () =
   let first = p () in
   fold_right_from (get_state ()) p op first
 
+let fold_right_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise : 'a
+    =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_choice in
+  match p () with
+  | first ->
+      State.pop_rewind_frame st frame;
+      fold_right_from st p op first
+  | exception Fail ->
+      no_first_element st frame otherwise
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
 let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
   match otherwise with
   | None ->
       fold_right_one_or_more p op ()
   | Some d ->
-      or_ (fold_right_one_or_more p op) (fun () -> d) ()
+      fold_right_or p op d
 
 type ('a, 'k) operator =
   | Infix_left of (unit -> 'a -> 'a -> 'a)

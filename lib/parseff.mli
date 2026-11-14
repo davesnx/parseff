@@ -1714,7 +1714,11 @@ val fold_left :
     values.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
-    [element] values instead of failing.
+    [element] values instead of failing. Only a failure of the first [element]
+    gives [otherwise], with the position unchanged. A later failure that a
+    {!commit} or {!cut} decided is the failure of the fold, as without
+    [~otherwise]. To return [otherwise] on any failure, as before 0.6, write
+    [or_ (fold_left element op) (fun () -> otherwise) ()].
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
@@ -1734,7 +1738,11 @@ val fold_right :
     [fold_right], counts as one more operand.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
-    [element] values instead of failing.
+    [element] values instead of failing. Only a failure of the first [element]
+    gives [otherwise], with the position unchanged. A later failure that a
+    {!commit} or {!cut} decided is the failure of the fold, as without
+    [~otherwise]. To return [otherwise] on any failure, as before 0.6, write
+    [or_ (fold_right element op) (fun () -> otherwise) ()].
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)

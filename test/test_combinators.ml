@@ -470,6 +470,87 @@ let test_consume_streaming_slow_source () =
   in
   Alcotest.(check string) "slow source" "Ok \"true\"" (show show_string r)
 
+let fold_digit () = Char.code (Parseff.digit ()) - Char.code '0'
+
+let folds =
+  [
+    ( "fold_left",
+      fun element op ->
+        Parseff.fold_left element (fun () -> op ()) ~otherwise:(-1) ()
+    );
+    ( "fold_right",
+      fun element op ->
+        Parseff.fold_right element (fun () -> op ()) ~otherwise:(-1) ()
+    );
+  ]
+
+let test_fold_otherwise_first_element () =
+  List.iter
+    (fun (_, fold) ->
+      let plus () =
+        ignore (Parseff.char '+');
+        ( + )
+      in
+      both string_of_int "x+1" (fun () -> fold fold_digit plus) "Ok (-1, 0)";
+      both string_of_int "" (fun () -> fold fold_digit plus) "Ok (-1, 0)";
+      both string_of_int "1+2+x" (fun () -> fold fold_digit plus) "Ok (3, 3)"
+    )
+    folds
+
+let test_fold_otherwise_commit () =
+  List.iter
+    (fun (_, fold) ->
+      let committed () =
+        ignore (Parseff.char '+');
+        Parseff.commit ();
+        ( + )
+      in
+      both string_of_int "1+2+x"
+        (fun () -> fold fold_digit committed)
+        "Error@4 Expected \"expected digit, found 'x'\"";
+      let cutting () =
+        ignore (Parseff.char '+');
+        Parseff.cut ();
+        ( + )
+      in
+      both string_of_int "1+2+x"
+        (fun () -> Parseff.context "sum" (fun () -> fold fold_digit cutting))
+        "Error@4 Expected \"expected digit, found 'x'\""
+    )
+    folds
+
+let test_fold_otherwise_releases_input () =
+  let input = "1" ^ String.concat "" (List.init 200 (fun _ -> "+1")) in
+  List.iter
+    (fun (name, fold) ->
+      let plus () =
+        ignore (Parseff.char '+');
+        Parseff.commit ();
+        ( + )
+      in
+      let r =
+        Parseff.parse_source ~backtrack_window:16 (chunked_source input)
+          (fun () -> fold fold_digit plus
+        )
+      in
+      Alcotest.(check string)
+        (name ^ ": a chain longer than the window")
+        "Ok 201" (show string_of_int r)
+    )
+    folds;
+  let plus () =
+    ignore (Parseff.char '+');
+    ( + )
+  in
+  let r =
+    Parseff.parse_source ~backtrack_window:16 (chunked_source input) (fun () ->
+        Parseff.fold_left fold_digit plus ~otherwise:(-1) ()
+    )
+  in
+  Alcotest.(check string)
+    "fold_left without commit: a chain longer than the window" "Ok 201"
+    (show string_of_int r)
+
 let () =
   let open Alcotest in
   run "Combinators"
@@ -498,6 +579,14 @@ let () =
           test_case "fold_right right assoc" `Quick test_fold_right_right_assoc;
           test_case "fold_right dropped pair" `Quick
             test_fold_right_dropped_pair_rolled_back;
+        ]
+      );
+      ( "fold ~otherwise",
+        [
+          test_case "first element" `Quick test_fold_otherwise_first_element;
+          test_case "failure after commit or cut" `Quick
+            test_fold_otherwise_commit;
+          test_case "stream window" `Quick test_fold_otherwise_releases_input;
         ]
       );
       ( "take",

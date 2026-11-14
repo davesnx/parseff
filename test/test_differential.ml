@@ -737,8 +737,7 @@ let rec ev m env g st =
       in
       (List l, st)
   | Fold_left (a, o, d) ->
-      let one env st =
-        let acc, st = ev m env a st in
+      let rest env acc st =
         let rec loop acc st =
           let f, env' = flag env st in
           match
@@ -757,10 +756,9 @@ let rec ev m env g st =
         in
         loop acc st
       in
-      otherwise env d one st
+      otherwise env d (fun env -> ev m env a) rest st
   | Fold_right (a, o, d) ->
-      let rec one env st =
-        let first, st = ev m env a st in
+      let rec rest env first st =
         choice env
           (fun env st ->
             let ov, st = ev m env o st in
@@ -769,8 +767,11 @@ let rec ev m env g st =
           )
           (fun _ st -> (first, st))
           st
+      and one env st =
+        let first, st = ev m env a st in
+        rest env first st
       in
-      otherwise env d one st
+      otherwise env d (fun env -> ev m env a) rest st
   | Count (n, a) ->
       let acc, st = required env (fun env -> ev m env a) [] n st in
       (List (List.rev acc), st)
@@ -852,11 +853,24 @@ and sep_then m a s env st =
   let _, st = ev m env s st in
   ev m env a st
 
-and otherwise env d one st =
+and otherwise env d first rest st =
   if d then
-    choice env one (fun _ st -> (Str "otherwise", st)) st
+    match
+      choice env
+        (fun env st ->
+          let v, st = first env st in
+          (Some v, st)
+        )
+        (fun _ st -> (None, st))
+        st
+    with
+    | Some v, st ->
+        rest env v st
+    | None, st ->
+        (Str "otherwise", st)
   else
-    one env st
+    let v, st = first env st in
+    rest env v st
 
 and expression m env atom table st =
   let prefixed =
