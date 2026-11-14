@@ -135,8 +135,10 @@ let frame_last_branch = 3
 let frame_kind_mask = 3
 let frame_committed_bit = 4
 let frame_pin_bit = 8
+let frame_capture_bit = 16
+let frame_capture = frame_barrier lor frame_capture_bit
 let frame_stride = 3
-let frame_trail_shift = 4
+let frame_trail_shift = 5
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -515,6 +517,25 @@ module State = struct
     let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
     if trail_depth t > saved then undo_trail t saved
 
+  let[@inline never] advance_capture_frame (t : t) i =
+    let base = i * frame_stride in
+    let frames = t.frames in
+    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames (base + 1)
+      (frame_capture lor (trail_depth t lsl frame_trail_shift));
+    Array.unsafe_set frames (base + 2) t.diag_len
+
+  let[@inline never] keep_recorded_from (t : t) lowest =
+    let frames = t.frames in
+    let depth = trail_depth t lsl frame_trail_shift in
+    let mask = (1 lsl frame_trail_shift) - 1 in
+    for i = lowest to t.frames_top - 1 do
+      let base = i * frame_stride in
+      Array.unsafe_set frames (base + 1)
+        (Array.unsafe_get frames (base + 1) land mask lor depth);
+      Array.unsafe_set frames (base + 2) t.diag_len
+    done
+
   let rec commit_nearest_from (t : t) i =
     i >= 0
     &&
@@ -522,28 +543,37 @@ module State = struct
     let flags = Array.unsafe_get t.frames slot in
     if flags land frame_pin_bit <> 0 then
       commit_nearest_from t (i - 1)
-    else
-      flags land frame_kind_mask <> frame_barrier
+    else if flags land frame_kind_mask <> frame_barrier then begin
+      Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+      true
+    end else
+      flags land frame_capture_bit <> 0
       && begin
-        Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+        advance_capture_frame t i;
+        keep_recorded_from t (i + 1);
         true
       end
 
   let commit_nearest (t : t) = commit_nearest_from t (t.frames_top - 1)
 
-  let seal_frames (t : t) ~floor =
+  let seal_frames (t : t) ~captures ~floor =
     let i = ref (t.frames_top - 1) in
     let reached = ref true in
+    let lowest = ref (-1) in
     while !reached && !i >= floor do
       let slot = (!i * frame_stride) + 1 in
       let flags = Array.unsafe_get t.frames slot in
-      if flags land frame_kind_mask = frame_barrier then
-        reached := false
-      else begin
+      if flags land frame_kind_mask <> frame_barrier then begin
         Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
         decr i
-      end
+      end else if captures && flags land frame_capture_bit <> 0 then begin
+        advance_capture_frame t !i;
+        lowest := !i;
+        decr i
+      end else
+        reached := false
     done;
+    if !lowest >= 0 then keep_recorded_from t !lowest;
     !reached
 
   let reclaim_floor (t : t) ~keep_from =
@@ -2179,7 +2209,7 @@ let[@inline always] context_exit st d name start delimited =
 
 let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
-    ignore (State.seal_frames st ~floor:0)
+    ignore (State.seal_frames st ~captures:false ~floor:0)
 
 let[@inline always] context_run st delimited start name p =
   let d = st.ctx_top in
@@ -2273,11 +2303,11 @@ let cut () =
   let st = get_state () in
   let d = st.ctx_top in
   if d = 0 then
-    ignore (State.seal_frames st ~floor:0)
+    ignore (State.seal_frames st ~captures:true ~floor:0)
   else begin
     let m = (d - 1) * ctx_stride in
     let ctx = st.ctx in
-    if State.seal_frames st ~floor:(Array.unsafe_get ctx m) then
+    if State.seal_frames st ~captures:true ~floor:(Array.unsafe_get ctx m) then
       Array.unsafe_set ctx (m + 1) (Array.unsafe_get ctx (m + 1) lor ctx_cut_bit)
   end
 
@@ -4658,9 +4688,16 @@ let capture_rewind st frame saved e =
   st.far <- saved;
   Stdlib.Error e
 
-let capture p =
+let capture ?(release = false) p =
   let st = get_state () in
-  let frame = State.push_rewind_frame st frame_barrier in
+  let frame =
+    State.push_rewind_frame st
+      ( if release then
+          frame_capture
+        else
+          frame_barrier
+      )
+  in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
   match p () with
@@ -4712,7 +4749,7 @@ let capture_with c p =
       far_merge st saved;
       raise exn
 
-let recover errors ~sync parser hole =
+let recover ?release errors ~sync parser hole =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4721,7 +4758,7 @@ let recover errors ~sync parser hole =
     parser ()
   else
     let start = st.pos in
-    match capture parser with
+    match capture ?release parser with
     | Ok v ->
         v
     | Error e ->

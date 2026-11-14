@@ -761,7 +761,7 @@ val skip_to : int -> unit
     input that the parse has read. Each offset from the position to one that
     {!peek_with} returned is in the input read. *)
 
-val capture : (unit -> 'a) -> ('a, error) result
+val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
 
@@ -775,6 +775,18 @@ val capture : (unit -> 'a) -> ('a, error) result
     past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
     not caught. In {!parse_source}, the input that [parser] reads must fit in
     [~backtrack_window].
+
+    With [~release:true], a {!commit} or {!cut} in [parser] that reaches
+    [capture] moves the rewind point to the position of that call. A later
+    failure of [parser] then goes back to that position, not to the start. It
+    removes only the diagnostics and the {!Ref} changes made after that call;
+    those made before it stay, as after a success. Do not parse the same input
+    again with another parser after [Error e]: skip from the current position,
+    and from [e.range.start] when it is later. A {!cut} also continues to the
+    frames outside [capture]. In {!parse_source}, only the input that [parser]
+    reads after the rewind point must fit in [~backtrack_window], so a parser
+    that calls {!cut} after each decided part can be longer than the window. The
+    default is [false].
 
     Example:
     {@ocaml[
@@ -819,6 +831,7 @@ val capture_with :
     ]} *)
 
 val recover :
+  ?release:bool ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -831,6 +844,10 @@ val recover :
 
     The errors that [parser] recorded in [errors] before it failed are removed,
     as with {!capture}: only [e] stays. To keep them, use {!capture_with}.
+
+    [~release] is given to {!capture}. With [~release:true], [sync] starts at
+    the last {!commit} or {!cut} that reached [recover], and the errors recorded
+    before that call stay.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
