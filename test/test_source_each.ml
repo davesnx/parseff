@@ -35,6 +35,82 @@ let test_empty_source () =
     "no values" []
     (collect (Parseff.parse_source_each (bytes_src "") line))
 
+let lookahead_words ?(fail_on = "") () =
+  let current = ref None in
+  let started = ref false in
+  let read_word () =
+    Parseff.skip_whitespace ();
+    match Parseff.take_while (fun c -> c >= 'a' && c <= 'z') with
+    | "" ->
+        None
+    | w ->
+        Some w
+  in
+  let element () =
+    if not !started then begin
+      started := true;
+      current := read_word ()
+    end;
+    match !current with
+    | None ->
+        Parseff.fail "no word"
+    | Some w when w = fail_on ->
+        Parseff.fail "bad word"
+    | Some w ->
+        current := read_word ();
+        w
+  in
+  let pending () = Option.is_some !current in
+  (element, pending)
+
+let test_pending_returns_held_value () =
+  let element, pending = lookahead_words () in
+  Alcotest.(check (list string))
+    "the last word is returned"
+    [ "ok one"; "ok two"; "ok three" ]
+    (collect
+       (Parseff.parse_source_each ~pending (bytes_src "one two three") element)
+    )
+
+let test_without_pending_held_value_is_lost () =
+  let element, _ = lookahead_words () in
+  Alcotest.(check (list string))
+    "the sequence ends when no input remains" [ "ok one"; "ok two" ]
+    (collect (Parseff.parse_source_each (bytes_src "one two three") element))
+
+let test_pending_only_asked_at_end () =
+  let element, pending = lookahead_words () in
+  let asked = ref [] in
+  let source = bytes_src "one two three" in
+  let pending () =
+    let p = pending () in
+    asked := p :: !asked;
+    p
+  in
+  ignore (collect (Parseff.parse_source_each ~pending source element));
+  Alcotest.(check (list bool)) "asked twice" [ false; true ] !asked
+
+let test_pending_error_ends () =
+  let element, pending = lookahead_words ~fail_on:"three" () in
+  Alcotest.(check (list string))
+    "an error on the held value ends the sequence"
+    [ "ok one"; "ok two"; "error 13 bad word" ]
+    (collect
+       (Parseff.parse_source_each ~pending (bytes_src "one two three") element)
+    )
+
+let test_pending_empty_source () =
+  let calls = ref 0 in
+  let pending () =
+    incr calls;
+    !calls = 1
+  in
+  Alcotest.(check (list string))
+    "one run on empty input" [ "ok held" ]
+    (collect
+       (Parseff.parse_source_each ~pending (bytes_src "") (fun () -> "held"))
+    )
+
 let test_error_of_each_value () =
   let parser () =
     let v = digits () in
@@ -189,7 +265,25 @@ let test_read_ahead_kept () =
            )
         )
     )
-    [ (16, 1); (16, 3); (16, 4096); (65536, 1); (65536, 4096) ];
+    [
+      (5, 1);
+      (5, 2);
+      (5, 3);
+      (6, 1);
+      (16, 1);
+      (16, 3);
+      (16, 4096);
+      (65536, 1);
+      (65536, 4096);
+    ];
+  Alcotest.(check (list string))
+    "window 4"
+    [ "ok a1"; "ok b22"; "error 7 backtrack window of 4 bytes exceeded" ]
+    (collect
+       (Parseff.parse_source_each ~backtrack_window:4 (bytes_src ~chunk:1 input)
+          regex_value
+       )
+    );
   Alcotest.(check (list string))
     "of_string"
     [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
@@ -476,6 +570,17 @@ let () =
           test_case "newline after each value" `Quick test_doc_example;
           test_case "node forced twice" `Quick test_force_twice;
           test_case "no progress" `Quick test_no_progress;
+        ]
+      );
+      ( "pending",
+        [
+          test_case "held value returned" `Quick test_pending_returns_held_value;
+          test_case "lost without pending" `Quick
+            test_without_pending_held_value_is_lost;
+          test_case "asked only at the end" `Quick
+            test_pending_only_asked_at_end;
+          test_case "error ends" `Quick test_pending_error_ends;
+          test_case "empty source" `Quick test_pending_empty_source;
         ]
       );
       ( "errors",

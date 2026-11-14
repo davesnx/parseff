@@ -32,7 +32,7 @@
   (ocaml
    (>= 5.3))
   (re
-   (>= 1.9.0))
+   (>= 1.11.0))
   (uucp
    (>= 16.0.0))
 
@@ -54,7 +54,7 @@
   ;; Documentation dependencies
   (odoc
    (and
-    (>= 3.1.0)
+    (>= 3.2.1)
     :with-doc))
   (odoc-parser :with-doc)
   (mdx :with-test)

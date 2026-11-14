@@ -82,59 +82,86 @@ let peek () = Parseff.look_ahead Parseff.any_char
 
 ## Numbers
 
-The number parsers read the bytes of a number directly from the input. They work across chunk boundaries in `Parseff.parse_source`. A failure is an `Expected` error. A missing number fails at its start, so `Parseff.or_` can try another branch, and its message merges with the other alternatives at that position. A `-`, `.` or exponent marker with no digit after it fails with `expected digit` after the marker: `"-x"` fails at offset 1, and `"1."` and `"1e"` fail at offset 2\. In streaming a number must be shorter than `backtrack_window` bytes, or the parse fails with `Backtrack_window_exceeded` at its start.
+The number parsers read a number at the current position. They stop at the first byte that does not fit, and they work across chunk boundaries in `Parseff.parse_source`.
 
 
-### `int`
+### `integer`
 
-`Parseff.int` parses an optional `-` and one or more decimal digits. It accepts leading zeros. It does not accept `+` or `_` separators. A value outside `min_int .. max_int` fails with `expected integer in int range`. On success it does not allocate.
+`Parseff.integer` parses an optional `-` and decimal digits. It fails when the value is outside the `int` range.
 
 ```ocaml
-val int : unit -> int
+val integer : unit -> int
 ```
 ```ocaml
 let point () =
-  let x = Parseff.int () in
+  let x = Parseff.integer () in
   let _ = Parseff.char ',' in
-  let y = Parseff.int () in
+  let y = Parseff.integer () in
   (x, y)
 
 (* Matches "12,-7" -> (12, -7) *)
-(* Fails on "+1,2" with "expected integer" *)
-(* Fails on "99999999999999999999,0" with "expected integer in int range" *)
 ```
 
-### `float`
+### `number`
 
-`Parseff.float` parses an optional `-`, one or more digits, an optional fraction, and an optional exponent. A `.` or an `e` must be followed by a digit. It does not accept `.5`, `inf` or `nan`. A value too large for a `float` gives `infinity`.
+`Parseff.number` parses a number with the JSON grammar: an optional `-`, digits, an optional fraction and an optional exponent.
 
 ```ocaml
-val float : unit -> float
+val number : unit -> float
 ```
 ```ocaml
-let measurement () =
-  let value = Parseff.float () in
-  let unit_ = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
-  (value, unit_)
+let coordinates () =
+  let lat = Parseff.number () in
+  let _ = Parseff.char ',' in
+  let lon = Parseff.number () in
+  (lat, lon)
 
-(* Matches "2.5kg" -> (2.5, "kg") *)
-(* Matches "6.02e23mol" -> (6.02e23, "mol") *)
-(* Fails on "1.kg" with "expected digit" *)
+(* Matches "48.85,-2.35e0" -> (48.85, -2.35) *)
 ```
 
-### `hex_int`
+### `hex_integer`
 
-`Parseff.hex_int` parses one or more hexadecimal digits (`0-9`, `a-f`, `A-F`). It does not accept a sign or a `0x` prefix. A value above `max_int` fails with `expected hexadecimal integer in int range`. On success it does not allocate.
+`Parseff.hex_integer` parses hexadecimal digits. It accepts no sign and no `0x` prefix.
 
 ```ocaml
-val hex_int : unit -> int
+val hex_integer : unit -> int
 ```
 ```ocaml
 let color () =
   let _ = Parseff.char '#' in
-  Parseff.hex_int ()
+  Parseff.hex_integer ()
 
 (* Matches "#ff8800" -> 0xff8800 *)
+```
+
+### Other number formats
+
+The number parsers do not read a leading `+`, `.5`, `5.`, digit separators such as `1_000`, `inf` or `nan`. An `e` or `E` after a number always starts an exponent, so a unit such as `2em` fails.
+
+For these formats, write your own parser with `Parseff.take_while`, `Parseff.recognize` and a conversion function. This one reads a number and its unit:
+
+```ocaml
+let is_digit c = c >= '0' && c <= '9'
+let is_letter c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+
+let quantity () =
+  let text =
+    Parseff.recognize (fun () ->
+        let _ = Parseff.take_while ~at_least:1 ~label:"digit" is_digit in
+        Parseff.optional
+          (fun () ->
+            let _ = Parseff.char '.' in
+            Parseff.take_while ~at_least:1 ~label:"digit" is_digit)
+          ())
+  in
+  let unit_ = Parseff.take_while ~at_least:1 ~label:"unit" is_letter in
+  (float_of_string text, unit_)
+```
+```ocaml
+# Parseff.parse "2em" quantity;;
+- : (float * string, Parseff.error) result = Ok (2., "em")
+# Parseff.parse "1.5eV" quantity;;
+- : (float * string, Parseff.error) result = Ok (1.5, "eV")
 ```
 
 ## Whitespace
@@ -249,7 +276,7 @@ parse_value ()
 
 ### `lexeme`
 
-`Parseff.lexeme` runs a parser, then skips what follows the token, and returns the result of the parser. By default it skips whitespace with `Parseff.skip_whitespace`. Pass `~skip` when the grammar also has comments.
+`Parseff.lexeme` runs a parser, then `~skip`, and returns the result of the parser. `~skip` defaults to `Parseff.skip_whitespace`; pass your own when the grammar also has comments.
 
 ```ocaml
 val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
@@ -276,9 +303,7 @@ let pair () =
 
 ### `keyword`
 
-`Parseff.keyword` matches a literal only when the next byte cannot continue an identifier. Use it for reserved words, so that `"let"` does not match the start of `"letter"`. By default ASCII letters, digits and `_` continue an identifier. Pass `~is_ident` to change that set. `~is_ident` receives one byte, not a UTF-8 character. At the end of the input the keyword matches. An empty keyword raises `Invalid_argument`.
-
-In streaming, `keyword` reads the byte after the keyword, so it needs a backtrack window of one byte more than the keyword.
+`Parseff.keyword` matches a literal only when the next byte cannot continue an identifier, so that `"let"` does not match the start of `"letter"`. Pass `~is_ident` to change which bytes continue an identifier. In streaming, `keyword` needs a backtrack window of one byte more than the keyword.
 
 ```ocaml
 val keyword : ?is_ident:(char -> bool) -> string -> unit
@@ -291,15 +316,4 @@ let binding () =
 
 (* Matches "let x" -> "x" *)
 (* Fails on "letter x" at offset 0, expecting "let" *)
-```
-A failure is reported at the start of the keyword and expects the keyword, so it merges with the other alternatives at that position. The comment shows the message of `parse`. In streaming, the `found` text holds only the bytes already read.
-
-```ocaml
-let statement () =
-  Parseff.or_
-    (fun () -> Parseff.keyword "let")
-    (fun () -> Parseff.keyword "in")
-    ()
-
-(* parse fails on "inx": expected "in" or "let", found 'inx' *)
 ```

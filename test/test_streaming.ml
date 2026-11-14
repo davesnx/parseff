@@ -1058,6 +1058,227 @@ let test_regex_readahead_half_window () =
   if !seen > 510 then
     Alcotest.failf "read %d bytes ahead, expected about 500" !seen
 
+let regex_token = Re.compile Re.(seq [ rg 'a' 'z'; rep1 digit ])
+let regex_digits = Re.compile Re.(rep digit)
+let regex_runs = Re.compile Re.(alt [ rep1 (rg 'a' 'c'); rep1 digit ])
+let regex_opt_tail = Re.compile Re.(seq [ char 'a'; opt (str "bc") ])
+let regex_windows = List.init 19 (fun i -> i + 2)
+let regex_chunks input = [ 1; 2; 3; max 1 (String.length input) ]
+
+let regex_then_semi re () =
+  let s = Parseff.match_regex re in
+  ignore (Parseff.char ';');
+  s
+
+let window_outcome : (_, Parseff.error) Result.t -> _ = function
+  | Ok v ->
+      Ok v
+  | Error { kind = Backtrack_window_exceeded { limit; oldest }; range; _ } ->
+      Error (range.start, limit, oldest)
+  | Error e ->
+      Alcotest.failf "unexpected error at %d: %s" e.range.start
+        (Parseff.error_message e)
+
+let window_case ~window ~chunk input =
+  Printf.sprintf "%S window %d chunk %d" input window chunk
+
+let test_regex_match_at_buffer_end () =
+  List.iter
+    (fun window ->
+      Alcotest.(check (result string (pair int string)))
+        (window_case ~window ~chunk:1 "b22;")
+        (Ok "b22")
+        (norm
+           (Parseff.parse_source ~backtrack_window:window
+              (chunked_source ~chunk_size:1 "b22;")
+              (regex_then_semi regex_token)
+           )
+        )
+    )
+    [ 4; 5; 8; 16 ]
+
+let test_regex_token_window_boundary () =
+  for digits = 1 to 20 do
+    let token = "b" ^ String.make digits '2' in
+    List.iter
+      (fun (input, parser) ->
+        List.iter
+          (fun window ->
+            let expected =
+              if String.length token < window then
+                Ok token
+              else
+                Error (2, window, 2)
+            in
+            List.iter
+              (fun chunk ->
+                Alcotest.(check (result string (triple int int int)))
+                  (window_case ~window ~chunk input)
+                  expected
+                  (window_outcome
+                     (Parseff.parse_source ~backtrack_window:window
+                        (chunked_source ~chunk_size:chunk input) (fun () ->
+                          ignore (Parseff.consume "x;");
+                          parser ()
+                      )
+                     )
+                  )
+              )
+              (regex_chunks input)
+          )
+          regex_windows
+      )
+      [
+        ("x;" ^ token ^ ";", regex_then_semi regex_token);
+        ("x;" ^ token, fun () -> Parseff.match_regex regex_token);
+      ]
+  done
+
+let check_window_or_parse ?(windows = regex_windows) name input parser =
+  let expected = norm_ignoring_found (Parseff.parse input parser) in
+  List.iter
+    (fun window ->
+      List.iter
+        (fun chunk ->
+          let actual =
+            Parseff.parse_source ~backtrack_window:window
+              (chunked_source ~chunk_size:chunk input)
+              parser
+          in
+          match actual with
+          | Error { kind = Backtrack_window_exceeded _; _ } ->
+              ()
+          | _ ->
+              Alcotest.(check (result (list string) (pair int string)))
+                (name ^ " " ^ window_case ~window ~chunk input)
+                expected
+                (norm_ignoring_found actual)
+        )
+        (regex_chunks input)
+    )
+    windows
+
+let test_regex_optional_tail () =
+  List.iter
+    (fun (input, expected) ->
+      let parser () = [ regex_then_semi regex_opt_tail () ] in
+      Alcotest.(check (result (list string) (pair int string)))
+        ("parse " ^ input) expected
+        (norm (Parseff.parse input parser));
+      check_window_or_parse
+        ~windows:(List.init 15 (fun i -> i + 6))
+        "a(bc)?" input parser
+    )
+    [
+      ("abc;", Ok [ "abc" ]);
+      ("a;", Ok [ "a" ]);
+      ("ab;", Error (1, "Expected expected ';', found 'b'"));
+      ("abd;", Error (1, "Expected expected ';', found 'bd'"));
+    ]
+
+let test_regex_empty_match () =
+  List.iter
+    (fun input ->
+      check_window_or_parse "[0-9]*" input (fun () ->
+          [ Parseff.match_regex regex_digits ]
+      );
+      Alcotest.(check (result (list string) (pair int string)))
+        ("large window " ^ input)
+        (norm
+           (Parseff.parse input (fun () -> [ Parseff.match_regex regex_digits ]))
+        )
+        (norm
+           (Parseff.parse_source (chunked_source ~chunk_size:1 input) (fun () ->
+                [ Parseff.match_regex regex_digits ]
+            )
+           )
+        )
+    )
+    [ ""; "123"; "abc" ]
+
+let test_regex_in_or_and_many () =
+  let or_parser () =
+    [
+      Parseff.or_
+        (regex_then_semi (Re.compile Re.(rep1 digit)))
+        (regex_then_semi regex_token)
+        ();
+    ]
+  in
+  let many_parser () = Parseff.many (regex_then_semi regex_token) () in
+  List.iter
+    (fun window ->
+      List.iter
+        (fun chunk ->
+          let run input parser =
+            window_outcome
+              (Parseff.parse_source ~backtrack_window:window
+                 (chunked_source ~chunk_size:chunk input)
+                 parser
+              )
+          in
+          Alcotest.(check (result (list string) (triple int int int)))
+            ("or_ " ^ window_case ~window ~chunk "b22;")
+            ( if window >= 4 then
+                Ok [ "b22" ]
+              else
+                Error (0, window, 0)
+            )
+            (run "b22;" or_parser);
+          let input = "a1;b22;c333;" in
+          Alcotest.(check (result (list string) (triple int int int)))
+            ("many " ^ window_case ~window ~chunk input)
+            ( match window with
+            | 2 ->
+                Error (0, 2, 0)
+            | 3 ->
+                Error (3, 3, 3)
+            | 4 ->
+                Error (7, 4, 7)
+            | _ ->
+                Ok [ "a1"; "b22"; "c333" ]
+            )
+            (run input many_parser)
+        )
+        [ 1; 2; 3; 12 ]
+    )
+    regex_windows
+
+let test_regex_differential () =
+  let rng = Random.State.make [| 42 |] in
+  let alphabet = "abc12;" in
+  let random_input () =
+    String.init (Random.State.int rng 25) (fun _ ->
+        alphabet.[Random.State.int rng (String.length alphabet)]
+    )
+  in
+  let parsers re =
+    [
+      (fun () -> Parseff.many (regex_then_semi re) ());
+      (fun () ->
+        Parseff.many
+          (fun () ->
+            Parseff.or_ (regex_then_semi re)
+              (fun () -> String.make 1 (Parseff.any_char ()))
+              ()
+          )
+          ()
+      );
+    ]
+  in
+  for _ = 1 to 300 do
+    let input = random_input () in
+    List.iter
+      (fun (name, re) ->
+        List.iter (check_window_or_parse name input) (parsers re)
+      )
+      [
+        ("[a-z][0-9]+", regex_token);
+        ("[0-9]*", regex_digits);
+        ("[a-c]+|[0-9]+", regex_runs);
+      ]
+  done
+
 let test_location_after_backtrack () =
   let input = "a\n\nb" in
   let parser () =
@@ -1475,9 +1696,9 @@ let test_excerpt_does_not_start_inside_a_code_point () =
   | Error e ->
       Alcotest.(check string)
         "excerpt"
-        "byte 6: [error] expected 'y' or '\xc3\xa9', found 'x'\n\
-         1 | ...x...\n\
-        \  |    ^"
+        "1:4: [error] expected 'y' or '\xc3\xa9', found 'x'\n\
+         1 | ...\xc3\xa9\xc3\xa9x...\n\
+        \  |      ^"
         (Parseff.render_error e);
       Alcotest.(check string)
         "excerpt with source"
@@ -1487,6 +1708,47 @@ let test_excerpt_does_not_start_inside_a_code_point () =
         (Parseff.render_error ~source:input e)
   | Ok _ ->
       Alcotest.fail "Expected an error"
+
+let test_kept_input_is_not_copied_on_each_read () =
+  let total = 65_536 in
+  let src = chunked_source ~chunk_size:64 (String.make total 'a') in
+  let before = Gc.allocated_bytes () in
+  let result =
+    Parseff.parse_source ~backtrack_window:max_int src (fun () ->
+        String.length (Parseff.take_while (fun _ -> true))
+    )
+  in
+  let allocated = Gc.allocated_bytes () -. before in
+  Alcotest.(check (result int reject)) "all input" (Ok total) result;
+  if allocated > 16. *. Float.of_int total then
+    Alcotest.failf "kept %d bytes, allocated %.0f bytes" total allocated
+
+let test_slice_is_not_changed_by_later_reads () =
+  let src = chunked_source ~chunk_size:3 "abcdefghi" in
+  let result =
+    Parseff.parse_source src (fun () ->
+        let a = Parseff.take 3 in
+        let b = Parseff.take 2 in
+        let c = Parseff.take_while (fun _ -> true) in
+        [ a; b; c ]
+    )
+  in
+  Alcotest.(check (result (list string) reject))
+    "slices"
+    (Ok [ "abc"; "de"; "fghi" ])
+    result
+
+let test_error_on_open_source_shows_only_input () =
+  let src = chunked_source ~chunk_size:3 "abcdef" in
+  let parser () =
+    ignore (Parseff.look_ahead (fun () -> Parseff.take 3));
+    Parseff.consume "x"
+  in
+  match Parseff.parse_source src parser with
+  | Error { kind = Expected { found = Text t; _ }; _ } ->
+      Alcotest.(check string) "found" "abc" t
+  | _ ->
+      Alcotest.fail "expected a failure with found text"
 
 let () =
   let open Alcotest in
@@ -1596,6 +1858,14 @@ let () =
             test_regex_lookbehind_window_accounting;
           test_case "regex read-ahead stops at half window" `Quick
             test_regex_readahead_half_window;
+          test_case "regex match at buffer end" `Quick
+            test_regex_match_at_buffer_end;
+          test_case "regex token window boundary" `Quick
+            test_regex_token_window_boundary;
+          test_case "regex optional tail" `Quick test_regex_optional_tail;
+          test_case "regex empty match" `Quick test_regex_empty_match;
+          test_case "regex in or_ and many" `Quick test_regex_in_or_and_many;
+          test_case "regex differential" `Quick test_regex_differential;
           test_case "location after backtrack" `Quick
             test_location_after_backtrack;
         ]
@@ -1621,6 +1891,16 @@ let () =
             test_excerpt_does_not_start_inside_a_code_point;
           test_case "error does not read more input" `Quick
             test_error_does_not_read_more_input;
+        ]
+      );
+      ( "kept input",
+        [
+          test_case "is not copied on each read" `Quick
+            test_kept_input_is_not_copied_on_each_read;
+          test_case "slice is not changed by later reads" `Quick
+            test_slice_is_not_changed_by_later_reads;
+          test_case "error on an open source shows only input" `Quick
+            test_error_on_open_source_shows_only_input;
         ]
       );
       ( "Source.of_seq",
