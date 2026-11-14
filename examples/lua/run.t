@@ -1023,3 +1023,33 @@ The constructs around it are not reported as unclosed.
   
   1 error
   [1]
+
+A long string that runs to the end of the file is one bad token. The line
+breaks inside it still end the statement before it, so the recovery keeps
+the "if" and the "while".
+
+  $ cat > open-string-1.lua <<'EOF'
+  > local a = = 1
+  > local b = 2
+  > if b t\hen print(b) e[[nd
+  > local t = {1, 2,, 3}
+  > print(a, b)
+  > x = (1 +goto )
+  > EOF
+  $ ./main.exe ast open-string-1.lua 2> /dev/null
+  (chunk
+    (local (a) (<error>))
+    (local (b) ((int 2)))
+    (if
+      (cond (name b)
+        <error>)))
+  [1]
+  $ cat > open-string-2.lua <<'EOF'
+  > while== x== d[[o x = x - 1 end
+  > repeat y() until z
+  > EOF
+  $ ./main.exe ast open-string-2.lua 2> /dev/null
+  (chunk
+    (while <error>
+      <error>))
+  [1]

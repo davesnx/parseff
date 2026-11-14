@@ -798,6 +798,196 @@ val skip_to : int -> unit
     input that the parse has read. Each offset from the position to one that
     {!peek_with} returned is in the input read. *)
 
+(** A token layer on byte input. The parser reads tokens; the input stays bytes,
+    so {!parse_source} and every other combinator work as before.
+
+    A lexer is made from a [read] parser, which reads one token, and a [skip]
+    parser, which skips the whitespace and comments before it. The lexer keeps
+    the last two tokens it read with the position where they start. A rewind
+    puts back only the position: the next read at that position finds the token
+    again, so {!or_}, {!many}, {!capture}, {!recover} and {!look_ahead} work
+    over tokens. The lexer pushes no rewind frame per token.
+
+    {b Where the position is.} After each lexer function, the position is at the
+    start of a token, or at the end of the input. {!Lexer.advance},
+    {!Lexer.next}, {!Lexer.eat} and {!Lexer.expect} move past the token and then
+    over the trivia after it. {!Lexer.peek}, {!Lexer.current},
+    {!Lexer.val-start}, {!Lexer.val-stop} and {!Lexer.range} move over the
+    trivia at the position, if any, and then stay at the token start.
+    {!Lexer.last} and {!Lexer.with_range} do not move the position.
+
+    So a token failure is at the position, and {!expect}, {!one_of_labeled} and
+    [require] treat it as a failure at their start. Trailing trivia is consumed
+    with the last token, so {!parse} and {!parse_source_each} end without an
+    extra call.
+
+    {b Ranges.} {!position}, {!val:with_range}, {!recognize} and the ranges of
+    {!val:context} end after the trivia that follows the last token.
+    {!Lexer.val-stop}, {!Lexer.range}, {!Lexer.last} and {!Lexer.with_range}
+    give ranges with no trivia.
+
+    {b Interactive input.} On a stream that a person types, {!Lexer.advance}
+    past the last token of a statement waits for the first byte after the
+    trivia, often the start of the next line. To answer at the end of a line,
+    end the statement without {!Lexer.advance} (look at the token with
+    {!Lexer.peek} and stop), or give the lexer a [skip] that stops at a newline
+    and read the newline as a token.
+
+    {b Leading trivia.} Trivia before the first lexer call of a parse is not
+    consumed until that call, so a combinator that starts there starts before
+    the token. Call {!Lexer.peek} first.
+
+    {b Cost.} The Lua example of the repository reads 20.9 MB of Lua with 11.4%
+    more instructions on this layer (release build; 10.7% from stdin) than with
+    a lookahead token kept by hand in plain [ref]s and saved and restored around
+    each rewind.
+
+    {b The rule for [read], [skip] and [comment]}: they record no diagnostic
+    with {!warn}, set no {!Ref}, and call no {!commit} or {!cut}. They do not
+    run each time a token is looked at: a token that the lexer holds is not read
+    again, and a token that it dropped is read again, so a {!warn} in [read]
+    could be lost or given twice. Put a lexical error in the token value, and
+    report it from the parser that takes the token. A failure in them is a
+    failure of the parser that asked for the token. When [read], [skip] or
+    [comment] succeeds, the failures of its probes are forgotten, as in
+    {!look_ahead}.
+
+    A lexer value is safe for parses that overlap (a parse inside a parse, two
+    fibers, two domains): each gets correct tokens, but reads them again, and a
+    comment can be given twice. For parses that overlap, create one lexer per
+    parse. A lexer does not keep a finished parse or its input alive.
+
+    In {!parse_source}, a token must fit in [~backtrack_window], or the parse
+    fails with [Backtrack_window_exceeded]. The trivia before it need not fit:
+    it is consumed as it is read. {!parse_source_each} loses no token between
+    two elements.
+
+    Unstable: this module can change in a 1.x release.
+
+    {@ocaml[
+    type tok = Name of string | Int of int | Sym of char | Eof
+
+    let read_tok () =
+      match peek_char () with
+      | None ->
+          Eof
+      | Some 'a' .. 'z' ->
+          Name (take_while (fun c -> c >= 'a' && c <= 'z'))
+      | Some '0' .. '9' ->
+          Int (int_of_string (take_while (fun c -> c >= '0' && c <= '9')))
+      | Some c ->
+          ignore (any_char ());
+          Sym c
+
+    let show_tok = function
+      | Name n ->
+          n
+      | Int i ->
+          string_of_int i
+      | Sym c ->
+          Printf.sprintf "'%c'" c
+      | Eof ->
+          "end of input"
+
+    let tokens = Lexer.create ~skip:skip_whitespace ~show:show_tok read_tok
+    let name_of = function Name n -> Some n | _ -> None
+
+    let call () =
+      let f = Lexer.expect tokens "a name" name_of in
+      Lexer.eat tokens (Sym '(');
+      let args =
+        sep_by
+          (fun () -> Lexer.expect tokens "a name" name_of)
+          (fun () -> Lexer.eat tokens (Sym ','))
+          ()
+      in
+      Lexer.eat tokens (Sym ')');
+      (f, args)
+    ]}
+
+    {@ocaml[
+    # parse "f (x, y)" call;;
+    - : (string * string list, error) result = Ok ("f", ["x"; "y"])
+    # Result.map_error (fun e -> error_message e) (parse "f (x y)" call);;
+    - : (string * string list, string) result =
+    Error "expected ')' or ',', found 'y'"
+    ]} *)
+module Lexer : sig
+  type 'tok t
+  (** A lexer that reads tokens of type ['tok]. *)
+
+  type 'tok token = { value : 'tok; start : int; stop : int }
+  (** A token with the absolute offsets of its first byte and of the byte after
+      it. *)
+
+  val create :
+    ?skip:(unit -> unit) ->
+    ?comment:(unit -> bool) ->
+    ?on_comment:(range -> string -> unit) ->
+    ?show:('tok -> string) ->
+    (unit -> 'tok) ->
+    'tok t
+  (** [create read] is a lexer whose tokens [read] reads.
+
+      Before each token the lexer runs [skip], then while [comment ()] returns
+      [true] it runs [skip] again. [comment] reads one comment and returns
+      [true], or reads nothing and returns [false]; a comment that reads nothing
+      ends the loop. The lexer gives each comment to [on_comment] with its range
+      and text, once per parse: a rewind that reads a comment again does not
+      give it again, unless another parse used the lexer in between. [show]
+      names the expected token in the errors of {!eat}; without it the name is
+      ["token"]. *)
+
+  val current : 'tok t -> 'tok token
+  (** [current lexer] is the token at the position, with its range. It consumes
+      no token; it can move the position over trivia. *)
+
+  val peek : 'tok t -> 'tok
+  (** [peek lexer] is the value of [current lexer]. *)
+
+  val advance : 'tok t -> unit
+  (** [advance lexer] moves the position past the current token and the trivia
+      after it. *)
+
+  val next : 'tok t -> 'tok
+  (** [next lexer] is [peek lexer], then [advance lexer]. *)
+
+  val start : 'tok t -> int
+  (** [start lexer] is the offset of the first byte of the current token. *)
+
+  val stop : 'tok t -> int
+  (** [stop lexer] is the offset after the current token. *)
+
+  val range : 'tok t -> range
+  (** [range lexer] is the range of the current token. *)
+
+  val last : 'tok t -> 'tok token option
+  (** [last lexer] is the token before the position, if the lexer still holds
+      it: after {!advance}, the token it passed. It is [None] at the start of
+      the input, and it can be [None] after a rewind. *)
+
+  val with_range : 'tok t -> (unit -> 'a) -> 'a * range
+  (** [with_range lexer parser] runs [parser] and returns its value with the
+      range from the position to the end of its last token. After a lexer
+      function the position is at a token start, so the range holds no trivia,
+      unlike {!val:with_range}; before the first lexer call it starts with the
+      leading trivia. It reads no token itself, so it fails only where [parser]
+      fails. If [parser] consumes nothing, the range is empty at the position.
+      If the lexer no longer holds the last token, the range ends at the
+      position. *)
+
+  val eat : 'tok t -> 'tok -> unit
+  (** [eat lexer tok] advances past the current token if it is equal to [tok]
+      with structural equality [( = )], and fails otherwise. The error is at the
+      position, expects [tok], covers the current token and shows its text as
+      found, or ["end of input"] for an empty token at the end of the input. *)
+
+  val expect : 'tok t -> string -> ('tok -> 'a option) -> 'a
+  (** [expect lexer label f] advances past the current token if [f] returns
+      [Some v] for it, and returns [v]. Otherwise it fails as {!eat} does, with
+      an error that expects [label]. *)
+end
+
 val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.

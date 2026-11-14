@@ -158,6 +158,7 @@ type source = {
   feed : feed;
   mutable eof : bool;
   mutable window : int;
+  mutable pin : int;
 }
 
 and feed =
@@ -360,7 +361,7 @@ module Source = struct
   type nonrec bigstring = bigstring
 
   let make ~initial ~eof feed : t =
-    { initial; feed; eof; window = default_backtrack_window }
+    { initial; feed; eof; window = default_backtrack_window; pin = max_int }
 
   let of_string s =
     make ~initial:s ~eof:true
@@ -665,7 +666,15 @@ module State = struct
 
   let reclaim_floor (t : t) ~keep_from =
     let frames = t.frames in
-    let floor = ref keep_from in
+    let floor =
+      ref
+        ( match t.source with
+        | Some s ->
+            imin keep_from s.pin
+        | None ->
+            keep_from
+        )
+    in
     for i = t.frames_top - 1 downto 0 do
       let base = i * frame_stride in
       let flags = Array.unsafe_get frames (base + 1) in
@@ -2359,6 +2368,272 @@ let skip_to target =
   if target < st.pos || target > st.input_len then
     invalid_arg "Parseff.skip_to: target is not in the input after the position";
   st.pos <- target
+
+let token_base = 16
+
+let[@inline always] parse_key st =
+  let (Undo top) = st.trail in
+  if top.token != idle_token || st.trail == not_running then
+    top.token
+  else begin
+    let token = ref true in
+    st.trail <-
+      Undo
+        {
+          cell = dummy_cell;
+          old = ();
+          depth = top.depth;
+          token;
+          next = running_empty;
+        };
+    token
+  end
+
+module Lexer = struct
+  type 'tok token = { value : 'tok; start : int; stop : int }
+
+  type 'tok slot = {
+    mutable at : int;
+    mutable token : 'tok token;
+    mutable after : int;
+  }
+
+  type 'tok cache = { key : bool ref; s0 : 'tok slot; s1 : 'tok slot }
+  type mark = { reader : bool ref; mutable upto : int }
+
+  type 'tok t = {
+    skip : unit -> unit;
+    comment : (unit -> bool) option;
+    on_comment : range -> string -> unit;
+    show : ('tok -> string) option;
+    read : unit -> 'tok;
+    mutable cache : 'tok cache option;
+    mutable mark : mark;
+  }
+
+  let create ?(skip = ignore) ?comment ?(on_comment = fun _ _ -> ()) ?show read
+      =
+    {
+      skip;
+      comment;
+      on_comment;
+      show;
+      read;
+      cache = None;
+      mark = { reader = idle_token; upto = -1 };
+    }
+
+  let[@inline always] key_of st =
+    let (Undo top) = st.trail in
+    top.token
+
+  let[@inline never] comments l st comment =
+    let key = parse_key st in
+    let m = l.mark in
+    let m =
+      if m.reader == key then
+        m
+      else begin
+        let m = { reader = key; upto = -1 } in
+        l.mark <- m;
+        m
+      end
+    in
+    let rec loop () =
+      let start = st.pos in
+      if comment () && st.pos > start then begin
+        let stop = st.pos in
+        if start >= m.upto then begin
+          m.upto <- stop;
+          l.on_comment { start; stop } (slice st start (stop - start))
+        end;
+        l.skip ();
+        loop ()
+      end
+    in
+    loop ()
+
+  let[@inline always] trivia l st =
+    let saved = st.far in
+    if saved != far_none then st.far <- far_none;
+    match
+      l.skip ();
+      match l.comment with None -> () | Some comment -> comments l st comment
+    with
+    | () ->
+        if st.far != saved then st.far <- saved
+    | exception exn ->
+        far_merge st saved;
+        raise exn
+
+  let read l st =
+    let start = st.pos in
+    let value = l.read () in
+    { value; start; stop = st.pos }
+
+  let read_pinned l st src at =
+    let pin = src.pin in
+    if at < pin then src.pin <- at;
+    match read l st with
+    | token ->
+        src.pin <- pin;
+        token
+    | exception exn ->
+        src.pin <- pin;
+        raise exn
+
+  let[@inline always] read_token l st at =
+    let saved = st.far in
+    if saved != far_none then st.far <- far_none;
+    let token =
+      match
+        match st.source with
+        | None ->
+            read l st
+        | Some src ->
+            read_pinned l st src at
+      with
+      | token ->
+          token
+      | exception exn ->
+          far_merge st saved;
+          raise exn
+    in
+    st.pos <- at;
+    if st.far != saved then st.far <- saved;
+    token
+
+  let[@inline never] fill l st =
+    let key = parse_key st in
+    match l.cache with
+    | Some c when c.key == key ->
+        let pos = st.pos in
+        let s0 = c.s0 and s1 = c.s1 in
+        if pos <> s0.after && pos <> s1.after then trivia l st;
+        let at = st.pos in
+        if s0.at = at then
+          s0
+        else if s1.at = at then
+          s1
+        else begin
+          let token = read_token l st at in
+          let s =
+            if s0.at < s1.at then
+              s0
+            else
+              s1
+          in
+          s.at <- at;
+          s.token <- token;
+          s.after <- -1;
+          s
+        end
+    | _ ->
+        trivia l st;
+        let at = st.pos in
+        let token = read_token l st at in
+        let s = { at; token; after = -1 } in
+        l.cache <- Some { key; s0 = s; s1 = { at = -1; token; after = -1 } };
+        s
+
+  let[@inline always] find l st =
+    match l.cache with
+    | Some c when c.key == key_of st ->
+        let pos = st.pos in
+        let s = c.s0 in
+        if s.at = pos then
+          s
+        else
+          let s = c.s1 in
+          if s.at = pos then
+            s
+          else
+            fill l st
+    | _ ->
+        fill l st
+
+  let[@inline always] pass l st s =
+    st.pos <- s.token.stop;
+    trivia l st;
+    s.after <- st.pos
+
+  let current l = (find l (get_state ())).token
+  let peek l = (find l (get_state ())).token.value
+
+  let advance l =
+    let st = get_state () in
+    pass l st (find l st)
+
+  let next l =
+    let st = get_state () in
+    let s = find l st in
+    let v = s.token.value in
+    pass l st s;
+    v
+
+  let start l = (find l (get_state ())).token.start
+  let stop l = (find l (get_state ())).token.stop
+
+  let range l =
+    let t = (find l (get_state ())).token in
+    { start = t.start; stop = t.stop }
+
+  let last_slot l st =
+    match l.cache with
+    | Some c when c.key == key_of st ->
+        let pos = st.pos in
+        if c.s0.after = pos then
+          Some c.s0.token
+        else if c.s1.after = pos then
+          Some c.s1.token
+        else
+          None
+    | _ ->
+        None
+
+  let last l = last_slot l (get_state ())
+
+  let with_range l p =
+    let st = get_state () in
+    let start = st.pos in
+    let v = p () in
+    let pos = st.pos in
+    if pos <= start then
+      (v, { start = pos; stop = pos })
+    else
+      let stop =
+        match last_slot l st with
+        | Some t when t.stop >= start ->
+            t.stop
+        | _ ->
+            pos
+      in
+      (v, { start; stop })
+
+  let[@inline never] mismatch st t label =
+    fail_str st t.start
+      (((token_base + t.stop - t.start) lsl 3) lor tag_big)
+      label
+
+  let eat l v =
+    let st = get_state () in
+    let s = find l st in
+    if s.token.value = v then
+      pass l st s
+    else
+      mismatch st s.token
+        (match l.show with Some show -> show v | None -> "token")
+
+  let expect l label f =
+    let st = get_state () in
+    let s = find l st in
+    match f s.token.value with
+    | Some v ->
+        pass l st s;
+        v
+    | None ->
+        mismatch st s.token label
+end
 
 let ctx_stride = 2
 let ctx_cut_bit = 1
@@ -4426,6 +4701,8 @@ let expected_of_far f =
           else
             string_of_int payload ^ " bytes"
         )
+    else if tag = tag_big && payload >= token_base then
+      Label s
     else if tag = tag_big && payload >= 2 then begin
       let label, _, _ = field_mismatch payload s in
       Label label
@@ -4530,15 +4807,36 @@ let found_of st pos =
     end
   end
 
+let token_found st pos width =
+  let found =
+    if width = 0 && pos >= st.input_len then
+      "end of input"
+    else if width = 0 then
+      "an empty token"
+    else if pos < st.base || pos + 1 > st.input_len then
+      Printf.sprintf "a token of %d bytes" width
+    else
+      let n = imin (imin width 32) (st.input_len - pos) in
+      let text = escape_text (Bytes.sub_string st.input (pos - st.base) n) in
+      if n < width then
+        "'" ^ text ^ "'..."
+      else
+        "'" ^ text ^ "'"
+  in
+  ("", found, width)
+
 let found_of_far st f pos =
   let all_short = ref true and all_value = ref true and value = ref None in
+  let token = ref None in
   for i = 0 to f.n - 1 do
     let kind = far_item_kind f i in
     let tag = kind land 7 and payload = kind lsr 3 in
     if kind <> none_kind then begin
       if not (tag = tag_bytes || (tag = tag_big && payload = 0)) then
         all_short := false;
-      if tag = tag_big && payload >= 2 then begin
+      if tag = tag_big && payload >= token_base then
+        token := Some (token_found st pos (payload - token_base))
+      else if tag = tag_big && payload >= 2 then begin
         let ((_, found, _) as v) = field_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
@@ -4549,17 +4847,24 @@ let found_of_far st f pos =
         all_value := false
     end
   done;
-  if !all_short then
-    if pos >= st.input_len then
-      (End, { start = pos; stop = pos })
-    else
-      (Short (st.input_len - pos), { start = pos; stop = st.input_len })
-  else
-    match !value with
-    | Some (_, found, width) when !all_value ->
-        (Value found, { start = pos; stop = imin st.input_len (pos + width) })
-    | _ ->
-        found_of st pos
+  match !token with
+  | Some (_, found, width) ->
+      (Value found, { start = pos; stop = imin st.input_len (pos + width) })
+  | None -> (
+      if !all_short then
+        if pos >= st.input_len then
+          (End, { start = pos; stop = pos })
+        else
+          (Short (st.input_len - pos), { start = pos; stop = st.input_len })
+      else
+        match !value with
+        | Some (_, found, width) when !all_value ->
+            ( Value found,
+              { start = pos; stop = imin st.input_len (pos + width) }
+            )
+        | _ ->
+            found_of st pos
+    )
 
 let build st ~pos ?(notes = []) ?help kind span frames =
   let idx =
@@ -5227,24 +5532,7 @@ module Ref = struct
 
   let set c value =
     let st = State.current () in
-    let (Undo top) = st.trail in
-    let token =
-      if top.token != idle_token || st.trail == not_running then
-        top.token
-      else begin
-        let token = ref true in
-        st.trail <-
-          Undo
-            {
-              cell = dummy_cell;
-              old = ();
-              depth = top.depth;
-              token;
-              next = running_empty;
-            };
-        token
-      end
-    in
+    let token = parse_key st in
     let owner = c.owner in
     if owner != token then begin
       if !owner then

@@ -24,6 +24,7 @@
   test_numbers
   test_sep_by_recover
   test_peek
+  test_lexer
   test_differential)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff alcotest re uucp))
