@@ -869,10 +869,15 @@ let[@inline never] append st ~floor ~spare ~own chunk off n =
       st.input <- Bytes.unsafe_of_string chunk
     else begin
       let room =
-        if spare then
-          imax kept n
-        else
+        if not spare then
           0
+        else if
+          kept + n + imax kept n > young_buf_size
+          && (2 * kept) + n <= young_buf_size
+        then
+          young_buf_size - kept - n
+        else
+          imax kept n
       in
       let buf = Bytes.create (kept + n + room) in
       Bytes.blit st.input drop buf 0 kept;

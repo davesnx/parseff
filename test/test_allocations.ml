@@ -204,6 +204,43 @@ let test_head_in_large_chunk () =
        most 30000"
       (String.length chunk) actual
 
+let first_read_source data first =
+  let sent = ref 0 in
+  Parseff.Source.of_function (fun buf off len ->
+      let want =
+        if !sent = 0 then
+          first
+        else
+          len
+      in
+      let n = min (min want len) (String.length data - !sent) in
+      Bytes.blit_string data !sent buf off n;
+      sent := !sent + n;
+      n
+  )
+
+let direct_major_words () =
+  let _, promoted, major = Gc.counters () in
+  major -. promoted
+
+let check_first_read first =
+  let data = head ^ String.make (4 * first) 'x' in
+  let parse () = parse_head (first_read_source data first) in
+  run_n warmup_iterations parse;
+  Gc.full_major ();
+  let before = direct_major_words () in
+  run_n iterations parse;
+  let actual = (direct_major_words () -. before) /. Float.of_int iterations in
+  if actual > 50. then
+    Alcotest.failf
+      "a first read of %d bytes allocated %.1f words on the major heap per \
+       parse, expected at most 50"
+      first actual
+
+let test_short_message () =
+  check_first_read 1100;
+  check_first_read 1500
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -220,6 +257,7 @@ let () =
           Alcotest.test_case "head as one chunk" `Quick test_one_chunk_head;
           Alcotest.test_case "head in a large chunk" `Quick
             test_head_in_large_chunk;
+          Alcotest.test_case "short message" `Quick test_short_message;
         ]
       );
     ]
