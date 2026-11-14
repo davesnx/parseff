@@ -917,6 +917,52 @@ let test_buf_size_sets_read_lengths () =
     )
     [ 1; 7; 512; 4096; 8192 ]
 
+let regex_read_lengths ?backtrack_window ~initial_buffer_size input =
+  let pos = ref 0 in
+  let lens = ref [] in
+  let src =
+    Parseff.Source.of_function ~initial_buffer_size (fun buf off len ->
+        lens := len :: !lens;
+        let n = min len (String.length input - !pos) in
+        Bytes.blit_string input !pos buf off n;
+        pos := !pos + n;
+        n
+    )
+  in
+  let letters = Re.compile (Re.rep1 (Re.rg 'a' 'z')) in
+  Alcotest.(check (result string reject))
+    (Printf.sprintf "initial_buffer_size %d" initial_buffer_size)
+    (Ok input)
+    (Parseff.parse_source ?backtrack_window src (fun () ->
+         Parseff.match_regex letters
+     )
+    );
+  List.rev !lens
+
+let test_regex_read_lengths () =
+  let input =
+    String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  List.iter
+    (fun initial_buffer_size ->
+      let name = Printf.sprintf "initial_buffer_size %d" initial_buffer_size in
+      match regex_read_lengths ~initial_buffer_size input with
+      | first :: rest ->
+          Alcotest.(check int) (name ^ ": first read") initial_buffer_size first;
+          Alcotest.(check (list int))
+            (name ^ ": later reads")
+            (List.map (fun _ -> max initial_buffer_size 4096) rest)
+            rest
+      | [] ->
+          Alcotest.fail "Expected reads"
+    )
+    [ 1; 7; 512; 4096; 8192 ];
+  Alcotest.(check (list int))
+    "backtrack_window 1000" [ 512; 488; 300 ]
+    (regex_read_lengths ~backtrack_window:1000 ~initial_buffer_size:512
+       (String.sub input 0 700)
+    )
+
 let test_buf_size_rejected () =
   List.iter
     (fun initial_buffer_size ->
@@ -2376,6 +2422,8 @@ let () =
         [
           test_case "sets the read lengths" `Quick
             test_buf_size_sets_read_lengths;
+          test_case "sets the read lengths of match_regex" `Quick
+            test_regex_read_lengths;
           test_case "below 1 is rejected" `Quick test_buf_size_rejected;
         ]
       );

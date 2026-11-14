@@ -226,7 +226,7 @@ This is the low-level escape hatch for byte sources that natively fill a pre-all
     Unix.recv socket buf off len []
   )
 ```
-The `~initial_buffer_size` parameter sets the first size of the read buffer, which is the `len` of the first `read` call (default: 2040 bytes). After a read that fills the buffer, the next read gets a buffer of 4096 bytes, or of `initial_buffer_size` bytes when that is larger. The larger buffer is allocated only when that read happens. A read that `match_regex` makes to look ahead does not use the read buffer: its `len` can be as large as the backtrack window. A source made for one short message, such as an HTTP request head, allocates less with an `initial_buffer_size` near the size of the message:
+The `~initial_buffer_size` parameter sets the first size of the read buffer, which is the `len` of the first `read` call (default: 2040 bytes). After a read that fills the buffer, the next read gets a buffer of 4096 bytes, or of `initial_buffer_size` bytes when that is larger. The larger buffer is allocated only when that read happens. A source made for one short message, such as an HTTP request head, allocates less with an `initial_buffer_size` near the size of the message:
 
 ```ocaml
   let request_head = Parseff.Source.of_function ~initial_buffer_size:512 (fun buf off len ->
