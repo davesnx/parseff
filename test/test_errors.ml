@@ -3071,7 +3071,9 @@ let test_error_start_in_dropped_input () =
         "input:2:101: [error] here";
         "1 |   {";
         "  | \xE2\x95\xAD\xE2\x94\x80\xE2\x95\xAF";
-        "2 | \xE2\x94\x82 ...tail";
+        "2 | \xE2\x94\x82 ..."
+        ^ String.concat "" (List.init 200 (fun _ -> "\\x80"))
+        ^ "tail";
         "  | \xE2\x95\xB0\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80^";
         "  * while parsing block, from 1:1";
       ]
@@ -3082,6 +3084,35 @@ let test_error_start_in_dropped_input () =
   Alcotest.(check string)
     "framed, ~source" framed_render
     (render ~source:framed_input framed_input framed)
+
+let test_excerpt_contains_error () =
+  let render ?source input =
+    match
+      Parseff.parse_source ~consume:`Partial (Parseff.Source.of_string input)
+        (fun () ->
+          ignore (Parseff.take 100);
+          Parseff.fail "here"
+      )
+    with
+    | Stdlib.Ok () ->
+        Alcotest.fail "expected an error"
+    | Stdlib.Error (e : Parseff.error) ->
+        Parseff.render_error ~name:"input" ?source e
+  in
+  let escapes n = String.concat "" (List.init n (fun _ -> "\\x80")) in
+  let check label input row =
+    let expected = lines [ "input:1:101: [error] here"; row; "  |    ^" ] in
+    Alcotest.(check string) label expected (render input);
+    Alcotest.(check string)
+      (label ^ ", ~source") expected
+      (render ~source:input input)
+  in
+  check "run of continuation bytes before the error"
+    (String.make 300 '\x80' ^ "tail\n")
+    ("1 | ..." ^ escapes 200 ^ "tail");
+  check "continuation bytes to the window end"
+    (String.make 600 '\x80' ^ "\n")
+    ("1 | ..." ^ escapes 237 ^ "...")
 
 let test_location_after_dropped_lines () =
   let input = "ab\ncd\n" ^ String.make 50 'e' ^ "\nf" in
@@ -4197,6 +4228,8 @@ let () =
             test_cut_line_context_column;
           test_case "error start in dropped input" `Quick
             test_error_start_in_dropped_input;
+          test_case "excerpt contains the error" `Quick
+            test_excerpt_contains_error;
           test_case "location after dropped lines" `Quick
             test_location_after_dropped_lines;
           test_case "context column in code points" `Quick

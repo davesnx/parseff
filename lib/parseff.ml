@@ -3797,14 +3797,15 @@ let window_start s len line_start focus =
   let start =
     ref (imin len (line_start + imax 0 (focus - (window_size / 2))))
   in
-  while is_continuation s len !start do
+  while !start < line_start + focus && is_continuation s len !start do
     incr start
   done;
   !start
 
 let window_stop s len start limit =
   let stop = ref (imin limit (start + window_size)) in
-  while !stop > start && is_continuation s len !stop do
+  let floor = imax start (!stop - 3) in
+  while !stop > floor && is_continuation s len !stop do
     decr stop
   done;
   !stop
