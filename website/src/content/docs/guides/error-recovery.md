@@ -71,7 +71,7 @@ Without recovery, the parse reports only the first of the two broken statements:
 ## `capture`
 
 ```ocaml
-val capture : (unit -> 'a) -> ('a, error) result
+val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 ```
 
 `Parseff.capture` runs a parser and returns its failure as a value. On a failure, the position goes back to where `capture` started. Unlike `Parseff.or_`, `capture` also catches the failure of a statement that `cut` decided:
@@ -95,6 +95,9 @@ Ok "expected integer, found ';', back at 0"
 
 ```ocaml
 val recover :
+  ?release:bool ->
+  ?outer:bool ->
+  ?record:(error -> error Diagnostics.entry list -> unit) ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -148,7 +151,7 @@ x = 1; <hole>; z = 3; <hole>
 
 `sync` decides where parsing continues. A good sync point is a token that ends the broken construct. For a statement it is the `;`, and `skip_statement` consumes it.
 
-In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. Use `capture` here, not `recover`: a hole can be empty, as in `[1, , 3]`, and `recover` always consumes input. At the end of the input, call the element parser directly, as `recover` does. Every element now succeeds, so check for `]` with `Parseff.look_ahead` first. If lists can nest, count the brackets as you skip.
+In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. A hole can also be empty, as in `[1, , 3]`, and `recover` always consumes input. Use `Parseff.sep_by_recover`: it parses the list as `sep_by` does and puts a hole in the place of each element that fails. For `~sync`, call `Parseff.skip_nested`: it stops before the next `,` or the `]` that closes the list, and skips nested brackets as a whole. A failing first element gives a list with one hole, so check for `]` first.
 
 ```ocaml
 let array errors () =
@@ -156,25 +159,18 @@ let array errors () =
       let _ = Parseff.char '[' in
       ws ();
       let xs =
-        Parseff.or_
-          (fun () ->
-            let _ = Parseff.look_ahead (fun () -> Parseff.char ']') in
-            [])
-          (Parseff.sep_by
-             (fun () ->
-               if Parseff.peek_char () = None then Some (integer ())
-               else
-                 match Parseff.capture (fun () -> Some (integer ())) with
-                 | Ok x -> x
-                 | Error e ->
-                     Parseff.warn ~pos:e.range.start errors e;
-                     Parseff.skip_while (fun c -> c <> ',' && c <> ']');
-                     None)
-             (fun () ->
-               ws ();
-               let _ = Parseff.char ',' in
-               ws ()))
-          ()
+        if Parseff.peek_char () = Some ']' then []
+        else
+          Parseff.sep_by_recover errors
+            ~sync:(fun () ->
+              Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
+            (fun () -> Some (integer ()))
+            (fun () ->
+              ws ();
+              let _ = Parseff.char ',' in
+              ws ())
+            (fun _ -> None)
+            ()
       in
       ws ();
       let _ = Parseff.char ']' in
@@ -213,6 +209,13 @@ let run_array input =
   |     ^
   * while parsing array, from 1:1
 - : unit = ()
+# run_array "[1, [2 3], 4]";;
+1; <hole>; 4
+1:5: [error] expected integer, found '['
+1 | [1, [2 3], 4]
+  |     ^
+  * while parsing array, from 1:1
+- : unit = ()
 # run_array "[]";;
 - : unit = ()
 # run_array "[1,]";;
@@ -229,6 +232,8 @@ let run_array input =
   * while parsing array, from 1:1
 - : unit = ()
 ```
+
+A failed element loses the errors that it recorded itself. To keep them, pass `~record` to `sep_by_recover`, as to `recover` below, or use `Parseff.capture_with`, which returns them with the error.
 
 ## A list with a closing token
 
@@ -324,4 +329,4 @@ Invalid_argument
  "Parseff.recover: errors is not the collector given to the runner".
 ```
 
-**In streaming, `capture` keeps its input.** A construct longer than `~backtrack_window` fails with `Backtrack_window_exceeded`.
+**In streaming, `capture` keeps its input.** A construct longer than `~backtrack_window` fails with `Backtrack_window_exceeded`. With `~release:true`, a `cut` or `commit` inside the parser moves the rewind point of `capture` to that call, so only the input read after it must fit in the window, and a construct that calls `cut` after each decided part can be longer.

@@ -47,6 +47,7 @@ diagnostics from the collector after the parse. They are there for [Ok] and for
   ?max_depth:int ->
   ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result]}

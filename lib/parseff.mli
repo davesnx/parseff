@@ -591,7 +591,7 @@ val with_range : (unit -> 'a) -> 'a * range
     Example:
     {@ocaml[
     let checked_number () =
-      let n, range = with_range number in
+      let n, range = with_range integer in
       if n > 255 then
         fail ~notes:[ { at = Some range; text = "this value" } ] "out of range";
       n
@@ -1006,14 +1006,14 @@ val skip_nested :
     Each kind of bracket is matched with its own kind. A closing character that
     does not match the innermost open bracket closes the nearest open bracket of
     its kind, and the brackets inside that one are taken as not closed. In
-    {v [1 2), 3 v} the closing parenthesis has no opening parenthesis, so the
-    skip stops before it.
+    [\[1 2), 3] the closing parenthesis has no opening parenthesis, so the skip
+    stops before it.
 
-    [~atom] is a parser for a piece of input that the skip must take as a
-    whole, such as a string literal or a comment, so that a bracket or a
-    separator inside it is not counted. The skip tries [atom] at each position;
-    where [atom] fails or consumes nothing, the skip reads the next character.
-    The failures of [atom] do not appear in later errors.
+    [~atom] is a parser for a piece of input that the skip must take as a whole,
+    such as a string literal or a comment, so that a bracket or a separator
+    inside it is not counted. The skip tries [atom] at each position; where
+    [atom] fails or consumes nothing, the skip reads the next character. The
+    failures of [atom] do not appear in later errors.
 
     Example:
     {@ocaml[
@@ -1105,13 +1105,15 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead} or {!peek_with}.
+    backtracks after the cut. It stops at a {!look_ahead}, {!peek_with} or
+    {!capture}. With [capture ~release:true], it moves the rewind point of the
+    [capture] to the position of the cut and continues.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
     failure. If the context ends without failing, the outer frames stay as they
-    were. Without an enclosing {!val:context}, [cut ()] seals every frame down
-    to the first {!look_ahead}.
+    were. Without an enclosing {!val:context}, [cut ()] seals the frames down to
+    the start of the parse, and stops at the same places.
 
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
