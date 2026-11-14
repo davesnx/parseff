@@ -564,9 +564,9 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
     When a parser fails and the position goes back, the diagnostics recorded
     since that position are removed. This holds for a branch of {!or_} or
     {!one_of}, an iteration of {!many}, {!optional}, and a {!capture} or
-    {!recover} whose parser fails. It also holds for a successful {!look_ahead},
-    and for a repetition iteration that succeeds without consuming input. A
-    {!Ref.set} is undone in the same cases.
+    {!recover} whose parser fails. It also holds for a successful {!look_ahead}
+    or {!peek_with}, and for a repetition iteration that succeeds without
+    consuming input. A {!Ref.set} is undone in the same cases.
 
     Thus a diagnostic recorded inside a construct is lost when an enclosing
     {!capture} or {!recover} fails later: only the error of the enclosing
@@ -694,7 +694,74 @@ val look_ahead : (unit -> 'a) -> 'a
     (* position hasn't moved *)
     ]} *)
 
-val capture : (unit -> 'a) -> ('a, error) result
+val peek_with : (unit -> 'a) -> 'a * int
+(** [peek_with parser] runs [parser] and returns its value with the position
+    where it stopped. It consumes no input: the position stays where it was
+    before. Fails if [parser] fails.
+
+    It follows the rule of {!look_ahead}: diagnostics recorded by [parser] with
+    {!warn} and {!Ref} writes made by [parser] are removed, a {!commit} or
+    {!cut} inside [parser] has no effect outside it, and the failures of its
+    probes are forgotten when it succeeds.
+
+    Use it with {!skip_to} to read a token once: look at the token, decide, then
+    move after it without a second scan. A parser with one token of lookahead
+    keeps the last result with the position where it was read. The position is
+    all that a rewind must put back, so {!or_}, {!many}, {!capture} and
+    {!recover} work with it.
+
+    {@ocaml[
+    type token = Name of string | Symbol of char | End
+
+    let token () =
+      skip_whitespace ();
+      match peek_char () with
+      | None ->
+          End
+      | Some 'a' .. 'z' ->
+          Name (take_while (fun c -> c >= 'a' && c <= 'z'))
+      | Some c ->
+          ignore (any_char ());
+          Symbol c
+
+    let read_at = ref (-1)
+    let current = ref End
+    let stop = ref 0
+
+    let peek () =
+      let here = position () in
+      if !read_at <> here then begin
+        let t, after = peek_with token in
+        read_at := here;
+        current := t;
+        stop := after
+      end;
+      !current
+
+    let advance () =
+      ignore (peek ());
+      skip_to !stop
+    ]}
+
+    Set [read_at] to [-1] before each parse.
+
+    To report an error of a token, return it in the value of [token] and record
+    it with {!warn} in [advance].
+
+    In {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window]. This includes the whitespace and comments that it skips
+    before the token. *)
+
+val skip_to : int -> unit
+(** [skip_to target] moves the position forward to [target], an absolute offset
+    as {!position} returns it. It reads nothing and never fails. Use it with a
+    position that {!peek_with} returned.
+
+    Raises [Invalid_argument] if [target] is before the position, or after the
+    input that the parse has read. Each offset from the position to one that
+    {!peek_with} returned is in the input read. *)
+
+val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
 
@@ -708,6 +775,18 @@ val capture : (unit -> 'a) -> ('a, error) result
     past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
     not caught. In {!parse_source}, the input that [parser] reads must fit in
     [~backtrack_window].
+
+    With [~release:true], a {!commit} or {!cut} in [parser] that reaches
+    [capture] moves the rewind point to the position of that call. A later
+    failure of [parser] then goes back to that position, not to the start. It
+    removes only the diagnostics and the {!Ref} changes made after that call;
+    those made before it stay, as after a success. Do not parse the same input
+    again with another parser after [Error e]: skip from the current position,
+    and from [e.range.start] when it is later. A {!cut} also continues to the
+    frames outside [capture]. In {!parse_source}, only the input that [parser]
+    reads after the rewind point must fit in [~backtrack_window], so a parser
+    that calls {!cut} after each decided part can be longer than the window. The
+    default is [false].
 
     Example:
     {@ocaml[
@@ -752,6 +831,7 @@ val capture_with :
     ]} *)
 
 val recover :
+  ?release:bool ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -764,6 +844,10 @@ val recover :
 
     The errors that [parser] recorded in [errors] before it failed are removed,
     as with {!capture}: only [e] stays. To keep them, use {!capture_with}.
+
+    [~release] is given to {!capture}. With [~release:true], [sync] starts at
+    the last {!commit} or {!cut} that reached [recover], and the errors recorded
+    before that call stay.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
@@ -788,6 +872,88 @@ val recover :
         ()
     ]} *)
 
+val sep_by_recover :
+  error Diagnostics.t ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (unit -> 'b) ->
+  (error -> 'a) ->
+  unit ->
+  'a list
+(** [sep_by_recover errors ~sync element separator hole] parses one or more
+    occurrences of [element] with [separator] between each pair, as {!sep_by}
+    does, and recovers from each [element] that fails. For a failure [e], it
+    records [e] in [errors], goes back to the start of the element, calls
+    [sync ()] to skip the broken element, and puts [hole e] in the list.
+
+    [sync] must stop before the next separator and before the token that closes
+    the list: {!skip_nested} does this for lists in brackets. Unlike {!recover},
+    [sep_by_recover] does not consume input when [sync] consumes nothing, so a
+    hole can be empty, as in [f(1, , 3)]. The list ends where [separator] fails.
+
+    A failure at the end of the input is not recovered: the parse fails there,
+    as with {!sep_by}. A failing first element gives a list with one hole, so
+    for a list that can be empty, test for the closing token first. [errors]
+    must be the collector given to the runner as [~diagnostics]; otherwise
+    [sep_by_recover] raises [Invalid_argument].
+
+    Example:
+    {@ocaml[
+    let arguments errors () =
+      let _ = char '(' in
+      let args =
+        if peek_char () = Some ')' then
+          []
+        else
+          sep_by_recover errors
+            ~sync:(fun () ->
+              skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ',')
+            )
+            expr
+            (fun () -> char ',')
+            (fun _ -> Hole)
+            ()
+      in
+      let _ = char ')' in
+      args
+    (* "(1, [2 3], 4)" -> [1; Hole; 4], with one error recorded *)
+    ]} *)
+
+val skip_nested :
+  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit
+(** [skip_nested pairs stop] skips input up to the end of a broken list element.
+    It is made for the [~sync] of {!sep_by_recover} and {!recover}.
+
+    [pairs] gives the brackets of the grammar as [(opening, closing)]
+    characters. The skip stops, without consuming, before the first of:
+
+    - a character for which [stop] is true, outside all brackets that the skip
+      opened;
+    - a closing character whose opening character the skip did not consume: it
+      closes a construct around the element;
+    - the end of the input.
+
+    Each kind of bracket is matched with its own kind. A closing character that
+    does not match the innermost open bracket closes the nearest open bracket of
+    its kind, and the brackets inside that one are taken as not closed. In
+    {v [1 2), 3 v} the closing parenthesis has no opening parenthesis, so the
+    skip stops before it.
+
+    [~atom] is a parser for a piece of input that the skip must take as a
+    whole, such as a string literal or a comment, so that a bracket or a
+    separator inside it is not counted. The skip tries [atom] at each position;
+    where [atom] fails or consumes nothing, the skip reads the next character.
+    The failures of [atom] do not appear in later errors.
+
+    Example:
+    {@ocaml[
+    let skip_argument () =
+      skip_nested ~atom:string_literal
+        [ ('(', ')'); ('[', ']'); ('{', '}') ]
+        (fun c -> c = ',')
+    (* on "g(1, 2) \"a,b\" x, 3)" it stops before ", 3)" *)
+    ]} *)
+
 val commit : unit -> unit
 (** [commit ()] seals the innermost active choice or repetition frame: the
     nearest enclosing {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} or
@@ -801,7 +967,8 @@ val commit : unit -> unit
     expected.
 
     [commit ()] does nothing outside any frame. It does nothing inside
-    {!look_ahead}, and it does not reach the frames outside the look-ahead.
+    {!look_ahead} or {!peek_with}, and it does not reach the frames outside the
+    look-ahead.
 
     [commit ()] does not seal or release outer frames. In
     [many (fun () -> or_ a b ())], a [commit ()] inside [a] seals the [or_]
@@ -868,7 +1035,7 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead}.
+    backtracks after the cut. It stops at a {!look_ahead} or {!peek_with}.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the

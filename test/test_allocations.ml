@@ -201,7 +201,7 @@ let direct_major_words_per_call f =
   (after -. before) /. Float.of_int iterations
 
 let test_full_first_read () =
-  let check name initial_buffer_size =
+  let check name initial_buffer_size at_most =
     Alcotest.(check (result int reject))
       (name ^ " head lines") (Ok 11)
       (parse_full_head ?initial_buffer_size ());
@@ -210,14 +210,15 @@ let test_full_first_read () =
           parse_full_head ?initial_buffer_size ()
       )
     in
-    if actual > 50. then
+    if actual > at_most then
       Alcotest.failf
         "a request head after a full first read allocated %.1f words directly \
-         on the major heap per parse with %s, expected at most 50"
-        actual name
+         on the major heap per parse with %s, expected at most %.0f"
+        actual name at_most
   in
-  check "~initial_buffer_size:512" (Some 512);
-  check "the default size" None
+  let input_with_room bytes = Float.of_int (2 * bytes / (Sys.word_size / 8)) in
+  check "~initial_buffer_size:512" (Some 512) 50.;
+  check "the default size" None (input_with_room 2040 +. 50.)
 
 let () =
   Alcotest.run "Allocations"

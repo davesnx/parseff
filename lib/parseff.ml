@@ -4,20 +4,19 @@ let one_char_strings = Array.init 256 (fun i -> String.make 1 (Char.chr i))
 
 let short_sub inp off len =
   let b = Bytes.create len in
-  Bytes.unsafe_set b 0 (String.unsafe_get inp off);
-  Bytes.unsafe_set b 1 (String.unsafe_get inp (off + 1));
+  Bytes.unsafe_set b 0 (Bytes.unsafe_get inp off);
+  Bytes.unsafe_set b 1 (Bytes.unsafe_get inp (off + 1));
   if len > 2 then begin
-    Bytes.unsafe_set b 2 (String.unsafe_get inp (off + 2));
+    Bytes.unsafe_set b 2 (Bytes.unsafe_get inp (off + 2));
     if len > 3 then begin
-      Bytes.unsafe_set b 3 (String.unsafe_get inp (off + 3));
+      Bytes.unsafe_set b 3 (Bytes.unsafe_get inp (off + 3));
       if len > 4 then begin
-        Bytes.unsafe_set b 4 (String.unsafe_get inp (off + 4));
+        Bytes.unsafe_set b 4 (Bytes.unsafe_get inp (off + 4));
         if len > 5 then begin
-          Bytes.unsafe_set b 5 (String.unsafe_get inp (off + 5));
+          Bytes.unsafe_set b 5 (Bytes.unsafe_get inp (off + 5));
           if len > 6 then begin
-            Bytes.unsafe_set b 6 (String.unsafe_get inp (off + 6));
-            if len > 7 then
-              Bytes.unsafe_set b 7 (String.unsafe_get inp (off + 7))
+            Bytes.unsafe_set b 6 (Bytes.unsafe_get inp (off + 6));
+            if len > 7 then Bytes.unsafe_set b 7 (Bytes.unsafe_get inp (off + 7))
           end
         end
       end
@@ -29,19 +28,19 @@ let[@inline always] string_slice inp off len total_len =
   if len = 0 then
     ""
   else if len = 1 then
-    Array.unsafe_get one_char_strings (Char.code (String.unsafe_get inp off))
+    Array.unsafe_get one_char_strings (Char.code (Bytes.unsafe_get inp off))
   else if off = 0 && len = total_len then
-    inp
+    Bytes.unsafe_to_string inp
   else if len <= 8 then
     short_sub inp off len
   else
-    String.sub inp off len
+    Bytes.sub_string inp off len
 
 let[@inline always] span_to_string s =
   let total_len = String.length s.buf in
   if s.off < 0 || s.len < 0 || s.off > total_len - s.len then
     invalid_arg "Parseff.span_to_string";
-  string_slice s.buf s.off s.len total_len
+  string_slice (Bytes.unsafe_of_string s.buf) s.off s.len total_len
 
 type location = { offset : int; line : int; col : int }
 type range_data = { start : int; stop : int }
@@ -136,8 +135,10 @@ let frame_last_branch = 3
 let frame_kind_mask = 3
 let frame_committed_bit = 4
 let frame_pin_bit = 8
+let frame_capture_bit = 16
+let frame_capture = frame_barrier lor frame_capture_bit
 let frame_stride = 3
-let frame_trail_shift = 4
+let frame_trail_shift = 5
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -232,11 +233,14 @@ let rec running_empty =
     }
 
 (* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
-   [base, input_len) are buffered. [input] is never mutated, only replaced, so
-   slices taken from it stay valid after a refill. Memory input has
-   [base = 0] and no source. *)
+   [base, input_len) are buffered. While a source is open, [input] can be
+   longer than [input_len - base]: the bytes after that length are not input,
+   and a refill writes there. Buffered bytes are never changed. [input] is
+   full when it has no such room; a full [input] is never written again, so
+   only a full [input] is shared as a string. Memory input is the caller's
+   string, with [base = 0] and no source. *)
 type state = {
-  mutable input : string;
+  mutable input : bytes;
   mutable pos : int;
   mutable input_len : int;
   mutable base : int;
@@ -356,7 +360,7 @@ module State = struct
 
   let make ~input ~max_depth ~source ~trace : t =
     {
-      input;
+      input = Bytes.unsafe_of_string input;
       pos = 0;
       input_len = String.length input;
       base = 0;
@@ -518,6 +522,25 @@ module State = struct
     let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
     if trail_depth t > saved then undo_trail t saved
 
+  let[@inline never] advance_capture_frame (t : t) i =
+    let base = i * frame_stride in
+    let frames = t.frames in
+    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames (base + 1)
+      (frame_capture lor (trail_depth t lsl frame_trail_shift));
+    Array.unsafe_set frames (base + 2) t.diag_len
+
+  let[@inline never] keep_recorded_from (t : t) lowest =
+    let frames = t.frames in
+    let depth = trail_depth t lsl frame_trail_shift in
+    let mask = (1 lsl frame_trail_shift) - 1 in
+    for i = lowest to t.frames_top - 1 do
+      let base = i * frame_stride in
+      Array.unsafe_set frames (base + 1)
+        (Array.unsafe_get frames (base + 1) land mask lor depth);
+      Array.unsafe_set frames (base + 2) t.diag_len
+    done
+
   let rec commit_nearest_from (t : t) i =
     i >= 0
     &&
@@ -525,28 +548,37 @@ module State = struct
     let flags = Array.unsafe_get t.frames slot in
     if flags land frame_pin_bit <> 0 then
       commit_nearest_from t (i - 1)
-    else
-      flags land frame_kind_mask <> frame_barrier
+    else if flags land frame_kind_mask <> frame_barrier then begin
+      Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+      true
+    end else
+      flags land frame_capture_bit <> 0
       && begin
-        Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+        advance_capture_frame t i;
+        keep_recorded_from t (i + 1);
         true
       end
 
   let commit_nearest (t : t) = commit_nearest_from t (t.frames_top - 1)
 
-  let seal_frames (t : t) ~floor =
+  let seal_frames (t : t) ~captures ~floor =
     let i = ref (t.frames_top - 1) in
     let reached = ref true in
+    let lowest = ref (-1) in
     while !reached && !i >= floor do
       let slot = (!i * frame_stride) + 1 in
       let flags = Array.unsafe_get t.frames slot in
-      if flags land frame_kind_mask = frame_barrier then
-        reached := false
-      else begin
+      if flags land frame_kind_mask <> frame_barrier then begin
         Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
         decr i
-      end
+      end else if captures && flags land frame_capture_bit <> 0 then begin
+        advance_capture_frame t !i;
+        lowest := !i;
+        decr i
+      end else
+        reached := false
     done;
+    if !lowest >= 0 then keep_recorded_from t !lowest;
     !reached
 
   let reclaim_floor (t : t) ~keep_from =
@@ -614,7 +646,7 @@ let find_newline s from limit =
   while
     !i + 8 <= limit
     &&
-    let x = Int64.logxor (String.get_int64_ne s !i) 0x0A0A0A0A0A0A0A0AL in
+    let x = Int64.logxor (Bytes.get_int64_ne s !i) 0x0A0A0A0A0A0A0A0AL in
     Int64.logand
       (Int64.logand (Int64.sub x 0x0101010101010101L) (Int64.lognot x))
       0x8080808080808080L
@@ -622,13 +654,13 @@ let find_newline s from limit =
   do
     i := !i + 8
   done;
-  while !i < limit && String.unsafe_get s !i <> '\n' do
+  while !i < limit && Bytes.unsafe_get s !i <> '\n' do
     incr i
   done;
   !i
 
 let extend_line_index idx ?(base_offset = 0) input up_to =
-  let len = String.length input in
+  let len = Bytes.length input in
   let i = ref idx.scanned_up_to in
   while !i < up_to do
     let rel = !i - base_offset in
@@ -668,7 +700,7 @@ let count_newlines s from limit =
   let n = ref 0 in
   let i = ref from in
   while !i + 8 <= limit do
-    let x = Int64.logxor (String.get_int64_ne s !i) 0x0A0A0A0A0A0A0A0AL in
+    let x = Int64.logxor (Bytes.get_int64_ne s !i) 0x0A0A0A0A0A0A0A0AL in
     let y =
       Int64.logor
         (Int64.add (Int64.logand x 0x7F7F7F7F7F7F7F7FL) 0x7F7F7F7F7F7F7F7FL)
@@ -686,28 +718,28 @@ let count_newlines s from limit =
     i := !i + 8
   done;
   while !i < limit do
-    if String.unsafe_get s !i = '\n' then incr n;
+    if Bytes.unsafe_get s !i = '\n' then incr n;
     incr i
   done;
   !n
 
 let last_newline s from limit =
   let i = ref (limit - 1) in
-  while !i >= from && String.unsafe_get s !i <> '\n' do
+  while !i >= from && Bytes.unsafe_get s !i <> '\n' do
     decr i
   done;
   !i
 
-let rec count_cut_chars idx s i stop =
+let rec count_cut_chars idx s len i stop =
   if i >= stop then
     i
   else begin
-    let c = Char.code (String.unsafe_get s i) in
+    let c = Char.code (Bytes.unsafe_get s i) in
     let width =
       if c < 0x80 then
         1
       else begin
-        let d = String.get_utf_8_uchar s i in
+        let d = Bytes.get_utf_8_uchar s i in
         if Uchar.utf_decode_is_valid d then
           Uchar.utf_decode_length d
         else begin
@@ -721,7 +753,7 @@ let rec count_cut_chars idx s i stop =
             else
               4
           in
-          if i + need > String.length s then
+          if i + need > len then
             need
           else
             1
@@ -732,7 +764,7 @@ let rec count_cut_chars idx s i stop =
       i
     else begin
       idx.cut_chars <- idx.cut_chars + 1;
-      count_cut_chars idx s (i + width) stop
+      count_cut_chars idx s len (i + width) stop
     end
   end
 
@@ -757,7 +789,7 @@ let ensure_line_index_preserved_through st up_to =
     end else begin
       let input = st.input in
       let base = st.base in
-      let stop = imin (up_to - base) (String.length input) in
+      let stop = imin (up_to - base) (st.input_len - base) in
       let start = imax 0 (idx.scanned_up_to - base) in
       let newlines = count_newlines input start stop in
       idx.line_base <- idx.line_base + idx.count - 1 + newlines;
@@ -786,9 +818,10 @@ let ensure_line_index_preserved_through st up_to =
         up_to
       end else begin
         let input = st.input in
-        let stop = imin (up_to - st.base) (String.length input) in
+        let len = st.input_len - st.base in
+        let stop = imin (up_to - st.base) len in
         if not known then idx.cut_chars <- 0;
-        let i = count_cut_chars idx input (from - st.base) stop in
+        let i = count_cut_chars idx input len (from - st.base) stop in
         idx.cut_line <- line_start;
         idx.cut_at <- i + st.base;
         if i < stop then
@@ -820,23 +853,38 @@ let[@inline never] handle_location st =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
-let[@inline never] append st ~floor chunk n =
-  let floor = imax 0 (floor - 1) in
+let[@inline never] append st ~floor ~spare chunk n =
   let cur_len = st.input_len - st.base in
-  let drop = imin (imax 0 (floor - st.base)) cur_len in
-  let drop =
-    if drop > 0 then
-      ensure_line_index_preserved_through st floor - st.base
-    else
-      drop
-  in
-  let kept = cur_len - drop in
-  let buf = Bytes.create (kept + n) in
-  Bytes.blit_string st.input drop buf 0 kept;
-  Bytes.blit chunk 0 buf kept n;
-  st.input <- Bytes.unsafe_to_string buf;
-  st.base <- st.base + drop;
-  st.input_len <- st.input_len + n
+  if spare && Bytes.length st.input - cur_len >= n then begin
+    Bytes.blit chunk 0 st.input cur_len n;
+    st.input_len <- st.input_len + n
+  end else begin
+    let floor = imax 0 (floor - 1) in
+    let drop = imin (imax 0 (floor - st.base)) cur_len in
+    let drop =
+      if drop > 0 then
+        ensure_line_index_preserved_through st floor - st.base
+      else
+        drop
+    in
+    let kept = cur_len - drop in
+    let room =
+      if spare then
+        imax kept n
+      else
+        0
+    in
+    let buf = Bytes.create (kept + n + room) in
+    Bytes.blit st.input drop buf 0 kept;
+    Bytes.blit chunk 0 buf kept n;
+    st.input <- buf;
+    st.base <- st.base + drop;
+    st.input_len <- st.input_len + n
+  end
+
+let trim_input st =
+  let len = st.input_len - st.base in
+  if Bytes.length st.input > len then st.input <- Bytes.sub st.input 0 len
 
 let[@inline never] read_source st src buf off len =
   State.suspend ();
@@ -885,9 +933,10 @@ let[@inline never] rec fill st ~keep_from need =
           let n = read_source st src src.tmp 0 max_bytes in
           if n = 0 then begin
             src.eof <- true;
+            trim_input st;
             false
           end else begin
-            append st ~floor src.tmp n;
+            append st ~floor ~spare:true src.tmp n;
             if n = Bytes.length src.tmp && n < src.tmp_cap then src.grow <- true;
             fill st ~keep_from need
           end
@@ -913,15 +962,15 @@ let[@inline never] refill_at st keep_from p =
       st.pos <- keep;
       fill st ~keep_from:keep (st.input_len + 1)
 
-let[@inline always] char_at st pos = String.unsafe_get st.input (pos - st.base)
+let[@inline always] char_at st pos = Bytes.unsafe_get st.input (pos - st.base)
 
 let[@inline always] slice st off len =
-  string_slice st.input (off - st.base) len (st.input_len - st.base)
+  string_slice st.input (off - st.base) len (Bytes.length st.input)
 
 let[@inline always] span st off len =
   match st.source with
   | None ->
-      { buf = st.input; off; len }
+      { buf = Bytes.unsafe_to_string st.input; off; len }
   | Some _ ->
       let s = slice st off len in
       { buf = s; off = 0; len = String.length s }
@@ -1323,7 +1372,7 @@ let[@inline never] scan_while_refilling st ~keep_from start pred =
     let inp = st.input in
     let len = st.input_len - base in
     let i = ref (!p - base) in
-    while !i < len && pred (String.unsafe_get inp !i) do
+    while !i < len && pred (Bytes.unsafe_get inp !i) do
       incr i
     done;
     p := !i + base;
@@ -1336,7 +1385,7 @@ let[@inline always] scan_while st ~keep_from start pred =
   let inp = st.input in
   let len = st.input_len - base in
   let i = ref (start - base) in
-  while !i < len && pred (String.unsafe_get inp !i) do
+  while !i < len && pred (Bytes.unsafe_get inp !i) do
     incr i
   done;
   if !i < len then
@@ -1456,7 +1505,7 @@ let regex_read_ahead st src ahead =
       else
         got := !got + n
     done;
-    if !got > 0 then append st ~floor chunk !got;
+    if !got > 0 then append st ~floor ~spare:false chunk !got;
     true
   end
 
@@ -1468,9 +1517,12 @@ let regex_failure st label =
       fail_str st st.pos tag_label label_regex
 
 let rec match_regex_source st src re label =
+  trim_input st;
   let off = st.pos - st.base in
   let ahead = st.input_len - st.pos in
-  match Re.exec_partial_detailed ~pos:off re st.input with
+  match
+    Re.exec_partial_detailed ~pos:off re (Bytes.unsafe_to_string st.input)
+  with
   | `Full g
     when Re.Group.start g 0 = off
          && (src.eof || st.base + Re.Group.stop g 0 < st.input_len) ->
@@ -1503,7 +1555,9 @@ let rec match_regex_source st src re label =
 let[@inline never] handle_match_regex st re label =
   match st.source with
   | None -> (
-      match Re.exec ~pos:(st.pos - st.base) re st.input with
+      match
+        Re.exec ~pos:(st.pos - st.base) re (Bytes.unsafe_to_string st.input)
+      with
       | groups ->
           let match_start = st.base + Re.Group.start groups 0 in
           let match_end = st.base + Re.Group.stop groups 0 in
@@ -1558,42 +1612,42 @@ let[@inline never] handle_any_varint st =
 let[@inline always] read_int16_be st =
   need_bytes st 2;
   let p = st.pos in
-  let v = String.get_int16_be st.input (p - st.base) in
+  let v = Bytes.get_int16_be st.input (p - st.base) in
   st.pos <- p + 2;
   v
 
 let[@inline always] read_int16_le st =
   need_bytes st 2;
   let p = st.pos in
-  let v = String.get_int16_le st.input (p - st.base) in
+  let v = Bytes.get_int16_le st.input (p - st.base) in
   st.pos <- p + 2;
   v
 
 let[@inline always] read_uint16_be st =
   need_bytes st 2;
   let p = st.pos in
-  let v = String.get_uint16_be st.input (p - st.base) in
+  let v = Bytes.get_uint16_be st.input (p - st.base) in
   st.pos <- p + 2;
   v
 
 let[@inline always] read_uint16_le st =
   need_bytes st 2;
   let p = st.pos in
-  let v = String.get_uint16_le st.input (p - st.base) in
+  let v = Bytes.get_uint16_le st.input (p - st.base) in
   st.pos <- p + 2;
   v
 
 let[@inline always] read_int32_be st =
   need_bytes st 4;
   let p = st.pos in
-  let v = String.get_int32_be st.input (p - st.base) in
+  let v = Bytes.get_int32_be st.input (p - st.base) in
   st.pos <- p + 4;
   v
 
 let[@inline always] read_int32_le st =
   need_bytes st 4;
   let p = st.pos in
-  let v = String.get_int32_le st.input (p - st.base) in
+  let v = Bytes.get_int32_le st.input (p - st.base) in
   st.pos <- p + 4;
   v
 
@@ -1602,8 +1656,8 @@ let[@inline always] read_uint32_be st =
   let p = st.pos in
   let i = p - st.base in
   let v =
-    (String.get_uint16_be st.input i lsl 16)
-    lor String.get_uint16_be st.input (i + 2)
+    (Bytes.get_uint16_be st.input i lsl 16)
+    lor Bytes.get_uint16_be st.input (i + 2)
   in
   st.pos <- p + 4;
   v
@@ -1613,8 +1667,8 @@ let[@inline always] read_uint32_le st =
   let p = st.pos in
   let i = p - st.base in
   let v =
-    (String.get_uint16_le st.input (i + 2) lsl 16)
-    lor String.get_uint16_le st.input i
+    (Bytes.get_uint16_le st.input (i + 2) lsl 16)
+    lor Bytes.get_uint16_le st.input i
   in
   st.pos <- p + 4;
   v
@@ -1622,14 +1676,14 @@ let[@inline always] read_uint32_le st =
 let[@inline always] read_int64_be st =
   need_bytes st 8;
   let p = st.pos in
-  let v = String.get_int64_be st.input (p - st.base) in
+  let v = Bytes.get_int64_be st.input (p - st.base) in
   st.pos <- p + 8;
   v
 
 let[@inline always] read_int64_le st =
   need_bytes st 8;
   let p = st.pos in
-  let v = String.get_int64_le st.input (p - st.base) in
+  let v = Bytes.get_int64_le st.input (p - st.base) in
   st.pos <- p + 8;
   v
 
@@ -1685,21 +1739,21 @@ let[@inline] fill_uchar st ~keep_from p =
   if p + 4 > st.input_len then utf8_fill st keep_from p
 
 let[@inline always] utf8_decode inp i =
-  let b0 = Char.code (String.unsafe_get inp i) in
-  let len = String.length inp in
+  let b0 = Char.code (Bytes.unsafe_get inp i) in
+  let len = Bytes.length inp in
   if b0 < 0xE0 then
     if b0 >= 0xC2 && i + 1 < len then
-      let b1 = Char.code (String.unsafe_get inp (i + 1)) in
+      let b1 = Char.code (Bytes.unsafe_get inp (i + 1)) in
       if b1 land 0xC0 = 0x80 then
         Uchar.utf_decode 2
           (Uchar.unsafe_of_int (((b0 land 0x1F) lsl 6) lor (b1 land 0x3F)))
       else
-        String.get_utf_8_uchar inp i
+        Bytes.get_utf_8_uchar inp i
     else
-      String.get_utf_8_uchar inp i
+      Bytes.get_utf_8_uchar inp i
   else if b0 < 0xF0 && i + 2 < len then
-    let b1 = Char.code (String.unsafe_get inp (i + 1)) in
-    let b2 = Char.code (String.unsafe_get inp (i + 2)) in
+    let b1 = Char.code (Bytes.unsafe_get inp (i + 1)) in
+    let b2 = Char.code (Bytes.unsafe_get inp (i + 2)) in
     if
       b1 land 0xC0 = 0x80
       && b2 land 0xC0 = 0x80
@@ -1714,9 +1768,9 @@ let[@inline always] utf8_decode inp i =
            )
         )
     else
-      String.get_utf_8_uchar inp i
+      Bytes.get_utf_8_uchar inp i
   else
-    String.get_utf_8_uchar inp i
+    Bytes.get_utf_8_uchar inp i
 
 let[@inline never] satisfy_uchar_slow st pred label =
   let p = st.pos in
@@ -1781,7 +1835,7 @@ let[@inline never] scan_uchars st inp ~base start limit pred =
   while
     !pos < limit
     &&
-    let b = Char.code (String.unsafe_get inp !pos) in
+    let b = Char.code (Bytes.unsafe_get inp !pos) in
     if b < 0x80 then
       pred (Uchar.unsafe_of_int b)
       && begin
@@ -1815,7 +1869,7 @@ let[@inline never] scan_while_uchar_refilling st ~keep_from start pred =
     else begin
       utf8_fill st keep_from !p;
       if !p < st.input_len then begin
-        let d = String.get_utf_8_uchar st.input (!p - st.base) in
+        let d = Bytes.get_utf_8_uchar st.input (!p - st.base) in
         if not (Uchar.utf_decode_is_valid d) then
           fail_str st !p tag_label label_utf8;
         if pred (Uchar.utf_decode_uchar d) then
@@ -1859,7 +1913,7 @@ let[@inline never] handle_skip_while_then_uchar st pred term =
   end;
   fill_uchar st ~keep_from:pos pos;
   if pos >= st.input_len then fail_int st pos kind;
-  let d = String.get_utf_8_uchar st.input (pos - st.base) in
+  let d = Bytes.get_utf_8_uchar st.input (pos - st.base) in
   if not (Uchar.utf_decode_is_valid d) then fail_str st pos tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u term then
@@ -2113,6 +2167,30 @@ let look_ahead p =
       far_merge st saved;
       raise exn
 
+let peek_with p =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      let stop = st.pos in
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      if st.far != saved then st.far <- saved;
+      (v, stop)
+  | exception exn ->
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let skip_to target =
+  let st = get_state () in
+  if target < st.pos || target > st.input_len then
+    invalid_arg "Parseff.skip_to: target is not in the input after the position";
+  st.pos <- target
+
 let ctx_stride = 2
 let ctx_cut_bit = 1
 let ctx_delimited_bit = 2
@@ -2141,7 +2219,7 @@ let[@inline always] context_exit st d name start delimited =
 
 let[@inline never] context_exit_cut st d =
   if Array.unsafe_get st.ctx ((d * ctx_stride) + 1) land ctx_cut_bit <> 0 then
-    ignore (State.seal_frames st ~floor:0)
+    ignore (State.seal_frames st ~captures:false ~floor:0)
 
 let[@inline always] context_run st delimited start name p =
   let d = st.ctx_top in
@@ -2235,11 +2313,11 @@ let cut () =
   let st = get_state () in
   let d = st.ctx_top in
   if d = 0 then
-    ignore (State.seal_frames st ~floor:0)
+    ignore (State.seal_frames st ~captures:true ~floor:0)
   else begin
     let m = (d - 1) * ctx_stride in
     let ctx = st.ctx in
-    if State.seal_frames st ~floor:(Array.unsafe_get ctx m) then
+    if State.seal_frames st ~captures:true ~floor:(Array.unsafe_get ctx m) then
       Array.unsafe_set ctx (m + 1) (Array.unsafe_get ctx (m + 1) lor ctx_cut_bit)
   end
 
@@ -3066,7 +3144,7 @@ let[@inline always] scan_whitespace st ~keep_from start =
   let inp = st.input in
   let len = st.input_len - base in
   let i = ref (start - base) in
-  while !i < len && is_whitespace (String.unsafe_get inp !i) do
+  while !i < len && is_whitespace (Bytes.unsafe_get inp !i) do
     incr i
   done;
   if !i < len || st.source == None then
@@ -3091,7 +3169,7 @@ let[@inline] skip_whitespace () =
   let inp = st.input in
   let len = st.input_len - base in
   let i = ref (st.pos - base) in
-  while !i < len && is_whitespace (String.unsafe_get inp !i) do
+  while !i < len && is_whitespace (Bytes.unsafe_get inp !i) do
     incr i
   done;
   if !i < len || st.source == None then
@@ -3329,7 +3407,9 @@ let far_chain st =
 
 let location_of_position input pos =
   let idx = create_line_index () in
-  extend_line_index idx input (min pos (String.length input));
+  extend_line_index idx
+    (Bytes.unsafe_of_string input)
+    (min pos (String.length input));
   let line_idx = find_line idx pos in
   { offset = pos; line = line_idx + 1; col = pos - idx.starts.(line_idx) + 1 }
 
@@ -3379,7 +3459,7 @@ let window_size = 240
 let max_frames = 5
 
 let char_len s i =
-  let d = String.get_utf_8_uchar s i in
+  let d = Bytes.get_utf_8_uchar s i in
   if Uchar.utf_decode_is_valid d then
     Uchar.utf_decode_length d
   else
@@ -3389,13 +3469,13 @@ let count_code_points s a b =
   let n = ref 0 and i = ref a in
   while
     !i + 8 <= b
-    && Int64.logand (String.get_int64_ne s !i) 0x8080808080808080L = 0L
+    && Int64.logand (Bytes.get_int64_ne s !i) 0x8080808080808080L = 0L
   do
     i := !i + 8;
     n := !n + 8
   done;
   while !i < b do
-    if Char.code (String.unsafe_get s !i) < 0x80 then begin
+    if Char.code (Bytes.unsafe_get s !i) < 0x80 then begin
       incr i;
       incr n
     end else begin
@@ -3586,22 +3666,21 @@ let error_message ?custom e =
   | Backtrack_window_exceeded { limit; _ } ->
       Printf.sprintf "backtrack window of %d bytes exceeded" limit
 
-let is_continuation s i =
-  i < String.length s && Char.code (String.unsafe_get s i) land 0xC0 = 0x80
+let is_continuation s len i =
+  i < len && Char.code (Bytes.unsafe_get s i) land 0xC0 = 0x80
 
-let window_start s line_start focus =
+let window_start s len line_start focus =
   let start =
-    ref
-      (imin (String.length s) (line_start + imax 0 (focus - (window_size / 2))))
+    ref (imin len (line_start + imax 0 (focus - (window_size / 2))))
   in
-  while is_continuation s !start do
+  while is_continuation s len !start do
     incr start
   done;
   !start
 
-let window_stop s start limit =
+let window_stop s len start limit =
   let stop = ref (imin limit (start + window_size)) in
-  while !stop > start && is_continuation s !stop do
+  while !stop > start && is_continuation s len !stop do
     decr stop
   done;
   !stop
@@ -3611,8 +3690,9 @@ let window ~number ~first text focus =
   if len <= window_size then
     { number; text; first; left_cut = false; right_cut = false }
   else begin
-    let start = window_start text 0 focus in
-    let stop = window_stop text start len in
+    let bytes = Bytes.unsafe_of_string text in
+    let start = window_start bytes len 0 focus in
+    let stop = window_stop bytes len start len in
     {
       number;
       text = String.sub text start (stop - start);
@@ -3703,7 +3783,11 @@ let char_boundary text i =
     i
   else
     let j = ref i in
-    while !j > 0 && i - !j < 3 && is_continuation text !j do
+    while
+      !j > 0
+      && i - !j < 3
+      && is_continuation (Bytes.unsafe_of_string text) (String.length text) !j
+    do
       decr j
     done;
     let d = String.get_utf_8_uchar text !j in
@@ -3753,7 +3837,7 @@ let render ?name ?source ?custom e =
           ( l,
             Some
               (1
-              + count_code_points s
+              + count_code_points (Bytes.unsafe_of_string s)
                   starts.(l.line - 1)
                   (imin e.range.start (String.length s))
               )
@@ -3770,7 +3854,7 @@ let render ?name ?source ?custom e =
         let shown =
           Some
             (1
-            + count_code_points s
+            + count_code_points (Bytes.unsafe_of_string s)
                 starts.(l.line - 1)
                 (imin f.start (String.length s))
             )
@@ -4245,21 +4329,27 @@ let found_of st pos =
   else begin
     let p = imax pos st.base in
     let rel = p - st.base in
-    let len = String.length st.input in
-    let c = String.unsafe_get st.input rel in
+    let len = st.input_len - st.base in
+    let c = Bytes.unsafe_get st.input rel in
     if is_ident_byte c then begin
       let k = ref 0 in
-      while rel + !k < len && !k < 33 && is_ident_byte st.input.[rel + !k] do
+      while
+        rel + !k < len
+        && !k < 33
+        && is_ident_byte (Bytes.get st.input (rel + !k))
+      do
         incr k
       done;
       if !k > 32 then
-        (Text (String.sub st.input rel 32 ^ "..."), { start = p; stop = p + 32 })
+        ( Text (Bytes.sub_string st.input rel 32 ^ "..."),
+          { start = p; stop = p + 32 }
+        )
       else
-        (Text (String.sub st.input rel !k), { start = p; stop = p + !k })
+        (Text (Bytes.sub_string st.input rel !k), { start = p; stop = p + !k })
     end else begin
       let n = char_len st.input rel in
       let n = imin n (len - rel) in
-      (Text (String.sub st.input rel n), { start = p; stop = p + n })
+      (Text (Bytes.sub_string st.input rel n), { start = p; stop = p + n })
     end
   end
 
@@ -4347,13 +4437,13 @@ let build st ~pos ?(notes = []) ?help kind span frames =
     else begin
       let focus = imax 0 (imin focus (st.input_len - start)) in
       let input = st.input in
-      let len = String.length input in
+      let len = st.input_len - st.base in
       let rel = start - st.base in
       let scan_end from limit = find_newline input from limit in
       let line_end = scan_end rel (imin len (rel + window_size + 1)) in
-      let ended = line_end < len && String.unsafe_get input line_end = '\n' in
+      let ended = line_end < len && Bytes.unsafe_get input line_end = '\n' in
       let strip_cr stop =
-        if stop > rel && String.unsafe_get input (stop - 1) = '\r' then
+        if stop > rel && Bytes.unsafe_get input (stop - 1) = '\r' then
           stop - 1
         else
           stop
@@ -4368,27 +4458,27 @@ let build st ~pos ?(notes = []) ?help kind span frames =
         Some
           {
             number;
-            text = String.sub input rel (stop - rel);
+            text = Bytes.sub_string input rel (stop - rel);
             first = start;
             left_cut = false;
             right_cut = (not ended) && source_open;
           }
       end else begin
-        let ws = window_start input rel focus in
+        let ws = window_start input len rel focus in
         let limit = imin len (ws + window_size + 1) in
         let nl = scan_end ws limit in
-        let ended = nl < len && String.unsafe_get input nl = '\n' in
+        let ended = nl < len && Bytes.unsafe_get input nl = '\n' in
         let line_stop =
           if ended || (nl = len && not source_open) then
             strip_cr nl
           else
             nl
         in
-        let stop = imax ws (window_stop input ws line_stop) in
+        let stop = imax ws (window_stop input len ws line_stop) in
         Some
           {
             number;
-            text = String.sub input ws (stop - ws);
+            text = Bytes.sub_string input ws (stop - ws);
             first = ws + st.base;
             left_cut = ws > rel;
             right_cut =
@@ -4423,7 +4513,7 @@ let build st ~pos ?(notes = []) ?help kind span frames =
             let e = ref st.base in
             while
               !e < pos && !e < st.input_len
-              && Char.code (String.unsafe_get st.input (!e - st.base)) land 0xC0
+              && Char.code (Bytes.unsafe_get st.input (!e - st.base)) land 0xC0
                  = 0x80
             do
               incr e
@@ -4608,9 +4698,16 @@ let capture_rewind st frame saved e =
   st.far <- saved;
   Stdlib.Error e
 
-let capture p =
+let capture ?(release = false) p =
   let st = get_state () in
-  let frame = State.push_rewind_frame st frame_barrier in
+  let frame =
+    State.push_rewind_frame st
+      ( if release then
+          frame_capture
+        else
+          frame_barrier
+      )
+  in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
   match p () with
@@ -4662,7 +4759,7 @@ let capture_with c p =
       far_merge st saved;
       raise exn
 
-let recover errors ~sync parser hole =
+let recover ?release errors ~sync parser hole =
   let st = get_state () in
   if st.diag != errors.self then
     invalid_arg
@@ -4671,7 +4768,7 @@ let recover errors ~sync parser hole =
     parser ()
   else
     let start = st.pos in
-    match capture parser with
+    match capture ?release parser with
     | Ok v ->
         v
     | Error e ->
@@ -4686,6 +4783,105 @@ let recover errors ~sync parser hole =
               p + imin (char_len st.input (p - st.base)) (st.input_len - p)
         end;
         hole e
+
+let skip_nested ?atom pairs stop =
+  let st = get_state () in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  let rec close_of c = function
+    | [] ->
+        None
+    | (o, k) :: rest ->
+        if o = c then
+          Some k
+        else
+          close_of c rest
+  in
+  let rec drop_through c = function
+    | [] ->
+        None
+    | k :: rest ->
+        if k = c then
+          Some rest
+        else
+          drop_through c rest
+  in
+  let rec go stack =
+    if have st 1 then begin
+      let start = st.pos in
+      (match atom with Some a -> ignore (optional a ()) | None -> ());
+      if st.pos <> start then
+        go stack
+      else
+        let c = char_at st start in
+        match close_of c pairs with
+        | Some k ->
+            st.pos <- start + 1;
+            go (k :: stack)
+        | None ->
+            if List.exists (fun (_, k) -> k = c) pairs then
+              begin match drop_through c stack with
+              | Some rest ->
+                  st.pos <- start + 1;
+                  go rest
+              | None ->
+                  ()
+            end
+            else if stack == [] && stop c then
+              ()
+            else begin
+              st.pos <- start + 1;
+              go stack
+            end
+    end
+  in
+  match go [] with
+  | () ->
+      if st.far != saved then st.far <- saved
+  | exception exn ->
+      far_merge st saved;
+      raise exn
+
+let sep_by_recover errors ~sync elem sep hole () =
+  let st = get_state () in
+  if st.diag != errors.self then
+    invalid_arg
+      "Parseff.sep_by_recover: errors is not the collector given to the runner";
+  let item () =
+    if not (have st 1) then
+      elem ()
+    else
+      let start = st.pos in
+      let frame = State.push_rewind_frame st frame_barrier in
+      let saved = st.far in
+      if saved != far_none then st.far <- far_none;
+      let more pos = fill st ~keep_from:start (pos + 1) || pos < st.input_len in
+      let fill_hole e =
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        st.far <- saved;
+        record_diagnostic errors st e.range.start e;
+        sync ();
+        hole e
+      in
+      let leave exn =
+        State.pop_rewind_frame st frame;
+        far_merge st saved;
+        raise exn
+      in
+      match elem () with
+      | v ->
+          State.pop_rewind_frame st frame;
+          far_merge st saved;
+          v
+      | exception Fail when more st.far.pos ->
+          fill_hole (error_of_far st (outer_contexts st st.far.pos))
+      | exception User_failure (pos, msg, x) when more pos ->
+          fill_hole (error_failure st pos msg x (outer_contexts st pos))
+      | exception exn ->
+          leave exn
+  in
+  sep_by ~at_least:1 item sep ()
 
 let run_detailed st ~all thunk =
   let previous = State.enter st in

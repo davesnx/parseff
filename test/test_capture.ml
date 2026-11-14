@@ -448,6 +448,272 @@ let test_cut_does_not_escape () =
     "cut in outer context" (Ok "ax")
     (Result.map_error error_message (parse "ax" q))
 
+let test_default_keeps_rewind_point () =
+  let sealed advance =
+    Result.map_error error_message
+      (parse "ax" (fun () ->
+           or_
+             (fun () ->
+               ignore
+                 (capture (fun () ->
+                      ignore (char 'a');
+                      advance ();
+                      char 'b'
+                  )
+                 );
+               consume "zz"
+             )
+             (fun () -> consume "ax")
+             ()
+       )
+      )
+  in
+  let reached = Alcotest.(result string string) in
+  Alcotest.check reached "cut does not reach past capture" (Ok "ax") (sealed cut);
+  Alcotest.check reached "commit does not reach past capture" (Ok "ax")
+    (sealed commit);
+  let retried advance =
+    Result.map_error error_message
+      (parse "abcd" (fun () ->
+           match
+             capture (fun () ->
+                 ignore (consume "ab");
+                 advance ();
+                 ignore (char '!')
+             )
+           with
+           | Ok () ->
+               (-1, "")
+           | Error _ ->
+               let start = position () in
+               (start, consume "abcd")
+       )
+      )
+  in
+  let retry = Alcotest.(result (pair int string) string) in
+  Alcotest.check retry "after a cut, the alternative runs from the start"
+    (Ok (0, "abcd"))
+    (retried cut);
+  Alcotest.check retry "after a commit, the alternative runs from the start"
+    (Ok (0, "abcd"))
+    (retried commit);
+  let recovered advance =
+    let d = Diagnostics.create () in
+    let seen = ref [] in
+    let statement () =
+      recover d
+        ~sync:(fun () ->
+          seen := position () :: !seen;
+          skip_while (fun c -> c <> ';');
+          ignore (optional (fun () -> char ';') ())
+        )
+        (fun () ->
+          ignore
+            (recover d
+               ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ';'))
+               (fun () -> ignore (consume "ab"))
+               ignore
+            );
+          ignore (char ',');
+          advance ();
+          ignore (consume "cd");
+          ignore (char ';')
+        )
+        ignore
+    in
+    let r =
+      parse ~diagnostics:d "ab,cd;xx,cd?ab,cd;ab,c;" (fun () ->
+          List.length (many statement ())
+      )
+    in
+    (Result.map_error error_message r, List.rev !seen, errors d)
+  in
+  let output =
+    Alcotest.(triple (result int string) (list int) (list (pair int string)))
+  in
+  let expected =
+    ( Ok 3,
+      [ 6; 18 ],
+      [ (11, "expected ';', found '?'"); (22, "expected \"d\", found ';'") ]
+    )
+  in
+  Alcotest.check output "recovery with cut" expected (recovered cut);
+  Alcotest.check output "recovery with commit" expected (recovered commit);
+  Alcotest.check output "recovery without either" expected (recovered ignore)
+
+let test_release_cut_in_context_does_not_escape () =
+  let p () =
+    or_
+      (fun () ->
+        ignore
+          (capture ~release:true (fun () ->
+               context "inner" (fun () ->
+                   ignore (char 'a');
+                   cut ();
+                   char 'b'
+               )
+           )
+          );
+        consume "zz"
+      )
+      (fun () -> consume "ax")
+      ()
+  in
+  Alcotest.(check (result string string))
+    "outer or_ backtracks" (Ok "ax")
+    (Result.map_error error_message (parse "ax" p));
+  let q () =
+    or_
+      (fun () ->
+        ignore
+          (capture ~release:true (fun () ->
+               ignore (char 'a');
+               commit ();
+               char 'b'
+           )
+          );
+        consume "zz"
+      )
+      (fun () -> consume "ax")
+      ()
+  in
+  Alcotest.(check (result string string))
+    "commit does not seal the outer or_" (Ok "ax")
+    (Result.map_error error_message (parse "ax" q))
+
+let test_release_cut_passes_capture () =
+  let p inner () =
+    or_
+      (fun () ->
+        ignore
+          (inner (fun () ->
+               ignore (char 'a');
+               cut ();
+               char 'b'
+           )
+          );
+        consume "zz"
+      )
+      (fun () -> consume "ax")
+      ()
+  in
+  let run inner = Result.map_error error_message (parse "ax" (p inner)) in
+  Alcotest.(check (result string string))
+    "outer or_ is sealed" (Error "expected \"zz\", found 'x'")
+    (run (fun body -> capture ~release:true body));
+  Alcotest.(check (result string string))
+    "a default capture outside stops the cut" (Ok "ax")
+    (run (fun body -> capture (fun () -> capture ~release:true body)))
+
+let test_release_moves_rewind_point () =
+  let d = Diagnostics.create () in
+  let body cell advance () =
+    warn d "before";
+    Ref.set cell 1;
+    ignore (consume "ab");
+    advance ();
+    warn d "after";
+    Ref.set cell 2;
+    ignore (consume "cd");
+    char '!'
+  in
+  let run ?release advance =
+    let cell = Ref.create 0 in
+    let r =
+      parse ~diagnostics:d ~consume:`Partial "abcd?" (fun () ->
+          let r = capture ?release (body cell advance) in
+          (show_error r, position (), Ref.get cell)
+      )
+    in
+    ( Result.get_ok r,
+      List.map (fun (e : _ Diagnostics.entry) -> e.value) (Diagnostics.to_list d)
+    )
+  in
+  let outcome = Alcotest.(pair (triple string int int) (list string)) in
+  let failure = "Error at 4: expected '!', found '?'" in
+  let start = ((failure, 0, 0), []) in
+  let moved = ((failure, 2, 1), [ "before" ]) in
+  Alcotest.check outcome "default, commit" start (run commit);
+  Alcotest.check outcome "default, cut" start (run cut);
+  Alcotest.check outcome "release:false, cut" start (run ~release:false cut);
+  let run = run ~release:true in
+  Alcotest.check outcome "without commit" start (run ignore);
+  Alcotest.check outcome "commit" moved (run commit);
+  Alcotest.check outcome "cut" moved (run cut);
+  Alcotest.check outcome "commit inside look_ahead" start
+    (run (fun () -> look_ahead commit));
+  Alcotest.check outcome "cut inside look_ahead" start
+    (run (fun () -> look_ahead cut));
+  Alcotest.check outcome "commit seals an inner or_ only" start
+    (run (fun () -> or_ commit ignore ()));
+  Alcotest.check outcome "cut reaches through an inner or_" moved
+    (run (fun () -> or_ cut ignore ()));
+  Alcotest.check outcome "a default capture inside stops the cut" start
+    (run (fun () -> ignore (capture cut)));
+  Alcotest.check outcome "a default capture inside stops the commit" start
+    (run (fun () -> ignore (capture commit)))
+
+let test_release_cut_moves_outer_captures () =
+  let run ~outer =
+    let r =
+      parse ~consume:`Partial "abc?" (fun () ->
+          let outer =
+            capture ~release:outer (fun () ->
+                ignore (char 'a');
+                let inner =
+                  capture ~release:true (fun () ->
+                      ignore (char 'b');
+                      cut ();
+                      ignore (char 'c')
+                  )
+                in
+                ignore (char '!');
+                inner
+            )
+          in
+          (show_error outer, position ())
+      )
+    in
+    Result.map_error error_message r
+  in
+  Alcotest.(check (result (pair string int) string))
+    "outer release capture rewinds to the cut"
+    (Ok ("Error at 3: expected '!', found '?'", 2))
+    (run ~outer:true);
+  Alcotest.(check (result (pair string int) string))
+    "outer default capture rewinds to its start"
+    (Ok ("Error at 3: expected '!', found '?'", 0))
+    (run ~outer:false)
+
+let test_release_recover_syncs_from_commit () =
+  let run ?release () =
+    let d = Diagnostics.create () in
+    let seen = ref (-1) in
+    let r =
+      parse ~diagnostics:d ~consume:`Partial "ab?;z" (fun () ->
+          recover ?release d
+            ~sync:(fun () ->
+              seen := position ();
+              skip_while (fun c -> c <> ';')
+            )
+            (fun () ->
+              ignore (consume "ab");
+              commit ();
+              ignore (char '!')
+            )
+            (fun _ -> ());
+          position ()
+      )
+    in
+    (Result.map_error error_message r, !seen, entries d)
+  in
+  let outcome = Alcotest.(triple (result int string) int errs) in
+  let entry = [ (2, "expected '!', found '?'") ] in
+  Alcotest.check outcome "release: sync starts at the commit" (Ok 3, 2, entry)
+    (run ~release:true ());
+  Alcotest.check outcome "default: sync starts at the start" (Ok 3, 0, entry)
+    (run ())
+
 let test_inside_or () =
   let d = Diagnostics.create () in
   let r =
@@ -1146,6 +1412,142 @@ let test_streaming_pins_start () =
        )
     )
 
+let test_streaming_release () =
+  let input = "let" ^ String.make 40 ' ' ^ "?" in
+  let source () =
+    Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
+  in
+  let body advance () =
+    ignore (consume "let");
+    advance ();
+    skip_while (fun c -> c = ' ');
+    char '!'
+  in
+  let stepwise () =
+    ignore (consume "let");
+    ignore
+      (many
+         (fun () ->
+           ignore (char ' ');
+           cut ()
+         )
+         ()
+      );
+    char '!'
+  in
+  let run ?release body =
+    Result.map_error
+      (fun e -> kind_name (Error e))
+      (parse_source ~backtrack_window:16 ~consume:`Partial (source ())
+         (fun () ->
+           match capture ?release body with
+           | Ok c ->
+               (c, -1)
+           | Error _ ->
+               ('?', position ())
+       )
+      )
+  in
+  let outcome = Alcotest.(result (pair char int) string) in
+  let exceeded = Error "Backtrack_window_exceeded" in
+  Alcotest.check outcome "default capture keeps its start" exceeded
+    (run stepwise);
+  let run = run ~release:true in
+  Alcotest.check outcome "capture without cut keeps its start" exceeded
+    (run (body ignore));
+  Alcotest.check outcome "capture keeps the input after the last cut" exceeded
+    (run (body cut));
+  Alcotest.check outcome "each cut releases the input before it"
+    (Ok ('?', 43))
+    (run stepwise)
+
+let chunks size s =
+  let i = ref 0 in
+  Source.of_chunks (fun () ->
+      if !i >= String.length s then
+        None
+      else begin
+        let n = min size (String.length s - !i) in
+        let c = String.sub s !i n in
+        i := !i + n;
+        Some c
+      end
+  )
+
+let test_streaming_release_commit_in_recognize () =
+  let run advance =
+    let cell = Ref.create 0 in
+    Result.get_ok
+      (parse_source ~consume:`Partial (Source.of_string "abcd?") (fun () ->
+           let r =
+             capture ~release:true (fun () ->
+                 recognize (fun () ->
+                     Ref.set cell 1;
+                     ignore (consume "ab");
+                     advance ();
+                     Ref.set cell 2;
+                     ignore (consume "cd");
+                     char '!'
+                 )
+             )
+           in
+           (Result.is_ok r, position (), Ref.get cell)
+       )
+      )
+  in
+  let outcome = Alcotest.(triple bool int int) in
+  Alcotest.check outcome "commit" (false, 2, 1) (run commit);
+  Alcotest.check outcome "cut" (false, 2, 1) (run cut)
+
+let test_streaming_nested_release () =
+  let run ?release () =
+    let d = Diagnostics.create () in
+    let rec statement () =
+      recover ?release d
+        ~sync:(fun () ->
+          skip_while (fun c -> c <> ';' && c <> '}');
+          ignore (optional (fun () -> char ';') ())
+        )
+        (fun () ->
+          ( match any_char () with
+          | '{' ->
+              ignore (many item ());
+              ignore (char '}')
+          | 'x' ->
+              skip_while (fun c -> c = 'x')
+          | _ ->
+              fail "expected a statement"
+          );
+          ignore (char ';');
+          cut ()
+        )
+        (fun _ -> ())
+    and item () =
+      ignore
+        (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"statement"));
+      statement ()
+    in
+    let leaf = String.make 100 'x' ^ ";" in
+    let block n = "{" ^ String.concat "" (List.init n (fun _ -> leaf)) ^ "};" in
+    let input = "{" ^ block 30 ^ "x?;" ^ block 30 ^ "};" ^ leaf in
+    Alcotest.(check bool)
+      "input is larger than the window" true
+      (String.length input > 4 * 1024);
+    let r =
+      parse_source ~backtrack_window:1024 ~diagnostics:d (chunks 64 input)
+        (fun () -> List.length (many statement ())
+      )
+    in
+    (Result.map_error (fun e -> kind_name (Error e)) r, errors d)
+  in
+  let outcome = Alcotest.(pair (result int string) errs) in
+  Alcotest.check outcome "release parses in a small window"
+    (Ok 2, [ (3035, "expected ';', found '?'") ])
+    (run ~release:true ());
+  Alcotest.check outcome "default needs the whole statement"
+    (Error "Backtrack_window_exceeded", [])
+    (run ())
+
 let () =
   let open Alcotest in
   run "Capture"
@@ -1188,6 +1590,18 @@ let () =
           test_case "failure restores" `Quick test_failure_restores;
           test_case "failure forgotten" `Quick test_failure_forgotten;
           test_case "cut does not escape" `Quick test_cut_does_not_escape;
+          test_case "default keeps the rewind point" `Quick
+            test_default_keeps_rewind_point;
+          test_case "release: cut in a context does not escape" `Quick
+            test_release_cut_in_context_does_not_escape;
+          test_case "release: cut passes capture" `Quick
+            test_release_cut_passes_capture;
+          test_case "release moves the rewind point" `Quick
+            test_release_moves_rewind_point;
+          test_case "release: cut moves outer captures" `Quick
+            test_release_cut_moves_outer_captures;
+          test_case "release: recover syncs from the commit" `Quick
+            test_release_recover_syncs_from_commit;
           test_case "inside or_" `Quick test_inside_or;
           test_case "inside many" `Quick test_inside_many;
           test_case "inside look_ahead" `Quick test_inside_look_ahead;
@@ -1196,6 +1610,11 @@ let () =
           test_case "more than 8 outer contexts" `Quick test_many_outer_contexts;
           test_case "limits propagate" `Quick test_limits_propagate;
           test_case "streaming pins start" `Quick test_streaming_pins_start;
+          test_case "streaming release" `Quick test_streaming_release;
+          test_case "streaming release: commit inside recognize" `Quick
+            test_streaming_release_commit_in_recognize;
+          test_case "streaming nested release" `Quick
+            test_streaming_nested_release;
         ]
       );
     ]

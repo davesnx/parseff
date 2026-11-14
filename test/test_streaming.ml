@@ -1745,8 +1745,8 @@ let test_excerpt_does_not_start_inside_a_code_point () =
       Alcotest.(check string)
         "excerpt"
         "1:4: [error] expected 'y' or '\xc3\xa9', found 'x'\n\
-         1 | ...\xc3\xa9x...\n\
-        \  |     ^"
+         1 | ...\xc3\xa9\xc3\xa9x...\n\
+        \  |      ^"
         (Parseff.render_error e);
       Alcotest.(check string)
         "excerpt with source"
@@ -1756,6 +1756,47 @@ let test_excerpt_does_not_start_inside_a_code_point () =
         (Parseff.render_error ~source:input e)
   | Ok _ ->
       Alcotest.fail "Expected an error"
+
+let test_kept_input_is_not_copied_on_each_read () =
+  let total = 65_536 in
+  let src = chunked_source ~chunk_size:64 (String.make total 'a') in
+  let before = Gc.allocated_bytes () in
+  let result =
+    Parseff.parse_source ~backtrack_window:max_int src (fun () ->
+        String.length (Parseff.take_while (fun _ -> true))
+    )
+  in
+  let allocated = Gc.allocated_bytes () -. before in
+  Alcotest.(check (result int reject)) "all input" (Ok total) result;
+  if allocated > 16. *. Float.of_int total then
+    Alcotest.failf "kept %d bytes, allocated %.0f bytes" total allocated
+
+let test_slice_is_not_changed_by_later_reads () =
+  let src = chunked_source ~chunk_size:3 "abcdefghi" in
+  let result =
+    Parseff.parse_source src (fun () ->
+        let a = Parseff.take 3 in
+        let b = Parseff.take 2 in
+        let c = Parseff.take_while (fun _ -> true) in
+        [ a; b; c ]
+    )
+  in
+  Alcotest.(check (result (list string) reject))
+    "slices"
+    (Ok [ "abc"; "de"; "fghi" ])
+    result
+
+let test_error_on_open_source_shows_only_input () =
+  let src = Parseff.Source.of_seq (List.to_seq [ "abc"; "def" ]) in
+  let parser () =
+    ignore (Parseff.look_ahead (fun () -> Parseff.take 3));
+    Parseff.consume "x"
+  in
+  match Parseff.parse_source src parser with
+  | Error { kind = Expected { found = Text t; _ }; _ } ->
+      Alcotest.(check string) "found" "abc" t
+  | _ ->
+      Alcotest.fail "expected a failure with found text"
 
 let () =
   let open Alcotest in
@@ -1898,6 +1939,16 @@ let () =
             test_excerpt_does_not_start_inside_a_code_point;
           test_case "error does not read more input" `Quick
             test_error_does_not_read_more_input;
+        ]
+      );
+      ( "kept input",
+        [
+          test_case "is not copied on each read" `Quick
+            test_kept_input_is_not_copied_on_each_read;
+          test_case "slice is not changed by later reads" `Quick
+            test_slice_is_not_changed_by_later_reads;
+          test_case "error on an open source shows only input" `Quick
+            test_error_on_open_source_shows_only_input;
         ]
       );
       ( "Source.of_seq",
