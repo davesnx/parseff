@@ -307,7 +307,9 @@ If the retained region would exceed `~backtrack_window`, parsing fails with `Bac
 
 ## Thread safety
 
-`Parseff.parse_source` (and `Parseff.parse`) are safe to call from multiple OCaml 5 domains concurrently. All mutable state (the parser position, internal buffer, recursion depth counter) is created locally inside each call and never shared across calls. There is no global mutable state in the library.
+`Parseff.parse_source` (and `Parseff.parse`) are safe to call from multiple OCaml 5 domains concurrently. The state of a parse (the parser position, internal buffer, recursion depth counter) is created inside each call. While the parse runs, Parseff keeps that state in a slot that belongs to the domain, so parses on different domains do not share it.
+
+A domain runs one parse at a time. System threads (`Thread`) that share a domain also share that slot, and the runtime can switch threads at any point inside a parser. Two threads that parse at the same time on one domain can get wrong results. Run each parse on its own domain, or hold one `Mutex` around each parse call.
 
 ```ocaml
   (* Parse different files in parallel *)
@@ -330,6 +332,8 @@ A source is for one call of `Parseff.parse_source` or `Parseff.parse_source_each
 
 Two parses can run at the same time on one domain, for example in two Eio fibers, when the only thing that suspends is the source `read` function. The parse state is stored per domain and Parseff installs it again each time `read` returns. A suspension inside a parser callback, such as a `satisfy` predicate or a `many` body, is not supported.
 
+This is for fibers, which switch only at `read`. It does not hold for system threads, which can switch anywhere.
+
 
 ## Limitations
 
@@ -344,7 +348,7 @@ The buffer no longer grows forever, but a parser can still exceed the configured
 
 ### Blocking reads
 
-`Parseff.Source.of_channel`, `Parseff.Source.of_chunks`, `Parseff.Source.of_function`, and `Parseff.Source.of_seq` all block the calling thread when waiting for data. For async/event-driven architectures, wrap the parse call in a thread:
+`Parseff.Source.of_channel`, `Parseff.Source.of_chunks`, `Parseff.Source.of_function`, and `Parseff.Source.of_seq` all block the calling thread when waiting for data. For async/event-driven architectures, run the parse on another domain:
 
 ```ocaml
   let result = Domain.spawn (fun () ->
