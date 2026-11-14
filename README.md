@@ -45,7 +45,7 @@ let () =
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
 ```
-A failed parse returns one `Parseff.error`. `Parseff.render_error` prints the message, the source line and a caret under the failure:
+The program prints `Parsed: 192.168.1.1`. A failed parse returns one `Parseff.error`. On `"192.168.1."`, `Parseff.render_error` prints the message, the source line and a caret under the failure:
 
 ```
 address:1:11: [error] expected digit, found end of input
