@@ -157,6 +157,7 @@ and feed =
       read : bytes -> int -> int -> int;
       mutable tmp : bytes;
       tmp_cap : int;
+      mutable grow : bool;
     }
   | Chunks of chunks
 
@@ -303,7 +304,14 @@ module Source = struct
 
   let of_string s =
     make ~initial:s ~eof:true
-      (Read { read = (fun _ _ _ -> 0); tmp = Bytes.empty; tmp_cap = 0 })
+      (Read
+         {
+           read = (fun _ _ _ -> 0);
+           tmp = Bytes.empty;
+           tmp_cap = 0;
+           grow = false;
+         }
+      )
 
   let of_channel ?(buf_size = default_buf_size) ic =
     if buf_size < 1 then
@@ -314,13 +322,22 @@ module Source = struct
            read = (fun buf off len -> input ic buf off len);
            tmp = Bytes.create buf_size;
            tmp_cap = buf_size;
+           grow = false;
          }
       )
 
-  let of_function read =
+  let of_function ?(initial_buffer_size = young_buf_size) read =
+    if initial_buffer_size < 1 then
+      invalid_arg
+        "Parseff.Source.of_function: initial_buffer_size must be at least 1";
     make ~initial:"" ~eof:false
       (Read
-         { read; tmp = Bytes.create young_buf_size; tmp_cap = default_buf_size }
+         {
+           read;
+           tmp = Bytes.create initial_buffer_size;
+           tmp_cap = imax initial_buffer_size default_buf_size;
+           grow = false;
+         }
       )
 
   let of_chunks next =
@@ -965,6 +982,10 @@ let[@inline never] rec fill st ~keep_from need =
           let n =
             match src.feed with
             | Read r ->
+                if r.grow then begin
+                  r.grow <- false;
+                  r.tmp <- Bytes.create r.tmp_cap
+                end;
                 let tmp = r.tmp in
                 let n =
                   read_source st r.read tmp 0 (imin room (Bytes.length tmp))
@@ -973,8 +994,7 @@ let[@inline never] rec fill st ~keep_from need =
                   append st ~floor ~spare:true ~own:false
                     (Bytes.unsafe_to_string tmp)
                     0 n;
-                  if n = Bytes.length tmp && n < r.tmp_cap then
-                    r.tmp <- Bytes.create r.tmp_cap
+                  if n = Bytes.length tmp && n < r.tmp_cap then r.grow <- true
                 end;
                 n
             | Chunks c ->

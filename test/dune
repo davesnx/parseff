@@ -26,3 +26,14 @@
   test_peek
   test_differential)
  (libraries parseff alcotest re uucp))
+
+(rule
+ (alias runtest)
+ (deps
+  test_streaming.exe
+  test_streaming_robust.exe
+  test_source_each.exe
+  test_differential.exe)
+ (action
+  (system
+   "for n in 1 7 65536; do mkdir -p _build/_tests_buf_size_$n; for t in streaming streaming_robust source_each differential; do PARSEFF_TEST_BUF_SIZE=$n ./test_$t.exe --compact -o _build/_tests_buf_size_$n || { echo \"failed: test_$t.exe with PARSEFF_TEST_BUF_SIZE=$n\"; exit 1; }; done; done")))
