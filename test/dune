@@ -22,5 +22,6 @@
   test_ref_model
   test_source_each
   test_numbers
+  test_peek
   test_differential)
  (libraries parseff alcotest re uucp))
