@@ -102,6 +102,16 @@ type custom_error = ..
     own cases with [type Parseff.custom_error += Too_large of int] and match
     them as [Custom (Too_large n)]. *)
 
+type custom_error +=
+  | Limit_exceeded of { limit : int }
+        (** The input went over a limit given with [~at_most] to
+            {!val:take_while} or {!val:many}. [limit] is that value. The error
+            range covers the run or the item that went over it, so a server can
+            answer "header too large" and not "bad request". It is an ordinary
+            failure: when a failure is recorded farther in the input, the parse
+            reports that one; see {!val:take_while} for how {!commit} keeps the
+            limit. Unstable: this case can change in a 1.x release. *)
+
 (** What failed. These five cases are final until 2.0, so a match on all of them
     needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
 type error_kind = private
@@ -152,7 +162,7 @@ val error_message : ?custom:(custom_error -> string) -> error -> string
     [expected "else", "if", or "while", found 'xyz']. A message lists at most 8
     expected items, then [, or N more alternatives]. [custom] prints [Custom]
     errors, without it the message is [custom error (no ~custom printer given)].
-*)
+    {!Limit_exceeded} always prints as [limit of N exceeded]. *)
 
 val render_error :
   ?name:string ->
@@ -457,7 +467,8 @@ val match_regex : ?label:string -> regex -> string
     let identifier () = match_regex ~label:"identifier" identifier_re
     ]} *)
 
-val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
+val take_while :
+  ?at_least:int -> ?at_most:int -> ?label:string -> (char -> bool) -> string
 (** [take_while fun] reads characters one by one as long as [fun] returns [true]
     for each one. Returns the matched string (may be empty if the very first
     character doesn't match). Much faster than regex for simple character
@@ -467,6 +478,29 @@ val take_while : ?at_least:int -> ?label:string -> (char -> bool) -> string
     match. Fails with [expected <label>] if fewer characters match, or with
     [expected at least n characters] when [~label] is missing. The failure
     position is the end of the characters that matched.
+
+    When [~at_most] is specified, the run may have at most that many characters.
+    When character [at_most + 1] matches too, the parse fails with
+    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
+    the [at_most + 1] characters read. [take_while] reads at most [at_most + 1]
+    characters. On a stream, these characters must fit in the backtrack window
+    together with the input that the parser still keeps; when they do not, the
+    parse fails with [Backtrack_window_exceeded] first. So keep [at_most] well
+    below [~backtrack_window].
+
+    The limit failure follows the rule of every failure: the parse reports the
+    furthest failure. A failure that an earlier abandoned branch recorded
+    farther in the input, or an alternative that fails farther afterwards, is
+    reported in its place, and {!or_}, {!optional} and {!many} recover from it
+    as from any failure. A parser that must report the limit calls {!commit}
+    before the run, inside the {!or_}, {!optional} or other frame around it:
+    [commit] forgets the failures recorded at or beyond the current position and
+    seals that frame, so its alternatives are not tried. Outside any frame
+    [commit] does nothing. {!cut} seals the frames of the enclosing
+    {!val:context} but forgets no failure.
+
+    Raises [Invalid_argument] when [at_most] is negative or below [at_least].
+    Unstable: [~at_most] can change in a 1.x release.
 
     Example:
     {@ocaml[
@@ -823,7 +857,10 @@ val skip_to : int -> unit
 
     Raises [Invalid_argument] if [target] is before the position, or after the
     input that the parse has read. Each offset from the position to one that
-    {!peek_with} returned is in the input read. *)
+    {!peek_with} returned is in the input read, except inside {!within}: there
+    the input ends at the frame end, and a target past it raises
+    [Invalid_argument], also one that {!peek_with} returned outside the frame.
+*)
 
 val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
@@ -1289,7 +1326,7 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
 (** {1 Repetition Combinators} *)
 
-val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
+val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
 (** [many parser] applies [parser] repeatedly until it fails. Returns a list of
     all successful results. Always succeeds (returns [[]] if [parser] fails
     immediately).
@@ -1299,6 +1336,17 @@ val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
 
     The loop also stops after an iteration that consumes no input, and that
     iteration's result is dropped.
+
+    When [~at_most] is specified, [many] returns at most that many results.
+    After [at_most] results, it runs [parser] once more. When that run succeeds
+    and consumes input, the parse fails with
+    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
+    the extra item. The limit failure follows the rule of every failure, as for
+    {!take_while}: a failure recorded farther in the input is reported in its
+    place, also one that the extra item records in a branch it abandons. A
+    {!commit} in [parser] once it has decided forgets those. Raises
+    [Invalid_argument] when [at_most] is negative or below [at_least]. Unstable:
+    [~at_most] can change in a 1.x release.
 
     Example:
     {@ocaml[
@@ -1857,6 +1905,41 @@ val take_span : int -> span
       take_span len
     ]} *)
 
+val within : int -> (unit -> 'a) -> 'a
+(** [within n parser] runs [parser] on the next [n] bytes exactly, as the
+    payload of a frame with a length prefix. [parser] sees the end of the input
+    after [n] bytes: {!end_of_input} succeeds there, and a read past it fails
+    with [found end of input].
+
+    When [parser] returns before the end of the [n] bytes, [within] fails with
+    [expected end of input] at the first byte left. When the input ends before
+    [n] bytes, [parser] sees the end where the input ends, and if it succeeds
+    there, [within] fails with [expected k bytes, found end of input], where [k]
+    is the number of bytes missing. A negative [n] fails like {!take}. A
+    [within] inside another one ends at the end of the outer one at the latest.
+
+    [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
+    be larger than [~backtrack_window] when [parser] calls {!commit} as it
+    reads. Two things copy inside a frame. {!match_regex} works on a copy of the
+    frame bytes read so far, from the byte before the position: it is made once
+    on string input, and again after each read on a stream, so its cost is the
+    size of the frame plus the size of each read. On string input, {!take_span},
+    {!take_while_span} and {!recognize_span} return copies, as they do with
+    {!parse_source}.
+
+    Inside the frame the input ends at the frame end, so {!skip_to} raises
+    [Invalid_argument] for a target past it, also for a position that
+    {!peek_with} returned outside the frame. Unstable: this function can change
+    in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let frame () =
+      let len = BE.any_uint24 () in
+      let kind = any_uint8 () in
+      within len (fun () -> (kind, take_while (fun _ -> true)))
+    ]} *)
+
 val take_iter : int -> (span -> unit) -> unit
 (** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
     in pieces, in order, with no empty piece. Joined, the pieces are the [n]
@@ -2161,6 +2244,10 @@ module BE : sig
   val any_uint16 : unit -> int
   (** Read 2 bytes as a big-endian unsigned 16-bit integer. *)
 
+  val any_uint24 : unit -> int
+  (** Read 3 bytes as a big-endian unsigned 24-bit integer, from [0] to
+      [16777215], such as the length of an HTTP/2 frame. *)
+
   val any_int32 : unit -> int32
   (** Read 4 bytes as a big-endian signed 32-bit integer. *)
 
@@ -2203,6 +2290,10 @@ module LE : sig
 
   val any_uint16 : unit -> int
   (** Read 2 bytes as a little-endian unsigned 16-bit integer. *)
+
+  val any_uint24 : unit -> int
+  (** Read 3 bytes as a little-endian unsigned 24-bit integer, from [0] to
+      [16777215]. *)
 
   val any_int32 : unit -> int32
   (** Read 4 bytes as a little-endian signed 32-bit integer. *)
