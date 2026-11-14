@@ -1,0 +1,1 @@
+luac: 08-expression-statement.lua:3: syntax error near <eof>

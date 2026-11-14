@@ -1,0 +1,1 @@
+luac: 07-unfinished-table.lua:2: '}' expected (to close '{' at line 1) near <eof>

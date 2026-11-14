@@ -1,0 +1,1 @@
+luac: 14-recovery-three-errors.lua:1: unexpected symbol near '='

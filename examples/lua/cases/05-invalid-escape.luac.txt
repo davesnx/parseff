@@ -1,0 +1,1 @@
+luac: 05-invalid-escape.lua:1: invalid escape sequence near '"\q'
