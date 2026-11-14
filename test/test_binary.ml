@@ -651,7 +651,7 @@ let test_any_uint32_truncated () =
     (check_failure ~pos:0 "expected 4 bytes, found end of input")
     (both "" Parseff.LE.any_uint32)
 
-let test_take_span_zero_copy () =
+let test_take_span_in_parse () =
   let input = "abcdef" in
   match
     Parseff.parse ~consume:`Partial input (fun () ->
@@ -661,9 +661,7 @@ let test_take_span_zero_copy () =
     )
   with
   | Ok (s, pos) ->
-      Alcotest.(check bool) "shares the input" true (s.buf == input);
-      Alcotest.(check int) "off" 1 s.off;
-      Alcotest.(check int) "len" 3 s.len;
+      Alcotest.(check int) "length" 3 (Parseff.span_length s);
       Alcotest.(check string) "text" "bcd" (Parseff.span_to_string s);
       Alcotest.(check int) "position" 4 pos
   | Error e ->
@@ -678,9 +676,8 @@ let test_take_span_streaming () =
     )
   with
   | Ok (s, pos) ->
-      Alcotest.(check string) "buf" "bcd" s.buf;
-      Alcotest.(check int) "off" 0 s.off;
-      Alcotest.(check int) "len" 3 s.len;
+      Alcotest.(check string) "text" "bcd" (Parseff.span_to_string s);
+      Alcotest.(check int) "length" 3 (Parseff.span_length s);
       Alcotest.(check int) "position" 4 pos
   | Error e ->
       Alcotest.fail (Parseff.error_message e)
@@ -927,8 +924,7 @@ let () =
       );
       ( "take_span",
         [
-          Alcotest.test_case "zero-copy in parse" `Quick
-            test_take_span_zero_copy;
+          Alcotest.test_case "in parse" `Quick test_take_span_in_parse;
           Alcotest.test_case "owned copy in parse_source" `Quick
             test_take_span_streaming;
           Alcotest.test_case "zero length" `Quick test_take_span_zero;

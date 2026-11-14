@@ -356,12 +356,11 @@ let test_take_while_span () =
               not (Uucp.White.is_white_space u)
           )
         in
-        (Parseff.span_to_string sp, sp.off, sp.len)
+        (Parseff.span_to_string sp, Parseff.span_length sp)
     )
   with
-  | Ok ((s, off, len), pos) ->
+  | Ok ((s, len), pos) ->
       Alcotest.(check string) "span string" "héllo" s;
-      Alcotest.(check int) "span offset" 0 off;
       (* "héllo" = 6 bytes: é is 2 bytes + 4 ASCII *)
       Alcotest.(check int) "span length" 6 len;
       Alcotest.(check int) "parser position" 6 pos

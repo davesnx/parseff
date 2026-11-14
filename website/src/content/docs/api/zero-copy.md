@@ -14,16 +14,18 @@ The zero-copy API allows you to parse without allocating intermediate strings, s
 ## Span type
 
 ```ocaml
-type span = { buf : string; off : int; len : int }
+type span
 ```
-A `Parseff.span` is a zero-copy slice of the input string. It holds a reference to the original buffer with an offset and length, avoiding string allocation until you explicitly call `Parseff.span_to_string`.
+A `Parseff.span` is a zero-copy slice of the input string. It refers to the input instead of copying it, so no string is allocated until you call `Parseff.span_to_string`. The type is abstract: read a span with `Parseff.span_length` and `Parseff.span_get`.
 
 For parsers run with `Parseff.parse_source`, spans may be materialized into owned strings internally so the streaming runtime can reclaim older buffer prefixes. In-memory `Parseff.parse` still keeps the zero-copy behavior.
 
 ```ocaml
 val span_to_string : span -> string
+val span_length : span -> int
+val span_get : span -> int -> char
 ```
-`Parseff.span_to_string` raises `Invalid_argument` if the span is not a valid range of its buffer.
+`Parseff.span_get` counts the index from the start of the span. It raises `Invalid_argument` if the index is not in `0 .. span_length span - 1`.
 
 
 ## Span-based operations
@@ -46,11 +48,11 @@ Real-world usage:
 
 ```ocaml
 (* Parse integers efficiently *)
-let int_of_span (span : Parseff.span) =
+let int_of_span span =
   let rec loop i acc =
-    if i >= span.len then acc
+    if i >= Parseff.span_length span then acc
     else
-      let c = span.buf.[span.off + i] in
+      let c = Parseff.span_get span i in
       loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
   in
   loop 0 0
@@ -96,11 +98,11 @@ val recognize_span : (unit -> 'a) -> span
 val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
 ```
 ```ocaml
-let int_of_span (span : Parseff.span) =
+let int_of_span span =
   let rec loop i acc =
-    if i >= span.len then acc
+    if i >= Parseff.span_length span then acc
     else
-      let c = span.buf.[span.off + i] in
+      let c = Parseff.span_get span i in
       loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
   in
   loop 0 0
@@ -231,11 +233,11 @@ let value () =
 ## Complete example: high-performance JSON array
 
 ```ocaml
-let int_of_span (span : Parseff.span) =
+let int_of_span span =
   let rec loop i acc =
-    if i >= span.len then acc
+    if i >= Parseff.span_length span then acc
     else
-      let c = span.buf.[span.off + i] in
+      let c = Parseff.span_get span i in
       loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
   in
   loop 0 0

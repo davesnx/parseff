@@ -1670,9 +1670,7 @@ let test_sep_by_take_span_several () =
   | Ok spans ->
       let strs = List.map Parseff.span_to_string spans in
       Alcotest.(check (list string)) "three items" [ "aa"; "bb"; "cc" ] strs;
-      let offsets = List.map (fun (s : Parseff.span) -> s.off) spans in
-      Alcotest.(check (list int)) "offsets" [ 0; 5; 10 ] offsets;
-      let lengths = List.map (fun (s : Parseff.span) -> s.len) spans in
+      let lengths = List.map Parseff.span_length spans in
       Alcotest.(check (list int)) "lengths" [ 2; 2; 2 ] lengths
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -1734,12 +1732,11 @@ let test_take_while_span () =
   match
     parse_with_pos "aaabbb" (fun () ->
         let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        (Parseff.span_to_string sp, sp.off, sp.len)
+        (Parseff.span_to_string sp, Parseff.span_length sp)
     )
   with
-  | Ok ((s, off, len), pos) ->
+  | Ok ((s, len), pos) ->
       Alcotest.(check string) "span string" "aaa" s;
-      Alcotest.(check int) "span offset" 0 off;
       Alcotest.(check int) "span length" 3 len;
       Alcotest.(check int) "parser position" 3 pos
   | Error _ ->
@@ -1749,7 +1746,7 @@ let test_take_while_span_empty () =
   match
     Parseff.parse ~consume:`Partial "xyz" (fun () ->
         let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        (Parseff.span_to_string sp, sp.len)
+        (Parseff.span_to_string sp, Parseff.span_length sp)
     )
   with
   | Ok (s, len) ->
@@ -1758,6 +1755,18 @@ let test_take_while_span_empty () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let span_at buf off len =
+  match
+    Parseff.parse ~consume:`Partial buf (fun () ->
+        ignore (Parseff.take off);
+        Parseff.take_span len
+    )
+  with
+  | Ok sp ->
+      sp
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
 let test_span_to_string_valid () =
   let buf = "abcdefghijk" in
   List.iter
@@ -1765,7 +1774,7 @@ let test_span_to_string_valid () =
       Alcotest.(check string)
         (Printf.sprintf "off %d len %d" off len)
         expected
-        (Parseff.span_to_string { buf; off; len })
+        (Parseff.span_to_string (span_at buf off len))
     )
     [
       (3, 0, "");
@@ -1777,26 +1786,19 @@ let test_span_to_string_valid () =
       (0, 11, buf);
     ]
 
-let test_span_to_string_invalid () =
+let test_span_get () =
+  let sp = span_at "abcdef" 2 3 in
+  Alcotest.(check (list char))
+    "bytes" [ 'c'; 'd'; 'e' ]
+    (List.init (Parseff.span_length sp) (Parseff.span_get sp));
   List.iter
-    (fun (off, len) ->
-      Alcotest.check_raises (Printf.sprintf "off %d len %d" off len)
-        (Invalid_argument "Parseff.span_to_string") (fun () ->
-          ignore (Parseff.span_to_string { buf = "abc"; off; len })
+    (fun i ->
+      Alcotest.check_raises (Printf.sprintf "index %d" i)
+        (Invalid_argument "Parseff.span_get") (fun () ->
+          ignore (Parseff.span_get sp i)
       )
     )
-    [
-      (5, 1);
-      (3, 1);
-      (-1, 1);
-      (2, 2);
-      (-8, 8);
-      (0, -1);
-      (100, 8);
-      (1 lsl 40, 8);
-      (max_int, 2);
-      (1, max_int);
-    ]
+    [ -1; 3; 4; max_int; min_int ]
 
 let check_location msg expected actual =
   Alcotest.(check int)
@@ -2122,7 +2124,7 @@ let () =
           test_case "take_while_span" `Quick test_take_while_span;
           test_case "take_while_span empty" `Quick test_take_while_span_empty;
           test_case "span_to_string valid" `Quick test_span_to_string_valid;
-          test_case "span_to_string invalid" `Quick test_span_to_string_invalid;
+          test_case "span_get" `Quick test_span_get;
         ]
       );
       ( "diagnostics",

@@ -27,15 +27,23 @@
 
 (** {1 Span Type} *)
 
-type span = { buf : string; off : int; len : int }
-(** A slice of the input string. With [parse] it is zero-copy: [buf] is the
-    input string. With [parse_source] it is an owned copy with [off = 0]. Use
-    [span_to_string] to materialize when needed. *)
+type span
+(** A slice of the input. With [parse] it is zero-copy: it points into the input
+    string. With [parse_source] it is an owned copy. Use [span_length] and
+    [span_get] to read it without a copy, and [span_to_string] to materialize it
+    when needed. *)
 
 val span_to_string : span -> string
 (** [span_to_string s] extracts the string from a span. Only call this when you
-    actually need the string value. Raises [Invalid_argument] if the span is not
-    a valid range of its buffer. *)
+    actually need the string value. *)
+
+val span_length : span -> int
+(** [span_length s] is the number of bytes in [s]. *)
+
+val span_get : span -> int -> char
+(** [span_get s i] is the byte at index [i] of [s], counted from the start of
+    the span. Raises [Invalid_argument] if [i] is not in
+    [0 .. span_length s - 1]. *)
 
 (** {1 Location Type} *)
 

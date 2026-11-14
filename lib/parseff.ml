@@ -42,6 +42,12 @@ let[@inline always] span_to_string s =
     invalid_arg "Parseff.span_to_string";
   string_slice (Bytes.unsafe_of_string s.buf) s.off s.len total_len
 
+let[@inline always] span_length s = s.len
+
+let[@inline always] span_get s i =
+  if i < 0 || i >= s.len then invalid_arg "Parseff.span_get";
+  String.unsafe_get s.buf (s.off + i)
+
 type location = { offset : int; line : int; col : int }
 type range_data = { start : int; stop : int }
 type note_data = { at : range_data option; text : string }
