@@ -21,7 +21,7 @@
  (name parseff)
   (synopsis "Direct-style parser combinator library for OCaml 5 with zero-copy spans")
   (description
-   "Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors are typed via polymorphic variants, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.")
+   "Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.")
  (depends
   (dune
    (or
@@ -38,11 +38,15 @@
 
    ;; Test dependencies
    (alcotest :with-test)
+   (eio :with-test)
    (eio_main :with-test)
    (miou :with-test)
-   (benchmark :with-test)
-   (angstrom :with-test)
-   (mparser :with-test)
+
+   ;; Benchmark dependencies
+   (benchmark :with-dev-setup)
+   (angstrom :with-dev-setup)
+   (bigstringaf :with-dev-setup)
+   (mparser :with-dev-setup)
 
   ;; Dev dependencies
   (ocamlformat

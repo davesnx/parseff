@@ -89,7 +89,7 @@ See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) 
 
 - Open an issue to discuss proposed changes
 - Write tests for new features
-- Run `make fmt` before submitting
+- Run `make format` before submitting
 - Ensure all tests pass with `make test`
 
 ## License
