@@ -103,7 +103,8 @@ type error_kind = private
           primitives are otherwise [Expected]. *)
   | Custom of custom_error  (** A value given to {!val:error}. *)
   | Depth_limit_exceeded of { limit : int }
-      (** {!val:rec_} nested deeper than [max_depth]. *)
+      (** {!val:rec_} nested deeper than [max_depth], or a {!val:fold_right}
+          chain longer than its limit. *)
   | Backtrack_window_exceeded of { limit : int; oldest : int }
       (** A streaming parser needed more rewind history than the window.
           [oldest] is the earliest position the runtime still needs to rewind to
@@ -1295,6 +1296,14 @@ val fold_right :
 (** [fold_right element op] parses one or more [element] values separated by
     [op], combining them right-associatively. Fails if there are zero [element]
     values.
+
+    Each operand takes a level of the stack. When the runtime reports a stack
+    limit, a chain longer than [(Gc.get ()).stack_limit / 32] operands, with
+    [stack_limit] read when Parseff is loaded ([4194304] with the default
+    [OCAMLRUNPARAM=l]), fails with [Depth_limit_exceeded] instead of a stack
+    overflow. Each combinator that keeps a rewind point open around the chain,
+    such as [or_], [optional], [look_ahead], [capture], [recover] or an outer
+    [fold_right], counts as one more operand.
 
     When [~otherwise] is specified, returns [otherwise] if there are zero
     [element] values instead of failing.

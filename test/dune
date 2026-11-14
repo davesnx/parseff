@@ -25,7 +25,18 @@
   test_sep_by_recover
   test_peek
   test_differential)
+ (modules :standard \ test_fold_right_limit)
  (libraries parseff alcotest re uucp))
+
+(test
+ (name test_fold_right_limit)
+ (modules test_fold_right_limit)
+ (libraries parseff alcotest)
+ (action
+  (setenv
+   OCAMLRUNPARAM
+   l=1M
+   (run %{test}))))
 
 (rule
  (alias runtest)
