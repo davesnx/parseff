@@ -667,6 +667,27 @@ module State = struct
     if !lowest >= 0 then keep_recorded_from t !lowest;
     !reached
 
+  let always_rewinding_frame_open (t : t) =
+    let rec go i =
+      i < t.frames_top
+      &&
+      let flags = Array.unsafe_get t.frames ((i * frame_stride) + 1) in
+      flags land frame_kind_mask = frame_barrier
+      && flags land frame_capture_bit = 0
+      || go (i + 1)
+    in
+    go 0
+
+  let keep_effects_so_far (t : t) =
+    let depth = trail_depth t lsl frame_trail_shift in
+    let mask = (1 lsl frame_trail_shift) - 1 in
+    for i = 0 to t.frames_top - 1 do
+      let slot = (i * frame_stride) + 1 in
+      Array.unsafe_set t.frames slot
+        (Array.unsafe_get t.frames slot land mask lor depth);
+      Array.unsafe_set t.frames (slot + 1) t.diag_len
+    done
+
   let reclaim_floor (t : t) ~keep_from =
     let frames = t.frames in
     let floor = ref keep_from in
@@ -694,8 +715,9 @@ let () =
     | Not_in_parse_context ->
         Some
           "Parseff: parser called outside of a parse context. Parser \
-           combinators can only be used inside a function passed to \
-           Parseff.parse or Parseff.parse_source."
+           combinators and warn can only be used inside a function passed to \
+           Parseff.parse or Parseff.parse_source, not in a function given to a \
+           *_iter function or to ~trace."
     | _ ->
         None
     )
@@ -2596,6 +2618,113 @@ let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
       value
     )
     ()
+
+let check_sealable st name =
+  if State.always_rewinding_frame_open st then
+    invalid_arg
+      ("Parseff." ^ name
+     ^ ": called inside look_ahead, peek_with, an operator lookup of \
+        precedence, capture without ~release:true, or recover or \
+        sep_by_recover without ~release:true that can recover, which can \
+        rewind before a value that it gives out"
+      )
+
+let give st f v =
+  ignore (State.seal_frames st ~captures:true ~floor:0 : bool);
+  State.keep_effects_so_far st;
+  trace_emit st f v
+
+let iter_elements st ~at_least ~progress_first first next f =
+  for _ = 1 to at_least do
+    give st f (first ())
+  done;
+  let frame = State.push_rewind_frame st frame_repeat in
+  let base = frame * frame_stride in
+  match
+    let start =
+      ref
+        ( if progress_first then
+            st.pos
+          else
+            -1
+        )
+    in
+    let v = ref (first ()) in
+    while st.pos <> !start do
+      give st f !v;
+      let pos = st.pos in
+      State.reset_repeat_frame st base pos;
+      start := pos;
+      v := next ()
+    done
+  with
+  | () ->
+      repeat_stop st frame
+  | exception Fail ->
+      repeat_fail st frame
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let many_iter ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) () =
+  let st = get_state () in
+  check_sealable st "many_iter";
+  iter_elements st ~at_least ~progress_first:true p p f
+
+let sep_by_iter ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b)
+    (f : 'a -> unit) () =
+  let st = get_state () in
+  check_sealable st "sep_by_iter";
+  let next () =
+    let _ = sep () in
+    p ()
+  in
+  if at_least <= 0 then
+    iter_elements st ~at_least:0 ~progress_first:false p next f
+  else begin
+    give st f (p ());
+    iter_elements st ~at_least:(at_least - 1) ~progress_first:true next next f
+  end
+
+let iter_input st limit scan f =
+  let left = ref limit in
+  let more = ref true in
+  while !more && !left > 0 && have st 1 do
+    let p = st.pos in
+    let stop = p + imin !left (st.input_len - p) in
+    let stop_at = scan p stop in
+    let n = stop_at - p in
+    if n > 0 then begin
+      st.pos <- stop_at;
+      left := !left - n;
+      give st f
+        { buf = Bytes.unsafe_to_string st.input; off = p - st.base; len = n }
+    end;
+    if stop_at < stop then more := false
+  done;
+  !left
+
+let take_iter n (f : span -> unit) =
+  let st = get_state () in
+  check_sealable st "take_iter";
+  if n < 0 then
+    fail_negative_count st n
+  else if n > 0 then begin
+    let left = iter_input st n (fun _ stop -> stop) f in
+    if left > 0 then fail_bytes st left
+  end
+
+let take_while_iter pred (f : span -> unit) =
+  let st = get_state () in
+  check_sealable st "take_while_iter";
+  let scan p stop =
+    let i = ref p in
+    while !i < stop && pred (char_at st !i) do
+      incr i
+    done;
+    !i
+  in
+  ignore (iter_input st max_int scan f : int)
 
 let fold_left_one_or_more (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     =
@@ -5486,7 +5615,14 @@ module Ref = struct
     let owner = c.owner in
     if owner != token then begin
       if !owner then
-        invalid_arg "Parseff.Ref.set: another running parse uses this cell";
+        invalid_arg
+          ( if st == State.none then
+              "Parseff.Ref.set: the cell belongs to a running parse, and this \
+               call is outside that parse, for example in a function given to \
+               a *_iter function or to ~trace"
+            else
+              "Parseff.Ref.set: another running parse uses this cell"
+          );
       c.owner <- token;
       c.mark <- 0
     end;
