@@ -26,6 +26,7 @@
 - **Fix `fold_right` looping forever.** It now stops after an operator and element that together consume no input, as `fold_left` does.
 - **Fix `expression` raising `Failure` with a `prefix` operator that commits and consumes no input.** That operator is now skipped, like one that does not commit.
 - **Fix `render_error` printing `byte N` in streaming when the start of the error line is no longer buffered.** Parseff now counts the characters of the line that it drops, so the header is `name:line:col`, with the same column as with `~source`. The excerpt is still cut on the left with `...`. Input is now dropped up to a character boundary, so the buffer can hold up to 3 bytes more than before.
+- **`Source.of_chunks` and `Source.of_seq` copy less.** They no longer allocate a 2040-byte read buffer for each source and copy each chunk into it. When Parseff keeps no earlier input and takes a whole chunk, the chunk becomes the input with no copy. A 454-byte HTTP request head given as one chunk now allocates 120 minor words per parse instead of 504. A chunk must not change after the source returns it.
 - **`render_error` counts terminal cells.** The caret stays under the failure on lines with CJK text, emoji or accents.
 - **Improve runtime performance.** The generic combinators, the binary readers and the `Utf8` primitives allocate less and run about 18% fewer instructions over the benchmark set.
 
