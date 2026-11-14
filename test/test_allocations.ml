@@ -57,6 +57,28 @@ let test_failed_parses () =
         ()
   )
 
+let request_line () =
+  ignore (Parseff.take_while ~at_least:1 (fun c -> c <> ' '));
+  ignore (Parseff.char ' ');
+  ignore (Parseff.take_while ~at_least:1 (fun c -> c <> ' '));
+  ignore (Parseff.char ' ');
+  ignore (Parseff.consume "HTTP/");
+  Parseff.digit ()
+
+let test_dropped_failures () =
+  check_failed_parse "request line cut after 21 bytes" 120.
+    "GET /index.html HTTP/" request_line;
+  let line = String.make 39 'a' ^ "\n" in
+  let input =
+    String.concat "" (List.init 50 (fun _ -> line))
+    ^ "#"
+    ^ String.concat "" (List.init 50 (fun _ -> line))
+  in
+  check_failed_parse "failure after 2000 bytes of 4001" 120. input (fun () ->
+      Parseff.skip_while (fun c -> c = 'a' || c = '\n');
+      Parseff.end_of_input ()
+  )
+
 let test_render_error () =
   let error =
     failed_error "z" (fun () ->
@@ -482,6 +504,8 @@ let () =
         [
           Alcotest.test_case "stopping failures" `Quick test_stopping_failures;
           Alcotest.test_case "failed parses" `Quick test_failed_parses;
+          Alcotest.test_case "dropped failed parses" `Quick
+            test_dropped_failures;
           Alcotest.test_case "render_error" `Quick test_render_error;
         ]
       );

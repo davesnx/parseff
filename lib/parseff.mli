@@ -95,7 +95,9 @@ type note = { at : range option; text : string }
 
 type excerpt
 (** Source lines kept with the error so that {!render_error} does not need the
-    input. *)
+    input. An error from {!parse} keeps the input string and reads the lines
+    from it when it is first rendered. An error from {!parse_source}, or from a
+    parser inside {!within}, keeps a copy of the lines. *)
 
 type custom_error = ..
 (** The type of the values given to {!val:error}. It is extensible: declare your
