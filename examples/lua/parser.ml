@@ -518,29 +518,40 @@ let expected_expression () =
   fail_here ?help:(expression_hint ())
     (Printf.sprintf "expected expression, found %s" (Lexer.found ()))
 
-let rec expr () = Parseff.rec_ (fun () -> subexpr 0)
-
-and subexpr limit =
-  let left =
-    match unop_of st.tok with
-    | Some op ->
-        let start = st.start in
-        advance ();
-        let e = Parseff.rec_ (fun () -> subexpr unary_priority) in
-        mk_expr (Unop (op, e)) { start; stop = e.erange.stop }
-    | None ->
-        simpleexp ()
-  in
-  climb limit left
-
-and climb limit left =
+let operator () =
   match binop_of st.tok with
-  | Some op when Printer.prio_left op > limit ->
+  | Some op ->
+      let build () =
+        advance ();
+        Parseff.commit ();
+        mk_bin op
+      in
+      Some
+        ( Printer.prio_left op,
+          if Printer.prio_right op < Printer.prio_left op then
+            Parseff.infix_right build
+          else
+            Parseff.infix_left build
+        )
+  | None ->
+      None
+
+let rec expr () =
+  Parseff.rec_ (fun () -> Parseff.precedence ~operand ~operator ())
+
+and operand () =
+  match unop_of st.tok with
+  | Some op ->
+      let start = st.start in
       advance ();
-      let right = Parseff.rec_ (fun () -> subexpr (Printer.prio_right op)) in
-      climb limit (mk_bin op left right)
-  | _ ->
-      left
+      let e =
+        Parseff.rec_ (fun () ->
+            Parseff.precedence ~min:(unary_priority + 1) ~operand ~operator ()
+        )
+      in
+      mk_expr (Unop (op, e)) { start; stop = e.erange.stop }
+  | None ->
+      simpleexp ()
 
 and simpleexp () =
   let r = here () in
