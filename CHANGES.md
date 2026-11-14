@@ -17,7 +17,7 @@
 - **Add `parse_source_each`.** Parses many values from one source as a `Seq.t`. Memory is bounded by the backtrack window, not by the number of values.
 - **Add `parse_source_each ?pending`.** A parser that keeps a lookahead, such as a lexer that reads the next token early, lost its last value: the sequence ended when no input remained. `~pending:(fun () -> ...)` is asked at that point; when it returns `true`, the parser runs one more time.
 - **Add `?initial_buffer_size` to `Source.of_function`.** It sets the `len` of the first `read` call. The default stays 2040. After a read that fills the buffer, the next read still gets 4096, or `initial_buffer_size` when that is larger. A short message, such as an HTTP request head of 454 bytes, allocates 191 fewer words per parse with `~initial_buffer_size:512`.
-- **`Source.of_function`, `of_chunks` and `of_seq` grow the read buffer only when they read again.** A parse that ends after a read that fills the buffer no longer allocates a 4096-byte buffer that it does not use.
+- **`Source.of_function` grows the read buffer only when it reads again.** A parse that ends after a read that fills the buffer no longer allocates a 4096-byte buffer that it does not use.
 - **Add `BE.any_uint32`, `LE.any_uint32`, `any_varint` and `take_span`.** Readers for unsigned 32-bit integers and LEB128 varints, and a `take` that returns a `span`.
 - **Add `context ~start`.** The position where the construct starts, for a parser that has already consumed the opening token.
 - **Add `?upto` to `fail` and `error`.** `~from` and `~upto` set the start and the end of the error range. Each defaults to the current position and can be before or after it. A reversed pair is swapped, so the range is never reversed.
@@ -28,6 +28,7 @@
 - **Fix `fold_right` looping forever.** It now stops after an operator and element that together consume no input, as `fold_left` does.
 - **Fix `expression` raising `Failure` with a `prefix` operator that commits and consumes no input.** That operator is now skipped, like one that does not commit.
 - **Fix `render_error` printing `byte N` in streaming when the start of the error line is no longer buffered.** Parseff now counts the characters of the line that it drops, so the header is `name:line:col`, with the same column as with `~source`. The excerpt is still cut on the left with `...`. Input is now dropped up to a character boundary, so the buffer can hold up to 3 bytes more than before.
+- **`Source.of_chunks` and `Source.of_seq` copy less.** They no longer allocate a 2040-byte read buffer for each source and copy each chunk into it. When Parseff keeps no earlier input and takes a whole chunk, the chunk becomes the input with no copy. A 454-byte HTTP request head given as one chunk now allocates 120 minor words per parse instead of 504. A chunk must not change after the source returns it.
 - **`render_error` counts terminal cells.** The caret stays under the failure on lines with CJK text, emoji or accents.
 - **Improve runtime performance.** The generic combinators, the binary readers and the `Utf8` primitives allocate less and run about 18% fewer instructions over the benchmark set.
 

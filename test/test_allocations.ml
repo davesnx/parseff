@@ -121,7 +121,7 @@ let test_source_reads () =
       "parse_source allocated %.6f minor words per read, expected at most 3"
       actual
 
-let request_head =
+let head =
   "GET /api/v1/items?page=2&limit=50 HTTP/1.1\r\n\
    Host: api.example.com\r\n\
    User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101\r\n\
@@ -135,15 +135,6 @@ let request_head =
    Referer: https://www.example.com/items\r\n\
    \r\n"
 
-let head_source ?initial_buffer_size () =
-  let pos = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size (fun buf off len ->
-      let n = min len (String.length request_head - !pos) in
-      Bytes.blit_string request_head !pos buf off n;
-      pos := !pos + n;
-      n
-  )
-
 let rec head_lines count =
   let line = Parseff.take_while (fun c -> c <> '\r') in
   ignore (Parseff.consume "\r\n");
@@ -152,18 +143,73 @@ let rec head_lines count =
   else
     head_lines (count + 1)
 
-let parse_head ?initial_buffer_size () =
-  Parseff.parse_source ~consume:`Partial (head_source ?initial_buffer_size ())
-    (fun () -> head_lines 0
+let parse_head source =
+  match
+    Parseff.parse_source ~consume:`Partial source (fun () -> head_lines 0)
+  with
+  | Ok 11 ->
+      ()
+  | Ok n ->
+      Alcotest.failf "parsed %d lines, expected 11" n
+  | Error error ->
+      Alcotest.fail (Parseff.render_error error)
+
+let words_per_head make_source =
+  for _ = 1 to warmup_iterations do
+    parse_head (make_source ())
+  done;
+  Gc.full_major ();
+  let heads = 10_000 in
+  let before = Gc.minor_words () in
+  for _ = 1 to heads do
+    parse_head (make_source ())
+  done;
+  (Gc.minor_words () -. before) /. Float.of_int heads
+
+let head_function ?initial_buffer_size () =
+  let pos = ref 0 in
+  Parseff.Source.of_function ?initial_buffer_size (fun buf off len ->
+      let n = min len (String.length head - !pos) in
+      Bytes.blit_string head !pos buf off n;
+      pos := !pos + n;
+      n
   )
 
+let test_one_chunk_head () =
+  let fn = words_per_head (fun () -> head_function ()) in
+  let seq =
+    words_per_head (fun () -> Parseff.Source.of_seq (Seq.return head))
+  in
+  if seq > 250. || seq > fn /. 2. then
+    Alcotest.failf
+      "of_seq with the %d-byte head as one chunk allocated %.1f minor words \
+       per parse, of_function %.1f; expected at most 250 and at most half"
+      (String.length head) seq fn
+
+let test_head_in_large_chunk () =
+  let chunk = head ^ String.make 1_000_000 'x' in
+  let parse () = parse_head (Parseff.Source.of_seq (Seq.return chunk)) in
+  for _ = 1 to 100 do
+    parse ()
+  done;
+  let parses = 1_000 in
+  let before = Gc.allocated_bytes () in
+  for _ = 1 to parses do
+    parse ()
+  done;
+  let actual = (Gc.allocated_bytes () -. before) /. Float.of_int parses in
+  if actual > 30_000. then
+    Alcotest.failf
+      "the head in a %d-byte chunk allocated %.0f bytes per parse, expected at \
+       most 30000"
+      (String.length chunk) actual
+
 let test_small_buf_size () =
-  Alcotest.(check (result int reject))
-    "head lines" (Ok 11)
-    (parse_head ~initial_buffer_size:512 ());
-  let default = words_per_call (fun () -> parse_head ()) in
+  let default = words_per_call (fun () -> parse_head (head_function ())) in
   let small =
-    words_per_call (fun () -> parse_head ~initial_buffer_size:512 ())
+    words_per_call (fun () ->
+        parse_head (head_function ~initial_buffer_size:512 ())
+    )
   in
   if small > default -. 150. then
     Alcotest.failf
@@ -172,7 +218,7 @@ let test_small_buf_size () =
        150 fewer"
       small default
 
-let head_and_body = request_head ^ String.make 4000 'x'
+let head_and_body = head ^ String.make 4000 'x'
 
 let full_source ?initial_buffer_size () =
   let pos = ref 0 in
@@ -181,11 +227,6 @@ let full_source ?initial_buffer_size () =
       Bytes.blit_string head_and_body !pos buf off n;
       pos := !pos + n;
       n
-  )
-
-let parse_full_head ?initial_buffer_size () =
-  Parseff.parse_source ~consume:`Partial (full_source ?initial_buffer_size ())
-    (fun () -> head_lines 0
   )
 
 let direct_major_words () =
@@ -202,12 +243,9 @@ let direct_major_words_per_call f =
 
 let test_full_first_read () =
   let check name initial_buffer_size at_most =
-    Alcotest.(check (result int reject))
-      (name ^ " head lines") (Ok 11)
-      (parse_full_head ?initial_buffer_size ());
     let actual =
       direct_major_words_per_call (fun () ->
-          parse_full_head ?initial_buffer_size ()
+          parse_head (full_source ?initial_buffer_size ())
       )
     in
     if actual > at_most then
@@ -233,6 +271,9 @@ let () =
       ( "source reads",
         [
           Alcotest.test_case "one byte per read" `Quick test_source_reads;
+          Alcotest.test_case "head as one chunk" `Quick test_one_chunk_head;
+          Alcotest.test_case "head in a large chunk" `Quick
+            test_head_in_large_chunk;
           Alcotest.test_case "small initial_buffer_size" `Quick
             test_small_buf_size;
           Alcotest.test_case "full first read" `Quick test_full_first_read;

@@ -977,6 +977,107 @@ module Precedence = struct
       )
       [ ("commit", Parseff.commit); ("cut", Parseff.cut) ]
 
+  let test_lookup_undone () =
+    let run lookup_effect mode input =
+      let d = Parseff.Diagnostics.create () in
+      let committed () =
+        Parseff.commit ();
+        binary "+" ()
+      in
+      let operator cell () =
+        match Parseff.peek_char () with
+        | Some '+' ->
+            Some (1, Parseff.infix_left committed)
+        | _ -> (
+            ignore (Parseff.any_char ());
+            lookup_effect d cell;
+            match mode with
+            | `None ->
+                None
+            | `Fail ->
+                ignore (Parseff.char '#');
+                None
+          )
+      in
+      let expr cell () =
+        Parseff.Ref.set cell 1;
+        Parseff.precedence
+          ~operand:(fun () -> string_of_int (Parseff.digit ()))
+          ~operator:(operator cell) ()
+      in
+      let rest () =
+        let b = Buffer.create 16 in
+        while Parseff.peek_char () <> None do
+          Buffer.add_char b (Parseff.any_char ())
+        done;
+        Buffer.contents b
+      in
+      let kept cell () =
+        let v = expr cell () in
+        let stop = Parseff.position () in
+        Printf.sprintf "%s@%d %s" v stop (rest ())
+      in
+      let whole cell () =
+        Parseff.or_
+          (fun () ->
+            let v = expr cell () in
+            Parseff.end_of_input ();
+            v
+          )
+          (fun () -> "other " ^ rest ())
+          ()
+      in
+      let report p parse =
+        let cell = Parseff.Ref.create 0 in
+        let r = parse (p cell) in
+        Printf.sprintf "%s, %d notes, ref %d" (show r)
+          (Parseff.Diagnostics.length d)
+          (Parseff.Ref.get cell)
+      in
+      List.concat_map
+        (fun p ->
+          [
+            report p (Parseff.parse ~diagnostics:d input);
+            report p
+              (Parseff.parse_source ~diagnostics:d ~backtrack_window:16
+                 (chunked_source input)
+              );
+          ]
+        )
+        [ kept; whole ]
+    in
+    List.iter
+      (fun (effect_name, lookup_effect) ->
+        List.iter
+          (fun (mode_name, mode) ->
+            List.iter
+              (fun (input, kept, whole) ->
+                let name = effect_name ^ ", " ^ mode_name ^ ", " ^ input in
+                Alcotest.(check (list string))
+                  name
+                  [
+                    kept ^ ", 0 notes, ref 1";
+                    kept ^ ", 0 notes, ref 1";
+                    whole ^ ", 0 notes, ref 0";
+                    whole ^ ", 0 notes, ref 0";
+                  ]
+                  (run lookup_effect mode input)
+              )
+              [
+                ("1x", "Ok 1@1 x", "Ok other 1x");
+                ("1+2x", "Ok (1+2)@3 x", "Ok other 1+2x");
+              ]
+          )
+          [ ("None", `None); ("fails", `Fail) ]
+      )
+      [
+        ("no effect", fun _ _ -> ());
+        ("warn", fun d _ -> Parseff.warn d "seen");
+        ("Ref.set", fun _ cell -> Parseff.Ref.set cell 2);
+        ("commit", fun _ _ -> Parseff.commit ());
+        ("cut", fun _ _ -> Parseff.cut ());
+      ]
+
   let test_build_fails () =
     let failing s () =
       tok s ();
@@ -1241,6 +1342,7 @@ module Precedence = struct
       test_case "commit in build function" `Quick test_commit_in_build;
       test_case "lookup with effects runs again" `Quick test_lookup_again;
       test_case "commit and cut in the lookup" `Quick test_commit_in_lookup;
+      test_case "lookup changes undone" `Quick test_lookup_undone;
       test_case "build function fails" `Quick test_build_fails;
       test_case "build effects" `Quick test_build_effects;
       test_case "same as expression" `Quick test_same_as_expression;

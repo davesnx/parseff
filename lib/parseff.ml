@@ -146,13 +146,25 @@ exception Backtrack_window_exceeded of backtrack_window_error * abort_frames
 
 type source = {
   initial : string;
-  read : bytes -> int -> int -> int;
+  feed : feed;
   mutable eof : bool;
-  mutable tmp : bytes;
-  tmp_cap : int;
-  mutable grow : bool;
   mutable window : int;
   mutable rx : bytes;
+}
+
+and feed =
+  | Read of {
+      read : bytes -> int -> int -> int;
+      mutable tmp : bytes;
+      tmp_cap : int;
+      mutable grow : bool;
+    }
+  | Chunks of chunks
+
+and chunks = {
+  next : unit -> string option;
+  mutable pending : string;
+  mutable pending_pos : int;
 }
 
 type far = {
@@ -237,8 +249,10 @@ let rec running_empty =
    longer than [input_len - base]: the bytes after that length are not input,
    and a refill writes there. Buffered bytes are never changed. [input] is
    full when it has no such room; a full [input] is never written again, so
-   only a full [input] is shared as a string. Memory input is the caller's
-   string, with [base = 0] and no source. *)
+   only a full [input] is shared as a string. A chunk from [Source.of_chunks]
+   becomes [input] only when it is all buffered, so it is full and is never
+   written. Memory input is the caller's string, with [base = 0] and no
+   source. *)
 type state = {
   mutable input : bytes;
   mutable pos : int;
@@ -285,63 +299,49 @@ let check_backtrack_window ?(name = "parse_source") w =
 module Source = struct
   type t = source
 
-  let make ~initial ~read ~eof ~tmp ~tmp_cap : t =
-    {
-      initial;
-      read;
-      eof;
-      tmp;
-      tmp_cap;
-      grow = false;
-      window = default_backtrack_window;
-      rx = Bytes.empty;
-    }
+  let make ~initial ~eof feed : t =
+    { initial; feed; eof; window = default_backtrack_window; rx = Bytes.empty }
 
   let of_string s =
-    make ~initial:s ~read:(fun _ _ _ -> 0) ~eof:true ~tmp:Bytes.empty ~tmp_cap:0
+    make ~initial:s ~eof:true
+      (Read
+         {
+           read = (fun _ _ _ -> 0);
+           tmp = Bytes.empty;
+           tmp_cap = 0;
+           grow = false;
+         }
+      )
 
   let of_channel ?(buf_size = default_buf_size) ic =
     if buf_size < 1 then
       invalid_arg "Parseff.Source.of_channel: buf_size must be at least 1";
-    make ~initial:""
-      ~read:(fun buf off len -> input ic buf off len)
-      ~eof:false ~tmp:(Bytes.create buf_size) ~tmp_cap:buf_size
+    make ~initial:"" ~eof:false
+      (Read
+         {
+           read = (fun buf off len -> input ic buf off len);
+           tmp = Bytes.create buf_size;
+           tmp_cap = buf_size;
+           grow = false;
+         }
+      )
 
   let of_function ?(initial_buffer_size = young_buf_size) read =
     if initial_buffer_size < 1 then
       invalid_arg
         "Parseff.Source.of_function: initial_buffer_size must be at least 1";
-    make ~initial:"" ~read ~eof:false
-      ~tmp:(Bytes.create initial_buffer_size)
-      ~tmp_cap:(imax initial_buffer_size default_buf_size)
+    make ~initial:"" ~eof:false
+      (Read
+         {
+           read;
+           tmp = Bytes.create initial_buffer_size;
+           tmp_cap = imax initial_buffer_size default_buf_size;
+           grow = false;
+         }
+      )
 
-  let of_chunks read_chunk =
-    let pending = ref "" in
-    let pending_pos = ref 0 in
-    of_function (fun buf off len ->
-        if !pending_pos < String.length !pending then begin
-          let available = String.length !pending - !pending_pos in
-          let n = min len available in
-          Bytes.blit_string !pending !pending_pos buf off n;
-          pending_pos := !pending_pos + n;
-          n
-        end else
-          let rec next () =
-            match read_chunk () with
-            | None ->
-                0
-            | Some s when String.length s = 0 ->
-                next ()
-            | Some chunk ->
-                pending := chunk;
-                pending_pos := 0;
-                let n = min len (String.length chunk) in
-                Bytes.blit_string chunk 0 buf off n;
-                pending_pos := n;
-                n
-          in
-          next ()
-    )
+  let of_chunks next =
+    make ~initial:"" ~eof:false (Chunks { next; pending = ""; pending_pos = 0 })
 
   let of_seq seq =
     let r = ref seq in
@@ -503,8 +503,22 @@ module State = struct
       (frame_repeat lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) t.diag_len
 
+  let[@inline always] reset_frame (t : t) frame kind =
+    let base = frame * frame_stride in
+    let frames = t.frames in
+    Array.unsafe_set frames base t.pos;
+    Array.unsafe_set frames (base + 1)
+      (kind lor (trail_depth t lsl frame_trail_shift));
+    Array.unsafe_set frames (base + 2) t.diag_len
+
   let[@inline always] frame_diag_len (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 2)
+
+  let[@inline always] frame_trail_depth (t : t) frame =
+    Array.unsafe_get t.frames ((frame * frame_stride) + 1) lsr frame_trail_shift
+
+  let[@inline always] frame_pos (t : t) frame =
+    Array.unsafe_get t.frames (frame * frame_stride)
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
@@ -853,10 +867,10 @@ let[@inline never] handle_location st =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
-let[@inline never] append st ~floor ~spare chunk n =
+let[@inline never] append st ~floor ~spare ~own chunk off n =
   let cur_len = st.input_len - st.base in
   if spare && Bytes.length st.input - cur_len >= n then begin
-    Bytes.blit chunk 0 st.input cur_len n;
+    Bytes.blit_string chunk off st.input cur_len n;
     st.input_len <- st.input_len + n
   end else begin
     let floor = imax 0 (floor - 1) in
@@ -868,16 +882,20 @@ let[@inline never] append st ~floor ~spare chunk n =
         drop
     in
     let kept = cur_len - drop in
-    let room =
-      if spare then
-        imax kept n
-      else
-        0
-    in
-    let buf = Bytes.create (kept + n + room) in
-    Bytes.blit st.input drop buf 0 kept;
-    Bytes.blit chunk 0 buf kept n;
-    st.input <- buf;
+    if own && kept = 0 && off = 0 && n = String.length chunk then
+      st.input <- Bytes.unsafe_of_string chunk
+    else begin
+      let room =
+        if spare then
+          imax kept n
+        else
+          0
+      in
+      let buf = Bytes.create (kept + n + room) in
+      Bytes.blit st.input drop buf 0 kept;
+      Bytes.blit_string chunk off buf kept n;
+      st.input <- buf
+    end;
     st.base <- st.base + drop;
     st.input_len <- st.input_len + n
   end
@@ -886,10 +904,10 @@ let trim_input st =
   let len = st.input_len - st.base in
   if Bytes.length st.input > len then st.input <- Bytes.sub st.input 0 len
 
-let[@inline never] read_source st src buf off len =
+let[@inline never] read_source st read buf off len =
   State.suspend ();
   let n =
-    match src.read buf off len with
+    match read buf off len with
     | n ->
         n
     | exception exn ->
@@ -903,6 +921,40 @@ let[@inline never] read_source st src buf off len =
       (Printf.sprintf "Parseff.Source: read returned %d, expected 0 to %d" n len);
   n
 
+let[@inline never] next_chunk st c =
+  State.suspend ();
+  let rec next () = match c.next () with Some "" -> next () | r -> r in
+  let r =
+    match next () with
+    | r ->
+        r
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        State.resume st;
+        Printexc.raise_with_backtrace exn bt
+  in
+  State.resume st;
+  match r with
+  | Some s ->
+      c.pending <- s;
+      c.pending_pos <- 0
+  | None ->
+      ()
+
+let chunk_avail st c len =
+  if c.pending_pos = String.length c.pending then next_chunk st c;
+  imin len (String.length c.pending - c.pending_pos)
+
+let read_any st src buf off len =
+  match src.feed with
+  | Read r ->
+      read_source st r.read buf off len
+  | Chunks c ->
+      let n = chunk_avail st c len in
+      Bytes.blit_string c.pending c.pending_pos buf off n;
+      c.pending_pos <- c.pending_pos + n;
+      n
+
 let[@inline never] rec fill st ~keep_from need =
   match st.source with
   | None ->
@@ -913,33 +965,57 @@ let[@inline never] rec fill st ~keep_from need =
       else if src.eof then
         false
       else
-        let () =
-          if src.grow then begin
-            src.grow <- false;
-            src.tmp <- Bytes.create src.tmp_cap
-          end
-        in
         let floor = State.reclaim_floor st ~keep_from in
         let limit = src.window in
-        let max_bytes =
-          imin (limit - (st.input_len - floor)) (Bytes.length src.tmp)
-        in
-        if max_bytes <= 0 then
+        let room = limit - (st.input_len - floor) in
+        if room <= 0 then
           raise
             (Backtrack_window_exceeded
                ({ limit; oldest = floor }, { at = st.pos; open_frames = [] })
             )
         else
-          let n = read_source st src src.tmp 0 max_bytes in
+          let n =
+            match src.feed with
+            | Read r ->
+                if r.grow then begin
+                  r.grow <- false;
+                  r.tmp <- Bytes.create r.tmp_cap
+                end;
+                let tmp = r.tmp in
+                let n =
+                  read_source st r.read tmp 0 (imin room (Bytes.length tmp))
+                in
+                if n > 0 then begin
+                  append st ~floor ~spare:true ~own:false
+                    (Bytes.unsafe_to_string tmp)
+                    0 n;
+                  if n = Bytes.length tmp && n < r.tmp_cap then r.grow <- true
+                end;
+                n
+            | Chunks c ->
+                let avail = chunk_avail st c room in
+                let off = c.pending_pos in
+                let n =
+                  if
+                    st.input_len = st.base && off = 0
+                    && avail = String.length c.pending
+                  then
+                    avail
+                  else
+                    imin avail default_buf_size
+                in
+                if n > 0 then begin
+                  c.pending_pos <- off + n;
+                  append st ~floor ~spare:true ~own:true c.pending off n
+                end;
+                n
+          in
           if n = 0 then begin
             src.eof <- true;
             trim_input st;
             false
-          end else begin
-            append st ~floor ~spare:true src.tmp n;
-            if n = Bytes.length src.tmp && n < src.tmp_cap then src.grow <- true;
+          end else
             fill st ~keep_from need
-          end
 
 let[@inline always] have st n =
   n <= st.input_len - st.pos
@@ -1499,13 +1575,16 @@ let regex_read_ahead st src ahead =
     let got = ref 0 in
     let want = imin room (ahead - (st.input_len - st.pos)) in
     while !got < want && not src.eof do
-      let n = read_source st src chunk !got (room - !got) in
+      let n = read_any st src chunk !got (room - !got) in
       if n = 0 then
         src.eof <- true
       else
         got := !got + n
     done;
-    if !got > 0 then append st ~floor ~spare:false chunk !got;
+    if !got > 0 then
+      append st ~floor ~spare:false ~own:false
+        (Bytes.unsafe_to_string chunk)
+        0 !got;
     true
   end
 
@@ -2792,13 +2871,23 @@ let prec_lower st frame start top prec =
       State.pop_rewind_frame st frame;
       raise exn
 
+let[@inline] prec_base_stop st frame start value =
+  if
+    st.diag_len = State.frame_diag_len st frame
+    && State.trail_depth st = State.frame_trail_depth st frame
+  then
+    st.pos <- start
+  else
+    restore_rewind_frame st frame;
+  State.pop_rewind_frame st frame;
+  value
+
 let prec_stop st frame top =
-  restore_rewind_frame st frame;
   match top with
   | Prec_base b ->
-      State.pop_rewind_frame st frame;
-      b.value
+      prec_base_stop st frame (State.frame_pos st frame) b.value
   | Prec_node _ -> (
+      restore_rewind_frame st frame;
       match prec_fold top with
       | value ->
           State.pop_rewind_frame st frame;
@@ -2816,7 +2905,9 @@ let prec_fail st frame top =
   prec_stop st frame top
 
 let rec prec_loop st operand operator top =
-  let frame = State.push_rewind_frame st frame_barrier in
+  prec_look st operand operator (State.push_rewind_frame st frame_barrier) top
+
+and prec_look st operand operator frame top =
   let start = st.pos in
   match operator () with
   | None ->
@@ -2826,26 +2917,28 @@ let rec prec_loop st operand operator top =
         State.set_frame_kind st frame frame_repeat;
         prec_try st operand operator frame start top prec op
       end else
-        begin match (op, top) with
-        | Prefix _, _ ->
-            State.pop_rewind_frame st frame;
-            prec_prefix ()
-        | _, Prec_base _ ->
-            prec_stop st frame top
-        | _, Prec_node _ ->
-            let top = prec_lower st frame start top prec in
-            if st.frames_top = frame then
-              prec_loop st operand operator top
-            else if prec >= prec_min top then
-              prec_try st operand operator frame start top prec op
-            else
-              prec_stop st frame top
-      end
+        prec_below st operand operator frame start top prec op
   | exception Fail ->
       prec_fail st frame top
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
+
+and prec_below st operand operator frame start top prec op =
+  match (op, top) with
+  | Prefix _, _ ->
+      State.pop_rewind_frame st frame;
+      prec_prefix ()
+  | _, Prec_base _ ->
+      prec_stop st frame top
+  | _, Prec_node _ ->
+      let top = prec_lower st frame start top prec in
+      if st.frames_top = frame then
+        prec_loop st operand operator top
+      else if prec >= prec_min top then
+        prec_try st operand operator frame start top prec op
+      else
+        prec_stop st frame top
 
 and prec_try st operand operator frame start top prec op =
   match prec_accept st operand start top prec op with
@@ -2853,8 +2946,8 @@ and prec_try st operand operator frame start top prec op =
       if next == top then
         prec_stop st frame top
       else begin
-        State.pop_rewind_frame st frame;
-        prec_loop st operand operator next
+        State.reset_frame st frame frame_barrier;
+        prec_look st operand operator frame next
       end
   | exception Fail ->
       prec_fail st frame top
@@ -2864,7 +2957,24 @@ and prec_try st operand operator frame start top prec op =
 
 let precedence ?(min = min_int) ~operand ~operator () =
   let st = get_state () in
-  prec_loop st operand operator (Prec_base { min; value = operand () })
+  let value = operand () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let start = st.pos in
+  match operator () with
+  | None ->
+      prec_base_stop st frame start value
+  | Some (prec, op) ->
+      let top = Prec_base { min; value } in
+      if prec >= min then begin
+        State.set_frame_kind st frame frame_repeat;
+        prec_try st operand operator frame start top prec op
+      end else
+        prec_below st operand operator frame start top prec op
+  | exception Fail ->
+      prec_fail st frame (Prec_base { min; value })
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
 
 let optional (p : unit -> 'a) () : 'a option =
   let st = get_state () in

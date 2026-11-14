@@ -346,20 +346,38 @@ let show_event = function
 
 let window_exceeded = "backtrack window exceeded"
 
-let chunked input sizes =
+type feed = Function | Seq
+
+let chunked feed input sizes =
   let pos = ref 0 in
   let turn = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
-    (fun buf off len ->
-      let chunk = List.nth sizes (!turn mod List.length sizes) in
-      incr turn;
-      let n = min (min chunk len) (String.length input - !pos) in
-      Bytes.blit_string input !pos buf off n;
-      pos := !pos + n;
-      n
-  )
+  let next len =
+    let chunk = List.nth sizes (!turn mod List.length sizes) in
+    incr turn;
+    let n = min (min chunk len) (String.length input - !pos) in
+    let p = !pos in
+    pos := p + n;
+    (p, n)
+  in
+  match feed with
+  | Function ->
+      Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+        (fun buf off len ->
+          let p, n = next len in
+          Bytes.blit_string input p buf off n;
+          n
+      )
+  | Seq ->
+      let rec seq () =
+        if !pos >= String.length input then
+          Seq.Nil
+        else
+          let p, n = next max_int in
+          Seq.Cons (String.sub input p n, seq)
+      in
+      Parseff.Source.of_seq seq
 
-type runner = Memory | Stream of int list * int
+type runner = Memory | Stream of feed * int list * int
 
 let run_real ?(traced = false) ~partial runner g input =
   let cx =
@@ -394,9 +412,9 @@ let run_real ?(traced = false) ~partial runner g input =
       match runner with
       | Memory ->
           Parseff.parse ~max_depth ~consume ~diagnostics:cx.diags ?trace input p
-      | Stream (sizes, backtrack_window) ->
+      | Stream (feed, sizes, backtrack_window) ->
           Parseff.parse_source ~max_depth ~backtrack_window ~consume
-            ~diagnostics:cx.diags ?trace (chunked input sizes) p
+            ~diagnostics:cx.diags ?trace (chunked feed input sizes) p
     with
     | Ok v ->
         (Success, Ok v)
@@ -1168,17 +1186,26 @@ let cases_per_seed = 2_000
 let large_window = 65_536
 
 let streams =
-  [
-    ([ 1 ], large_window);
-    ([ 1; 2; 3 ], large_window);
-    ([ 1 ], 2);
-    ([ 2 ], 3);
-    ([ 3 ], 4);
-    ([ 1; 3 ], 8);
-  ]
+  let sizes =
+    [
+      ([ 1 ], large_window);
+      ([ 1; 2; 3 ], large_window);
+      ([ 1 ], 2);
+      ([ 2 ], 3);
+      ([ 3 ], 4);
+      ([ 1; 3 ], 8);
+      ([ 8 ], large_window);
+      ([ 8 ], 2);
+      ([ 8 ], 5);
+    ]
+  in
+  List.map (fun (s, w) -> (Function, s, w)) sizes
+  @ List.map (fun (s, w) -> (Seq, s, w)) sizes
+  @ [ (Seq, [ 0; 2; 0; 0; 3 ], large_window); (Seq, [ 0; 1; 3 ], 3) ]
 
-let show_stream (sizes, window) =
-  Printf.sprintf "parse_source, chunks [%s], backtrack_window %d"
+let show_stream (feed, sizes, window) =
+  Printf.sprintf "parse_source, %s, chunks [%s], backtrack_window %d"
+    (match feed with Function -> "of_function" | Seq -> "of_seq")
     (String.concat "; " (List.map string_of_int sizes))
     window
 
@@ -1207,8 +1234,12 @@ let check_case stats seed case =
     let traced = run_real ~traced:true ~partial Memory g input in
     let streamed =
       List.map
-        (fun ((sizes, window) as s) ->
-          (s, run_real ~traced:true ~partial (Stream (sizes, window)) g input)
+        (fun ((feed, sizes, window) as s) ->
+          ( s,
+            run_real ~traced:true ~partial
+              (Stream (feed, sizes, window))
+              g input
+          )
         )
         streams
     in
@@ -1238,7 +1269,7 @@ let check_case stats seed case =
              (show_outcome traced)
           );
       List.iter
-        (fun (((_, window) as s), (o : outcome)) ->
+        (fun (((_, _, window) as s), (o : outcome)) ->
           if window = large_window then against (show_stream s) (untraced o);
           if o.cls = Window then
             begin if window > span then
