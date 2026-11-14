@@ -151,8 +151,10 @@ let frame_committed_bit = 4
 let frame_pin_bit = 8
 let frame_capture_bit = 16
 let frame_capture = frame_barrier lor frame_capture_bit
+let frame_clamp_bit = 32
+let frame_kept_bit = 64
 let frame_stride = 3
-let frame_trail_shift = 5
+let frame_trail_shift = 7
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -619,24 +621,60 @@ module State = struct
     Array.unsafe_get t.frames (((top - 1) * frame_stride) + 1)
     lsr frame_trail_shift
 
+  let[@inline always] trail_cut_allowed (t : t) depth =
+    let first = Array.unsafe_get t.frames 1 in
+    depth <= first lsr frame_trail_shift && first land frame_kept_bit = 0
+
   let[@inline always] frame_pos (t : t) frame =
     Array.unsafe_get t.frames (frame * frame_stride)
+
+  let[@inline never] clamp_below (t : t) frame =
+    let frames = t.frames in
+    let base = frame * frame_stride in
+    let diag = Array.unsafe_get frames (base + 2) in
+    let depth = Array.unsafe_get frames (base + 1) lsr frame_trail_shift in
+    let mask = (1 lsl frame_trail_shift) - 1 in
+    for i = frame - 1 downto 0 do
+      let b = i * frame_stride in
+      if Array.unsafe_get frames (b + 2) > diag then
+        Array.unsafe_set frames (b + 2) diag;
+      let flags = Array.unsafe_get frames (b + 1) in
+      if flags lsr frame_trail_shift > depth then
+        Array.unsafe_set frames (b + 1)
+          (flags land mask lor (depth lsl frame_trail_shift))
+    done
+
+  let[@inline never] undo_frame_trail (t : t) frame saved =
+    undo_trail t saved;
+    if
+      Array.unsafe_get t.frames ((frame * frame_stride) + 1)
+      land frame_clamp_bit
+      <> 0
+    then
+      clamp_below t frame
+
+  let[@inline never] drop_frame_diags (t : t) frame saved =
+    ( match diag t with
+    | Sink c ->
+        c.rev <- drop_entries c.rev (t.diag_len - saved)
+    | No_sink ->
+        ()
+    );
+    t.diag_len <- saved;
+    if
+      Array.unsafe_get t.frames ((frame * frame_stride) + 1)
+      land frame_clamp_bit
+      <> 0
+    then
+      clamp_below t frame
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
     t.pos <- Array.unsafe_get t.frames base;
     let saved = Array.unsafe_get t.frames (base + 2) in
-    if t.diag_len > saved then begin
-      ( match diag t with
-      | Sink c ->
-          c.rev <- drop_entries c.rev (t.diag_len - saved)
-      | No_sink ->
-          ()
-      );
-      t.diag_len <- saved
-    end;
+    if t.diag_len > saved then drop_frame_diags t frame saved;
     let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
-    if trail_depth t > saved then undo_trail t saved
+    if trail_depth t > saved then undo_frame_trail t frame saved
 
   let[@inline never] advance_capture_frame (t : t) i =
     let base = i * frame_stride in
@@ -646,16 +684,31 @@ module State = struct
       (frame_capture lor (trail_depth t lsl frame_trail_shift));
     Array.unsafe_set frames (base + 2) t.diag_len
 
-  let[@inline never] keep_recorded_from (t : t) lowest =
+  let[@inline never] keep_before_advance (t : t) advanced =
     let frames = t.frames in
-    let depth = trail_depth t lsl frame_trail_shift in
-    let mask = (1 lsl frame_trail_shift) - 1 in
-    for i = lowest to t.frames_top - 1 do
+    let depth = trail_depth t in
+    let low = ref depth in
+    for i = advanced + 1 to t.frames_top - 1 do
       let base = i * frame_stride in
-      Array.unsafe_set frames (base + 1)
-        (Array.unsafe_get frames (base + 1) land mask lor depth);
-      Array.unsafe_set frames (base + 2) t.diag_len
-    done
+      let flags = Array.unsafe_get frames (base + 1) in
+      let d = flags lsr frame_trail_shift in
+      if d < depth || Array.unsafe_get frames (base + 2) < t.diag_len then begin
+        Array.unsafe_set frames (base + 1) (flags lor frame_clamp_bit);
+        if d < !low then low := d
+      end
+    done;
+    if !low < depth then begin
+      let rec unmark (Undo u) =
+        if u.depth > !low then begin
+          u.cell.mark <- 0;
+          unmark u.next
+        end else if advanced = 0 then
+          u.next <- running_empty
+      in
+      unmark t.trail;
+      if advanced = 0 then
+        Array.unsafe_set frames 1 (Array.unsafe_get frames 1 lor frame_kept_bit)
+    end
 
   let rec commit_nearest_from (t : t) i =
     i >= 0
@@ -671,7 +724,7 @@ module State = struct
       flags land frame_capture_bit <> 0
       && begin
         advance_capture_frame t i;
-        keep_recorded_from t (i + 1);
+        keep_before_advance t i;
         true
       end
 
@@ -694,7 +747,7 @@ module State = struct
       end else
         reached := false
     done;
-    if !lowest >= 0 then keep_recorded_from t !lowest;
+    if !lowest >= 0 then keep_before_advance t !lowest;
     !reached
 
   let always_rewinding_frame_open (t : t) =
@@ -710,7 +763,10 @@ module State = struct
 
   let keep_effects_so_far (t : t) =
     let depth = trail_depth t lsl frame_trail_shift in
-    let mask = (1 lsl frame_trail_shift) - 1 in
+    let mask =
+      ((1 lsl frame_trail_shift) - 1)
+      land lnot (frame_clamp_bit lor frame_kept_bit)
+    in
     for i = 0 to t.frames_top - 1 do
       let slot = (i * frame_stride) + 1 in
       Array.unsafe_set t.frames slot
@@ -6237,7 +6293,7 @@ module Ref = struct
     if top > 0 && c.mark <= State.frame_trail_depth_below st top then begin
       let next = st.trail in
       let (Undo u) = next in
-      if u.depth <= State.frame_trail_depth st 0 then u.next <- running_empty;
+      if State.trail_cut_allowed st u.depth then u.next <- running_empty;
       let depth = u.depth + 1 in
       c.mark <- depth;
       st.trail <- Undo { cell = c; old = c.value; depth; token; next }

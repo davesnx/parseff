@@ -895,14 +895,16 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
     [capture], or a value that {!many_iter}, {!sep_by_iter}, {!take_iter} or
     {!take_while_iter} gives out in [parser], moves the rewind point to the
     position of that call. A later failure of [parser] then goes back to that
-    position, not to the start. It removes only the diagnostics and the {!Ref}
-    changes made after that call; those made before it stay, as after a success.
-    Do not parse the same input again with another parser after [Error e]: skip
-    from the current position, and from [e.range.start] when it is later. A
-    {!cut} also continues to the frames outside [capture]. In {!parse_source},
-    only the input that [parser] reads after the rewind point must fit in
-    [~backtrack_window], so a parser that calls {!cut} after each decided part
-    can be longer than the window. The default is [false].
+    position, not to the start. It removes the diagnostics and the {!Ref}
+    changes made after that call. Those made before it stay, as after a success,
+    except those that a parser inside [parser] removes when it goes back, as it
+    does without [~release], for example an iteration of {!many} that consumes
+    nothing. Do not parse the same input again with another parser after
+    [Error e]: skip from the current position, and from [e.range.start] when it
+    is later. A {!cut} also continues to the frames outside [capture]. In
+    {!parse_source}, only the input that [parser] reads after the rewind point
+    must fit in [~backtrack_window], so a parser that calls {!cut} after each
+    decided part can be longer than the window. The default is [false].
 
     With [~outer:false], [e] keeps only the contexts that [parser] opened, as if
     the parse started at [capture]: the contexts open around [capture] are not
@@ -948,9 +950,9 @@ val recover :
     again: [warn ~pos:d.pos errors d.value] gives the same entry. With
     [~release:true], [inner] holds only the errors recorded after the last
     {!commit}, {!cut} or value given out by a [*_iter] function, such as
-    {!many_iter}, that reached [recover], since the errors before it stay. For
-    example, to keep the errors of [parser] and record [e] only when there are
-    none:
+    {!many_iter}, that reached [recover], since the errors before it stay as in
+    {!capture}. For example, to keep the errors of [parser] and record [e] only
+    when there are none:
     {@ocaml[
     let record errors e inner =
       List.iter
@@ -962,7 +964,7 @@ val recover :
     [~release] and [~outer] are given to {!capture}. With [~release:true],
     [sync] starts at the last {!commit}, {!cut} or value given out by a [*_iter]
     function that reached [recover], and the errors recorded before that call
-    stay.
+    stay as in {!capture}.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] calls [parser] directly, so the parse fails as without
