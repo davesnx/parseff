@@ -3608,14 +3608,22 @@ let location_of_position input pos =
 let window_size = 240
 let max_frames = 5
 
-let char_len s i =
-  let d = Bytes.get_utf_8_uchar s i in
+let char_len ?(limit = max_int) s i =
+  let need = utf8_sequence_length (Char.code (Bytes.unsafe_get s i)) in
+  let d =
+    if i + need > limit then
+      Bytes.get_utf_8_uchar (Bytes.sub s i (limit - i)) 0
+    else
+      Bytes.get_utf_8_uchar s i
+  in
   if Uchar.utf_decode_is_valid d then
     Uchar.utf_decode_length d
+  else if i + need > limit && Uchar.utf_decode_length d = limit - i then
+    need
   else
     1
 
-let count_code_points s a b =
+let count_code_points ?limit s a b =
   let n = ref 0 and i = ref a in
   while
     !i + 8 <= b
@@ -3629,7 +3637,7 @@ let count_code_points s a b =
       incr i;
       incr n
     end else begin
-      let len = char_len s !i in
+      let len = char_len ?limit s !i in
       if !i + len <= b then incr n;
       i := !i + len
     end
@@ -4500,6 +4508,13 @@ let expected_of_far f =
     List.length items - List.length kept
   )
 
+let unread_limit st =
+  match st.source with
+  | Some src when not src.eof ->
+      st.input_len - st.base
+  | _ ->
+      max_int
+
 let found_of st pos =
   if pos >= st.input_len then
     (End, { start = pos; stop = pos })
@@ -4524,7 +4539,7 @@ let found_of st pos =
       else
         (Text (Bytes.sub_string st.input rel !k), { start = p; stop = p + !k })
     end else begin
-      let n = char_len st.input rel in
+      let n = char_len ~limit:(unread_limit st) st.input rel in
       let n = imin n (len - rel) in
       (Text (Bytes.sub_string st.input rel n), { start = p; stop = p + n })
     end
@@ -4591,13 +4606,18 @@ let build st ~pos ?(notes = []) ?help kind span frames =
     if p > st.input_len then
       None
     else if line_start >= st.base then
-      Some (1 + count_code_points st.input (line_start - st.base) (p - st.base))
+      Some
+        (1
+        + count_code_points ~limit:(unread_limit st) st.input
+            (line_start - st.base) (p - st.base)
+        )
     else if
       idx.cut_line = line_start && idx.cut_at >= st.base && p >= idx.cut_at
     then
       Some
         (1 + idx.cut_chars
-        + count_code_points st.input (idx.cut_at - st.base) (p - st.base)
+        + count_code_points ~limit:(unread_limit st) st.input
+            (idx.cut_at - st.base) (p - st.base)
         )
     else
       None

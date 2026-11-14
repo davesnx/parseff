@@ -3085,6 +3085,85 @@ let test_error_start_in_dropped_input () =
     "framed, ~source" framed_render
     (render ~source:framed_input framed_input framed)
 
+let render_after_stale ?backtrack_window ~read stale input parser =
+  let off = ref 0 in
+  let source =
+    Parseff.Source.of_function (fun buf o len ->
+        let n = min (min len read) (String.length input - !off) in
+        Bytes.blit_string input !off buf o n;
+        off := !off + n;
+        n
+    )
+  in
+  Gc.minor ();
+  for _ = 1 to 1000 do
+    ignore (Sys.opaque_identity (Bytes.make 1000 stale))
+  done;
+  Gc.minor ();
+  match Parseff.parse_source ?backtrack_window source parser with
+  | Stdlib.Ok () ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error (e : Parseff.error) ->
+      ( header_of (Parseff.render_error e),
+        header_of (Parseff.render_error ~source:input e)
+      )
+
+let stale_bytes = [ '\x82'; '\xAC'; 'a' ]
+
+let test_unread_bytes_column () =
+  let input = "a\xE2\x82\xAC\xE2\x82\xAC" in
+  List.iter
+    (fun stale ->
+      let label = Printf.sprintf "stale %C" stale in
+      let streamed, with_source =
+        render_after_stale ~read:6 stale input (fun () ->
+            ignore (Parseff.take 5);
+            Parseff.fail "here"
+        )
+      in
+      Alcotest.(check string)
+        (label ^ ": ~source") "1:3: [error] here" with_source;
+      Alcotest.(check string) label with_source streamed
+    )
+    stale_bytes
+
+let test_unread_bytes_found () =
+  let input = "a\xE2\x82\xAC\xE2\x82\xAC" in
+  List.iter
+    (fun stale ->
+      Alcotest.(check string)
+        (Printf.sprintf "stale %C" stale)
+        "1:3: [error] expected 'x', found '\\xE2\\x82'"
+        (fst
+           (render_after_stale ~read:6 stale input (fun () ->
+                ignore (Parseff.take 4);
+                ignore (Parseff.char 'x')
+            )
+           )
+        )
+    )
+    stale_bytes
+
+let test_unread_bytes_cut_line () =
+  let input = String.concat "" (List.init 20 (fun _ -> "\xE2\x82\xAC")) in
+  List.iter
+    (fun stale ->
+      let label = Printf.sprintf "stale %C" stale in
+      let streamed, with_source =
+        render_after_stale ~backtrack_window:8 ~read:2 stale input (fun () ->
+            for _ = 1 to 10 do
+              ignore (Parseff.take 3)
+            done;
+            ignore (Parseff.take 2);
+            Parseff.fail "here"
+        )
+      in
+      Alcotest.(check string)
+        (label ^ ": ~source") "1:11: [error] here" with_source;
+      Alcotest.(check string) label with_source streamed
+    )
+    stale_bytes
+
 let test_location_after_dropped_lines () =
   let input = "ab\ncd\n" ^ String.make 50 'e' ^ "\nf" in
   let parser () =
@@ -4201,6 +4280,10 @@ let () =
             test_error_start_in_dropped_input;
           test_case "location after dropped lines" `Quick
             test_location_after_dropped_lines;
+          test_case "unread bytes: column" `Quick test_unread_bytes_column;
+          test_case "unread bytes: found" `Quick test_unread_bytes_found;
+          test_case "unread bytes: dropped line start" `Quick
+            test_unread_bytes_cut_line;
           test_case "context column in code points" `Quick
             test_context_column_in_code_points;
           test_case "take reports what is left" `Quick
