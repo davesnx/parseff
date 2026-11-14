@@ -585,6 +585,10 @@ module State = struct
   let[@inline always] frame_trail_depth (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 1) lsr frame_trail_shift
 
+  let[@inline always] frame_trail_depth_below (t : t) top =
+    Array.unsafe_get t.frames (((top - 1) * frame_stride) + 1)
+    lsr frame_trail_shift
+
   let[@inline always] frame_pos (t : t) frame =
     Array.unsafe_get t.frames (frame * frame_stride)
 
@@ -1453,20 +1457,26 @@ let[@inline always] bytes_kind n = (n lsl 3) lor tag_bytes
 
 let[@inline always] at_least_kind n = (n lsl 3) lor tag_at_least
 
+let big_bytes_payload = 0
+let big_at_least_payload = 1
+let big_field_payload = 2
+let big_none_payload = 8
+let negative_count_payload = 9
+let[@inline always] big_kind payload = (payload lsl 3) lor tag_big
+
 let[@inline never] fail_bytes st n =
   if n <= max_small_count then
     fail_int st st.pos (bytes_kind n)
   else
-    fail_str st st.pos tag_big (string_of_int n)
+    fail_str st st.pos (big_kind big_bytes_payload) (string_of_int n)
 
 let[@inline never] fail_at_least st n =
   if n <= max_small_count then
     fail_int st st.pos (at_least_kind n)
   else
-    fail_str st st.pos ((1 lsl 3) lor tag_big) (string_of_int n)
-let none_kind = (8 lsl 3) lor tag_big
-let negative_count_payload = 9
-let negative_count_kind = (negative_count_payload lsl 3) lor tag_big
+    fail_str st st.pos (big_kind big_at_least_payload) (string_of_int n)
+let none_kind = big_kind big_none_payload
+let negative_count_kind = big_kind negative_count_payload
 
 let[@inline never] fail_negative_count st n =
   fail_str st st.pos negative_count_kind (string_of_int n)
@@ -2363,6 +2373,7 @@ let skip_to target =
 let ctx_stride = 2
 let ctx_cut_bit = 1
 let ctx_delimited_bit = 2
+let ctx_start_shift = 2
 
 let[@inline never] ctx_grow st =
   let old = st.ctx in
@@ -2396,7 +2407,7 @@ let[@inline always] context_run st delimited start name p =
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
   Array.unsafe_set st.ctx (m + 1)
-    ((start lsl 2) lor (Bool.to_int delimited * ctx_delimited_bit));
+    ((start lsl ctx_start_shift) lor (Bool.to_int delimited * ctx_delimited_bit));
   if Array.unsafe_get st.ctx_names d != name then
     Array.unsafe_set st.ctx_names d name;
   st.ctx_top <- d + 1;
@@ -2680,7 +2691,7 @@ let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
   | Some d ->
       or_ (fold_right_one_or_more p op) (fun () -> d) ()
 
-type 'a operator =
+type ('a, 'k) operator =
   | Infix_left of (unit -> 'a -> 'a -> 'a)
   | Infix_right of (unit -> 'a -> 'a -> 'a)
   | Prefix of (unit -> 'a -> 'a)
@@ -2691,173 +2702,7 @@ let infix_right op = Infix_right op
 let prefix op = Prefix op
 let postfix op = Postfix op
 
-let rec has_prefix_op = function
-  | [] ->
-      false
-  | Prefix _ :: _ ->
-      true
-  | _ :: ops ->
-      has_prefix_op ops
-
-let rec has_prefix = function
-  | [] ->
-      false
-  | ops :: rest ->
-      has_prefix_op ops || has_prefix rest
-
-type 'a expression = {
-  st : State.t;
-  operand : unit -> 'a;
-  table : 'a operator list list;
-  prefixed : bool;
-}
-
-exception Expr_stop
-
-let rec expr_level c levels = expr_loop c levels (expr_operand c) (-1)
-
-and expr_level_right c here start =
-  let lhs = expr_operand c in
-  expr_loop c here lhs
-    ( if c.st.pos = start then
-        start
-      else
-        -1
-    )
-
-and expr_operand c =
-  if not c.prefixed then
-    c.operand ()
-  else begin
-    let st = c.st in
-    let frame = State.push_rewind_frame st frame_choice in
-    match expr_prefix_levels c frame st.pos c.table with
-    | v ->
-        State.pop_rewind_frame st frame;
-        v
-    | exception Fail ->
-        State.pop_rewind_frame st frame;
-        if State.frame_committed st frame then raise_notrace Fail;
-        restore_rewind_frame st frame;
-        c.operand ()
-    | exception exn ->
-        State.pop_rewind_frame st frame;
-        raise exn
-  end
-
-and expr_prefix_levels c frame start = function
-  | [] ->
-      raise_notrace Fail
-  | ops :: rest ->
-      expr_prefix_ops c frame start rest ops
-
-and expr_prefix_ops c frame start rest = function
-  | [] ->
-      expr_prefix_levels c frame start rest
-  | Prefix f :: ops -> (
-      match
-        let g = f () in
-        if c.st.pos = start then begin
-          State.set_frame_kind c.st frame frame_choice;
-          raise_notrace Fail
-        end;
-        g (rec_ (fun () -> expr_level c rest))
-      with
-      | v ->
-          v
-      | exception Fail ->
-          if State.frame_committed c.st frame then raise_notrace Fail;
-          restore_rewind_frame c.st frame;
-          expr_prefix_ops c frame start rest ops
-    )
-  | _ :: ops ->
-      expr_prefix_ops c frame start rest ops
-
-(* [stop_at] is the start of the first step of the right operand of an
-   [infix_right] whose operator and operand consumed no input, or [-1]. An
-   [infix_right] operator that consumes no input there would nest the same
-   step again, so the loop stops instead. *)
-and expr_loop c levels lhs stop_at =
-  match levels with
-  | [] ->
-      lhs
-  | _ :: _ -> (
-      let st = c.st in
-      let frame = State.push_rewind_frame st frame_repeat in
-      let start = st.pos in
-      match expr_try_levels c frame start stop_at lhs levels with
-      | v ->
-          State.pop_rewind_frame st frame;
-          if st.pos = start then begin
-            restore_rewind_frame st frame;
-            lhs
-          end else
-            expr_loop c levels v (-1)
-      | exception Fail ->
-          State.pop_rewind_frame st frame;
-          if State.frame_committed st frame then raise_notrace Fail;
-          restore_rewind_frame st frame;
-          lhs
-      | exception Expr_stop ->
-          State.pop_rewind_frame st frame;
-          restore_rewind_frame st frame;
-          lhs
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          raise exn
-    )
-
-and expr_try_levels c frame start stop_at lhs = function
-  | [] ->
-      raise_notrace Fail
-  | ops :: rest as here ->
-      expr_try_ops c frame start stop_at lhs here rest ops
-
-and expr_try_ops c frame start stop_at lhs here rest = function
-  | [] ->
-      expr_try_levels c frame start stop_at lhs rest
-  | Prefix _ :: ops ->
-      expr_try_ops c frame start stop_at lhs here rest ops
-  | Infix_left f :: ops -> (
-      match
-        let g = f () in
-        g lhs (expr_level c rest)
-      with
-      | v ->
-          v
-      | exception Fail ->
-          expr_next c frame start stop_at lhs here rest ops
-    )
-  | Infix_right f :: ops -> (
-      match
-        let g = f () in
-        if c.st.pos = stop_at then raise_notrace Expr_stop;
-        g lhs (rec_ (fun () -> expr_level_right c here start))
-      with
-      | v ->
-          v
-      | exception Fail ->
-          expr_next c frame start stop_at lhs here rest ops
-    )
-  | Postfix f :: ops -> (
-      match
-        let g = f () in
-        g lhs
-      with
-      | v ->
-          v
-      | exception Fail ->
-          expr_next c frame start stop_at lhs here rest ops
-    )
-
-and expr_next c frame start stop_at lhs here rest ops =
-  if State.frame_committed c.st frame then raise_notrace Fail;
-  restore_rewind_frame c.st frame;
-  expr_try_ops c frame start stop_at lhs here rest ops
-
-let expression ~operand table () =
-  let c = { st = get_state (); operand; table; prefixed = has_prefix table } in
-  expr_level c table
+exception Prec_build
 
 type 'a prec_node =
   | Prec_base of { min : int; value : 'a }
@@ -2879,22 +2724,34 @@ let[@inline] prec_value = function
 let[@inline] prec_with top value =
   match top with
   | Prec_base b ->
-      Prec_base { b with value }
+      Prec_base { min = b.min; value }
   | Prec_node n ->
-      Prec_node { n with value }
+      Prec_node { min = n.min; value; build = n.build; below = n.below }
 
-let rec prec_fold = function
+let rec prec_fold_into node value =
+  match node with
+  | Prec_base _ ->
+      value
+  | Prec_node n ->
+      prec_fold_into n.below (n.build (prec_value n.below) value)
+
+let prec_fold = function
   | Prec_base b ->
       b.value
   | Prec_node n ->
-      prec_fold (prec_with n.below (n.build (prec_value n.below) n.value))
+      prec_fold_into n.below (n.build (prec_value n.below) n.value)
 
-let rec prec_reduce top prec =
+let rec prec_reduce_into node value prec =
+  match node with
+  | Prec_node n when prec < n.min ->
+      prec_reduce_into n.below (n.build (prec_value n.below) value) prec
+  | _ ->
+      prec_with node value
+
+let prec_reduce top prec =
   match top with
   | Prec_node n when prec < n.min ->
-      prec_reduce
-        (prec_with n.below (n.build (prec_value n.below) n.value))
-        prec
+      prec_reduce_into n.below (n.build (prec_value n.below) n.value) prec
   | _ ->
       top
 
@@ -2910,10 +2767,21 @@ let prec_tightest st operand start top build =
   if st.pos = start then
     top
   else
-    prec_with top (build (prec_value top) value)
+    match build (prec_value top) value with
+    | v ->
+        prec_with top v
+    | exception Fail ->
+        raise_notrace Prec_build
 
-let prec_prefix () =
-  invalid_arg "Parseff.precedence: operator returned a prefix operator"
+let prec_postfix st start top build =
+  if st.pos = start then
+    top
+  else
+    match build (prec_value top) with
+    | v ->
+        prec_with top v
+    | exception Fail ->
+        raise_notrace Prec_build
 
 let prec_accept st operand start top prec = function
   | Infix_left f ->
@@ -2924,20 +2792,14 @@ let prec_accept st operand start top prec = function
   | Infix_right f ->
       prec_shift st operand start top prec (f ())
   | Postfix f ->
-      let value = (f ()) (prec_value top) in
-      if st.pos = start then
-        top
-      else
-        prec_with top value
+      prec_postfix st start top (f ())
   | Prefix _ ->
-      prec_prefix ()
+      top
 
 let prec_lower st frame start top prec =
-  let base = frame * frame_stride in
-  let flags = Array.unsafe_get st.frames (base + 1) in
   let again =
-    st.diag_len <> Array.unsafe_get st.frames (base + 2)
-    || State.trail_depth st <> flags lsr frame_trail_shift
+    st.diag_len <> State.frame_diag_len st frame
+    || State.trail_depth st <> State.frame_trail_depth st frame
   in
   let after = st.pos in
   if again then
@@ -2949,10 +2811,13 @@ let prec_lower st frame start top prec =
       if again then
         State.pop_rewind_frame st frame
       else begin
-        State.reset_repeat_frame st base start;
+        State.reset_repeat_frame st (frame * frame_stride) start;
         st.pos <- after
       end;
       top
+  | exception Fail ->
+      State.pop_rewind_frame st frame;
+      raise_notrace Prec_build
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
@@ -2978,6 +2843,9 @@ let prec_stop st frame top =
       | value ->
           State.pop_rewind_frame st frame;
           value
+      | exception Fail ->
+          State.pop_rewind_frame st frame;
+          raise_notrace Prec_build
       | exception exn ->
           State.pop_rewind_frame st frame;
           raise exn
@@ -3011,13 +2879,10 @@ and prec_look st operand operator frame top =
       raise exn
 
 and prec_below st operand operator frame start top prec op =
-  match (op, top) with
-  | Prefix _, _ ->
-      State.pop_rewind_frame st frame;
-      prec_prefix ()
-  | _, Prec_base _ ->
+  match top with
+  | Prec_base _ ->
       prec_stop st frame top
-  | _, Prec_node _ ->
+  | Prec_node _ ->
       let top = prec_lower st frame start top prec in
       if st.frames_top = frame then
         prec_loop st operand operator top
@@ -3041,8 +2906,7 @@ and prec_try st operand operator frame start top prec op =
       State.pop_rewind_frame st frame;
       raise exn
 
-let precedence ?(min = min_int) ~operand ~operator () =
-  let st = get_state () in
+let prec_run st min operand operator =
   let value = operand () in
   let frame = State.push_rewind_frame st frame_barrier in
   let start = st.pos in
@@ -3061,6 +2925,353 @@ let precedence ?(min = min_int) ~operand ~operator () =
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
+
+let precedence ?(min = min_int) ~operand ~operator () =
+  match prec_run (get_state ()) min operand operator with
+  | v ->
+      v
+  | exception Prec_build ->
+      raise_notrace Fail
+
+let expr_no_build _ = raise_notrace Fail
+let expr_none = Prefix (fun () -> expr_no_build)
+
+type ('a, 'k) expr_table = {
+  levels : ('a, 'k) operator list list;
+  mutable found : int;
+  mutable binary : 'a -> 'a -> 'a;
+  mutable unary : 'a -> 'a;
+}
+
+type 'a expr_zero = {
+  mutable node : 'a prec_node;
+  right : bool;
+  mutable zero : bool;
+}
+
+let rec expr_scan st t frame start level hi = function
+  | ops :: rest when level < hi ->
+      expr_scan_ops st t frame start level hi rest ops
+  | _ ->
+      expr_none
+
+and expr_scan_ops st t frame start level hi rest = function
+  | [] ->
+      expr_scan st t frame start (level + 1) hi rest
+  | op :: ops -> (
+      match op with
+      | Infix_left f | Infix_right f -> (
+          match f () with
+          | build ->
+              t.found <- level;
+              if t.binary != build then t.binary <- build;
+              op
+          | exception Fail ->
+              expr_skip st t frame start level hi rest ops
+        )
+      | Postfix f -> (
+          match f () with
+          | build ->
+              t.found <- level;
+              if t.unary != build then t.unary <- build;
+              op
+          | exception Fail ->
+              expr_skip st t frame start level hi rest ops
+        )
+      | Prefix _ ->
+          expr_scan_ops st t frame start level hi rest ops
+    )
+
+and expr_skip st t frame start level hi rest ops =
+  if State.frame_committed st frame then raise_notrace Fail;
+  if
+    st.diag_len = State.frame_diag_len st frame
+    && State.trail_depth st = State.frame_trail_depth st frame
+  then
+    st.pos <- start
+  else
+    restore_rewind_frame st frame;
+  expr_scan_ops st t frame start level hi rest ops
+
+let rec expr_drop n levels =
+  if n <= 0 then
+    levels
+  else
+    match levels with [] -> [] | _ :: rest -> expr_drop (n - 1) rest
+
+let rec expr_after op = function
+  | [] ->
+      []
+  | o :: ops ->
+      if o == op then
+        ops
+      else
+        expr_after op ops
+
+let expr_unwind st base =
+  while st.frames_top > base do
+    State.pop_rewind_frame st (st.frames_top - 1)
+  done
+
+let[@inline] expr_with top value =
+  if prec_value top == value then
+    top
+  else
+    prec_with top value
+
+let expr_stop_at zeros top =
+  match zeros with z :: _ -> z.node == top && z.zero && z.right | [] -> false
+
+let rec expr_retarget top below = function
+  | [] ->
+      ()
+  | z :: zeros ->
+      if z.node == top then z.node <- below;
+      expr_retarget top below zeros
+
+let rec expr_mark = function
+  | [] ->
+      ()
+  | z :: zeros ->
+      z.zero <- false;
+      expr_mark zeros
+
+let rec expr_look st operand t base top value zeros =
+  expr_band st operand t base top value zeros (imax 0 (prec_min top)) max_int
+
+and expr_band st operand t base top value zeros low hi =
+  let frame = st.frames_top - 1 in
+  match expr_scan st t frame st.pos low hi (expr_drop low t.levels) with
+  | op ->
+      if op == expr_none then
+        expr_end st operand t base top value zeros
+      else
+        expr_step st operand t base top value zeros hi op
+  | exception exn ->
+      expr_unwind st base;
+      raise exn
+
+and expr_step st operand t base top value zeros hi op =
+  let frame = st.frames_top - 1 in
+  let start = State.frame_pos st frame in
+  match op with
+  | Postfix _ ->
+      if st.pos = start then begin
+        restore_rewind_frame st frame;
+        expr_end st operand t base top value zeros
+      end else
+        begin match t.unary value with
+        | value ->
+            expr_moved st operand t base top value zeros
+        | exception Fail ->
+            expr_unwind st base;
+            raise_notrace Prec_build
+        | exception exn ->
+            expr_unwind st base;
+            raise exn
+      end
+  | Infix_left _ | Infix_right _ -> (
+      let level = t.found in
+      let right = match op with Infix_right _ -> true | _ -> false in
+      if right && st.pos = start && expr_stop_at zeros top then begin
+        restore_rewind_frame st frame;
+        expr_end st operand t base top value zeros
+      end else
+        let build = t.binary in
+        match operand () with
+        | rhs ->
+            let below = expr_with top value in
+            if below != top && zeros != [] then expr_retarget top below zeros;
+            let node =
+              Prec_node
+                {
+                  min =
+                    ( if right then
+                        level
+                      else
+                        level + 1
+                    );
+                  value = rhs;
+                  build;
+                  below;
+                }
+            in
+            if st.pos = start then begin
+              ignore (State.push_rewind_frame st frame_repeat);
+              expr_look st operand t base node rhs
+                ({ node; right; zero = true } :: zeros)
+            end else
+              expr_moved st operand t base node rhs zeros
+        | exception Fail ->
+            if State.frame_committed st frame then begin
+              expr_unwind st base;
+              raise_notrace Fail
+            end;
+            restore_rewind_frame st frame;
+            expr_retry st operand t base top value zeros hi level op
+        | exception exn ->
+            expr_unwind st base;
+            raise exn
+    )
+  | Prefix _ ->
+      expr_end st operand t base top value zeros
+
+and expr_moved st operand t base top value zeros =
+  expr_mark zeros;
+  State.reset_frame st (st.frames_top - 1) frame_repeat;
+  expr_look st operand t base top value zeros
+
+and expr_retry st operand t base top value zeros hi level op =
+  let frame = st.frames_top - 1 in
+  match
+    match expr_drop level t.levels with
+    | ops :: rest ->
+        expr_scan_ops st t frame st.pos level hi rest (expr_after op ops)
+    | [] ->
+        expr_none
+  with
+  | op ->
+      if op == expr_none then
+        expr_end st operand t base top value zeros
+      else
+        expr_step st operand t base top value zeros hi op
+  | exception exn ->
+      expr_unwind st base;
+      raise exn
+
+and expr_end st operand t base top value zeros =
+  match (zeros, top) with
+  | z :: rest, Prec_node n when z.node == top ->
+      if z.zero then begin
+        let frame = st.frames_top - 1 in
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        restore_rewind_frame st (st.frames_top - 1);
+        expr_end st operand t base n.below (prec_value n.below) rest
+      end else
+        expr_reduce st operand t base top value rest true
+  | _, Prec_node _ ->
+      expr_reduce st operand t base top value zeros false
+  | _, Prec_base _ ->
+      let frame = st.frames_top - 1 in
+      prec_base_stop st frame (State.frame_pos st frame) value
+
+and expr_reduce st operand t base top value zeros pop =
+  match top with
+  | Prec_base _ ->
+      expr_end st operand t base top value zeros
+  | Prec_node n -> (
+      match n.build (prec_value n.below) value with
+      | value ->
+          if pop then State.pop_rewind_frame st (st.frames_top - 1);
+          State.reset_frame st (st.frames_top - 1) frame_repeat;
+          expr_band st operand t base n.below value zeros
+            (imax 0 (prec_min n.below))
+            n.min
+      | exception Fail ->
+          expr_unwind st base;
+          raise_notrace Prec_build
+      | exception exn ->
+          expr_unwind st base;
+          raise exn
+    )
+
+let expr_run st min operand t =
+  let value = operand () in
+  let base = State.push_rewind_frame st frame_repeat in
+  let low = imax 0 min in
+  match expr_scan st t base st.pos low max_int (expr_drop low t.levels) with
+  | op ->
+      if op == expr_none then
+        prec_base_stop st base (State.frame_pos st base) value
+      else
+        expr_step st operand t base
+          (Prec_base { min; value })
+          value [] max_int op
+  | exception exn ->
+      expr_unwind st base;
+      raise exn
+
+let rec expr_has_prefix_op = function
+  | [] ->
+      false
+  | Prefix _ :: _ ->
+      true
+  | _ :: ops ->
+      expr_has_prefix_op ops
+
+let rec expr_has_prefix = function
+  | [] ->
+      false
+  | ops :: rest ->
+      expr_has_prefix_op ops || expr_has_prefix rest
+
+let rec expr_operand st t operand () =
+  let frame = State.push_rewind_frame st frame_choice in
+  match expr_prefix st t operand frame st.pos 0 t.levels with
+  | build, value -> (
+      State.pop_rewind_frame st frame;
+      match build value with
+      | v ->
+          v
+      | exception Fail ->
+          raise_notrace Prec_build
+    )
+  | exception Fail ->
+      State.pop_rewind_frame st frame;
+      if State.frame_committed st frame then raise_notrace Fail;
+      restore_rewind_frame st frame;
+      operand ()
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+and expr_prefix st t operand frame start level = function
+  | [] ->
+      raise_notrace Fail
+  | ops :: rest ->
+      expr_prefix_ops st t operand frame start level rest ops
+
+and expr_prefix_ops st t operand frame start level rest = function
+  | [] ->
+      expr_prefix st t operand frame start (level + 1) rest
+  | Prefix f :: ops -> (
+      match
+        let build = f () in
+        if st.pos = start then begin
+          State.set_frame_kind st frame frame_choice;
+          raise_notrace Fail
+        end;
+        ( build,
+          rec_ (fun () -> expr_run st (level + 1) (expr_operand st t operand) t)
+        )
+      with
+      | r ->
+          r
+      | exception Fail ->
+          if State.frame_committed st frame then raise_notrace Fail;
+          restore_rewind_frame st frame;
+          expr_prefix_ops st t operand frame start level rest ops
+    )
+  | _ :: ops ->
+      expr_prefix_ops st t operand frame start level rest ops
+
+let expression ~operand table () =
+  let st = get_state () in
+  let t =
+    { levels = table; found = 0; binary = expr_no_build; unary = expr_no_build }
+  in
+  let operand =
+    if expr_has_prefix table then
+      expr_operand st t operand
+    else
+      operand
+  in
+  match expr_run st min_int operand t with
+  | v ->
+      v
+  | exception Prec_build ->
+      raise_notrace Fail
 
 let optional (p : unit -> 'a) () : 'a option =
   let st = get_state () in
@@ -3434,7 +3645,7 @@ let[@inline] any_varint () =
 
 let int_kind index endian =
   let little = match endian with Big -> 0 | Little -> 1 in
-  ((2 + (index * 2) + little) lsl 3) lor tag_big
+  big_kind (big_field_payload + (index * 2) + little)
 
 let[@inline never] int16_mismatch st start endian expected actual =
   let b = Bytes.create 4 in
@@ -3608,14 +3819,22 @@ let location_of_position input pos =
 let window_size = 240
 let max_frames = 5
 
-let char_len s i =
-  let d = Bytes.get_utf_8_uchar s i in
+let char_len ?(limit = max_int) s i =
+  let need = utf8_sequence_length (Char.code (Bytes.unsafe_get s i)) in
+  let d =
+    if i + need > limit then
+      Bytes.get_utf_8_uchar (Bytes.sub s i (limit - i)) 0
+    else
+      Bytes.get_utf_8_uchar s i
+  in
   if Uchar.utf_decode_is_valid d then
     Uchar.utf_decode_length d
+  else if i + need > limit && Uchar.utf_decode_length d = limit - i then
+    need
   else
     1
 
-let count_code_points s a b =
+let count_code_points ?limit s a b =
   let n = ref 0 and i = ref a in
   while
     !i + 8 <= b
@@ -3629,7 +3848,7 @@ let count_code_points s a b =
       incr i;
       incr n
     end else begin
-      let len = char_len s !i in
+      let len = char_len ?limit s !i in
       if !i + len <= b then incr n;
       i := !i + len
     end
@@ -3722,9 +3941,9 @@ let more_alternatives n =
     string_of_int n ^ " more alternatives"
 
 let int_mismatch payload s =
-  let index = (payload - 2) / 2 in
+  let index = (payload - big_field_payload) / 2 in
   let suffix =
-    if (payload - 2) land 1 = 1 then
+    if (payload - big_field_payload) land 1 = 1 then
       "le"
     else
       "be"
@@ -3744,13 +3963,15 @@ let int_mismatch payload s =
         Printf.sprintf "0x%08lX" actual,
         4
       )
-  | _ ->
+  | 2 ->
       let expected = String.get_int64_be s 0 in
       let actual = String.get_int64_be s 8 in
       ( Printf.sprintf "int64%s 0x%016LX" suffix expected,
         Printf.sprintf "0x%016LX" actual,
         8
       )
+  | _ ->
+      failwith "Parseff: internal error: unknown field payload"
 
 let field_mismatch payload s =
   if payload = negative_count_payload then
@@ -3841,17 +4062,21 @@ let window_start s len line_start focus =
   let start =
     ref (imin len (line_start + imax 0 (focus - (window_size / 2))))
   in
-  while is_continuation s len !start do
+  while !start < line_start + focus && is_continuation s len !start do
     incr start
   done;
   !start
 
 let window_stop s len start limit =
-  let stop = ref (imin limit (start + window_size)) in
-  while !stop > start && is_continuation s len !stop do
-    decr stop
+  let stop = imin limit (start + window_size) in
+  let back = ref stop in
+  while !back > imax start (stop - 3) && is_continuation s len !back do
+    decr back
   done;
-  !stop
+  if is_continuation s len !back then
+    stop
+  else
+    !back
 
 let window ~number ~first text focus =
   let len = String.length text in
@@ -4426,12 +4651,12 @@ let expected_of_far f =
           else
             string_of_int payload ^ " bytes"
         )
-    else if tag = tag_big && payload >= 2 then begin
+    else if tag = tag_big && payload >= big_field_payload then begin
       let label, _, _ = field_mismatch payload s in
       Label label
     end else if tag = tag_big then
       Label
-        ( if payload = 0 then
+        ( if payload = big_bytes_payload then
             s ^ " bytes"
           else
             "at least " ^ s ^ " characters"
@@ -4500,6 +4725,13 @@ let expected_of_far f =
     List.length items - List.length kept
   )
 
+let unread_limit st =
+  match st.source with
+  | Some src when not src.eof ->
+      st.input_len - st.base
+  | _ ->
+      max_int
+
 let found_of st pos =
   if pos >= st.input_len then
     (End, { start = pos; stop = pos })
@@ -4524,7 +4756,7 @@ let found_of st pos =
       else
         (Text (Bytes.sub_string st.input rel !k), { start = p; stop = p + !k })
     end else begin
-      let n = char_len st.input rel in
+      let n = char_len ~limit:(unread_limit st) st.input rel in
       let n = imin n (len - rel) in
       (Text (Bytes.sub_string st.input rel n), { start = p; stop = p + n })
     end
@@ -4536,9 +4768,10 @@ let found_of_far st f pos =
     let kind = far_item_kind f i in
     let tag = kind land 7 and payload = kind lsr 3 in
     if kind <> none_kind then begin
-      if not (tag = tag_bytes || (tag = tag_big && payload = 0)) then
+      if not (tag = tag_bytes || (tag = tag_big && payload = big_bytes_payload))
+      then
         all_short := false;
-      if tag = tag_big && payload >= 2 then begin
+      if tag = tag_big && payload >= big_field_payload then begin
         let ((_, found, _) as v) = field_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
@@ -4591,13 +4824,18 @@ let build st ~pos ?(notes = []) ?help kind span frames =
     if p > st.input_len then
       None
     else if line_start >= st.base then
-      Some (1 + count_code_points st.input (line_start - st.base) (p - st.base))
+      Some
+        (1
+        + count_code_points ~limit:(unread_limit st) st.input
+            (line_start - st.base) (p - st.base)
+        )
     else if
       idx.cut_line = line_start && idx.cut_at >= st.base && p >= idx.cut_at
     then
       Some
         (1 + idx.cut_chars
-        + count_code_points st.input (idx.cut_at - st.base) (p - st.base)
+        + count_code_points ~limit:(unread_limit st) st.input
+            (idx.cut_at - st.base) (p - st.base)
         )
     else
       None
@@ -4858,7 +5096,7 @@ let outer_contexts st pos =
   for d = st.ctx_top - 1 downto 0 do
     let m = d * ctx_stride in
     let flags = Array.unsafe_get st.ctx (m + 1) in
-    let start = flags lsr 2 in
+    let start = flags lsr ctx_start_shift in
     if pos > start then
       acc :=
         ( Array.unsafe_get st.ctx_names d,
@@ -5447,16 +5685,10 @@ module Ref = struct
       c.mark <- 0
     end;
     let top = st.frames_top in
-    if
-      top > 0
-      && c.mark
-         <= Array.unsafe_get st.frames (((top - 1) * frame_stride) + 1)
-            lsr frame_trail_shift
-    then begin
+    if top > 0 && c.mark <= State.frame_trail_depth_below st top then begin
       let next = st.trail in
       let (Undo u) = next in
-      if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
-        u.next <- running_empty;
+      if u.depth <= State.frame_trail_depth st 0 then u.next <- running_empty;
       let depth = u.depth + 1 in
       c.mark <- depth;
       st.trail <- Undo { cell = c; old = c.value; depth; token; next }

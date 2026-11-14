@@ -44,7 +44,7 @@ Add `parseff` to your `dune-project`:
  (name my_project)
  (depends
   (ocaml (>= 5.3))
-  (parseff (>= 0.1))))
+  parseff))
 ```
 
 Then lock and build:
@@ -111,11 +111,12 @@ let () =
 
 | Section | Combinators |
 |---------|------------|
-| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input` |
-| [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `commit`, `cut`, `rec_` |
-| [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right` |
-| [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace` |
-| [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `capture`, `recover`, `render_error` |
-| [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics` |
-| [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take` |
-| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source` |
+| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `regex`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
+| [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `commit`, `cut`, `rec_`, `peek_with`, `skip_to`, `parse ~trace` |
+| [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right`, `expression`, `precedence` |
+| [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace`, `integer`, `number`, `hex_integer`, `lexeme`, `keyword` |
+| [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `render_error` |
+| [Error recovery](/parseff/guides/error-recovery) | `capture`, `recover`, `sep_by_recover`, `skip_nested` |
+| [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics`, `Ref` |
+| [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `take_span`, `span_length`, `span_get` |
+| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `Source.of_bigstring_chunks`, `parse_source`, `parse_source_each` |

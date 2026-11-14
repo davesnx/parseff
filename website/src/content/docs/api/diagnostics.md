@@ -48,6 +48,7 @@ val parse :
   ?max_depth:int ->
   ?consume:[ `All | `Partial ] ->
   ?diagnostics:'d Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
