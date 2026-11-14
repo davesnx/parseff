@@ -97,6 +97,7 @@ module Diagnostics = struct
 end
 
 type custom_error = ..
+type custom_error += Limit_exceeded of { limit : int }
 
 exception Fail
 type fail_extra = {
@@ -110,7 +111,14 @@ type fail_extra = {
 
 exception User_failure of int * string * fail_extra
 
-type over = { opos : int; mutable oitems : (int * string) list }
+let no_limit = -1
+let no_end = max_int
+
+type over = {
+  opos : int;
+  mutable oitems : (int * string) list;
+  mutable oend : int;
+}
 
 type far_extra =
   | No_extra
@@ -158,6 +166,8 @@ type source = {
   feed : feed;
   mutable eof : bool;
   mutable window : int;
+  mutable limit : int;
+  mutable buffered : int;
 }
 
 and feed =
@@ -311,7 +321,11 @@ let rec running_empty =
    only a full [input] is shared as a string. A chunk from [Source.of_chunks]
    becomes [input] only when it is all buffered, so it is full and is never
    written. Memory input is the caller's string, with [base = 0] and no
-   source. *)
+   source. While within runs, the source keeps the frame end in [limit] and
+   the real end of the buffered bytes in [buffered], and [input_len] is
+   [min buffered limit]. A refill sees [limit <> no_limit] and reads with
+   [input_len] set back to [buffered]. On memory input, within installs a
+   source that has ended, so that every primitive takes its bounded path. *)
 type state = {
   mutable input : bytes;
   mutable pos : int;
@@ -326,7 +340,7 @@ type state = {
   mutable ctx : int array;
   mutable ctx_names : string array;
   mutable line_index : line_index option;
-  source : source option;
+  mutable source : source option;
   mutable frames : int array;
   mutable frames_top : int;
   mutable trail : trail;
@@ -360,7 +374,14 @@ module Source = struct
   type nonrec bigstring = bigstring
 
   let make ~initial ~eof feed : t =
-    { initial; feed; eof; window = default_backtrack_window }
+    {
+      initial;
+      feed;
+      eof;
+      window = default_backtrack_window;
+      limit = no_limit;
+      buffered = 0;
+    }
 
   let of_string s =
     make ~initial:s ~eof:true
@@ -1091,6 +1112,8 @@ let[@inline never] rec fill st ~keep_from need =
         true
       else if src.eof then
         false
+      else if src.limit <> no_limit then
+        fill_limited st ~keep_from need
       else
         let floor = State.reclaim_floor st ~keep_from in
         let limit = src.window in
@@ -1150,6 +1173,27 @@ let[@inline never] rec fill st ~keep_from need =
             false
           end else
             fill st ~keep_from need
+
+and[@inline never] fill_limited st ~keep_from need =
+  match st.source with
+  | None ->
+      false
+  | Some src -> (
+      let limit = src.limit in
+      st.input_len <- src.buffered;
+      src.limit <- no_limit;
+      match fill st ~keep_from (imin need limit) with
+      | ok ->
+          src.buffered <- st.input_len;
+          src.limit <- limit;
+          st.input_len <- imin st.input_len limit;
+          ok && need <= limit
+      | exception exn ->
+          src.buffered <- st.input_len;
+          src.limit <- limit;
+          st.input_len <- imin st.input_len limit;
+          raise exn
+    )
 
 let[@inline always] have st n =
   n <= st.input_len - st.pos
@@ -1310,7 +1354,7 @@ let[@inline never] far_overflow f k s =
         | Some o ->
             o
         | None ->
-            let o = { opos = f.pos; oitems = [] } in
+            let o = { opos = f.pos; oitems = []; oend = no_end } in
             f.extra <- Over o;
             o
       in
@@ -1379,11 +1423,13 @@ let far_relabel f n0 o0 label =
   f.n <- n0;
   begin match far_over f with
   | Some o ->
-      if n0 < far_total_capacity then
-        f.extra <- No_extra
-      else
+      if n0 >= far_total_capacity then
         o.oitems <-
           List.filteri (fun i _ -> i >= List.length o.oitems - o0) o.oitems
+      else if o.oend <> no_end then
+        o.oitems <- []
+      else
+        f.extra <- No_extra
   | None ->
       ()
   end;
@@ -1717,6 +1763,17 @@ let regex_failure st label =
   | None ->
       fail_str st st.pos tag_label label_regex
 
+let[@inline never] regex_window_error st src =
+  raise
+    (Backtrack_window_exceeded
+       ( {
+           limit = src.window;
+           oldest = State.reclaim_floor st ~keep_from:st.pos;
+         },
+         { at = st.pos; open_frames = [] }
+       )
+    )
+
 let rec match_regex_source st src re label =
   trim_input st;
   let off = st.pos - st.base in
@@ -1735,16 +1792,36 @@ let rec match_regex_source st src re label =
       regex_failure st label
   | _ ->
       if not (regex_read_ahead st src (ahead + imax 1 ahead)) then
-        raise
-          (Backtrack_window_exceeded
-             ( {
-                 limit = src.window;
-                 oldest = State.reclaim_floor st ~keep_from:st.pos;
-               },
-               { at = st.pos; open_frames = [] }
-             )
-          );
+        regex_window_error st src;
       match_regex_source st src re label
+
+let rec match_regex_frame st src re label =
+  let off = st.pos - st.base in
+  let ahead = st.input_len - st.pos in
+  let shift =
+    if off = 0 then
+      0
+    else
+      off - 1
+  in
+  let ended = src.eof || st.input_len = src.limit in
+  match
+    Re.exec_partial_detailed ~pos:(off - shift) re
+      (Bytes.sub_string st.input shift (st.input_len - st.base - shift))
+  with
+  | `Full g when ended || st.base + shift + Re.Group.stop g 0 < st.input_len ->
+      let match_start = st.pos in
+      let match_end = st.base + shift + Re.Group.stop g 0 in
+      st.pos <- match_end;
+      slice st match_start (match_end - match_start)
+  | `Mismatch ->
+      regex_failure st label
+  | _ when ended ->
+      regex_failure st label
+  | _ ->
+      if not (regex_read_ahead st src (ahead + imax 1 ahead)) then
+        regex_window_error st src;
+      match_regex_frame st src re label
 
 let[@inline never] handle_match_regex st re label =
   match st.source with
@@ -1763,7 +1840,10 @@ let[@inline never] handle_match_regex st re label =
   | Some src ->
       if (not src.eof) && st.input_len - st.pos < src.window / 2 then
         ignore (regex_read_ahead st src (src.window / 2));
-      match_regex_source st src re label
+      if src.limit = no_limit then
+        match_regex_source st src re label
+      else
+        match_regex_frame st src re label
 
 let[@inline never] need_bytes_slow st n =
   if not (have st n) then fail_int st st.pos (bytes_kind n)
@@ -1825,6 +1905,26 @@ let[@inline always] read_uint16_le st =
   let p = st.pos in
   let v = Bytes.get_uint16_le st.input (p - st.base) in
   st.pos <- p + 2;
+  v
+
+let[@inline always] read_uint24_be st =
+  need_bytes st 3;
+  let p = st.pos in
+  let i = p - st.base in
+  let v =
+    (Bytes.get_uint16_be st.input i lsl 8) lor Bytes.get_uint8 st.input (i + 2)
+  in
+  st.pos <- p + 3;
+  v
+
+let[@inline always] read_uint24_le st =
+  need_bytes st 3;
+  let p = st.pos in
+  let i = p - st.base in
+  let v =
+    Bytes.get_uint16_le st.input i lor (Bytes.get_uint8 st.input (i + 2) lsl 16)
+  in
+  st.pos <- p + 3;
   v
 
 let[@inline always] read_int32_be st =
@@ -1928,9 +2028,17 @@ let[@inline never] utf8_fill st keep_from p =
 let[@inline] fill_uchar st ~keep_from p =
   if p + 4 > st.input_len then utf8_fill st keep_from p
 
-let[@inline always] utf8_decode inp i =
+let[@inline never] utf8_decode_cut inp i len =
+  Bytes.get_utf_8_uchar (Bytes.sub inp i (imin 4 (len - i))) 0
+
+let[@inline always] utf8_decode_tail inp i len =
+  if len >= Bytes.length inp then
+    Bytes.get_utf_8_uchar inp i
+  else
+    utf8_decode_cut inp i len
+
+let[@inline always] utf8_decode inp i len =
   let b0 = Char.code (Bytes.unsafe_get inp i) in
-  let len = Bytes.length inp in
   if b0 < 0xE0 then
     if b0 >= 0xC2 && i + 1 < len then
       let b1 = Char.code (Bytes.unsafe_get inp (i + 1)) in
@@ -1938,9 +2046,9 @@ let[@inline always] utf8_decode inp i =
         Uchar.utf_decode 2
           (Uchar.unsafe_of_int (((b0 land 0x1F) lsl 6) lor (b1 land 0x3F)))
       else
-        Bytes.get_utf_8_uchar inp i
+        utf8_decode_tail inp i len
     else
-      Bytes.get_utf_8_uchar inp i
+      utf8_decode_tail inp i len
   else if b0 < 0xF0 && i + 2 < len then
     let b1 = Char.code (Bytes.unsafe_get inp (i + 1)) in
     let b2 = Char.code (Bytes.unsafe_get inp (i + 2)) in
@@ -1958,15 +2066,15 @@ let[@inline always] utf8_decode inp i =
            )
         )
     else
-      Bytes.get_utf_8_uchar inp i
+      utf8_decode_tail inp i len
   else
-    Bytes.get_utf_8_uchar inp i
+    utf8_decode_tail inp i len
 
 let[@inline never] satisfy_uchar_slow st pred label =
   let p = st.pos in
   fill_uchar st ~keep_from:p p;
   if p >= st.input_len then fail_str st p tag_label label;
-  let d = utf8_decode st.input (p - st.base) in
+  let d = utf8_decode st.input (p - st.base) (st.input_len - st.base) in
   if not (Uchar.utf_decode_is_valid d) then fail_str st p tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if pred u then begin
@@ -1996,7 +2104,7 @@ let[@inline never] char_uchar_slow st expected =
   fill_uchar st ~keep_from:p p;
   let kind = Uchar.to_int expected lsl 3 in
   if p >= st.input_len then fail_int st p kind;
-  let d = utf8_decode st.input (p - st.base) in
+  let d = utf8_decode st.input (p - st.base) (st.input_len - st.base) in
   if not (Uchar.utf_decode_is_valid d) then fail_str st p tag_label label_utf8;
   let u = Uchar.utf_decode_uchar d in
   if Uchar.equal u expected then begin
@@ -2033,7 +2141,7 @@ let[@inline never] scan_uchars st inp ~base start limit pred =
         true
       end
     else
-      let d = utf8_decode inp !pos in
+      let d = utf8_decode inp !pos (Bytes.length inp) in
       if not (Uchar.utf_decode_is_valid d) then
         fail_str st (!pos + base) tag_label label_utf8;
       pred (Uchar.utf_decode_uchar d)
@@ -2059,7 +2167,7 @@ let[@inline never] scan_while_uchar_refilling st ~keep_from start pred =
     else begin
       utf8_fill st keep_from !p;
       if !p < st.input_len then begin
-        let d = Bytes.get_utf_8_uchar st.input (!p - st.base) in
+        let d = utf8_decode st.input (!p - st.base) (st.input_len - st.base) in
         if not (Uchar.utf_decode_is_valid d) then
           fail_str st !p tag_label label_utf8;
         if pred (Uchar.utf_decode_uchar d) then
@@ -2169,6 +2277,110 @@ let[@inline] location () =
   let st = get_state () in
   handle_location st
 
+let[@inline never] clip_far st start =
+  let f = st.far in
+  if f.special = 0 && f.pos >= start && f.pos <= st.input_len then
+    match far_over f with
+    | Some o ->
+        if o.oend = no_end then o.oend <- st.input_len
+    | None ->
+        f.extra <- Over { opos = f.pos; oitems = []; oend = st.input_len }
+
+let enter_limit st src stop =
+  let outer = src.limit in
+  if outer = no_limit then begin
+    src.buffered <- st.input_len;
+    src.limit <- stop
+  end else
+    src.limit <- imin stop outer;
+  st.input_len <- imin src.buffered src.limit;
+  outer
+
+let leave_limit st src outer =
+  src.limit <- outer;
+  st.input_len <-
+    ( if outer = no_limit then
+        src.buffered
+      else
+        imin src.buffered outer
+    )
+
+let[@inline never] limited st stop f =
+  let start = st.pos in
+  let far0 = st.far in
+  let far0_pos = far0.pos and far0_n = far0.n in
+  let installed, src =
+    match st.source with
+    | Some src ->
+        (false, src)
+    | None ->
+        let src = Source.of_string "" in
+        st.source <- Some src;
+        (true, src)
+  in
+  let outer = enter_limit st src stop in
+  match f () with
+  | v ->
+      leave_limit st src outer;
+      if installed then st.source <- None;
+      v
+  | exception exn ->
+      if
+        exn == Fail
+        && not (st.far == far0 && far0.pos = far0_pos && far0.n = far0_n)
+      then
+        clip_far st start;
+      leave_limit st src outer;
+      if installed then st.source <- None;
+      raise exn
+
+let[@inline never] fail_limit st ~from ~upto limit =
+  if st.far.pos >= from then far_commit_reset st;
+  fail_user st upto
+    (Payload_ext
+       ( Limit_exceeded { limit },
+         { from; upto; notes = []; help = None; depth = 0; chain = [] }
+       )
+    )
+
+let[@inline never] take_while_at_most st at_most pred =
+  if at_most < 0 then
+    invalid_arg "Parseff.take_while: at_most must be at least 0";
+  let start = st.pos in
+  let stop =
+    if at_most >= max_int - start then
+      max_int
+    else
+      start + at_most + 1
+  in
+  let end_pos =
+    match st.source with
+    | None -> (
+        let outer = st.input_len in
+        st.input_len <- imin outer stop;
+        match scan_while st ~keep_from:start start pred with
+        | e ->
+            st.input_len <- outer;
+            e
+        | exception exn ->
+            st.input_len <- outer;
+            raise exn
+      )
+    | Some src -> (
+        let outer = enter_limit st src stop in
+        match scan_while st ~keep_from:start start pred with
+        | e ->
+            leave_limit st src outer;
+            e
+        | exception exn ->
+            leave_limit st src outer;
+            raise exn
+      )
+  in
+  if end_pos - start > at_most then
+    fail_limit st ~from:start ~upto:end_pos at_most;
+  end_pos
+
 let[@inline never] end_of_input_slow st =
   ignore (have st 1);
   if st.pos <> st.input_len then fail_int st st.pos tag_end_of_input
@@ -2177,10 +2389,16 @@ let[@inline] end_of_input () =
   let st = get_state () in
   if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
-let[@inline] take_while ?(at_least = 0) ?label pred =
+let[@inline] take_while ?(at_least = 0) ?at_most ?label pred =
   let st = get_state () in
   let start = st.pos in
-  let end_pos = scan_while st ~keep_from:start start pred in
+  let end_pos =
+    match at_most with
+    | None ->
+        scan_while st ~keep_from:start start pred
+    | Some n ->
+        take_while_at_most st n pred
+  in
   st.pos <- end_pos;
   let n = end_pos - start in
   if n < at_least then
@@ -2263,6 +2481,25 @@ let take_span n =
     fail_negative_count st n
   else
     handle_take_span st n
+
+let within n p =
+  let st = get_state () in
+  if n < 0 then fail_negative_count st n;
+  let stop =
+    if n > max_int - st.pos then
+      max_int
+    else
+      st.pos + n
+  in
+  limited st stop (fun () ->
+      let v = p () in
+      if st.pos <> stop then
+        if have st 1 then
+          fail_int st st.pos tag_end_of_input
+        else
+          fail_bytes st (stop - st.pos);
+      v
+  )
 
 let or_ left right () =
   let st = get_state () in
@@ -2505,7 +2742,40 @@ let rec many_required p acc n =
   else
     many_required p (p () :: acc) (n - 1)
 
-let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
+let[@inline never] many_at_most st at_least at_most p =
+  if at_most < 0 || at_most < at_least then
+    invalid_arg "Parseff.many: at_most must be at least 0 and at least at_least";
+  let acc = ref (many_required p [] at_least) in
+  let n = ref at_least in
+  let frame = State.push_rewind_frame st frame_repeat in
+  let base = frame * frame_stride in
+  match
+    let start = ref st.pos in
+    let v = ref (p ()) in
+    while st.pos <> !start && !n < at_most do
+      acc := !v :: !acc;
+      incr n;
+      let pos = st.pos in
+      State.reset_repeat_frame st base pos;
+      start := pos;
+      v := p ()
+    done;
+    !start
+  with
+  | start when st.pos <> start ->
+      State.pop_rewind_frame st frame;
+      fail_limit st ~from:start ~upto:st.pos at_most
+  | _ ->
+      repeat_stop st frame;
+      List.rev !acc
+  | exception Fail ->
+      repeat_fail st frame;
+      List.rev !acc
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let many_loop at_least (p : unit -> 'a) : 'a list =
   let st = get_state () in
   let acc = ref (many_required p [] at_least) in
   let frame = State.push_rewind_frame st frame_repeat in
@@ -2530,6 +2800,13 @@ let many ?(at_least = 0) (p : unit -> 'a) () : 'a list =
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
+
+let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) () : 'a list =
+  match at_most with
+  | None ->
+      many_loop at_least p
+  | Some at_most ->
+      many_at_most (get_state ()) at_least at_most p
 
 let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
   let st = get_state () in
@@ -3480,6 +3757,7 @@ let[@inline always] expect_int64 endian read expected =
 module BE = struct
   let[@inline] any_int16 () = read_int16_be (get_state ())
   let[@inline] any_uint16 () = read_uint16_be (get_state ())
+  let[@inline] any_uint24 () = read_uint24_be (get_state ())
   let[@inline] any_int32 () = read_int32_be (get_state ())
   let[@inline] any_uint32 () = read_uint32_be (get_state ())
   let[@inline] any_int64 () = read_int64_be (get_state ())
@@ -3493,6 +3771,7 @@ end
 module LE = struct
   let[@inline] any_int16 () = read_int16_le (get_state ())
   let[@inline] any_uint16 () = read_uint16_le (get_state ())
+  let[@inline] any_uint24 () = read_uint24_le (get_state ())
   let[@inline] any_int32 () = read_int32_le (get_state ())
   let[@inline] any_uint32 () = read_uint32_le (get_state ())
   let[@inline] any_int64 () = read_int64_le (get_state ())
@@ -3804,6 +4083,8 @@ let error_message ?custom e =
       "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
   | Failed m ->
       m
+  | Custom (Limit_exceeded { limit }) ->
+      Printf.sprintf "limit of %d exceeded" limit
   | Custom v -> (
       match custom with
       | Some f ->
@@ -4500,13 +4781,13 @@ let expected_of_far f =
     List.length items - List.length kept
   )
 
-let found_of st pos =
-  if pos >= st.input_len then
+let found_of st stop pos =
+  if pos >= stop then
     (End, { start = pos; stop = pos })
   else begin
     let p = imax pos st.base in
     let rel = p - st.base in
-    let len = st.input_len - st.base in
+    let len = stop - st.base in
     let c = Bytes.unsafe_get st.input rel in
     if is_ident_byte c then begin
       let k = ref 0 in
@@ -4531,6 +4812,13 @@ let found_of st pos =
   end
 
 let found_of_far st f pos =
+  let stop =
+    match far_over f with
+    | Some o ->
+        imin o.oend st.input_len
+    | None ->
+        st.input_len
+  in
   let all_short = ref true and all_value = ref true and value = ref None in
   for i = 0 to f.n - 1 do
     let kind = far_item_kind f i in
@@ -4550,16 +4838,16 @@ let found_of_far st f pos =
     end
   done;
   if !all_short then
-    if pos >= st.input_len then
+    if pos >= stop then
       (End, { start = pos; stop = pos })
     else
-      (Short (st.input_len - pos), { start = pos; stop = st.input_len })
+      (Short (stop - pos), { start = pos; stop })
   else
     match !value with
     | Some (_, found, width) when !all_value ->
-        (Value found, { start = pos; stop = imin st.input_len (pos + width) })
+        (Value found, { start = pos; stop = imin stop (pos + width) })
     | _ ->
-        found_of st pos
+        found_of st stop pos
 
 let build st ~pos ?(notes = []) ?help kind span frames =
   let idx =
