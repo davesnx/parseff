@@ -1289,6 +1289,81 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     When [~at_least] is specified, requires at least that many elements. The
     loop stops after an iteration that consumes no input, as in {!many}. *)
 
+val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
+(** [many_iter parser f] is {!many} that builds no list: it gives each value of
+    [parser] to [f], in order, and returns [()]. The stop rules and [~at_least]
+    are the same as in {!many}.
+
+    Before it gives a value, [many_iter] seals every open frame, as {!cut} does
+    with no enclosing {!val:context}: no {!or_}, {!many}, {!optional} or similar
+    frame outside it can rewind before that value, and a streaming source can
+    drop the input before it. Thus with {!parse_source} memory is bounded by the
+    size of one element, not by the number of elements. The exception is
+    {!recognize} and {!recognize_span}: they keep their input, so inside them
+    the parse fails with [Backtrack_window_exceeded] when that input is larger
+    than the window. {!with_range} keeps no input.
+
+    A failure after a value is given out is an error of the whole parse, unless
+    a {!capture} or {!recover} with [~release:true] is open: then the parse goes
+    back to the point after the last value, and {!capture} returns [Error] or
+    {!recover} gives its hole there. See {!section-streaming} for the rule.
+
+    A value of an element that consumed no input is given out too, as {!many}
+    keeps it with [~at_least]. An outer {!many} or {!sep_by} can then stop at
+    that position and drop its own element, but the value stays given.
+
+    [f] runs outside the parse: a parser called in [f] raises an exception. An
+    exception from [f] stops the parse, and the runner raises it again.
+
+    [many_iter] raises [Invalid_argument] when it is called inside
+    {!look_ahead}, {!peek_with}, an operator lookup of {!precedence}, or
+    {!capture} or {!recover} without [~release:true]. These always rewind on
+    failure, or also on success, so [f] could get a value that the parse then
+    undoes.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let sum = ref 0 in
+    parse "1 2 3 "
+      (many_iter
+         (fun () ->
+           let n = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+           let _ = char ' ' in
+           int_of_string n
+         )
+         (fun n -> sum := !sum + n)
+      )
+    (* Ok (), and !sum is 6 *)
+    ]} *)
+
+val sep_by_iter :
+  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit -> unit
+(** [sep_by_iter element separator f] is {!sep_by} that builds no list: it gives
+    each [element] value to [f], as {!many_iter} does. The stop rules and
+    [~at_least] are the same as in {!sep_by}. A failure in [separator] after a
+    value is given out cannot rewind before that value. As in {!sep_by}, the
+    first element is kept when it consumes no input, so [f] can get a value of
+    an element that consumed no input, as described in {!many_iter}.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let count = ref 0 in
+    parse "[1,2,3]" (fun () ->
+        let _ = char '[' in
+        sep_by_iter
+          (fun () -> take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
+          (fun () -> char ',')
+          (fun _ -> incr count)
+          ();
+        char ']'
+    )
+    (* Ok ']', and !count is 3 *)
+    ]} *)
+
 val fold_left :
   (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
 (** [fold_left element op] parses one or more [element] values separated by
@@ -1640,7 +1715,60 @@ val take_span : int -> span
       take_span len
     ]} *)
 
-(** {1 Streaming} *)
+val take_iter : int -> (span -> unit) -> unit
+(** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
+    in pieces, in order, with no empty piece. Joined, the pieces are the [n]
+    bytes. With {!parse} there is one piece. With {!parse_source} a piece is the
+    part of the [n] bytes that is in the input buffer, so the [n] bytes are
+    never held whole and [n] can be larger than [~backtrack_window]. Inside
+    {!recognize} or {!recognize_span} the input is kept: when [n] is larger than
+    the window, the parse fails with [Backtrack_window_exceeded] after [f] got
+    the bytes that fit.
+
+    A piece points into the input buffer with no copy. It is valid only while
+    [f] runs: use {!span_to_string} to keep it.
+
+    [take_iter] gives out values as {!many_iter} does: it seals every open frame
+    before each piece, [f] runs outside the parse, an exception from [f] stops
+    the parse, and the same frames make it raise [Invalid_argument]. If the
+    input ends before [n] bytes, the parse fails after [f] got the bytes that
+    were there. The error counts the missing bytes, as in
+    [expected 2 bytes, found end of input]. A negative [n] fails as in {!take}.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let body out () =
+      let len = BE.any_uint16 () in
+      take_iter len (fun piece ->
+          for i = 0 to span_length piece - 1 do
+            Buffer.add_char out (span_get piece i)
+          done
+      )
+    ]} *)
+
+val take_while_iter : (char -> bool) -> (span -> unit) -> unit
+(** [take_while_iter pred f] reads bytes while [pred] holds, like {!take_while},
+    and gives them to [f] in pieces as {!take_iter} does. It never fails. When
+    the first byte does not match, [f] is not called.
+
+    Unstable: this function can change in a 1.x release. *)
+
+(** {1:streaming Streaming}
+
+    A rewind does not undo a call to your code. {!or_}, {!many}, {!optional},
+    {!look_ahead} and the other frames go back to an earlier position when a
+    parser fails, but a value that was given to a function outside the parse
+    stays given. So give a value out only at a point that no open frame can
+    rewind before, for example after a {!cut} outside any {!val:context}.
+    {!many_iter}, {!sep_by_iter}, {!take_iter} and {!take_while_iter} follow
+    this rule by themselves: they seal every open frame before each value, and
+    raise [Invalid_argument] inside a frame that cannot be sealed. Sealing is
+    also what lets a source drop the input before that point, so a parse that
+    gives its values out this way can read input much larger than
+    [~backtrack_window]. The exception is {!recognize} and {!recognize_span},
+    which keep all the input that they read. *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
     — a channel, file descriptor, or custom reader — behind a uniform interface.
