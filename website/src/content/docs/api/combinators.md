@@ -235,7 +235,7 @@ If two failures tie at the furthest position, the construct list of the first on
 
 ### `cut`
 
-`Parseff.cut` declares that the construct that is running is decided. `Parseff.commit` seals the nearest frame only. `cut` seals every `or_`, `one_of`, `many`, `sep_by`, `optional` and `fold_*` frame that was opened since the innermost enclosing `context`. It stops at `Parseff.look_ahead`.
+`Parseff.cut` declares that the construct that is running is decided. `Parseff.commit` seals the nearest frame only. `cut` seals every `or_`, `one_of`, `many`, `sep_by`, `optional` and `fold_*` frame that was opened since the innermost enclosing `context`. It stops at `Parseff.look_ahead`, `Parseff.peek_with` or `Parseff.capture`. With `capture ~release:true`, it moves the rewind point of the `capture` to the position of the cut and continues.
 
 ```ocaml
 val cut : unit -> unit
