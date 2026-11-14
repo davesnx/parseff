@@ -55,6 +55,7 @@
 - **`Source.of_chunks` and `Source.of_seq` copy less.** They no longer allocate a 2040-byte read buffer for each source and copy each chunk into it. When Parseff keeps no earlier input and takes a whole chunk, the chunk becomes the input with no copy. A 454-byte HTTP request head given as one chunk now allocates 120 minor words per parse instead of 504. A chunk must not change after the source returns it.
 - **`render_error` counts terminal cells.** The caret stays under the failure on lines with CJK text, emoji or accents.
 - **Improve runtime performance.** The generic combinators, the binary readers and the `Utf8` primitives allocate less and run about 18% fewer instructions over the benchmark set.
+- **Check the owner of the cached parse state without a C call.** Each primitive checked that the cached state belongs to the running domain with `Domain.self`, a C call. It now compares the domain's local storage array, which is one load. On OCaml 5.3 this removes about 7 instructions from each primitive: the generic JSON parser runs 3.7% fewer instructions, the generic arithmetic parser 5.0% fewer, and a 450-byte HTTP request head 1.3% fewer.
 
 ## 0.5.0
 

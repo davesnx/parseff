@@ -481,29 +481,35 @@ module State = struct
 
   let none = for_input ~input:"" ~max_depth:0 ~trace:None
 
-  type slot = { owner : int; mutable state : t; peer : slot }
+  external dls_state : unit -> Obj.t array = "%dls_get"
+
+  type slot = { mutable dls : Obj.t array; mutable state : t; peer : slot }
 
   let key : slot Domain.DLS.key =
     Domain.DLS.new_key (fun () ->
-        let owner = (Domain.self () :> int) in
-        let rec active = { owner; state = none; peer = idle }
-        and idle = { owner = lnot owner; state = none; peer = active } in
+        let rec active = { dls = [| Obj.repr 0 |]; state = none; peer = idle }
+        and idle = { dls = [| Obj.repr 0 |]; state = none; peer = active } in
         active
     )
 
   let cache : slot ref =
-    let rec unset = { owner = min_int; state = none; peer = unset } in
+    let rec unset = { dls = [| Obj.repr 0 |]; state = none; peer = unset } in
     ref unset
 
+  let[@inline never] refresh () =
+    let slot = Domain.DLS.get key in
+    slot.dls <- dls_state ();
+    slot
+
   let[@inline always] own_slot () =
-    let owner = (Domain.self () :> int) in
+    let d = dls_state () in
     let slot = !cache in
-    if slot.owner = owner then
+    if slot.dls == d then
       slot
-    else if slot.owner = lnot owner then
+    else if slot.peer.dls == d then
       slot.peer
     else
-      Domain.DLS.get key
+      refresh ()
 
   let[@inline always] activate slot (t : t) =
     slot.state <- t;
@@ -747,7 +753,7 @@ let () =
     )
 
 let[@inline never] get_state_slow () =
-  let slot = Domain.DLS.get State.key in
+  let slot = State.refresh () in
   let st = slot.state in
   if st == State.none then raise Not_in_parse_context;
   State.cache := slot;
@@ -755,7 +761,7 @@ let[@inline never] get_state_slow () =
 
 let[@inline always] get_state () =
   let slot = !State.cache in
-  if slot.owner <> (Domain.self () :> int) then
+  if slot.dls != State.dls_state () then
     get_state_slow ()
   else
     slot.state
