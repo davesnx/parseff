@@ -207,7 +207,7 @@ let far_none =
 
 type trace_event =
   | Enter of { name : string; pos : int }
-  | Exit of { name : string; start : int; stop : int }
+  | Return of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
 
 type 'a cell = {
@@ -1996,7 +1996,9 @@ let[@inline] consume s =
   let st = get_state () in
   handle_consume st s
 
-let[@inline] satisfy pred ~label =
+let label_satisfy = "at least 1 character"
+
+let[@inline] satisfy ?(label = label_satisfy) pred =
   let st = get_state () in
   handle_satisfy st pred label
 
@@ -2333,7 +2335,7 @@ let[@inline never] context_traced st f delimited start name p =
   trace_emit st f (Enter { name; pos = start });
   match context_run st delimited start name p with
   | v ->
-      trace_emit st f (Exit { name; start; stop = st.pos });
+      trace_emit st f (Return { name; start; stop = st.pos });
       v
   | exception Fail ->
       trace_emit st f (Fail { name; start; pos = st.pos });
@@ -2368,7 +2370,7 @@ let print_trace ppf =
   | Enter { name; pos } ->
       line "%s @%d" name pos;
       incr depth
-  | Exit { name; start; stop } ->
+  | Return { name; start; stop } ->
       decr depth;
       line "%s ok @%d..%d" name start stop
   | Fail { name; start; pos } ->
@@ -3089,7 +3091,7 @@ let[@inline] digit () =
     else
       satisfy_slow st is_digit_char label_digit
   in
-  Char.code c - Char.code '0'
+  c
 
 let[@inline always] byte_at st ~keep_from p =
   if p < st.input_len || fill st ~keep_from (p + 1) then
@@ -3231,7 +3233,7 @@ let hex_integer () =
   handle_hex_integer st
 
 let is_letter_char c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-let[@inline] letter () = satisfy is_letter_char ~label:"letter"
+let[@inline] letter () = satisfy ~label:"letter" is_letter_char
 
 let[@inline always] is_whitespace c =
   c <= ' ' && (c = ' ' || c = '\t' || c = '\n' || c = '\r')
@@ -3307,7 +3309,7 @@ let keyword ?(is_ident = is_ident_byte) s =
 let is_alphanum_char c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 
-let[@inline] alphanum () = satisfy is_alphanum_char ~label:"alphanumeric"
+let[@inline] alphanum () = satisfy ~label:"alphanumeric" is_alphanum_char
 
 let label_any_char = "any character"
 let always_true _ = true
@@ -3405,7 +3407,7 @@ module LE = struct
 end
 
 module Utf8 = struct
-  let[@inline] satisfy pred ~label =
+  let[@inline] satisfy ?(label = label_satisfy) pred =
     let st = get_state () in
     handle_satisfy_uchar st pred label
 
@@ -3537,7 +3539,7 @@ type excerpt = {
 
 type error_kind =
   | Expected of { items : expected * expected list; found : found; more : int }
-  | Failure of string
+  | Failed of string
   | Custom of custom_error
   | Depth_limit_exceeded of { limit : int }
   | Backtrack_window_exceeded of { limit : int; oldest : int }
@@ -3749,7 +3751,7 @@ let error_message ?custom e =
   match e.kind with
   | Expected { items = x, xs; found; more } ->
       "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
-  | Failure m ->
+  | Failed m ->
       m
   | Custom v -> (
       match custom with
@@ -4761,7 +4763,7 @@ let error_of_far st outer =
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
-          build st ~pos (Failure "no alternative matched")
+          build st ~pos (Failed "no alternative matched")
             { start = pos; stop = pos }
             frames
       | x :: xs, more ->
@@ -4774,7 +4776,7 @@ let error_plain st pos kind frames =
 
 let error_failure st pos msg (x : fail_extra) outer =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes ?help:x.help (Failure msg) span
+  build st ~pos:span.start ~notes:x.notes ?help:x.help (Failed msg) span
     (outer @ x.chain)
 
 let outer_contexts st pos =
@@ -5159,9 +5161,7 @@ let parse_source_each ?(max_depth = 128)
           ended := true;
           Seq.Cons
             ( Error
-                (error_plain st start (Failure "the parser consumed no input")
-                   []
-                ),
+                (error_plain st start (Failed "the parser consumed no input") []),
               node (i + 1)
             )
       | Ok (Some v) ->

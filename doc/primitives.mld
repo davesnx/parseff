@@ -49,7 +49,7 @@ let pair () =
   let _ = right_paren () in
   (a, b)
 
-(* Matches "(1,2)" -> (1, 2) *)
+(* Matches "(1,2)" -> ('1', '2') *)
 ]}
 
 {b Tip:} Use [char] for single characters and [consume] for multi-character
@@ -59,28 +59,23 @@ string allocation for a single byte.
 {2 [satisfy]}
 
 {!val:Parseff.satisfy} matches a character satisfying the given predicate. The
-[~label] parameter is used in error messages.
+[~label] parameter is used in error messages. Without it, the error says
+[expected at least 1 character], as for [take_while ~at_least:1].
 
-{@ocaml skip[val satisfy : (char -> bool) -> label:string -> char]}
+{@ocaml skip[val satisfy : ?label:string -> (char -> bool) -> char]}
 
 {@ocaml[
 (* Match any vowel *)
 let vowel () =
-  Parseff.satisfy
-    (fun c -> String.contains "aeiouAEIOU" c)
-    ~label:"vowel"
+  Parseff.satisfy ~label:"vowel" (fun c -> String.contains "aeiouAEIOU" c)
 
 (* Match any digit *)
 let digit_char () =
-  Parseff.satisfy
-    (fun c -> c >= '0' && c <= '9')
-    ~label:"digit"
+  Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
 
 (* Match any uppercase letter *)
 let uppercase () =
-  Parseff.satisfy
-    (fun c -> c >= 'A' && c <= 'Z')
-    ~label:"uppercase letter"
+  Parseff.satisfy ~label:"uppercase letter" (fun c -> c >= 'A' && c <= 'Z')
 ]}
 
 {b Tip:} The label parameter is shown in error messages. Prefer descriptive
@@ -105,9 +100,7 @@ let digits () = Parseff.take_while (fun c -> c >= '0' && c <= '9')
 (* Parse identifier *)
 let identifier () =
   let first =
-    Parseff.satisfy
-      (fun c -> c = '_' || (c >= 'a' && c <= 'z'))
-      ~label:"letter"
+    Parseff.satisfy ~label:"letter" (fun c -> c = '_' || (c >= 'a' && c <= 'z'))
   in
   let rest =
     Parseff.take_while (fun c ->
@@ -293,7 +286,7 @@ let complete_number () =
   Parseff.end_of_input ();
   n
 
-(* Matches: "5" -> 5 *)
+(* Matches: "5" -> '5' *)
 (* Fails: "52" -> Error: expected end of input *)
 
 (* parse already requires all input by default. end_of_input is for
@@ -392,7 +385,8 @@ type expr =
 let number () =
   let loc = Parseff.location () in
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   Num (n, loc)
 
 (* Convert error positions after parsing *)

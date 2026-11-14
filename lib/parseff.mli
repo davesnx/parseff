@@ -7,7 +7,7 @@
 
     {@ocaml[
       let number () =
-        let c = satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" in
+        let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
         Char.code c - Char.code '0'
 
       let ip_address () =
@@ -105,7 +105,7 @@ type error_kind = private
           furthest failure position, sorted and without duplicates, up to 64
           items. [more] is how many further alternatives were expected and are
           not in [items], [0] unless more than 64 were. *)
-  | Failure of string
+  | Failed of string
       (** A failure raised with {!val:fail}, or ["no alternative matched"] when
           [one_of []] is the only failure at the furthest position. Failures of
           primitives are otherwise [Expected]. *)
@@ -273,13 +273,13 @@ end
 (** An event of a traced parse, see the [trace] argument of {!val:parse}.
 
     Each {!val:context} call gives one [Enter], then the events nested in it,
-    then one [Exit] or [Fail]. Events also come from branches that are later
+    then one [Return] or [Fail]. Events also come from branches that are later
     abandoned, so a backtrack shows as an [Enter] before the end of the previous
     event. Positions are absolute byte offsets. *)
 type trace_event = private
   | Enter of { name : string; pos : int }
       (** A {!val:context} named [name] started at byte offset [pos]. *)
-  | Exit of { name : string; start : int; stop : int }
+  | Return of { name : string; start : int; stop : int }
       (** The construct returned. It read the bytes from [start] to [stop]. *)
   | Fail of { name : string; start : int; pos : int }
       (** The construct failed or raised. [pos] is the parser position when it
@@ -336,7 +336,7 @@ val parse :
     [Depth_limit_exceeded] instead of risking a stack overflow.
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
-    {!type:error}. [e.kind] is [Expected] for a mismatch, [Failure] for
+    {!type:error}. [e.kind] is [Expected] for a mismatch, [Failed] for
     {!val:fail}, [Custom] for {!val-error}, [Depth_limit_exceeded] when
     recursion nested deeper than [max_depth], and [Backtrack_window_exceeded]
     for streaming.
@@ -346,7 +346,7 @@ val parse :
     match parse "hello" (fun () -> consume "hello") with
     | Ok s ->
         Printf.printf "Matched %S\n" s
-    | Error { kind = Failure msg; _ } ->
+    | Error { kind = Failed msg; _ } ->
         Printf.printf "Failed: %s\n" msg
     | Error e ->
         prerr_endline (render_error ~name:"input" e)
@@ -370,14 +370,15 @@ val consume : string -> string
       consume "world"
     ]} *)
 
-val satisfy : (char -> bool) -> label:string -> char
-(** [satisfy fun ~label] matches the next character if [fun] returns [true] for
-    it. If the character doesn't match or input is empty, fails with [label] in
-    the error message.
+val satisfy : ?label:string -> (char -> bool) -> char
+(** [satisfy ?label fun] matches the next character if [fun] returns [true] for
+    it. If the character doesn't match or input is empty, fails with
+    [expected <label>]. Without [~label] the label is ["at least 1 character"],
+    as for [take_while ~at_least:1].
 
     Example:
     {@ocaml[
-    let vowel () = satisfy (fun c -> String.contains "aeiou" c) ~label:"vowel"
+    let vowel () = satisfy ~label:"vowel" (fun c -> String.contains "aeiou" c)
     ]} *)
 
 val char : char -> char
@@ -475,7 +476,7 @@ val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
 
 val fail :
   ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
-(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failure msg]
+(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failed msg]
     error.
 
     [~from] and [~upto] make the error cover the bytes from [from] to [upto]
@@ -949,7 +950,7 @@ val sep_by_recover :
       skip_whitespace ();
       let _ = char ',' in
       skip_whitespace ();
-      ignore (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"field"))
+      ignore (look_ahead (fun () -> satisfy ~label:"field" (fun c -> c <> '}')))
 
     let table errors field () =
       let _ = char '{' in
@@ -1248,7 +1249,7 @@ val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
 
     Example:
     {@ocaml[
-    let digits () = many digit () (* parses "123" -> [1; 2; 3] *)
+    let digits () = many digit () (* parses "123" -> ['1'; '2'; '3'] *)
     let non_empty_digits () = many ~at_least:1 digit ()
     ]} *)
 
@@ -1470,7 +1471,7 @@ val precedence :
           ignore (char ')');
           e
       | _ ->
-          digit ()
+          integer ()
     ]} *)
 
 val optional : (unit -> 'a) -> unit -> 'a option
@@ -1494,12 +1495,14 @@ val count : int -> (unit -> 'a) -> unit -> 'a list
 
 (** {1 Convenience Combinators} *)
 
-val digit : unit -> int
-(** [digit ()] parses a decimal digit (0-9) and returns its integer value.
+val digit : unit -> char
+(** [digit ()] parses an ASCII decimal digit, ['0'] to ['9'], and returns it.
+    Use {!integer} for the value of a number, or [Char.code c - Char.code '0']
+    for the value of one digit.
 
     Example:
     {@ocaml[
-      let d = digit () in  (* parses "7" -> 7 *)
+      let d = digit () in  (* parses "7" -> '7' *)
       ...
     ]} *)
 
@@ -1936,19 +1939,20 @@ end
     same parser. Position tracking remains in bytes. *)
 
 module Utf8 : sig
-  val satisfy : (Uchar.t -> bool) -> label:string -> Uchar.t
-  (** [satisfy pred ~label] decodes the next UTF-8 code point and checks it
+  val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t
+  (** [satisfy ?label pred] decodes the next UTF-8 code point and checks it
       against [pred]. Advances by the number of bytes in the UTF-8 encoding
-      (1--4). Fails with [label] if the predicate returns [false] or the input
-      ends. Invalid UTF-8 fails with [expected valid UTF-8], whatever [label]
-      is.
+      (1--4). Fails with [expected <label>] if the predicate returns [false] or
+      the input ends. Without [~label] the label is ["at least 1 character"], as
+      for [take_while ~at_least:1]. Invalid UTF-8 fails with
+      [expected valid UTF-8], whatever [label] is.
 
       Example:
       {@ocaml skip[
       let cjk () =
-        Parseff.Utf8.satisfy
-          (fun u -> Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF)
-          ~label:"CJK character"
+        Parseff.Utf8.satisfy ~label:"CJK character" (fun u ->
+            Uchar.to_int u >= 0x4E00 && Uchar.to_int u <= 0x9FFF
+        )
       ]} *)
 
   val char : Uchar.t -> Uchar.t

@@ -236,7 +236,7 @@ let test_fold_left () =
   check_final "fold_left" "1+2+" "ok" 1
     (with_cell (fun c () ->
          ignore
-           (fold_left digit
+           (fold_left integer
               (fun () ->
                 incr_cell c;
                 let _ = char '+' in

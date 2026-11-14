@@ -443,7 +443,7 @@ let separator () =
   skip_whitespace ();
   let _ = char ',' in
   skip_whitespace ();
-  ignore (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"field"))
+  ignore (look_ahead (fun () -> satisfy ~label:"field" (fun c -> c <> '}')))
 
 let table errors field () =
   let _ = char '{' in

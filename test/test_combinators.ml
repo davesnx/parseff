@@ -6,8 +6,8 @@ let show_error (e : Parseff.error) =
       "E"
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.error_message e)
-  | Failure s ->
-      Printf.sprintf "Failure %S" s
+  | Failed s ->
+      Printf.sprintf "Failed %S" s
   | _ ->
       "other"
 
@@ -108,7 +108,7 @@ let test_many_stops_after_consuming () =
         (fun () ->
           match Parseff.optional Parseff.digit () with
           | Some d ->
-              d
+              Char.code d - Char.code '0'
           | None ->
               -1
         )
@@ -152,7 +152,7 @@ let tree a b = "(" ^ a ^ "^" ^ b ^ ")"
 let digit_or_dash () =
   match Parseff.optional Parseff.digit () with
   | Some d ->
-      string_of_int d
+      String.make 1 d
   | None ->
       "-"
 
@@ -190,7 +190,7 @@ let test_fold_right_right_assoc () =
   both show_string "1^2^3"
     (fun () ->
       Parseff.fold_right
-        (fun () -> string_of_int (Parseff.digit ()))
+        (fun () -> String.make 1 (Parseff.digit ()))
         (fun () ->
           ignore (Parseff.char '^');
           tree

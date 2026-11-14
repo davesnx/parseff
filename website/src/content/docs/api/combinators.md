@@ -98,7 +98,7 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 let literal () =
   Parseff.one_of_labeled
     [
-      ("number", fun () -> Number (Parseff.digit ()));
+      ("number", fun () -> Number (Char.code (Parseff.digit ()) - Char.code '0'));
       ("string", string_parser);
       ("boolean", bool_parser);
     ]

@@ -11,8 +11,8 @@ let kind (e : Parseff.error) =
   match e.kind with
   | Expected _ ->
       "Expected " ^ Parseff.error_message e
-  | Failure m ->
-      "Failure " ^ m
+  | Failed m ->
+      "Failed " ^ m
   | Custom _ ->
       "Custom"
   | Depth_limit_exceeded _ ->
@@ -83,7 +83,7 @@ let test_utf8_satisfy_split () =
       check_all "satisfy" show_code_points text
         (fun () ->
           Parseff.many
-            (fun () -> Parseff.Utf8.satisfy (fun _ -> true) ~label:"any")
+            (fun () -> Parseff.Utf8.satisfy ~label:"any" (fun _ -> true))
             ()
         )
         ("Ok " ^ expected_code_points text)

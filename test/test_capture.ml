@@ -330,7 +330,7 @@ let test_success () =
       Alcotest.fail "expected Ok \"ab\" at position 2"
 
 let test_success_keeps_failures () =
-  let digits () = many (fun () -> satisfy is_digit ~label:"digit") () in
+  let digits () = many (fun () -> satisfy ~label:"digit" is_digit) () in
   let direct () =
     ignore (digits ());
     char ','
@@ -1531,7 +1531,7 @@ let issue_62_render outer =
     many
       (fun () ->
         ws ();
-        ignore (look_ahead (fun () -> satisfy is_letter ~label:"statement"));
+        ignore (look_ahead (fun () -> satisfy ~label:"statement" is_letter));
         recover ?outer d
           ~sync:(fun () ->
             skip_while (fun c -> c <> ';' && c <> '}');
@@ -1847,7 +1847,7 @@ let test_streaming_nested_release () =
         (fun _ -> ())
     and item () =
       ignore
-        (look_ahead (fun () -> satisfy (fun c -> c <> '}') ~label:"statement"));
+        (look_ahead (fun () -> satisfy ~label:"statement" (fun c -> c <> '}')));
       statement ()
     in
     let leaf = String.make 100 'x' ^ ";" in

@@ -21,7 +21,7 @@ let bench_utf8_satisfy_ascii () =
   match
     Parseff.parse "a" (fun () ->
         ignore
-          (Parseff.Utf8.satisfy (fun u -> Uchar.to_int u >= 0x61) ~label:"alpha")
+          (Parseff.Utf8.satisfy ~label:"alpha" (fun u -> Uchar.to_int u >= 0x61))
     )
   with
   | Ok _ ->
@@ -33,7 +33,7 @@ let bench_utf8_satisfy_3byte () =
   match
     Parseff.parse cjk_1 (fun () ->
         ignore
-          (Parseff.Utf8.satisfy (fun u -> Uchar.to_int u = 0x4E16) ~label:"CJK")
+          (Parseff.Utf8.satisfy ~label:"CJK" (fun u -> Uchar.to_int u = 0x4E16))
     )
   with
   | Ok _ ->

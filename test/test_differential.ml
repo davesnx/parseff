@@ -339,7 +339,7 @@ type outcome = {
 let show_event = function
   | Parseff.Enter { name; pos } ->
       Printf.sprintf "enter %s@%d" name pos
-  | Exit { name; start; stop } ->
+  | Return { name; start; stop } ->
       Printf.sprintf "exit %s@%d..%d" name start stop
   | Fail { name; start; pos } ->
       Printf.sprintf "fail %s@%d from %d" name pos start
@@ -420,7 +420,7 @@ let run_real ?(traced = false) ~partial runner g input =
         (Success, Ok v)
     | Error { kind = Backtrack_window_exceeded _; _ } ->
         (Window, Error window_exceeded)
-    | Error ({ kind = Failure "hard"; _ } as e) ->
+    | Error ({ kind = Failed "hard"; _ } as e) ->
         (Hard e.range.start, Error (show_error e))
     | Error ({ kind = Depth_limit_exceeded _; _ } as e) ->
         (Depth e.range.start, Error (show_error e))

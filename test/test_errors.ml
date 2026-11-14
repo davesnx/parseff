@@ -16,7 +16,7 @@ let test_fold_left_user_exception () =
       else
         a + b
   in
-  ( match Parseff.parse "1+1+1" (Parseff.fold_left Parseff.digit op) with
+  ( match Parseff.parse "1+1+1" (Parseff.fold_left Parseff.integer op) with
   | _ ->
       Alcotest.fail "expected Exit"
   | exception Exit ->
@@ -59,7 +59,7 @@ let test_outside_parse_many () =
       check_parseff_error exn
 
 let test_outside_parse_satisfy () =
-  match Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit" with
+  match Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') with
   | _ ->
       Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
@@ -227,8 +227,8 @@ let show_error (e : Parseff.error) =
   match e.kind with
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.error_message e)
-  | Failure s ->
-      Printf.sprintf "Failure %S" s
+  | Failed s ->
+      Printf.sprintf "Failed %S" s
   | Custom Cause_e ->
       "E"
   | _ ->
@@ -404,16 +404,16 @@ let test_fail_escapes_or_many_expect () =
   let boom () = Parseff.fail "boom" in
   both_runners show_unit "x"
     (fun () -> Parseff.or_ boom (fun () -> ()) ())
-    {|Error@0 Failure "boom"|};
+    {|Error@0 Failed "boom"|};
   both_runners show_unit "x"
     (fun () -> ignore (Parseff.many boom ()))
-    {|Error@0 Failure "boom"|};
+    {|Error@0 Failed "boom"|};
   both_runners show_unit "x"
     (fun () -> Parseff.expect "thing" boom)
-    {|Error@0 Failure "boom"|};
+    {|Error@0 Failed "boom"|};
   both_runners show_unit "x"
     (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ] ()))
-    {|Error@0 Failure "boom"|}
+    {|Error@0 Failed "boom"|}
 
 let test_custom_error_absorbed_by_or () =
   both_runners
@@ -1569,11 +1569,11 @@ let test_fail_from_span () =
     )
     (render_error "x = 300;" parser);
   match Parseff.parse "x = 300;" parser with
-  | Error ({ kind = Failure "number is too large"; _ } as e)
+  | Error ({ kind = Failed "number is too large"; _ } as e)
     when e.range.start = 4 ->
       ()
   | _ ->
-      Alcotest.fail "expected a Failure error positioned at the span start"
+      Alcotest.fail "expected a Failed error positioned at the span start"
 
 let test_fail_from_after_position_is_normalized () =
   let parser () = Parseff.fail ~from:5 "backwards" in
@@ -1973,7 +1973,7 @@ let describe_kind (e : Parseff.error) =
         | _ ->
             "other"
         )
-  | Parseff.Failure m ->
+  | Parseff.Failed m ->
       "message " ^ m
   | Parseff.Custom _ ->
       "user"
@@ -1997,7 +1997,7 @@ let test_exhaustive_kind_match () =
            (Parseff.or_ Parseff.digit
               (fun () ->
                 ignore (Parseff.char '1');
-                0
+                '0'
               )
               ()
            )
@@ -2098,7 +2098,7 @@ let test_custom_errors_by_pattern () =
           Parseff.or_ number_checked (fun () -> Parseff.fail "second") ()
       )
     with
-  | Stdlib.Error { kind = Parseff.Failure "second"; _ } ->
+  | Stdlib.Error { kind = Parseff.Failed "second"; _ } ->
       ()
   | _ ->
       Alcotest.fail "fail in the second branch must win"
@@ -2119,7 +2119,7 @@ let test_custom_errors_by_pattern () =
       Alcotest.fail "the furthest custom error is reported"
   );
   match Parseff.parse "x" (fun () -> Parseff.fail "boom") with
-  | Stdlib.Error { kind = Parseff.Failure "boom"; _ } ->
+  | Stdlib.Error { kind = Parseff.Failed "boom"; _ } ->
       ()
   | _ ->
       Alcotest.fail "fail gives a message"
@@ -2650,7 +2650,7 @@ let test_built_in_failures_are_expected_items () =
          ignore
            (Parseff.or_
               (fun () ->
-                ignore (Parseff.Utf8.satisfy (fun _ -> true) ~label:"letter");
+                ignore (Parseff.Utf8.satisfy ~label:"letter" (fun _ -> true));
                 'a'
               )
               (fun () -> Parseff.char 'x')
@@ -3635,10 +3635,10 @@ let test_empty_one_of_adds_no_item () =
     )
     (render_error "x" (Parseff.one_of []));
   ( match Parseff.parse ~consume:`Partial "x" (Parseff.one_of []) with
-  | Stdlib.Error { kind = Failure m; _ } ->
+  | Stdlib.Error { kind = Failed m; _ } ->
       Alcotest.(check string) "kind" "no alternative matched" m
   | _ ->
-      Alcotest.fail "expected a Failure"
+      Alcotest.fail "expected a Failed error"
   );
   Alcotest.(check string)
     "next to another failure" "expected \"a\", found 'x'"

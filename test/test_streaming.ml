@@ -17,7 +17,11 @@ let parse_source_with_pos src parser =
 
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let n =
+    List.fold_left
+      (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
+      0 digits
+  in
   if n >= 0 && n <= 255 then
     n
   else
@@ -162,7 +166,7 @@ let test_of_string_satisfy () =
   let src = Parseff.Source.of_string "7" in
   match
     Parseff.parse_source src (fun () ->
-        Parseff.satisfy (fun c -> c >= '0' && c <= '9') ~label:"digit"
+        Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
     )
   with
   | Ok c ->
@@ -188,7 +192,7 @@ let test_of_string_many () =
   let src = Parseff.Source.of_string "123" in
   match parse_source_with_pos src (Parseff.many Parseff.digit) with
   | Ok (lst, pos) ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst;
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst;
       Alcotest.(check int) "pos" 3 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -280,7 +284,7 @@ let test_of_string_sep_by () =
       (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
   with
   | Ok lst ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3 ] lst
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -557,7 +561,7 @@ let test_many_across_chunks () =
   let src = chunked_source ~chunk_size:1 "12345" in
   match Parseff.parse_source src (Parseff.many Parseff.digit) with
   | Ok lst ->
-      Alcotest.(check (list int)) "digits" [ 1; 2; 3; 4; 5 ] lst
+      Alcotest.(check (list char)) "digits" [ '1'; '2'; '3'; '4'; '5' ] lst
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1043,8 +1047,8 @@ let norm : (_, Parseff.error) Result.t -> _ = function
         match e.kind with
         | Expected _ ->
             "Expected " ^ Parseff.error_message e
-        | Failure m ->
-            "Failure " ^ m
+        | Failed m ->
+            "Failed " ^ m
         | Custom _ ->
             "Custom"
         | Depth_limit_exceeded _ ->

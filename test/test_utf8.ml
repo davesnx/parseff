@@ -12,7 +12,7 @@ let parse_with_pos input parser =
 let test_satisfy_ascii () =
   match
     Parseff.parse "a" (fun () ->
-        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u = 0x61) ~label:"'a'"
+        Parseff.Utf8.satisfy ~label:"'a'" (fun u -> Uchar.to_int u = 0x61)
     )
   with
   | Ok u ->
@@ -24,7 +24,7 @@ let test_satisfy_multibyte () =
   (* λ = U+03BB, encoded as 0xCE 0xBB (2 bytes) *)
   match
     parse_with_pos "\xCE\xBB" (fun () ->
-        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u = 0x03BB) ~label:"lambda"
+        Parseff.Utf8.satisfy ~label:"lambda" (fun u -> Uchar.to_int u = 0x03BB)
     )
   with
   | Ok (u, pos) ->
@@ -37,7 +37,7 @@ let test_satisfy_3byte () =
   (* 中 = U+4E2D, encoded as 0xE4 0xB8 0xAD (3 bytes) *)
   match
     parse_with_pos "\xE4\xB8\xAD" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok (u, pos) ->
@@ -50,7 +50,7 @@ let test_satisfy_4byte () =
   (* 😀 = U+1F600, encoded as 0xF0 0x9F 0x98 0x80 (4 bytes) *)
   match
     parse_with_pos "\xF0\x9F\x98\x80" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok (u, pos) ->
@@ -62,7 +62,7 @@ let test_satisfy_4byte () =
 let test_satisfy_failure () =
   match
     Parseff.parse "a" (fun () ->
-        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u > 0x7F) ~label:"non-ASCII"
+        Parseff.Utf8.satisfy ~label:"non-ASCII" (fun u -> Uchar.to_int u > 0x7F)
     )
   with
   | Ok _ ->
@@ -79,7 +79,7 @@ let test_satisfy_failure () =
 let test_satisfy_eof () =
   match
     Parseff.parse "" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok _ ->
@@ -97,7 +97,7 @@ let test_satisfy_invalid_utf8 () =
   (* 0xFF is never valid in UTF-8 *)
   match
     Parseff.parse "\xFF" (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok _ ->
@@ -599,7 +599,7 @@ let test_streaming_satisfy () =
   in
   match
     Parseff.parse_source source (fun () ->
-        Parseff.Utf8.satisfy (fun _ -> true) ~label:"any"
+        Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
   | Ok u ->

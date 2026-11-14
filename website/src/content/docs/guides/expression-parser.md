@@ -90,7 +90,7 @@ and factor () =
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
-      Num d)
+      Num (Char.code d - Char.code '0'))
     ()
 ```
 
@@ -172,7 +172,7 @@ and factor () =
       Parseff.skip_whitespace ();
       let _ = Parseff.char ')' in
       e)
-    (fun () -> Num (Parseff.digit ()))
+    (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
     ()
 ```
 
@@ -211,7 +211,7 @@ and factor () =
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
-      Num d)
+      Num (Char.code d - Char.code '0'))
     ()
 ```
 

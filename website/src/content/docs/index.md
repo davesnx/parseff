@@ -82,7 +82,8 @@ type Parseff.custom_error += Out_of_range of int
 
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.error (Out_of_range n)
 

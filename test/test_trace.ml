@@ -2,7 +2,7 @@ let show (e : Parseff.trace_event) =
   match e with
   | Enter { name; pos } ->
       Printf.sprintf "enter %s %d" name pos
-  | Exit { name; start; stop } ->
+  | Return { name; start; stop } ->
       Printf.sprintf "exit %s %d %d" name start stop
   | Fail { name; start; pos } ->
       Printf.sprintf "fail %s %d %d" name start pos

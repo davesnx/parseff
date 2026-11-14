@@ -176,7 +176,7 @@ and factor () =
       let e = expr () in
       let _ = Parseff.char ')' in
       e)
-    (fun () -> Parseff.digit ())
+    (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     ()
 ```
 
