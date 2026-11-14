@@ -2025,6 +2025,118 @@ let test_each_across_chunk_borders () =
       [ "1\n22\n333\n" ]; [ "1\n2"; "2\n33"; "3\n" ]; [ "1"; "\n22\n3"; "33\n" ];
     ]
 
+exception Read_failed
+
+let digits_re = Re.compile Re.(rep1 (rg '0' '9'))
+
+let read_after_failed_regex src =
+  Parseff.parse_source src (fun () ->
+      (try ignore (Parseff.match_regex digits_re) with Read_failed -> ());
+      Parseff.take_while (fun _ -> true)
+  )
+
+let check_read_ahead_kept src =
+  Alcotest.(check (result string reject))
+    "rest" (Ok "1234 x")
+    (read_after_failed_regex src)
+
+let test_read_ahead_raise_of_function () =
+  let calls = ref 0 in
+  check_read_ahead_kept
+    (Parseff.Source.of_function (fun buf off _ ->
+         incr calls;
+         let put s =
+           Bytes.blit_string s 0 buf off (String.length s);
+           String.length s
+         in
+         match !calls with
+         | 1 ->
+             put "12"
+         | 2 ->
+             put "3"
+         | 3 ->
+             raise Read_failed
+         | 4 ->
+             put "4 x"
+         | _ ->
+             0
+     )
+    )
+
+let test_read_ahead_raise_of_chunks () =
+  let steps = ref [ Some "12"; Some "3"; None; Some "4 x" ] in
+  check_read_ahead_kept
+    (Parseff.Source.of_chunks (fun () ->
+         match !steps with
+         | [] ->
+             None
+         | None :: rest ->
+             steps := rest;
+             raise Read_failed
+         | (Some _ as chunk) :: rest ->
+             steps := rest;
+             chunk
+     )
+    )
+
+let test_read_ahead_raise_of_seq () =
+  let failed = ref false in
+  let tail () =
+    if !failed then
+      Seq.Cons ("4 x", Seq.empty)
+    else begin
+      failed := true;
+      raise Read_failed
+    end
+  in
+  check_read_ahead_kept
+    (Parseff.Source.of_seq (Seq.cons "12" (Seq.cons "3" tail)))
+
+type _ Effect.t += Wait : unit Effect.t
+
+let test_read_ahead_discontinue () =
+  let calls = ref 0 in
+  let src =
+    Parseff.Source.of_function (fun buf off _ ->
+        incr calls;
+        let put s =
+          Bytes.blit_string s 0 buf off (String.length s);
+          String.length s
+        in
+        match !calls with
+        | 1 ->
+            put "12"
+        | 2 ->
+            put "3"
+        | 3 ->
+            Effect.perform Wait;
+            0
+        | 4 ->
+            put "4 x"
+        | _ ->
+            0
+    )
+  in
+  let result =
+    Effect.Deep.match_with read_after_failed_regex src
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (e : a Effect.t) ->
+            match e with
+            | Wait ->
+                Some
+                  (fun (k : (a, _) Effect.Deep.continuation) ->
+                    Effect.Deep.discontinue k Read_failed
+                  )
+            | _ ->
+                None
+          );
+      }
+  in
+  Alcotest.(check (result string reject)) "rest" (Ok "1234 x") result
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -2210,6 +2322,18 @@ let () =
           test_case "take_while" `Quick test_of_seq_take_while;
           test_case "large input grows the read buffer" `Quick
             test_large_input_grows_read_buffer;
+        ]
+      );
+      ( "read-ahead raise",
+        [
+          test_case "of_function keeps earlier bytes" `Quick
+            test_read_ahead_raise_of_function;
+          test_case "of_chunks keeps earlier bytes" `Quick
+            test_read_ahead_raise_of_chunks;
+          test_case "of_seq keeps earlier bytes" `Quick
+            test_read_ahead_raise_of_seq;
+          test_case "discontinued read keeps earlier bytes" `Quick
+            test_read_ahead_discontinue;
         ]
       );
     ]
