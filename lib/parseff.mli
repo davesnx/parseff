@@ -99,6 +99,8 @@ type custom_error = ..
     own cases with [type Parseff.custom_error += Too_large of int] and match
     them as [Custom (Too_large n)]. *)
 
+(** What failed. These five cases are final until 2.0, so a match on all of them
+    needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
@@ -278,7 +280,10 @@ end
     abandoned, so a backtrack shows as an [Enter] before the end of the previous
     event. A [Captured] event shows a failure that {!val:capture},
     {!val:recover} or {!val:sep_by_recover} caught, so the parse continued.
-    Positions are absolute byte offsets. *)
+    Positions are absolute byte offsets.
+
+    A 1.x release can add events: end a match on [trace_event] with a [_] case.
+*)
 type trace_event = private
   | Enter of { name : string; pos : int }
       (** A {!val:context} named [name] started at byte offset [pos]. *)
@@ -617,7 +622,7 @@ val with_range : (unit -> 'a) -> 'a * range
     Example:
     {@ocaml[
     let checked_number () =
-      let n, range = with_range number in
+      let n, range = with_range integer in
       if n > 255 then
         fail ~notes:[ { at = Some range; text = "this value" } ] "out of range";
       n
@@ -1017,14 +1022,14 @@ val skip_nested :
     Each kind of bracket is matched with its own kind. A closing character that
     does not match the innermost open bracket closes the nearest open bracket of
     its kind, and the brackets inside that one are taken as not closed. In
-    {v [1 2), 3 v} the closing parenthesis has no opening parenthesis, so the
-    skip stops before it.
+    [\[1 2), 3] the closing parenthesis has no opening parenthesis, so the skip
+    stops before it.
 
-    [~atom] is a parser for a piece of input that the skip must take as a
-    whole, such as a string literal or a comment, so that a bracket or a
-    separator inside it is not counted. The skip tries [atom] at each position;
-    where [atom] fails or consumes nothing, the skip reads the next character.
-    The failures of [atom] do not appear in later errors.
+    [~atom] is a parser for a piece of input that the skip must take as a whole,
+    such as a string literal or a comment, so that a bracket or a separator
+    inside it is not counted. The skip tries [atom] at each position; where
+    [atom] fails or consumes nothing, the skip reads the next character. The
+    failures of [atom] do not appear in later errors.
 
     Example:
     {@ocaml[
@@ -1116,13 +1121,15 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead} or {!peek_with}.
+    backtracks after the cut. It stops at a {!look_ahead}, {!peek_with} or
+    {!capture}. With [capture ~release:true], it moves the rewind point of the
+    [capture] to the position of the cut and continues.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the
     failure. If the context ends without failing, the outer frames stay as they
-    were. Without an enclosing {!val:context}, [cut ()] seals every frame down
-    to the first {!look_ahead}.
+    were. Without an enclosing {!val:context}, [cut ()] seals the frames down to
+    the start of the parse, and stops at the same places.
 
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
@@ -1396,43 +1403,114 @@ val fold_right :
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
 
-type 'a operator
-(** An operator for {!expression}. Each constructor takes a parser for the
-    operator token. The parser returns the function that builds the result, as
-    the [op] argument of {!fold_left} does. *)
+type ('a, +'kind) operator
+(** An operator for {!expression} and {!precedence}. Each constructor takes a
+    parser for the operator token. The parser returns the build function, as the
+    [op] argument of {!fold_left} does.
 
-val infix_left : (unit -> 'a -> 'a -> 'a) -> 'a operator
+    ['kind] tells where the operator goes: [`Infix], [`Prefix] or [`Postfix].
+    {!expression} takes all three. {!precedence} reads prefix operators in its
+    [operand], so a {!prefix} operator in its [operator] is a type error.
+
+    When you write the type, keep ['kind] open, or the table does not
+    type-check: [(int, [ `Infix ]) operator] and [(int, [ `Prefix ]) operator]
+    have no common type. In an implementation, write [(int, _) operator]. In a
+    signature, write [(int, [> `Infix ]) operator]. A record field or a table
+    that holds operators of every kind takes the full set
+    [(int, [ `Infix | `Prefix | `Postfix ]) operator].
+
+    Example:
+    {@ocaml[
+    module Ops : sig
+      val add : (int, [> `Infix ]) operator
+      val neg : (int, [> `Prefix ]) operator
+    end = struct
+      let add : (int, _) operator =
+        infix_left (fun () ->
+            ignore (char '+');
+            ( + )
+        )
+
+      let neg : (int, _) operator =
+        prefix (fun () ->
+            ignore (char '-');
+            ( ~- )
+        )
+    end
+
+    type grammar = {
+      table : (int, [ `Infix | `Prefix | `Postfix ]) operator list list;
+    }
+
+    let grammar = { table = [ [ Ops.add ]; [ Ops.neg ] ] }
+
+    let expr () =
+      expression
+        ~operand:(fun () -> Char.code (digit ()) - Char.code '0')
+        grammar.table ()
+    ]} *)
+
+val infix_left : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
 (** [infix_left op] is a left-associative binary operator: [1-2-3] is [(1-2)-3].
 *)
 
-val infix_right : (unit -> 'a -> 'a -> 'a) -> 'a operator
+val infix_right : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
 (** [infix_right op] is a right-associative binary operator: [2^3^2] is
     [2^(3^2)]. *)
 
-val prefix : (unit -> 'a -> 'a) -> 'a operator
+val prefix : (unit -> 'a -> 'a) -> ('a, [> `Prefix ]) operator
 (** [prefix op] is a unary operator before its operand. It can repeat: [- - 1]
     is [-(-1)]. Its operand holds only operators of higher precedence, so with
-    [-] below [^], [-2^2] is [-(2^2)]. *)
+    [-] below [^], [-2^2] is [-(2^2)]. Only {!expression} takes it. *)
 
-val postfix : (unit -> 'a -> 'a) -> 'a operator
+val postfix : (unit -> 'a -> 'a) -> ('a, [> `Postfix ]) operator
 (** [postfix op] is a unary operator after its operand. It can repeat: [3!!] is
     [(3!)!]. *)
 
-val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression :
+  operand:(unit -> 'a) ->
+  ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
+  unit ->
+  'a
 (** [expression ~operand table] parses operands with [operand], joined by the
-    operators of [table].
+    operators of [table]. It is {!precedence} with a lookup made from [table]:
+    the operators of level [i] have the precedence [i].
 
     [table] lists the precedence levels from the lowest to the highest
     precedence. [operand] parses an operand; for parentheses, it calls the
     expression parser again inside {!rec_}. [expression] skips no whitespace:
     skip it in the token parsers and in [operand].
 
-    The operators are tried in table order. When one token starts another, such
-    as [!] and [!=], list the longer token first. The loop stops after an
-    operator and operand that together consume no input, as in {!fold_left}.
+    After each operand, [expression] runs token parsers until one succeeds. It
+    starts with the operators that bind to that operand: the levels above the
+    pending operator before it, and the level of that operator when it is an
+    {!infix_right}. When none of them matches, it runs the build function of
+    that pending operator and moves out to the operators that bind to its
+    result, and so on down to the lowest level. Each group is tried in table
+    order. Each token parser runs at most once for one operand, and the token
+    parser that succeeds is not run again: its diagnostics, {!Ref} changes and
+    {!commit} stay. The token parsers that fail add to the expected set of an
+    error.
 
-    For a grammar with many precedence levels, {!precedence} is faster: it looks
-    for the operator once after each operand.
+    When the token parser or the operand after it fails, [expression] continues
+    with the next operator in this order at the same position, and stops before
+    the operator when no other operator matches. Thus [<] can come before [<<]
+    in the table: in [1<<2], the operand after [<] fails, and [<<] is next. A
+    postfix operator has no operand, so when one token starts another, such as
+    [!] and [!=], list the longer token first. A {!commit} in a token parser
+    stops this search: when that operator or a later step fails, [expression]
+    fails.
+
+    A step whose operator and right operand together consume no input ends its
+    group: [expression] goes back before that operator and moves out to the
+    lower groups. The right operand includes the operators that bind to it: with
+    an operand that can be empty, an infix operator [""] below a postfix [^]
+    reads [2^] as [""] applied to [2] and to the empty operand with [^].
+
+    Where an operand starts, [expression] tries the {!prefix} operators in table
+    order, then [operand]. The operand of a prefix operator uses one depth level
+    of {!rec_}. A chain of infix operators uses no depth level. When a build
+    function fails, the expression fails, as in {!precedence}.
 
     Example:
     {@ocaml[
@@ -1460,19 +1538,20 @@ val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
 val precedence :
   ?min:int ->
   operand:(unit -> 'a) ->
-  operator:(unit -> (int * 'a operator) option) ->
+  operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
   unit ->
   'a
 (** [precedence ~operand ~operator] parses operands with [operand], joined by
-    the operators that [operator] finds. It does the work of {!expression} with
-    one operator lookup after each operand, where {!expression} tries each
-    operator of its table.
+    the operators that [operator] finds. {!expression} uses the same loop. Where
+    {!expression} runs the token parsers of its table, [precedence] calls
+    [operator] once after each operand. For a grammar with many precedence
+    levels, this is faster.
 
-    After each operand, [precedence] calls [operator] once. [operator] looks at
-    the input and returns [Some (prec, op)], or [None] when no operator is next.
-    A higher [prec] binds tighter, and each [int] is a valid [prec]. [op] is
-    {!infix_left}, {!infix_right} or {!postfix}; a {!prefix} raises
-    [Invalid_argument].
+    [operator] looks at the input and returns [Some (prec, op)], or [None] when
+    no operator is next. A higher [prec] binds tighter, and each [int] is a
+    valid [prec]. [op] is {!infix_left}, {!infix_right} or {!postfix}. For a
+    prefix operator, read the token in [operand], then parse its operand with
+    [precedence ~min] inside {!rec_}.
 
     There is one exception to the one call. When [operator] records a diagnostic
     or sets a {!Ref}, and the operator that it returns binds less tightly than
@@ -1499,25 +1578,19 @@ val precedence :
     operator, call {!commit} in the token parser of [op].
 
     [min] is the lowest [prec] that [precedence] accepts. The default accepts
-    all operators. Use it for a prefix operator: read the prefix token in
-    [operand], then parse its operand with [precedence ~min] inside {!rec_}.
+    all operators.
 
-    A chain of operators uses no depth level of {!rec_}. As in {!expression},
-    when the token parser of [op] or the operand after it fails, the expression
-    stops before that operator, unless the token parser called {!commit}. The
-    loop stops after an operator and operand that together consume no input. A
-    build function runs when the operator after its right operand is known, with
-    {!position} at the end of that operand. The build function of an
-    {!infix_left} operator with [prec] of [max_int] runs immediately after its
-    right operand, because no operator binds tighter. As in {!expression}, a
+    A chain of operators uses no depth level of {!rec_}. When the token parser
+    of [op] or the operand after it fails, the expression stops before that
+    operator, unless the token parser called {!commit}; then [precedence] fails.
+    The loop stops after an operator and operand that together consume no input.
+
+    A build function runs when the operator after its right operand is known,
+    with {!position} at the end of that operand. A postfix build function, and
+    the build function of an {!infix_left} operator with [prec] of [max_int],
+    run immediately: no operator binds tighter. When a build function fails, the
+    expression fails at that position; it does not stop before the operator. A
     {!commit} in a build function has no effect.
-
-    One difference from {!expression}: when a build function fails,
-    {!expression} stops before that operator. In [precedence], an infix build
-    function runs after the next lookup, so its failure is the failure of the
-    full [precedence] call. A {!postfix} build function, and the build function
-    of an {!infix_left} operator with [prec] of [max_int], run immediately, and
-    their failure stops the expression before that operator.
 
     Example:
     {@ocaml[
