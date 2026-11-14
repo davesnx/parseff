@@ -2624,9 +2624,9 @@ let check_sealable st name =
     invalid_arg
       ("Parseff." ^ name
      ^ ": called inside look_ahead, peek_with, an operator lookup of \
-        precedence, capture without ~release:true, or recover or \
-        sep_by_recover without ~release:true that can recover, which can \
-        rewind before a value that it gives out"
+        precedence, capture without ~release:true, require that can recover, \
+        or recover, sep_by_recover or list without ~release:true that can \
+        recover, which can rewind before a value that it gives out"
       )
 
 let give st f v =

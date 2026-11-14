@@ -1588,11 +1588,11 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
     {!look_ahead}, {!peek_with}, an operator lookup of {!precedence}, or
     {!capture} without [~release:true]. These always rewind on failure, or also
     on success, so [f] could get a value that the parse then undoes. Inside
-    {!recover} or {!sep_by_recover} without [~release:true], it raises when that
-    call can recover: when the runner got its collector as [~diagnostics] and
-    input remains. Without the collector, [recover] runs its parser directly and
-    [many_iter] does not raise. So test a parser that uses [many_iter] there
-    with [~diagnostics].
+    {!require}, or inside {!recover}, {!sep_by_recover} or an element of {!list}
+    without [~release:true], it raises when that call can recover: when the
+    runner got its collector as [~diagnostics] and input remains. Without the
+    collector, these run their parser directly and [many_iter] does not raise.
+    So test a parser that uses [many_iter] there with [~diagnostics].
 
     Unstable: this function can change in a 1.x release.
 
