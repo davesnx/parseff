@@ -674,13 +674,14 @@ module State = struct
     in
     go 0
 
-  let forget_older_undo (t : t) =
+  let keep_effects_so_far (t : t) =
     let depth = trail_depth t lsl frame_trail_shift in
     let mask = (1 lsl frame_trail_shift) - 1 in
     for i = 0 to t.frames_top - 1 do
       let slot = (i * frame_stride) + 1 in
       Array.unsafe_set t.frames slot
-        (Array.unsafe_get t.frames slot land mask lor depth)
+        (Array.unsafe_get t.frames slot land mask lor depth);
+      Array.unsafe_set t.frames (slot + 1) t.diag_len
     done
 
   let reclaim_floor (t : t) ~keep_from =
@@ -710,8 +711,9 @@ let () =
     | Not_in_parse_context ->
         Some
           "Parseff: parser called outside of a parse context. Parser \
-           combinators can only be used inside a function passed to \
-           Parseff.parse or Parseff.parse_source."
+           combinators and warn can only be used inside a function passed to \
+           Parseff.parse or Parseff.parse_source, not in a function given to a \
+           *_iter function or to ~trace."
     | _ ->
         None
     )
@@ -2610,14 +2612,15 @@ let check_sealable st name =
   if State.always_rewinding_frame_open st then
     invalid_arg
       ("Parseff." ^ name
-     ^ ": called inside look_ahead, peek_with, an operator lookup, or capture \
-        or recover without ~release:true, which can rewind before a value that \
-        it gives out"
+     ^ ": called inside look_ahead, peek_with, an operator lookup of \
+        precedence, capture without ~release:true, or recover or \
+        sep_by_recover without ~release:true that can recover, which can \
+        rewind before a value that it gives out"
       )
 
 let give st f v =
   ignore (State.seal_frames st ~captures:true ~floor:0 : bool);
-  State.forget_older_undo st;
+  State.keep_effects_so_far st;
   trace_emit st f v
 
 let iter_elements st ~at_least ~progress_first first next f =
@@ -2692,10 +2695,10 @@ let iter_input st limit scan f =
 
 let take_iter n (f : span -> unit) =
   let st = get_state () in
+  check_sealable st "take_iter";
   if n < 0 then
     fail_negative_count st n
   else if n > 0 then begin
-    check_sealable st "take_iter";
     let left = iter_input st n (fun _ stop -> stop) f in
     if left > 0 then fail_bytes st left
   end
@@ -5600,7 +5603,14 @@ module Ref = struct
     let owner = c.owner in
     if owner != token then begin
       if !owner then
-        invalid_arg "Parseff.Ref.set: another running parse uses this cell";
+        invalid_arg
+          ( if st == State.none then
+              "Parseff.Ref.set: the cell belongs to a running parse, and this \
+               call is outside that parse, for example in a function given to \
+               a *_iter function or to ~trace"
+            else
+              "Parseff.Ref.set: another running parse uses this cell"
+          );
       c.owner <- token;
       c.mark <- 0
     end;

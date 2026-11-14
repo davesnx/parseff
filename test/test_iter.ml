@@ -475,6 +475,128 @@ let raises_invalid name run =
 
 let elements f () = Parseff.sep_by_iter number comma f ()
 
+let test_zero_width_effects_kept () =
+  let d = Parseff.Diagnostics.create () in
+  let z = Parseff.Ref.create 0 in
+  let result =
+    Parseff.parse ~diagnostics:d "" (fun () ->
+        let _ =
+          Parseff.many
+            (fun () ->
+              Parseff.Ref.set z 7;
+              Parseff.warn d "w";
+              Parseff.sep_by_iter
+                (fun () -> Parseff.take_while (fun c -> c = 'a'))
+                comma ignore ()
+            )
+            ()
+        in
+        (Parseff.Ref.get z, Parseff.Diagnostics.length d)
+    )
+  in
+  Alcotest.(check (result (pair int int) string))
+    "Ref change and diagnostic before the value are kept"
+    (Ok (7, 1))
+    (Result.map_error Parseff.error_message result)
+
+let message_of run =
+  match run () with _ -> "no exception" | exception e -> Printexc.to_string e
+
+let contains text needle = Re.execp (Re.compile (Re.str needle)) text
+
+let test_ref_set_in_callback () =
+  let x = Parseff.Ref.create 0 in
+  let msg =
+    message_of (fun () ->
+        Parseff.parse "1,2" (fun () ->
+            Parseff.Ref.set x 1;
+            Parseff.sep_by_iter digits comma (fun _ -> Parseff.Ref.set x 5) ()
+        )
+    )
+  in
+  Alcotest.(check bool)
+    ("says the call is outside the parse: " ^ msg)
+    true (contains msg "outside")
+
+let test_ref_in_callback_unowned () =
+  let x = Parseff.Ref.create 0 in
+  let seen = ref [] in
+  let result =
+    Parseff.parse "1,2" (fun () ->
+        Parseff.sep_by_iter digits comma
+          (fun _ ->
+            seen := Parseff.Ref.get x :: !seen;
+            Parseff.Ref.set x (Parseff.Ref.get x + 1)
+          )
+          ();
+        Parseff.Ref.get x
+    )
+  in
+  Alcotest.(check (result int string))
+    "value" (Ok 2)
+    (Result.map_error Parseff.error_message result);
+  Alcotest.(check (list int)) "Ref.get in f" [ 1; 0 ] !seen
+
+let test_warn_in_callback () =
+  let d = Parseff.Diagnostics.create () in
+  let msg =
+    message_of (fun () ->
+        Parseff.parse ~diagnostics:d "1" (fun () ->
+            Parseff.take_iter 1 (fun _ -> Parseff.warn d "w")
+        )
+    )
+  in
+  Alcotest.(check bool)
+    ("names the *_iter functions: " ^ msg)
+    true (contains msg "_iter")
+
+let test_recover_raises_with_collector () =
+  let errs = Parseff.Diagnostics.create () in
+  let got = ref 0 in
+  let items () =
+    Parseff.many_iter
+      (fun () ->
+        let d = digits () in
+        let _ = Parseff.char ';' in
+        d
+      )
+      (fun _ -> incr got)
+      ()
+  in
+  let in_recover () =
+    Parseff.recover errs ~sync:ignore
+      (fun () ->
+        items ();
+        "ok"
+      )
+      (fun _ -> "hole")
+  in
+  let in_sep_by_recover () =
+    String.concat ","
+      (Parseff.sep_by_recover errs ~sync:ignore
+         (fun () ->
+           items ();
+           "ok"
+         )
+         comma
+         (fun _ -> "hole")
+         ()
+      )
+  in
+  List.iter
+    (fun (name, p) ->
+      got := 0;
+      Alcotest.(check (result string string))
+        (name ^ " without the collector")
+        (Ok "ok")
+        (Result.map_error Parseff.error_message (Parseff.parse "1;2;" p));
+      Alcotest.(check int) (name ^ " values") 2 !got;
+      raises_invalid (name ^ " with the collector") (fun () ->
+          Parseff.parse ~diagnostics:errs "1;2;" p
+      )
+    )
+    [ ("recover", in_recover); ("sep_by_recover", in_sep_by_recover) ]
+
 let test_barriers_raise () =
   let d = Parseff.Diagnostics.create () in
   let ignore_value _ = () in
@@ -493,6 +615,9 @@ let test_barriers_raise () =
       ("recover", fun p -> Parseff.recover d ~sync:ignore p ignore);
       ( "take_iter in look_ahead",
         fun _ -> Parseff.look_ahead (fun () -> Parseff.take_iter 1 ignore_value)
+      );
+      ( "take_iter 0 in look_ahead",
+        fun _ -> Parseff.look_ahead (fun () -> Parseff.take_iter 0 ignore_value)
       );
     ]
 
@@ -588,6 +713,8 @@ let () =
           test_case "memory bounded with Ref.set in capture ~release" `Quick
             (test_memory_bounded_with_ref in_released_capture);
           test_case "zero-width value" `Quick test_zero_width_value;
+          test_case "zero-width value keeps Ref and diagnostics" `Quick
+            test_zero_width_effects_kept;
         ]
       );
       ( "pieces",
@@ -605,6 +732,8 @@ let () =
           test_case "or_ is sealed" `Quick test_inside_or_seals;
           test_case "optional is sealed" `Quick test_inside_optional_seals;
           test_case "barriers raise" `Quick test_barriers_raise;
+          test_case "recover raises only with its collector" `Quick
+            test_recover_raises_with_collector;
           test_case "capture ~release" `Quick test_released_capture;
           test_case "Ref undone in a failed element" `Quick
             test_ref_undone_in_element;
@@ -620,6 +749,11 @@ let () =
         [
           test_case "raises" `Quick test_callback_raises;
           test_case "runs outside the parse" `Quick test_callback_outside_parse;
+          test_case "Ref.set of a parse cell in f" `Quick
+            test_ref_set_in_callback;
+          test_case "Ref in f on a cell the parse did not set" `Quick
+            test_ref_in_callback_unowned;
+          test_case "warn in f" `Quick test_warn_in_callback;
         ]
       );
     ]
