@@ -310,11 +310,15 @@ type trace_event = private
           [error] and went back to [start]: the start of its parser, or with
           [~release:true] the last {!val:commit}, {!val:cut} or value given out
           by {!val:many_iter}, {!val:sep_by_iter}, {!val:take_iter} or
-          {!val:take_while_iter} that reached it. [capture] gives the event when
-          it returns [Error error]. [recover] and [sep_by_recover] give it after
-          [sync], [~record] and [hole] return, so the events of [sync] and
-          [hole] come first. When one of them fails, the failure was not
-          recovered and no event is given. *)
+          {!val:take_while_iter} that reached it. {!val:require} and {!val:list}
+          give it for each error that they record, with [start] where the
+          missing part was inserted. A recovery inside a parser that is later
+          undone, such as the [close] of {!val:list} or a branch of {!val:or_},
+          still gives its event. [capture] gives the event when it returns
+          [Error error]. [recover] and [sep_by_recover] give it after [sync],
+          [~record] and [hole] return, so the events of [sync] and [hole] come
+          first. When one of them fails, the failure was not recovered and no
+          event is given. Unstable: this event can change in a 1.x release. *)
 
 val print_trace : Format.formatter -> trace_event -> unit
 (** [print_trace ppf] is a [trace] callback that prints each event on its own
@@ -923,7 +927,9 @@ val recover :
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
+(** Unstable: this function can change in a 1.x release.
+
+    [recover errors ~sync parser hole] runs [parser] with {!capture}. If
     [parser] fails with the error [e], [recover] records [e] in [errors], calls
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
@@ -991,7 +997,9 @@ val sep_by_recover :
   (error -> 'a) ->
   unit ->
   'a list
-(** [sep_by_recover errors ~sync element separator hole] parses one or more
+(** Unstable: this function can change in a 1.x release.
+
+    [sep_by_recover errors ~sync element separator hole] parses one or more
     occurrences of [element] with [separator] between each pair, as {!sep_by}
     does, and recovers from each [element] that fails. For a failure [e], it
     records [e] in [errors], goes back to the start of the element, calls
@@ -1071,9 +1079,221 @@ val sep_by_recover :
     (* "(1, [2 3], 4)" -> [`Int 1; `Hole; `Int 4], with one error recorded *)
     ]} *)
 
+val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
+(** [require errors parser missing] runs [parser]. If the furthest failure of
+    [parser] is at the position where [require] started, [require] records the
+    error [e] in [errors], goes back to that position and returns [missing e]:
+    it inserts the missing part, consumes nothing and the parse goes on. Use it
+    for a token that the grammar needs at this point, such as [then], [;], or
+    the [)] that closes a list, and for a missing expression.
+
+    The furthest failure decides, not the position where [parser] stopped. A
+    branch of [parser] that read further and failed means that the construct is
+    there and broken, not missing: the failure goes on, as without [require],
+    and an enclosing {!recover} or {!list} handles it. On ["ax"],
+    [require errors (fun () -> ignore (optional ab ()); ignore (char ')'))
+     ignore] with [ab] reading ['a'] then ['b'] does not insert: [ab] failed at
+    1. With [capture ab] in place of [optional ab ()], the failure of [ab] is
+    not counted, and [require] inserts the [)] at 0. The same rule holds for a
+    failure of {!fail} or {!val-error}: it is inserted only when no branch of
+    [parser] read further.
+
+    A failure at the end of the input is inserted too, so a missing closing
+    token at the end gives one error. [e] keeps the contexts open around
+    [require], so {!render_error} shows the construct that the token closes. [e]
+    also lists what other parsers expected at the same position, such as the
+    separator that a {!list} tried before it stopped, as {!parse} would report
+    it. After the insertion, those expectations are dropped, as after reading a
+    token, for a primitive failure and for {!fail}. An error of {!fail} has its
+    message and no expected set, so it does not list them.
+
+    With the collector, a {!commit} or {!cut} in [parser] does not reach the
+    frames outside [require], as with {!recover}; without the collector it does.
+    So an {!or_} around [require] can take its other branch with the collector
+    and not without it. An insertion undoes all that [parser] did: the position,
+    the diagnostics and the {!Ref} changes.
+
+    In byte mode, a token parser usually skips the whitespace after it. Then [e]
+    points after that whitespace, not at the end of the previous token.
+
+    [errors] must be the collector given to the runner as [~diagnostics];
+    otherwise [require] calls [parser] directly. A traced parse gets a
+    [Captured] event for each insertion. Unstable: this function can change in a
+    1.x release.
+
+    Example:
+    {@ocaml[
+    type call = Call of string * int list
+
+    let call errors () =
+      let name =
+        take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
+      in
+      let _ = char '(' in
+      let args =
+        list
+          ~sep:(fun () ->
+            let _ = char ',' in
+            skip_whitespace ()
+          )
+          errors
+          ~close:(fun () -> peek_char () = Some ')')
+          ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ','))
+          (fun () ->
+            let n = integer () in
+            skip_whitespace ();
+            n
+          )
+          (fun _ -> 0)
+          ()
+      in
+      require errors (fun () -> ignore (char ')')) ignore;
+      Call (name, args)
+
+    let () =
+      let errors = Diagnostics.create () in
+      let r = parse ~diagnostics:errors "f(1, 2" (call errors) in
+      assert (r = Ok (Call ("f", [ 1; 2 ])));
+      match Diagnostics.to_list errors with
+      | [ { Diagnostics.value = e; _ } ] ->
+          assert (error_message e = "expected ')' or ',', found end of input")
+      | _ ->
+          assert false
+    ]} *)
+
+val list :
+  ?release:bool ->
+  ?outer:bool ->
+  ?record:(error -> error Diagnostics.entry list -> unit) ->
+  ?sep:(unit -> unit) ->
+  ?trailing:bool ->
+  error Diagnostics.t ->
+  close:(unit -> bool) ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (error -> 'a) ->
+  unit ->
+  'a list
+(** [list errors ~close ~sync element hole ()] parses [element] until [close ()]
+    is [true] or the input ends, and recovers from each [element] that fails. It
+    is one loop for a list of statements and, with [~sep], for a list with
+    separators. It does not read the closing token: follow it with {!require}.
+
+    [close] tells where the list ends. Its changes are undone, as with
+    {!look_ahead}, so it can read the closing token. A failing [close] makes
+    [list] fail. At the end of the input [list] does not call it.
+
+    When [element] fails with the error [e], [list] records [e], calls [sync ()]
+    and puts [hole e] in the list, as {!recover} does. [~release], [~outer] and
+    [~record] are as in {!recover}.
+
+    Without [~sep], [close] runs before each element. When [sync] consumes
+    nothing, [list] skips one character past the error, as {!recover} does. An
+    element that consumes nothing ends the list, as in {!many}, unless it
+    recorded a diagnostic, such as an insertion of {!require}: then [list] keeps
+    its value, calls [sync ()], and when [sync] consumes nothing, skips one
+    character. Thus each element moves the position, or ends the list.
+
+    With [~sep], [list] reads as {!sep_by}: an element, then a separator and an
+    element, again and again. An element that succeeds on no input is a value,
+    as in {!sep_by}. [close] runs before the first element, and after an element
+    when the separator fails. The list ends where the separator fails at [close]
+    or at the end of the input, or where a separator and an element together
+    consume nothing.
+    - When [close] is [true] before the first element, [element] runs without
+      recovery: if it succeeds, its value is the first element; if it fails, the
+      list is empty. A failure of {!fail} there is recorded first, since
+      {!sep_by} does not catch it and the plain parse fails.
+    - [list] does not skip, as {!sep_by_recover}: [sync] must stop before the
+      next separator and before the closing token, and {!skip_nested} does this.
+      Thus a hole can be empty, as in [f(1, , 3)].
+    - After a separator before the closing token, as in [{1, 2,}], [element]
+      runs: a failure is recorded and gives [hole e], as with {!sep_by}, which
+      rejects this input. At the end of the input the parse fails there. With
+      [~trailing:true], [close] runs after each separator, and a separator after
+      an element can come before the closing token, with no error and no element
+      after it. A separator with no element before it, as in [{,}], is still an
+      error.
+    - When the separator is missing and an element follows, as in [f(1 2)],
+      [list] records the error of the separator and goes on with the element.
+      When no element follows, as in [f(1 ?)], [list] calls [sync ()]. If [sync]
+      consumes input, [list] records the error of the separator and goes on.
+      Otherwise the list ends there, and the {!require} of the closing token
+      reports the error. The element after a missing separator runs once, under
+      recovery, as any element. The error of the separator goes through
+      [~record], with no inner diagnostics. It is recorded, and its [Captured]
+      event is given, after those of that element, and only when that step
+      succeeds.
+
+    To find the next element when a separator is missing, [element] and [sep]
+    must skip the whitespace after them, not before.
+
+    A failure at the end of the input is not recovered: the parse fails there,
+    as with {!recover}. [errors] must be the collector given to the runner as
+    [~diagnostics]; otherwise [list] is the plain parser: {!many} [element]
+    without [~sep], {!sep_by} [element] [sep] with it, and with [~trailing:true]
+    also an optional separator after a list that is not empty. [close] is not
+    used then. For valid input, [list] with the collector gives the same list as
+    the plain parser, and records nothing.
+
+    As with {!look_ahead} and {!or_}, [close] and the first element at the
+    closing token can give trace events for work that is undone. Unstable: this
+    function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    type stmt = Assign of string * int | Bad
+
+    let statement () =
+      let name =
+        take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
+      in
+      skip_whitespace ();
+      let _ = char '=' in
+      skip_whitespace ();
+      let value = integer () in
+      skip_whitespace ();
+      let _ = char ';' in
+      skip_whitespace ();
+      Assign (name, value)
+
+    let skip_statement () =
+      skip_while (fun c -> c <> ';' && c <> '}');
+      ignore (optional (fun () -> char ';') ());
+      skip_whitespace ()
+
+    let block errors () =
+      context ~delimited:true "block" (fun () ->
+          let _ = char '{' in
+          skip_whitespace ();
+          let stmts =
+            list errors
+              ~close:(fun () -> peek_char () = Some '}')
+              ~sync:skip_statement statement
+              (fun _ -> Bad)
+              ()
+          in
+          require errors (fun () -> ignore (char '}')) ignore;
+          stmts
+      )
+
+    let () =
+      let errors = Diagnostics.create () in
+      let r = parse ~diagnostics:errors "{ x = 1; y = ; " (block errors) in
+      assert (r = Ok [ Assign ("x", 1); Bad ]);
+      assert (
+        List.map
+          (fun { Diagnostics.value = e; _ } -> error_message e)
+          (Diagnostics.to_list errors)
+        = [ "expected integer, found ';'"; "expected '}', found end of input" ]
+      )
+    ]} *)
+
 val skip_nested :
   ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit -> unit
-(** [skip_nested pairs stop ()] skips input up to the end of a broken list
+(** Unstable: this function can change in a 1.x release.
+
+    [skip_nested pairs stop ()] skips input up to the end of a broken list
     element. It is made for the [~sync] of {!sep_by_recover} and {!recover}:
     [~sync:(skip_nested pairs stop)].
 
@@ -1422,11 +1642,11 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
     {!look_ahead}, {!peek_with}, an operator lookup of {!precedence}, or
     {!capture} without [~release:true]. These always rewind on failure, or also
     on success, so [f] could get a value that the parse then undoes. Inside
-    {!recover} or {!sep_by_recover} without [~release:true], it raises when that
-    call can recover: when the runner got its collector as [~diagnostics] and
-    input remains. Without the collector, [recover] runs its parser directly and
-    [many_iter] does not raise. So test a parser that uses [many_iter] there
-    with [~diagnostics].
+    {!require}, or inside {!recover}, {!sep_by_recover} or an element of {!list}
+    without [~release:true], it raises when that call can recover: when the
+    runner got its collector as [~diagnostics] and input remains. Without the
+    collector, these run their parser directly and [many_iter] does not raise.
+    So test a parser that uses [many_iter] there with [~diagnostics].
 
     Unstable: this function can change in a 1.x release.
 
