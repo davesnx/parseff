@@ -2141,11 +2141,13 @@ val within : int -> (unit -> 'a) -> 'a
     [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
     be larger than [~backtrack_window] when [parser] calls {!commit} as it
     reads. Two things copy inside a frame. {!match_regex} works on a copy of the
-    frame bytes read so far, from the byte before the position: it is made once
-    on string input, and again after each read on a stream, so its cost is the
-    size of the frame plus the size of each read. On string input, {!take_span},
-    {!take_while_span} and {!recognize_span} return copies, as they do with
-    {!parse_source}.
+    frame bytes read so far, from the byte before the position of the first
+    call. When a later call is at a position before the copy, the copy is made
+    again from the start of the frame, so on string input it is made at most
+    twice per frame. On a stream it is also made again after each read, from the
+    position, which costs the bytes read ahead of the position. On string input,
+    {!take_span}, {!take_while_span} and {!recognize_span} return copies, as
+    they do with {!parse_source}.
 
     Inside the frame the input ends at the frame end, so {!skip_to} raises
     [Invalid_argument] for a target past it, also for a position that
