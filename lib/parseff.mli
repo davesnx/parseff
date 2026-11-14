@@ -297,16 +297,18 @@ type trace_event = private
           ended. The error position is in the {!type:error}. *)
   | Captured of { start : int; error : error }
       (** A {!val:capture}, {!val:recover} or {!val:sep_by_recover} caught
-          [error] and went back to [start]: the start of its parser, or the last
-          {!val:commit} or {!val:cut} that reached it with [~release:true].
-          {!val:require} and {!val:list} give it for each error that they
-          record, with [start] where the missing part was inserted. A recovery
-          inside a parser that is later undone, such as the [close] of
-          {!val:list} or a branch of {!val:or_}, still gives its event.
-          [capture] gives the event when it returns [Error error]. [recover] and
-          [sep_by_recover] give it after [sync], [~record] and [hole] return, so
-          the events of [sync] and [hole] come first. When one of them fails,
-          the failure was not recovered and no event is given. *)
+          [error] and went back to [start]: the start of its parser, or with
+          [~release:true] the last {!val:commit}, {!val:cut} or value given out
+          by {!val:many_iter}, {!val:sep_by_iter}, {!val:take_iter} or
+          {!val:take_while_iter} that reached it. {!val:require} and {!val:list}
+          give it for each error that they record, with [start] where the
+          missing part was inserted. A recovery inside a parser that is later
+          undone, such as the [close] of {!val:list} or a branch of {!val:or_},
+          still gives its event. [capture] gives the event when it returns
+          [Error error]. [recover] and [sep_by_recover] give it after [sync],
+          [~record] and [hole] return, so the events of [sync] and [hole] come
+          first. When one of them fails, the failure was not recovered and no
+          event is given. *)
 
 val print_trace : Format.formatter -> trace_event -> unit
 (** [print_trace ppf] is a [trace] callback that prints each event on its own
@@ -848,16 +850,17 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
     two errors. {!recover} and {!sep_by_recover} do not recover such a failure.
 
     With [~release:true], a {!commit} or {!cut} in [parser] that reaches
-    [capture] moves the rewind point to the position of that call. A later
-    failure of [parser] then goes back to that position, not to the start. It
-    removes only the diagnostics and the {!Ref} changes made after that call;
-    those made before it stay, as after a success. Do not parse the same input
-    again with another parser after [Error e]: skip from the current position,
-    and from [e.range.start] when it is later. A {!cut} also continues to the
-    frames outside [capture]. In {!parse_source}, only the input that [parser]
-    reads after the rewind point must fit in [~backtrack_window], so a parser
-    that calls {!cut} after each decided part can be longer than the window. The
-    default is [false].
+    [capture], or a value that {!many_iter}, {!sep_by_iter}, {!take_iter} or
+    {!take_while_iter} gives out in [parser], moves the rewind point to the
+    position of that call. A later failure of [parser] then goes back to that
+    position, not to the start. It removes only the diagnostics and the {!Ref}
+    changes made after that call; those made before it stay, as after a success.
+    Do not parse the same input again with another parser after [Error e]: skip
+    from the current position, and from [e.range.start] when it is later. A
+    {!cut} also continues to the frames outside [capture]. In {!parse_source},
+    only the input that [parser] reads after the rewind point must fit in
+    [~backtrack_window], so a parser that calls {!cut} after each decided part
+    can be longer than the window. The default is [false].
 
     With [~outer:false], [e] keeps only the contexts that [parser] opened, as if
     the parse started at [capture]: the contexts open around [capture] are not
@@ -900,9 +903,10 @@ val recover :
     the failure removed, in the order they were recorded. To keep one, record it
     again: [warn ~pos:d.pos errors d.value] gives the same entry. With
     [~release:true], [inner] holds only the errors recorded after the last
-    {!commit} or {!cut} that reached [recover], since the errors before it stay.
-    For example, to keep the errors of [parser] and record [e] only when there
-    are none:
+    {!commit}, {!cut} or value given out by a [*_iter] function, such as
+    {!many_iter}, that reached [recover], since the errors before it stay. For
+    example, to keep the errors of [parser] and record [e] only when there are
+    none:
     {@ocaml[
     let record errors e inner =
       List.iter
@@ -912,8 +916,9 @@ val recover :
     ]}
 
     [~release] and [~outer] are given to {!capture}. With [~release:true],
-    [sync] starts at the last {!commit} or {!cut} that reached [recover], and
-    the errors recorded before that call stay.
+    [sync] starts at the last {!commit}, {!cut} or value given out by a [*_iter]
+    function that reached [recover], and the errors recorded before that call
+    stay.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] calls [parser] directly, so the parse fails as without
@@ -960,8 +965,9 @@ val sep_by_recover :
     [sync ()] to skip the broken element, and puts [hole e] in the list. The
     errors that the element recorded in [errors] before it failed are removed;
     [~release], [~outer] and [~record] are as in {!recover}. With
-    [~release:true], a failure goes back to the last {!commit} or {!cut} that
-    reached [sep_by_recover], not to the start of the element.
+    [~release:true], a failure goes back to the last {!commit}, {!cut} or value
+    given out by a [*_iter] function that reached [sep_by_recover], not to the
+    start of the element.
 
     [sync] must stop before the next separator and before the token that closes
     the list: {!skip_nested} does this for lists in brackets. Unlike {!recover},
@@ -1548,6 +1554,98 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     When [~at_least] is specified, requires at least that many elements. The
     loop stops after an iteration that consumes no input, as in {!many}. *)
 
+val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
+(** [many_iter parser f] is {!many} that builds no list: it gives each value of
+    [parser] to [f], in order, and returns [()]. The stop rules and [~at_least]
+    are the same as in {!many}.
+
+    Before it gives a value, [many_iter] seals every open frame, as {!cut} does
+    with no enclosing {!val:context}: no {!or_}, {!many}, {!optional} or similar
+    frame outside it can rewind before that value, and a streaming source can
+    drop the input before it. Thus with {!parse_source} memory is bounded by the
+    size of one element, not by the number of elements. The exception is
+    {!recognize} and {!recognize_span}: they keep their input, so inside them
+    the parse fails with [Backtrack_window_exceeded] when that input is larger
+    than the window. {!with_range} keeps no input.
+
+    A failure after a value is given out is an error of the whole parse, unless
+    a {!capture} or {!recover} with [~release:true] is open: then the parse goes
+    back to the point after the last value, and {!capture} returns [Error] or
+    {!recover} gives its hole there. See {!section-streaming} for the rule.
+
+    A value of an element that consumed no input is given out too, as {!many}
+    keeps it with [~at_least]. An outer {!many} or {!sep_by} can then stop at
+    that position and drop its own element, but the value stays given.
+
+    [f] runs outside the parse. A parser or {!warn} called in [f] raises an
+    exception. {!Ref.get} in [f] reads the current value. {!Ref.set} in [f] on a
+    cell that the parse has set raises [Invalid_argument]; on another cell it
+    sets the value as outside any parse, and no rewind undoes it. A value given
+    to [f] is never undone, so keep the state of [f] in plain OCaml values. An
+    exception from [f] stops the parse, and the runner raises it again.
+
+    [many_iter] raises [Invalid_argument] when it is called inside
+    {!look_ahead}, {!peek_with}, an operator lookup of {!precedence}, or
+    {!capture} without [~release:true]. These always rewind on failure, or also
+    on success, so [f] could get a value that the parse then undoes. Inside
+    {!recover} or {!sep_by_recover} without [~release:true], it raises when that
+    call can recover: when the runner got its collector as [~diagnostics] and
+    input remains. Without the collector, [recover] runs its parser directly and
+    [many_iter] does not raise. So test a parser that uses [many_iter] there
+    with [~diagnostics].
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let sum = ref 0
+
+    let () =
+      let r =
+        parse "1 2 3 "
+          (many_iter
+             (fun () ->
+               let n = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+               let _ = char ' ' in
+               int_of_string n
+             )
+             (fun n -> sum := !sum + n)
+          )
+      in
+      assert (Result.is_ok r && !sum = 6)
+    ]} *)
+
+val sep_by_iter :
+  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit -> unit
+(** [sep_by_iter element separator f] is {!sep_by} that builds no list: it gives
+    each [element] value to [f], as {!many_iter} does. The stop rules and
+    [~at_least] are the same as in {!sep_by}. A failure in [separator] after a
+    value is given out cannot rewind before that value. As in {!sep_by}, the
+    first element is kept when it consumes no input, so [f] can get a value of
+    an element that consumed no input, as described in {!many_iter}. It raises
+    [Invalid_argument] in the same cases as {!many_iter}.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let elements = ref 0
+
+    let () =
+      let r =
+        parse "[1,2,3]" (fun () ->
+            let _ = char '[' in
+            sep_by_iter
+              (fun () -> take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
+              (fun () -> char ',')
+              (fun _ -> incr elements)
+              ();
+            char ']'
+        )
+      in
+      assert (Result.is_ok r && !elements = 3)
+    ]} *)
+
 val fold_left :
   (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
 (** [fold_left element op] parses one or more [element] values separated by
@@ -1973,7 +2071,60 @@ val take_span : int -> span
       take_span len
     ]} *)
 
-(** {1 Streaming} *)
+val take_iter : int -> (span -> unit) -> unit
+(** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
+    in pieces, in order, with no empty piece. Joined, the pieces are the [n]
+    bytes. With {!parse} there is one piece. With {!parse_source} a piece is the
+    part of the [n] bytes that is in the input buffer, so the [n] bytes are
+    never held whole and [n] can be larger than [~backtrack_window]. Inside
+    {!recognize} or {!recognize_span} the input is kept: when [n] is larger than
+    the window, the parse fails with [Backtrack_window_exceeded] after [f] got
+    the bytes that fit.
+
+    A piece points into the input buffer with no copy. It is valid only while
+    [f] runs: use {!span_to_string} to keep it.
+
+    [take_iter] gives out values as {!many_iter} does: it seals every open frame
+    before each piece, [f] runs outside the parse, an exception from [f] stops
+    the parse, and the same frames make it raise [Invalid_argument]. If the
+    input ends before [n] bytes, the parse fails after [f] got the bytes that
+    were there. The error counts the missing bytes, as in
+    [expected 2 bytes, found end of input]. A negative [n] fails as in {!take}.
+
+    Unstable: this function can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let body out () =
+      let len = BE.any_uint16 () in
+      take_iter len (fun piece ->
+          for i = 0 to span_length piece - 1 do
+            Buffer.add_char out (span_get piece i)
+          done
+      )
+    ]} *)
+
+val take_while_iter : (char -> bool) -> (span -> unit) -> unit
+(** [take_while_iter pred f] reads bytes while [pred] holds, like {!take_while},
+    and gives them to [f] in pieces as {!take_iter} does. It never fails. When
+    the first byte does not match, [f] is not called.
+
+    Unstable: this function can change in a 1.x release. *)
+
+(** {1:streaming Streaming}
+
+    A rewind does not undo a call to your code. {!or_}, {!many}, {!optional},
+    {!look_ahead} and the other frames go back to an earlier position when a
+    parser fails, but a value that was given to a function outside the parse
+    stays given. So give a value out only at a point that no open frame can
+    rewind before, for example after a {!cut} outside any {!val:context}.
+    {!many_iter}, {!sep_by_iter}, {!take_iter} and {!take_while_iter} follow
+    this rule by themselves: they seal every open frame before each value, and
+    raise [Invalid_argument] inside a frame that cannot be sealed. Sealing is
+    also what lets a source drop the input before that point, so a parse that
+    gives its values out this way can read input much larger than
+    [~backtrack_window]. The exception is {!recognize} and {!recognize_span},
+    which keep all the input that they read. *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
     — a channel, file descriptor, or custom reader — behind a uniform interface.
