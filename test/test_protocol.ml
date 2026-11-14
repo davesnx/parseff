@@ -84,14 +84,31 @@ let test_within_read_past_end () =
     (check_message "expected 6 bytes, found only 5 (end of input)")
 
 let test_within_found_stops_at_end () =
-  both "found text" "abcdefgh"
-    (fun () ->
-      Parseff.within 4 (fun () ->
-          let _ = Parseff.consume "ab" in
-          Parseff.consume "xyz"
-      )
+  let parser () =
+    Parseff.within 4 (fun () ->
+        let _ = Parseff.consume "ab" in
+        Parseff.consume "xyz"
     )
-    (check_message "expected \"xyz\", found 'cd'")
+  in
+  let message found = Printf.sprintf "expected \"xyz\", found '%s'" found in
+  check_message (message "cd") "found text (string)"
+    (Parseff.parse "abcdefgh" parser);
+  List.iter
+    (fun (chunk_size, found) ->
+      let name = Printf.sprintf "found text (chunks of %d)" chunk_size in
+      let result =
+        Parseff.parse_source (chunked_source ~chunk_size "abcdefgh") parser
+      in
+      match (Buf_size_env.buf_size, result) with
+      | None, _ ->
+          check_message (message found) name result
+      | Some _, Error e
+        when List.mem (Parseff.error_message e) [ message "c"; message "cd" ] ->
+          ()
+      | Some _, _ ->
+          check_message (message found) name result
+    )
+    [ (1, "c"); (2, "cd"); (3, "c"); (7, "cd"); (64, "cd"); (4096, "cd") ]
 
 let test_within_short_input () =
   both "short input" "abc"

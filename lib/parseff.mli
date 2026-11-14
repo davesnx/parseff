@@ -403,6 +403,11 @@ val consume : string -> string
     [found end of input]. The one exception is a mismatch inside a multi-byte
     character: it is reported at the start of that character.
 
+    In {!parse_source}, [consume] compares the buffered bytes first. It reads
+    more input only while they match the start of [s], so a wrong byte fails at
+    once, without a wait for more input. The error shows the bytes read so far:
+    its [found] text can be shorter than {!parse} gives on the whole input.
+
     Example:
     {@ocaml[
     let parser () =

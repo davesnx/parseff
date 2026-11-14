@@ -1515,13 +1515,13 @@ let test_render_streaming_opener_dropped () =
       Alcotest.(check bool)
         "header" true
         (has "stream:501:1: [error] expected \"]\" or \"ab\\n\", found 'x'");
-      Alcotest.(check bool) "error line" true (has "501 | x");
+      Alcotest.(check bool) "error line" true (has "501 | x...");
       Alcotest.(check bool)
         "context start is a byte offset" true
         (has "* while parsing list, from byte 0");
       Alcotest.(check bool) "no opener corner" false (has "╭");
       Alcotest.(check bool) "no gutter bar" false (has "│");
-      Alcotest.(check bool) "plain caret row" true (has "501 | x\n    | ^");
+      Alcotest.(check bool) "plain caret row" true (has "501 | x...\n    | ^");
       let full = Parseff.render_error ~name:"stream" ~source:input e in
       let has_full sub =
         let n = String.length sub in

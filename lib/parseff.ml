@@ -1586,17 +1586,15 @@ let[@inline never] fail_literal st pos matched s =
 
 let[@inline never] consume_refilling st s =
   let len = String.length s in
-  let complete = have st len in
   let pos = st.pos in
-  let avail =
-    if complete then
-      len
-    else
-      st.input_len - pos
-  in
   let i = ref 0 in
-  while !i < avail && char_at st (pos + !i) = String.unsafe_get s !i do
-    incr i
+  let reading = ref true in
+  while !reading do
+    let avail = imin len (st.input_len - pos) in
+    while !i < avail && char_at st (pos + !i) = String.unsafe_get s !i do
+      incr i
+    done;
+    if !i < avail || !i = len || not (have st (!i + 1)) then reading := false
   done;
   if !i = len then begin
     st.pos <- pos + len;

@@ -30,6 +30,8 @@ let parser () =
 ```
 When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input. A mismatch inside a multi-byte character is reported at the start of that character.
 
+On a stream, `consume` compares the buffered bytes first and reads more input only while they match the start of the literal, so a wrong byte fails at once. The error shows the bytes read so far: its `found` text can be shorter than on the whole input.
+
 **Performance:** `consume` is optimized for literal string matching. It's much faster than using regex for exact matches.
 
 

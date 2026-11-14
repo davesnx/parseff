@@ -34,6 +34,8 @@ val parse_source :
 ```
 Error positions are absolute offsets from the start of the stream, also after Parseff dropped old input to keep the buffer bounded. An error does not keep the dropped input alive: failures that are older than the buffered input still count for the position of the error, but the buffer does not grow for them.
 
+A stream error shows the bytes read so far. The position and the expected items are the same as `Parseff.parse` gives on the whole input, but the `found` text can be shorter: Parseff does not read more input only to show it. `Parseff.consume` compares the buffered bytes first and fails at the first byte that differs, so a peer that stops sending after a wrong byte gets an error at once, not a parser that waits for the rest of the literal.
+
 The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 
