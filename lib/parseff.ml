@@ -2902,9 +2902,9 @@ let check_sealable st name =
     invalid_arg
       ("Parseff." ^ name
      ^ ": called inside look_ahead, peek_with, an operator lookup of \
-        precedence, capture without ~release:true, or recover or \
-        sep_by_recover without ~release:true that can recover, which can \
-        rewind before a value that it gives out"
+        precedence, capture without ~release:true, require that can recover, \
+        or recover, sep_by_recover or list without ~release:true that can \
+        recover, which can rewind before a value that it gives out"
       )
 
 let give st f v =
@@ -5749,6 +5749,195 @@ let sep_by_recover ?(release = false) ?(outer = true) ?record errors ~sync elem
           hole
     in
     sep_by ~at_least:1 item sep ()
+
+let far_from st start =
+  let saved = st.far in
+  if saved != far_none && saved.pos <> start then st.far <- far_none;
+  saved
+
+let far_back st saved = if st.far != saved then far_merge st saved
+
+let failed_at st start = function
+  | User_failure (pos, _, _) ->
+      pos = start && st.far.pos <= start
+  | _ ->
+      st.far.pos = start
+
+let error_of_exn st outer = function
+  | User_failure (pos, msg, x) ->
+      error_failure st pos msg x (outer_of st outer pos)
+  | _ ->
+      error_of_far st (outer_of st outer st.far.pos)
+
+let require errors parser missing =
+  let st = get_state () in
+  if st.diag != errors.self then
+    parser ()
+  else
+    let start = st.pos in
+    let frame = State.push_rewind_frame st frame_barrier in
+    let saved = st.far in
+    if saved != far_none then st.far <- far_none;
+    match parser () with
+    | v ->
+        State.pop_rewind_frame st frame;
+        far_merge st saved;
+        v
+    | exception ((Fail | User_failure _) as exn) when failed_at st start exn ->
+        ( match exn with
+        | Fail when saved.pos = start ->
+            let own = st.far in
+            st.far <- saved;
+            far_merge st own
+        | _ ->
+            ()
+        );
+        let e = error_of_exn st true exn in
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        st.far <-
+          ( if saved.pos = start then
+              far_none
+            else
+              saved
+          );
+        record_diagnostic errors st e.range.start e;
+        let v = missing e in
+        captured st start e;
+        v
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        far_merge st saved;
+        raise exn
+
+let skip_char st =
+  let p = st.pos in
+  fill_uchar st ~keep_from:p p;
+  st.pos <- p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+
+exception Not_an_element
+
+let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
+    errors ~close ~sync element hole () =
+  let st = get_state () in
+  if st.diag != errors.self then (
+    match sep with
+    | None ->
+        many element ()
+    | Some s ->
+        let xs = sep_by element s () in
+        if trailing && xs <> [] then ignore (optional s ());
+        xs
+  ) else
+    let closed () = (not (have st 1)) || look_ahead close in
+    let item () =
+      recovering st ~release ~outer ~record ~progress:(Option.is_none sep)
+        errors ~sync element hole
+    in
+    let rec steps acc =
+      if closed () then
+        List.rev acc
+      else
+        let start = st.pos in
+        let recorded = st.diag_len in
+        let v = item () in
+        if st.pos <> start then
+          steps (v :: acc)
+        else if st.diag_len = recorded then
+          List.rev acc
+        else begin
+          sync ();
+          if st.pos = start && have st 1 then skip_char st;
+          steps (v :: acc)
+        end
+    in
+    let rec first s =
+      if closed () then begin
+        let start = st.pos in
+        let frame = State.push_rewind_frame st frame_choice in
+        match element () with
+        | v ->
+            State.pop_rewind_frame st frame;
+            after s [ v ]
+        | exception Fail when not (State.frame_committed st frame) ->
+            restore_rewind_frame st frame;
+            State.pop_rewind_frame st frame;
+            []
+        | exception (User_failure _ as exn) ->
+            let e = error_of_exn st outer exn in
+            restore_rewind_frame st frame;
+            State.pop_rewind_frame st frame;
+            inserted start e;
+            []
+        | exception exn ->
+            State.pop_rewind_frame st frame;
+            raise exn
+      end else
+        after s [ item () ]
+    and inserted at e =
+      record_error errors st record e [];
+      captured st at e
+    and after s acc =
+      let at = st.pos in
+      let saved = far_from st at in
+      match optional s () with
+      | Some _ ->
+          far_back st saved;
+          if trailing && closed () then
+            List.rev acc
+          else
+            let recorded = st.diag_len in
+            let v = item () in
+            if st.pos <> at then
+              after s (v :: acc)
+            else if st.diag_len = recorded then
+              List.rev acc
+            else
+              List.rev (v :: acc)
+      | None ->
+          if closed () then begin
+            far_back st saved;
+            List.rev acc
+          end else
+            let e = error_of_far st (outer_of st outer st.far.pos) in
+            far_back st saved;
+            missing_separator s acc at e
+      | exception exn ->
+          far_back st saved;
+          raise exn
+    and missing_separator s acc at e =
+      let at_start = ref false in
+      let element () =
+        match element () with
+        | v ->
+            v
+        | exception ((Fail | User_failure _) as exn) ->
+            at_start := failed_at st at exn;
+            raise exn
+      in
+      let record e inner =
+        if !at_start then raise Not_an_element;
+        record_error errors st record e inner
+      in
+      match
+        recovering st ~release ~outer ~record:(Some record) ~progress:false
+          errors ~sync element hole
+      with
+      | v ->
+          inserted at e;
+          if st.pos = at then
+            List.rev (v :: acc)
+          else
+            after s (v :: acc)
+      | exception Not_an_element ->
+          sync ();
+          if st.pos > at then begin
+            inserted at e;
+            after s acc
+          end else
+            List.rev acc
+    in
+    match sep with None -> steps [] | Some s -> first s
 
 let run_detailed st ~all thunk =
   let previous = State.enter st in
