@@ -401,11 +401,12 @@ let test_chunked_regex () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chunked_skip_while_then_char () =
+let test_chunked_skip_while_char () =
   let src = chunked_source ~chunk_size:2 "   :" in
   match
     parse_source_with_pos src (fun () ->
-        Parseff.skip_while_then_char Parseff.is_whitespace ':'
+        Parseff.skip_while Parseff.is_whitespace;
+        ignore (Parseff.char ':')
     )
   with
   | Ok ((), pos) ->
@@ -1417,13 +1418,13 @@ let is_space c = c = ' '
 let is_lower c = c >= 'a' && c <= 'z'
 
 let sep_take_position_take () =
-  let l = Parseff.sep_by_take is_space ',' is_lower in
+  let l = Parseff.sep_by_take ~ws:is_space ~sep:',' is_lower in
   let pos = Parseff.position () in
   let rest = Parseff.take 3 in
   (l, pos, rest)
 
 let sep_take_span_position_take () =
-  let l = Parseff.sep_by_take_span is_space ',' is_lower in
+  let l = Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower in
   let pos = Parseff.position () in
   let rest = Parseff.take 3 in
   (List.map Parseff.span_to_string l, pos, rest)
@@ -1437,11 +1438,11 @@ let test_sep_by_take_long_whitespace () =
 
 let test_sep_by_take_leading_whitespace () =
   let with_pos l = (l, Parseff.position ()) in
-  let take () = with_pos (Parseff.sep_by_take is_space ',' is_lower) in
+  let take () = with_pos (Parseff.sep_by_take ~ws:is_space ~sep:',' is_lower) in
   let take_span () =
     with_pos
       (List.map Parseff.span_to_string
-         (Parseff.sep_by_take_span is_space ',' is_lower)
+         (Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower)
       )
   in
   let expect name input expected parser =
@@ -1542,15 +1543,20 @@ let test_streaming_matches_parse () =
             (fun () -> Parseff.consume "aby")
             ()
       );
-      ( "skip_while_then_char",
+      ( "skip_while then char",
         "   ;x",
         fun () ->
-          Parseff.skip_while_then_char is_space ';';
+          Parseff.skip_while is_space;
+          ignore (Parseff.char ';');
           letters ()
       );
-      ( "fused_sep_take",
+      ( "separator then value",
         "  : value",
-        fun () -> Parseff.fused_sep_take is_space ':' is_lower
+        fun () ->
+          Parseff.skip_while is_space;
+          ignore (Parseff.char ':');
+          Parseff.skip_while is_space;
+          Parseff.take_while ~at_least:1 is_lower
       );
       ( "regex",
         "123abc",
@@ -2282,8 +2288,8 @@ let () =
           test_case "take_while 2-byte" `Quick test_chunked_take_while;
           test_case "alternation 2-byte" `Quick test_chunked_alternation;
           test_case "regex 2-byte" `Quick test_chunked_regex;
-          test_case "skip_while_then_char 2-byte" `Quick
-            test_chunked_skip_while_then_char;
+          test_case "skip_while then char 2-byte" `Quick
+            test_chunked_skip_while_char;
         ]
       );
       ( "edge cases",

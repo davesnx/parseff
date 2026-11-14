@@ -2834,7 +2834,8 @@ let test_cut_line_column_counts_characters () =
     ]
   in
   let parser () =
-    Parseff.skip_while_then_char (fun c -> c <> '!') '!';
+    Parseff.skip_while (fun c -> c <> '!');
+    ignore (Parseff.char '!');
     Parseff.cut ();
     ignore (Parseff.char '?')
   in
@@ -2906,7 +2907,8 @@ let test_cut_line_column_random_bytes () =
   in
   let state = Random.State.make [| 19 |] in
   let parser () =
-    Parseff.skip_while_then_char (fun c -> c <> '!') '!';
+    Parseff.skip_while (fun c -> c <> '!');
+    ignore (Parseff.char '!');
     Parseff.cut ();
     ignore (Parseff.char '?')
   in

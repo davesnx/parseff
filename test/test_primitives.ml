@@ -1615,7 +1615,7 @@ let test_sep_by_take_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "" (fun () ->
-        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1627,7 +1627,7 @@ let test_sep_by_take_single () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "hello" (fun () ->
-        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1639,7 +1639,7 @@ let test_sep_by_take_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "a , b , c" (fun () ->
-        Parseff.sep_by_take Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1653,7 +1653,7 @@ let test_sep_by_take_span_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "" (fun () ->
-        Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1665,7 +1665,7 @@ let test_sep_by_take_span_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "aa , bb , cc" (fun () ->
-        Parseff.sep_by_take_span Parseff.is_whitespace ',' is_alpha
+        Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok spans ->
@@ -1675,57 +1675,6 @@ let test_sep_by_take_span_several () =
       Alcotest.(check (list int)) "lengths" [ 2; 2; 2 ] lengths
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* --- fused_sep_take --- *)
-
-let test_fused_sep_take_success () =
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  match
-    Parseff.parse ", hello" (fun () ->
-        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
-    )
-  with
-  | Ok s ->
-      Alcotest.(check string) "taken value" "hello" s
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_fused_sep_take_missing_sep () =
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  match
-    Parseff.parse "abc" (fun () ->
-        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.range.start in
-      let expected = Parseff.error_message e in
-      Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string)
-        "error message" "expected ',', found 'abc'" expected
-  | Error _ ->
-      Alcotest.fail "Unexpected error type"
-
-let test_fused_sep_take_missing_value () =
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  match
-    Parseff.parse ", " (fun () ->
-        Parseff.fused_sep_take Parseff.is_whitespace ',' is_alpha
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check string)
-        "expected items" "expected value, found end of input"
-        (Parseff.error_message e);
-      (* After ",_" whitespace is skipped, pos is at EOF *)
-      Alcotest.(check int) "error position" 2 pos
-  | Error _ ->
-      Alcotest.fail "Expected an end of input error"
 
 (* --- take_while_span --- *)
 
@@ -2117,11 +2066,6 @@ let () =
           test_case "sep_by_take_span empty" `Quick test_sep_by_take_span_empty;
           test_case "sep_by_take_span several" `Quick
             test_sep_by_take_span_several;
-          test_case "fused_sep_take success" `Quick test_fused_sep_take_success;
-          test_case "fused_sep_take missing sep" `Quick
-            test_fused_sep_take_missing_sep;
-          test_case "fused_sep_take missing value" `Quick
-            test_fused_sep_take_missing_value;
           test_case "take_while_span" `Quick test_take_while_span;
           test_case "take_while_span empty" `Quick test_take_while_span_empty;
           test_case "span_to_string valid" `Quick test_span_to_string_valid;

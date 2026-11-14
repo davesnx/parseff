@@ -445,34 +445,23 @@ val skip_while : (char -> bool) -> unit
     let skip_spaces () = skip_while (fun c -> c = ' ')
     ]} *)
 
-val skip_while_then_char : (char -> bool) -> char -> unit
-(** [skip_while_then_char fun c] skips characters where [fun] returns [true],
-    then matches the exact character [c]. More efficient than calling
-    {!skip_while} followed by {!char} separately. *)
-
-val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
-(** [sep_by_take is_whitespace separator is_value_char] parses a list of values
-    separated by [separator]. Whitespace (characters where [is_whitespace]
-    returns [true]) is skipped around each separator. Each value consists of
-    characters where [is_value_char] returns [true]. Returns a list of matched
-    strings. Runs entirely in a single operation for maximum efficiency. *)
+val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
+(** [sep_by_take ~ws ~sep is_value_char] parses a list of values separated by
+    [sep]. Characters where [ws] returns [true] are skipped around each
+    separator. Each value consists of characters where [is_value_char] returns
+    [true]. Returns a list of matched strings. Runs entirely in a single
+    operation for maximum efficiency. *)
 
 val take_while_span : (char -> bool) -> span
 (** [take_while_span fun] like {!take_while} but returns a zero-copy
     {!type:span} instead of allocating a string. No memory allocation until you
     call {!span_to_string}. *)
 
-val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
-(** [sep_by_take_span is_whitespace separator is_value_char] like {!sep_by_take}
-    but returns zero-copy {!type:span}s instead of strings. No [String.sub]
-    allocations per element. *)
-
-val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
-(** [fused_sep_take is_whitespace separator is_value_char] skips whitespace,
-    matches [separator], skips whitespace again, then reads one or more
-    characters where [is_value_char] returns [true]. All steps run in a single
-    operation. Returns the taken string. Much more efficient than calling each
-    step separately when parsing separated values. *)
+val sep_by_take_span :
+  ws:(char -> bool) -> sep:char -> (char -> bool) -> span list
+(** [sep_by_take_span ~ws ~sep is_value_char] like {!sep_by_take} but returns
+    zero-copy {!type:span}s instead of strings. No [String.sub] allocations per
+    element. *)
 
 val fail :
   ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
@@ -1989,11 +1978,6 @@ module Utf8 : sig
   val take_while_span : (Uchar.t -> bool) -> span
   (** [take_while_span pred] like {!take_while} but returns a zero-copy
       {!type:span}. *)
-
-  val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit
-  (** [skip_while_then_char pred u] skips code points where [pred] returns
-      [true], then matches the exact code point [u]. More efficient than calling
-      {!skip_while} followed by {!char} separately. *)
 
   val is_whitespace : Uchar.t -> bool
   (** [is_whitespace u] returns [true] for Unicode whitespace characters, using

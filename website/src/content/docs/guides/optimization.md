@@ -50,29 +50,12 @@ parse_value ()
 
 ### Use fused operations
 
-Fewer parser round-trips means less work overall. Fused operations combine several steps into one, yielding a 2-4x improvement in hot paths by doing in a single call what would otherwise require multiple:
-
-```ocaml
-(* 4 parser steps *)
-Parseff.skip_whitespace ();
-let _ = Parseff.char ',' in
-Parseff.skip_whitespace ();
-let value = Parseff.take_while ~at_least:1 is_digit ~label:"digit" in
-ignore value
-
-(* 1 fused step *)
-let value = Parseff.fused_sep_take is_whitespace ',' is_digit in
-ignore value
-```
-
-Available fused operations:
+Fewer parser round-trips means less work overall. A fused operation parses a whole separated list in one call, where the generic version calls a parser for each element and each separator:
 
 ```
-Operation                       Replaces
-skip_while_then_char f c        skip_while f; char c
-fused_sep_take ws sep pred      skip_whitespace; char sep; skip_whitespace; take_while ~at_least:1 pred
-sep_by_take ws sep pred         sep_by (take_while pred) (skip_ws; char sep; skip_ws)
-sep_by_take_span ws sep pred    Same, but returns spans instead of strings
+Operation                              Replaces
+sep_by_take ~ws ~sep pred              sep_by (take_while pred) (skip_while ws; char sep; skip_while ws)
+sep_by_take_span ~ws ~sep pred         Same, but returns spans instead of strings
 ```
 
 ### Use zero-copy spans
@@ -89,7 +72,7 @@ let parse_values () =
 
 (* zero-copy: spans point into the original buffer *)
 let parse_values () =
-  let spans = Parseff.sep_by_take_span is_whitespace ',' is_digit in
+  let spans = Parseff.sep_by_take_span ~ws:is_whitespace ~sep:',' is_digit in
   List.map int_of_span spans
 ```
 
@@ -141,6 +124,6 @@ let parse_list () =
 
 let parse_list () =
   (* runs the entire scan in one operation *)
-  Parseff.sep_by_take is_whitespace ',' is_digit
+  Parseff.sep_by_take ~ws:is_whitespace ~sep:',' is_digit
   |> List.map int_of_string
 ```

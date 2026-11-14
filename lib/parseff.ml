@@ -1336,7 +1336,6 @@ let negative_count_kind = (negative_count_payload lsl 3) lor tag_big
 
 let[@inline never] fail_negative_count st n =
   fail_str st st.pos negative_count_kind (string_of_int n)
-let label_value = "value"
 let label_regex = "text matching the pattern"
 let label_varint = "varint up to max_int"
 
@@ -1481,32 +1480,6 @@ let[@inline always] handle_take_while_span st pred =
 
 let[@inline always] handle_skip_while st pred =
   st.pos <- scan_while st ~keep_from:no_keep st.pos pred
-
-let[@inline never] handle_skip_while_then_char st pred c =
-  let pos = scan_while st ~keep_from:no_keep st.pos pred in
-  if pos < st.input_len && char_at st pos = c then begin
-    st.pos <- pos + 1
-  end else begin
-    st.pos <- pos;
-    fail_int st pos (char_kind c)
-  end
-
-let[@inline never] handle_fused_sep_take st ws_pred sep_char take_pred =
-  let pos = scan_while st ~keep_from:no_keep st.pos ws_pred in
-  if pos < st.input_len && char_at st pos = sep_char then begin
-    let pos2 = scan_while st ~keep_from:no_keep (pos + 1) ws_pred in
-    let end_pos = scan_while st ~keep_from:pos2 pos2 take_pred in
-    if end_pos > pos2 then begin
-      st.pos <- end_pos;
-      slice st pos2 (end_pos - pos2)
-    end else begin
-      st.pos <- end_pos;
-      fail_str st end_pos tag_label label_value
-    end
-  end else begin
-    st.pos <- pos;
-    fail_int st pos (char_kind sep_char)
-  end
 
 let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
   let start = st.pos in
@@ -1970,25 +1943,6 @@ let[@inline never] handle_take_while_span_uchar st pred =
 let[@inline never] handle_skip_while_uchar st pred =
   st.pos <- scan_while_uchar st ~keep_from:no_keep st.pos pred
 
-let[@inline never] handle_skip_while_then_uchar st pred term =
-  let pos = scan_while_uchar st ~keep_from:no_keep st.pos pred in
-  let kind = Uchar.to_int term lsl 3 in
-  if pos >= st.input_len then begin
-    st.pos <- pos;
-    fail_int st pos kind
-  end;
-  fill_uchar st ~keep_from:pos pos;
-  if pos >= st.input_len then fail_int st pos kind;
-  let d = Bytes.get_utf_8_uchar st.input (pos - st.base) in
-  if not (Uchar.utf_decode_is_valid d) then fail_str st pos tag_label label_utf8;
-  let u = Uchar.utf_decode_uchar d in
-  if Uchar.equal u term then
-    st.pos <- pos + Uchar.utf_decode_length d
-  else begin
-    st.pos <- pos;
-    fail_int st pos kind
-  end
-
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
 
@@ -2092,25 +2046,17 @@ let[@inline] skip_while pred =
   let st = get_state () in
   handle_skip_while st pred
 
-let[@inline] skip_while_then_char pred c =
-  let st = get_state () in
-  handle_skip_while_then_char st pred c
-
 let[@inline] take_while_span pred =
   let st = get_state () in
   handle_take_while_span st pred
 
-let[@inline] sep_by_take ws_pred sep_char take_pred =
+let[@inline] sep_by_take ~ws:ws_pred ~sep:sep_char take_pred =
   let st = get_state () in
   handle_sep_by_take st ws_pred sep_char take_pred
 
-let[@inline] sep_by_take_span ws_pred sep_char take_pred =
+let[@inline] sep_by_take_span ~ws:ws_pred ~sep:sep_char take_pred =
   let st = get_state () in
   handle_sep_by_take_span st ws_pred sep_char take_pred
-
-let[@inline] fused_sep_take ws_pred sep_char take_pred =
-  let st = get_state () in
-  handle_fused_sep_take st ws_pred sep_char take_pred
 
 let[@inline] match_regex ?label re =
   let st = get_state () in
@@ -3455,10 +3401,6 @@ module Utf8 = struct
   let[@inline] take_while_span pred =
     let st = get_state () in
     handle_take_while_span_uchar st pred
-
-  let[@inline] skip_while_then_char pred u =
-    let st = get_state () in
-    handle_skip_while_then_uchar st pred u
 
   let[@inline] is_whitespace u =
     let i = Uchar.to_int u in

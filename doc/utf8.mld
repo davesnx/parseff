@@ -95,14 +95,6 @@ when needed.
 
 {@ocaml skip[val take_while_span : (Uchar.t -> bool) -> span]}
 
-{2 [skip_while_then_char]}
-
-{!val:Parseff.Utf8.skip_while_then_char} skips code points matching a predicate,
-then matches a specific terminating code point. More efficient than calling
-{!val:Parseff.Utf8.skip_while} followed by {!val:Parseff.Utf8.char} separately.
-
-{@ocaml skip[val skip_while_then_char : (Uchar.t -> bool) -> Uchar.t -> unit]}
-
 {1 Convenience combinators}
 
 These are built on top of the structural primitives using Unicode character

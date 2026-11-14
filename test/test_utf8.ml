@@ -367,68 +367,6 @@ let test_take_while_span () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_skip_while_then_char () =
-  match
-    parse_with_pos "  :value" (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x3A);
-        Parseff.consume "value"
-    )
-  with
-  | Ok (s, pos) ->
-      Alcotest.(check string) "matched" "value" s;
-      Alcotest.(check int) "position" 8 pos
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_skip_while_then_char_unicode_term () =
-  (* Skip whitespace then match → U+2192 (3 bytes: 0xE2 0x86 0x92) *)
-  match
-    parse_with_pos "  \xE2\x86\x92ok" (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x2192);
-        Parseff.consume "ok"
-    )
-  with
-  | Ok (s, pos) ->
-      Alcotest.(check string) "matched" "ok" s;
-      Alcotest.(check int) "position" 7 pos
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_skip_while_then_char_failure () =
-  match
-    Parseff.parse "  x" (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x3A)
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check int) "error at non-matching char" 2 pos
-  | Error _ ->
-      Alcotest.fail "Unexpected error type"
-
-let test_skip_while_then_char_eof () =
-  match
-    Parseff.parse "  " (fun () ->
-        Parseff.Utf8.skip_while_then_char Uucp.White.is_white_space
-          (Uchar.of_int 0x3A)
-    )
-  with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = End; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check string)
-        "expected items" "expected ':', found end of input"
-        (Parseff.error_message e);
-      Alcotest.(check int) "error at eof" 2 pos
-  | Error _ ->
-      Alcotest.fail "Expected an end of input error"
-
 let test_letter_ascii () =
   match Parseff.parse "a" Parseff.Utf8.letter with
   | Ok u ->
@@ -688,15 +626,6 @@ let () =
         ]
       );
       ("take_while_span", [ test_case "basic" `Quick test_take_while_span ]);
-      ( "skip_while_then_char",
-        [
-          test_case "basic" `Quick test_skip_while_then_char;
-          test_case "unicode terminator" `Quick
-            test_skip_while_then_char_unicode_term;
-          test_case "failure" `Quick test_skip_while_then_char_failure;
-          test_case "eof" `Quick test_skip_while_then_char_eof;
-        ]
-      );
       ( "letter",
         [
           test_case "ASCII" `Quick test_letter_ascii;
