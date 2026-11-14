@@ -17,13 +17,21 @@ let is_eof () = match st.tok with Lexer.Eof -> true | _ -> false
 let is_kw k = match st.tok with Lexer.Kw k' -> k' == k | _ -> false
 let is_sym s = match st.tok with Lexer.Sym s' -> s' == s | _ -> false
 
+let last_cut = ref None
+
 let attempt f =
   let snap = Lexer.save () in
-  match Parseff.capture f with
+  let start = Parseff.position () in
+  match Parseff.capture ~release:true f with
   | Ok v ->
       Ok v
   | Error e ->
-      Lexer.restore snap;
+      ( match !last_cut with
+      | Some (p, s) when p > start && p = Parseff.position () ->
+          Lexer.restore s
+      | _ ->
+          Lexer.restore snap
+      );
       Error e
 
 let caused_by_lexical ?word ~region (e : Parseff.error) =
@@ -791,6 +799,8 @@ and block closer opener : block =
         | t ->
             after_return returned t;
             let s = statement_rec opener in
+            Parseff.cut ();
+            last_cut := Some (Parseff.position (), Lexer.save ());
             let returned =
               match s.sdesc with
               | Return _ ->
@@ -1256,6 +1266,7 @@ and local_stat () =
 
 and parses_as_statement () =
   let snap = Lexer.save () in
+  let cut = !last_cut in
   let before = Parseff.Diagnostics.length errors in
   let valid =
     Parseff.look_ahead (fun () ->
@@ -1271,6 +1282,7 @@ and parses_as_statement () =
     )
   in
   Lexer.restore snap;
+  last_cut := cut;
   valid
 
 and local_name closes () =

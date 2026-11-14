@@ -3,7 +3,7 @@ let custom = function Lexer.Lua { msg; _ } -> msg | _ -> "unknown error"
 let render ~name ?source e = Parseff.render_error ~name ?source ~custom e
 
 let max_shown = 50
-let backtrack_window = 64 * 1024 * 1024
+let backtrack_window = 1024 * 1024
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
