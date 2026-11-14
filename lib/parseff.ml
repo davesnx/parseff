@@ -181,6 +181,7 @@ and feed =
 
 and frame = {
   outer : source option;
+  first : int;
   limit : int;
   mutable outer_len : int;
   mutable text : string;
@@ -1365,6 +1366,7 @@ let far_over f =
       None
 
 let[@inline never] far_overflow f k s =
+  Option.iter (fun o -> o.oend <- no_end) (far_over f);
   if f.special = 0 then begin
     let s =
       if far_carries_string k then
@@ -1832,16 +1834,23 @@ let rec match_regex_source st src re label =
       match_regex_source st src re label
 
 let regex_frame_text st fr =
-  let want =
-    if st.pos > st.base then
-      st.pos - 1
+  let before p =
+    if p > st.base then
+      p - 1
     else
-      st.pos
+      p
   in
+  let want = before st.pos in
   if fr.text_from > want || fr.text_from + String.length fr.text <> st.input_len
   then begin
-    fr.text <- Bytes.sub_string st.input (want - st.base) (st.input_len - want);
-    fr.text_from <- want
+    let from =
+      if fr.text_from > want then
+        before fr.first
+      else
+        want
+    in
+    fr.text <- Bytes.sub_string st.input (from - st.base) (st.input_len - from);
+    fr.text_from <- from
   end
 
 let rec match_regex_frame st src fr re label =
@@ -2323,7 +2332,7 @@ let[@inline never] clip_far st start =
   if f.special = 0 && f.pos >= start && f.pos <= st.input_len then
     match far_over f with
     | Some o ->
-        if o.oitems = [] && (o.oend = no_end || o.on <> f.n) then begin
+        if o.oend = no_end || o.on <> f.n then begin
           o.oend <- st.input_len;
           o.on <- f.n
         end
@@ -2349,7 +2358,9 @@ let[@inline never] limited st stop f =
             (stop, src.eof, src.window)
       )
   in
-  let fr = { outer; limit; outer_len; text = ""; text_from = max_int } in
+  let fr =
+    { outer; first = start; limit; outer_len; text = ""; text_from = max_int }
+  in
   st.source <-
     Some
       {
@@ -5176,7 +5187,7 @@ let found_of st stop pos =
 let found_of_far st f pos =
   let stop =
     match far_over f with
-    | Some o when o.on = f.n && o.oitems = [] ->
+    | Some o when o.on = f.n ->
         imin o.oend st.input_len
     | Some _ | None ->
         st.input_len

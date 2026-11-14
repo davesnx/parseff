@@ -788,6 +788,40 @@ let regex_words n =
   );
   Gc.allocated_bytes () -. before
 
+let regex_stepping_back n =
+  let input = String.make n 'a' in
+  let letter = Parseff.regex Re.(rg 'a' 'z') in
+  let parser () =
+    Parseff.within n (fun () ->
+        for i = n - 1 downto 0 do
+          ignore
+            (Parseff.look_ahead (fun () ->
+                 Parseff.skip_to i;
+                 Parseff.match_regex letter
+             )
+            )
+        done;
+        Parseff.skip_to n
+    )
+  in
+  let before = Gc.allocated_bytes () in
+  ( match Parseff.parse input parser with
+  | Ok () ->
+      ()
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+  );
+  Gc.allocated_bytes () -. before
+
+let test_regex_going_back_is_linear () =
+  let small = regex_stepping_back 4_000
+  and large = regex_stepping_back 16_000 in
+  if large > 6. *. small then
+    Alcotest.failf
+      "allocation grows faster than the input: %.0f bytes for 4000, %.0f for \
+       16000"
+      small large
+
 let test_regex_in_frame_is_linear () =
   let small = regex_words 2_000 and large = regex_words 8_000 in
   if large > 6. *. small then
@@ -956,6 +990,62 @@ let test_take_while_at_least_above_at_most () =
         )
   )
 
+let chars k =
+  List.init k (fun i () -> String.make 1 (Parseff.char (Char.chr (48 + i))))
+
+let body k () =
+  ignore (Parseff.take 2);
+  Parseff.one_of (chars k) ()
+
+let describe_error = function
+  | Ok s ->
+      "ok " ^ s
+  | Error (e : Parseff.error) ->
+      Printf.sprintf "[%d,%d) found %s" e.range.start e.range.stop
+        ( match e.kind with
+        | Expected { found = Text t; _ } ->
+            "'" ^ t ^ "'"
+        | Expected { found = End; _ } ->
+            "end of input"
+        | _ ->
+            "other"
+        )
+
+let test_found_text_at_capacity () =
+  List.iter
+    (fun k ->
+      let outside () =
+        ignore (Parseff.take 2);
+        String.make 1 (Parseff.char '0')
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "%d items, then an outside item" k)
+        "[2,4) found 'zz'"
+        (describe_error
+           (Parseff.parse "abzz"
+              (Parseff.or_ (fun () -> Parseff.within 2 (body k)) outside)
+           )
+        );
+      Alcotest.(check string)
+        (Printf.sprintf "%d items, then a look_ahead with the same items" k)
+        "[2,4) found 'zz'"
+        (describe_error
+           (Parseff.parse "abzz"
+              (Parseff.or_
+                 (fun () -> Parseff.within 2 (body k))
+                 (fun () -> Parseff.look_ahead (body k))
+              )
+           )
+        );
+      Alcotest.(check string)
+        (Printf.sprintf "%d items, all in the frame" k)
+        "[2,2) found end of input"
+        (describe_error
+           (Parseff.parse "abzz" (fun () -> Parseff.within 2 (body k)))
+        )
+    )
+    [ 63; 64; 65; 70 ]
+
 let () =
   Alcotest.run "Protocol"
     [
@@ -1023,6 +1113,10 @@ let () =
             test_limit_through_look_ahead;
           Alcotest.test_case "regex in a frame is linear" `Quick
             test_regex_in_frame_is_linear;
+          Alcotest.test_case "found text at 64 items and more" `Quick
+            test_found_text_at_capacity;
+          Alcotest.test_case "regex going back in a frame is linear" `Quick
+            test_regex_going_back_is_linear;
           Alcotest.test_case "take_while at_least above at_most" `Quick
             test_take_while_at_least_above_at_most;
           Alcotest.test_case "limit with a parse in the trace function" `Quick
