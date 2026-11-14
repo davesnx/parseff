@@ -361,7 +361,8 @@ let chunked feed input sizes =
   in
   match feed with
   | Function ->
-      Parseff.Source.of_function (fun buf off len ->
+      Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+        (fun buf off len ->
           let p, n = next len in
           Bytes.blit_string input p buf off n;
           n

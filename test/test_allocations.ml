@@ -166,9 +166,9 @@ let words_per_head make_source =
   done;
   (Gc.minor_words () -. before) /. Float.of_int heads
 
-let head_function () =
+let head_function ?initial_buffer_size () =
   let pos = ref 0 in
-  Parseff.Source.of_function (fun buf off len ->
+  Parseff.Source.of_function ?initial_buffer_size (fun buf off len ->
       let n = min len (String.length head - !pos) in
       Bytes.blit_string head !pos buf off n;
       pos := !pos + n;
@@ -176,7 +176,7 @@ let head_function () =
   )
 
 let test_one_chunk_head () =
-  let fn = words_per_head head_function in
+  let fn = words_per_head (fun () -> head_function ()) in
   let seq =
     words_per_head (fun () -> Parseff.Source.of_seq (Seq.return head))
   in
@@ -223,14 +223,20 @@ let direct_major_words () =
   let _, promoted, major = Gc.counters () in
   major -. promoted
 
-let check_first_read first =
-  let data = head ^ String.make (4 * first) 'x' in
-  let parse () = parse_head (first_read_source data first) in
-  run_n warmup_iterations parse;
+let direct_major_words_per_call f =
+  run_n warmup_iterations f;
   Gc.full_major ();
   let before = direct_major_words () in
-  run_n iterations parse;
-  let actual = (direct_major_words () -. before) /. Float.of_int iterations in
+  run_n iterations f;
+  (direct_major_words () -. before) /. Float.of_int iterations
+
+let check_first_read first =
+  let data = head ^ String.make (4 * first) 'x' in
+  let actual =
+    direct_major_words_per_call (fun () ->
+        parse_head (first_read_source data first)
+    )
+  in
   if actual > 50. then
     Alcotest.failf
       "a first read of %d bytes allocated %.1f words on the major heap per \
@@ -240,6 +246,47 @@ let check_first_read first =
 let test_short_message () =
   check_first_read 1100;
   check_first_read 1500
+
+let test_small_buf_size () =
+  let default = words_per_call (fun () -> parse_head (head_function ())) in
+  let small =
+    words_per_call (fun () ->
+        parse_head (head_function ~initial_buffer_size:512 ())
+    )
+  in
+  if small > default -. 150. then
+    Alcotest.failf
+      "a request head allocated %.1f minor words per parse with \
+       ~initial_buffer_size:512 and %.1f with the default, expected at least \
+       150 fewer"
+      small default
+
+let head_and_body = head ^ String.make 4000 'x'
+
+let full_source ?initial_buffer_size () =
+  let pos = ref 0 in
+  Parseff.Source.of_function ?initial_buffer_size (fun buf off len ->
+      let n = min len (String.length head_and_body - !pos) in
+      Bytes.blit_string head_and_body !pos buf off n;
+      pos := !pos + n;
+      n
+  )
+
+let test_full_first_read () =
+  let check name initial_buffer_size =
+    let actual =
+      direct_major_words_per_call (fun () ->
+          parse_head (full_source ?initial_buffer_size ())
+      )
+    in
+    if actual > 50. then
+      Alcotest.failf
+        "a request head after a full first read allocated %.1f words directly \
+         on the major heap per parse with %s, expected at most 50"
+        actual name
+  in
+  check "~initial_buffer_size:512" (Some 512);
+  check "the default size" None
 
 let () =
   Alcotest.run "Allocations"
@@ -258,6 +305,9 @@ let () =
           Alcotest.test_case "head in a large chunk" `Quick
             test_head_in_large_chunk;
           Alcotest.test_case "short message" `Quick test_short_message;
+          Alcotest.test_case "small initial_buffer_size" `Quick
+            test_small_buf_size;
+          Alcotest.test_case "full first read" `Quick test_full_first_read;
         ]
       );
     ]

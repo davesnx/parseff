@@ -1,6 +1,7 @@
 let chunked_source ?(chunk_size = 1) input =
   let pos = ref 0 in
-  Parseff.Source.of_function (fun buf off len ->
+  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+    (fun buf off len ->
       let available = String.length input - !pos in
       let n = min (min chunk_size len) available in
       Bytes.blit_string input !pos buf off n;
@@ -471,7 +472,7 @@ let test_streaming_commit_blocks_backtrack () =
       (fun () -> Parseff.consume "abcd")
       ()
   in
-  let src = chunked_source ~chunk_size:2 "abcd" in
+  let src = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in
   match Parseff.parse_source src parser with
   | Ok _ ->
       Alcotest.fail "Expected committed branch failure"
@@ -883,6 +884,52 @@ let test_large_input_grows_read_buffer () =
     );
   check "of_seq" (Parseff.Source.of_seq (Seq.return input))
 
+let test_buf_size_sets_read_lengths () =
+  let input =
+    String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  List.iter
+    (fun initial_buffer_size ->
+      let pos = ref 0 in
+      let lens = ref [] in
+      let src =
+        Parseff.Source.of_function ~initial_buffer_size (fun buf off len ->
+            lens := len :: !lens;
+            let n = min len (String.length input - !pos) in
+            Bytes.blit_string input !pos buf off n;
+            pos := !pos + n;
+            n
+        )
+      in
+      let name = Printf.sprintf "initial_buffer_size %d" initial_buffer_size in
+      Alcotest.(check (result string reject))
+        name (Ok input)
+        (Parseff.parse_source src (fun () -> Parseff.take_while (fun _ -> true)));
+      match List.rev !lens with
+      | first :: rest ->
+          Alcotest.(check int) (name ^ ": first read") initial_buffer_size first;
+          Alcotest.(check (list int))
+            (name ^ ": later reads")
+            (List.map (fun _ -> max initial_buffer_size 4096) rest)
+            rest
+      | [] ->
+          Alcotest.fail "Expected reads"
+    )
+    [ 1; 7; 512; 4096; 8192 ]
+
+let test_buf_size_rejected () =
+  List.iter
+    (fun initial_buffer_size ->
+      match
+        Parseff.Source.of_function ~initial_buffer_size (fun _ _ _ -> 0)
+      with
+      | _ ->
+          Alcotest.failf "initial_buffer_size %d accepted" initial_buffer_size
+      | exception Invalid_argument _ ->
+          ()
+    )
+    [ 0; -1 ]
+
 let test_of_seq_basic () =
   let seq = List.to_seq [ "192."; "168."; "1.1"; "00" ] in
   let src = Parseff.Source.of_seq seq in
@@ -1039,7 +1086,8 @@ let test_regex_lookbehind_window_accounting () =
 let test_regex_readahead_half_window () =
   let total = ref 0 in
   let src =
-    Parseff.Source.of_function (fun buf off len ->
+    Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+      (fun buf off len ->
         let remaining = 5000 - !total in
         let n = min (min 10 len) remaining in
         Bytes.fill buf off n 'a';
@@ -1739,7 +1787,7 @@ let test_slice_is_not_changed_by_later_reads () =
     result
 
 let test_error_on_open_source_shows_only_input () =
-  let src = chunked_source ~chunk_size:3 "abcdef" in
+  let src = Parseff.Source.of_seq (List.to_seq [ "abc"; "def" ]) in
   let parser () =
     ignore (Parseff.look_ahead (fun () -> Parseff.take 3));
     Parseff.consume "x"
@@ -2322,6 +2370,13 @@ let () =
           test_case "take_while" `Quick test_of_seq_take_while;
           test_case "large input grows the read buffer" `Quick
             test_large_input_grows_read_buffer;
+        ]
+      );
+      ( "Source.of_function ~initial_buffer_size",
+        [
+          test_case "sets the read lengths" `Quick
+            test_buf_size_sets_read_lengths;
+          test_case "below 1 is rejected" `Quick test_buf_size_rejected;
         ]
       );
       ( "read-ahead raise",
