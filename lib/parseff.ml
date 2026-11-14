@@ -1554,17 +1554,26 @@ let regex_read_ahead st src ahead =
     let chunk = src.rx in
     let got = ref 0 in
     let want = imin room (ahead - (st.input_len - st.pos)) in
-    while !got < want && not src.eof do
-      let n = read_any st src chunk !got (room - !got) in
-      if n = 0 then
-        src.eof <- true
-      else
-        got := !got + n
-    done;
-    if !got > 0 then
-      append st ~floor ~spare:false ~own:false
-        (Bytes.unsafe_to_string chunk)
-        0 !got;
+    let flush () =
+      if !got > 0 then
+        append st ~floor ~spare:false ~own:false
+          (Bytes.unsafe_to_string chunk)
+          0 !got
+    in
+    begin try
+      while !got < want && not src.eof do
+        let n = read_any st src chunk !got (room - !got) in
+        if n = 0 then
+          src.eof <- true
+        else
+          got := !got + n
+      done
+    with exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      flush ();
+      Printexc.raise_with_backtrace exn bt
+    end;
+    flush ();
     true
   end
 

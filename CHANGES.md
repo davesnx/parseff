@@ -22,6 +22,7 @@
 - **Fix `span_to_string` reading outside its buffer.** A span with an offset outside its buffer returned a wrong byte or crashed the process. It now raises `Invalid_argument`.
 - **Fix `expression` with an `infix_right` operator that consumes no input.** It failed with a depth-limit error. It now stops, as `fold_left` does.
 - **Fix `match_regex` returning a cut match in streaming.** It now reads more input when a match reaches the end of the buffer, and fails with `Backtrack_window_exceeded` when the window is full. Parseff now needs `re` 1.11.0 or later.
+- **Fix `match_regex` losing input in streaming when a read raises.** `match_regex` reads several times before it adds the bytes to the input. When a later read raised, the bytes of the earlier reads were lost, so a parser that caught the exception did not see them. They are now added before the exception leaves `match_regex`.
 - **Fix slow streaming reads when the parser keeps much input.** Each read copied all input that the parser still kept, so a long `take_while`, or a `capture` or `or_` around a large construct, took time in proportion to the square of its size. A read now copies the kept input only when the buffer is full: 8 MB kept in 4 KB reads takes 0.016 s instead of 1.3 s.
 - **Fix `fold_right` looping forever.** It now stops after an operator and element that together consume no input, as `fold_left` does.
 - **Fix `expression` raising `Failure` with a `prefix` operator that commits and consumes no input.** That operator is now skipped, like one that does not commit.
