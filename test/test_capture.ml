@@ -1474,6 +1474,31 @@ let chunks size s =
       end
   )
 
+let test_streaming_release_commit_in_recognize () =
+  let run advance =
+    let cell = Ref.create 0 in
+    Result.get_ok
+      (parse_source ~consume:`Partial (Source.of_string "abcd?") (fun () ->
+           let r =
+             capture ~release:true (fun () ->
+                 recognize (fun () ->
+                     Ref.set cell 1;
+                     ignore (consume "ab");
+                     advance ();
+                     Ref.set cell 2;
+                     ignore (consume "cd");
+                     char '!'
+                 )
+             )
+           in
+           (Result.is_ok r, position (), Ref.get cell)
+       )
+      )
+  in
+  let outcome = Alcotest.(triple bool int int) in
+  Alcotest.check outcome "commit" (false, 2, 1) (run commit);
+  Alcotest.check outcome "cut" (false, 2, 1) (run cut)
+
 let test_streaming_nested_release () =
   let run ?release () =
     let d = Diagnostics.create () in
@@ -1586,6 +1611,8 @@ let () =
           test_case "limits propagate" `Quick test_limits_propagate;
           test_case "streaming pins start" `Quick test_streaming_pins_start;
           test_case "streaming release" `Quick test_streaming_release;
+          test_case "streaming release: commit inside recognize" `Quick
+            test_streaming_release_commit_in_recognize;
           test_case "streaming nested release" `Quick
             test_streaming_nested_release;
         ]

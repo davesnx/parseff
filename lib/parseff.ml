@@ -548,6 +548,7 @@ module State = struct
       flags land frame_capture_bit <> 0
       && begin
         advance_capture_frame t i;
+        keep_recorded_from t (i + 1);
         true
       end
 
