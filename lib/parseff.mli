@@ -1838,6 +1838,110 @@ val parse_source_each :
     ]}
     Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
 
+(** Push input: the caller gives the input in chunks, and each call returns
+    [Await] when the parser needs more input or [Done] with the result. Use it
+    when your code owns the read loop, as with Lwt, Async or a callback API.
+
+    The parser is the same [unit -> 'a] function as for {!parse}. [Feed] runs it
+    on a source like {!Source.of_chunks} whose read performs an effect when it
+    needs a chunk that the caller has not given yet. The parse stops there, and
+    the next {!Feed.feed} resumes it with the chunk. This is one effect for each
+    chunk that the parser waits for. {!parse} and {!parse_source} use no
+    effects, and [Feed] does not change them. A 454-byte HTTP request head in
+    one chunk takes about 15000 instructions with [Feed] and 13800 with
+    {!parse_source}, 9% more.
+
+    A parse with [Feed] always stops after the value and returns the bytes that
+    follow it. To require the whole input, end the parser with {!end_of_input}:
+    [Done] then comes at {!Feed.finish}.
+
+    Only the read of the source may stop the parser, as for {!parse_source}. Two
+    feeds and calls to {!parse} can run in turn on one domain. A feed that waits
+    holds the {!Ref} cells that it set and its [diagnostics] collector until it
+    ends or {!Feed.finish} is called, as a {!parse_source} that waits in an Eio
+    fiber does: another parse cannot use them. A feed can continue on another
+    domain, but only one domain may use a feed at a time; the result of two
+    domains that use one feed at the same time is not defined.
+
+    Unstable: this module can change in a 0.x release.
+
+    Example:
+    {@ocaml[
+    let line () =
+      let s = take_while (fun c -> c <> '\n') in
+      let _ = char '\n' in
+      s
+
+    let lines chunks =
+      let rec go t = function
+        | [] ->
+            Feed.finish t
+        | chunk :: rest ->
+            begin match Feed.feed t chunk with
+            | Feed.Await ->
+                go t rest
+            | Feed.Done r ->
+                r
+            end
+      in
+      go (Feed.start line) chunks
+    ]}
+    Here [lines [ "ab"; "c\nde" ]] is [Ok ("abc", "de")]. *)
+module Feed : sig
+  type 'a t
+  (** A parse that takes its input in chunks. *)
+
+  type 'a step =
+    | Await  (** The parser needs more input: call {!feed} or {!finish}. *)
+    | Done of ('a * string, error) Stdlib.result
+        (** The parse ended. [Ok (v, leftover)] has the value and the
+            [leftover]: the bytes after the value in the chunks given so far.
+            For a pipelined protocol, give the [leftover] to the next parse,
+            before its next chunk. *)
+
+  val start :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:'d Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    (unit -> 'a) ->
+    'a t
+  (** [start parser] is a parse of [parser] that has no input yet. The parser
+      starts at the first {!feed} or {!finish}. The arguments are those of
+      {!parse_source}, without [consume]. Positions count from the first byte of
+      the first chunk.
+
+      [diagnostics] stays in use from the first {!feed} until the parse ends. *)
+
+  val feed : 'a t -> string -> 'a step
+  (** [feed t chunk] gives [chunk] to the parse and runs the parser until it
+      needs more input or ends. An empty [chunk] gives no input and returns
+      [Await] when the parse waits.
+
+      Parseff can keep [chunk] as its input with no copy, and a value of the
+      parser can be [chunk] itself. So [chunk] must not change while the parse
+      runs or while a value taken from it is in use. This matters only for a
+      string made with [Bytes.unsafe_to_string] from bytes that are written
+      again.
+
+      An exception that the parser raises comes out of [feed], and the parse
+      ends. Raises [Invalid_argument] after the parse ended, and when called
+      from inside a parser. *)
+
+  val finish : 'a t -> ('a * string, error) Stdlib.result
+  (** [finish t] tells the parse that the input ended, and runs the parser to
+      the end. A parser that waits for more input then succeeds or fails as
+      {!parse_source} does at the end of its source. [finish] on a parse with no
+      chunk parses the empty input.
+
+      A feed that you drop before it ends is collected by the GC, and nothing in
+      the parser runs again: no exception handler and no cleanup. Its
+      [diagnostics] stays in use, and the {!Ref} cells that it set cannot be set
+      by another parse. Call [finish] to end the parse and release them.
+
+      Raises [Invalid_argument] as {!feed} does. *)
+end
+
 (** {1 Binary Parsing}
 
     Big-endian and little-endian parsers for multi-byte integers, floats, and

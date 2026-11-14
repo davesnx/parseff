@@ -5219,6 +5219,120 @@ let parse_source_each ?(max_depth = 128)
   in
   node 0
 
+module Feed = struct
+  type _ Effect.t += Need : string option Effect.t
+  type 'a step = Await | Done of ('a * string, error) Stdlib.result
+
+  type 'a status =
+    | Fresh of (unit -> 'a step)
+    | Waiting of (string option, 'a step) Effect.Deep.continuation
+    | Running
+    | Ended
+
+  type 'a t = {
+    mutable status : 'a status;
+    mutable first : string option;
+    mutable closed : bool;
+  }
+
+  let leftover t st c =
+    let buffered =
+      Bytes.sub_string st.input (st.pos - st.base) (st.input_len - st.pos)
+    in
+    let rest = String.length c.pending - c.pending_pos in
+    let pending =
+      if rest = 0 then
+        buffered
+      else
+        buffered ^ String.sub c.pending c.pending_pos rest
+    in
+    match t.first with
+    | Some chunk ->
+        t.first <- None;
+        pending ^ chunk
+    | None ->
+        pending
+
+  let start ?(max_depth = 128) ?(backtrack_window = default_backtrack_window)
+      ?diagnostics ?trace (parser : unit -> 'a) : 'a t =
+    check_backtrack_window ~name:"Feed.start" backtrack_window;
+    let t = { status = Ended; first = None; closed = false } in
+    let next () =
+      match t.first with
+      | Some _ as chunk ->
+          t.first <- None;
+          chunk
+      | None ->
+          if t.closed then
+            None
+          else
+            Effect.perform Need
+    in
+    let c = { next; pending = ""; pending_pos = 0 } in
+    let src = Source.make ~initial:"" ~eof:false (Chunks c) in
+    let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+    let body () =
+      match run st ~consume:`Partial ~diagnostics parser with
+      | Ok v ->
+          Done (Ok (v, leftover t st c))
+      | Error e ->
+          Done (Error e)
+    in
+    let effc : type b.
+        b Effect.t -> ((b, 'a step) Effect.Deep.continuation -> 'a step) option
+        = function
+      | Need ->
+          Some
+            (fun k ->
+              t.status <- Waiting k;
+              Await
+            )
+      | _ ->
+          None
+    in
+    let exnc exn =
+      Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+    in
+    t.status <-
+      Fresh
+        (fun () -> Effect.Deep.match_with body () { retc = Fun.id; exnc; effc });
+    t
+
+  let step name t chunk =
+    let resume =
+      match t.status with
+      | Fresh run ->
+          fun () ->
+            t.first <- chunk;
+            run ()
+      | Waiting k ->
+          fun () -> Effect.Deep.continue k chunk
+      | Running ->
+          invalid_arg ("Parseff.Feed." ^ name ^ ": called from its own parser")
+      | Ended ->
+          invalid_arg ("Parseff.Feed." ^ name ^ ": the parse is done")
+    in
+    if State.current () != State.none then
+      invalid_arg ("Parseff.Feed." ^ name ^ ": called from inside a parser");
+    if chunk = None then t.closed <- true;
+    t.status <- Running;
+    match resume () with
+    | Await ->
+        Await
+    | Done _ as done_ ->
+        t.status <- Ended;
+        done_
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        t.status <- Ended;
+        Printexc.raise_with_backtrace exn bt
+
+  let feed t chunk = step "feed" t (Some chunk)
+
+  let finish t =
+    match step "finish" t None with Done r -> r | Await -> assert false
+end
+
 module Ref = struct
   type 'a t = 'a cell
 

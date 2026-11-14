@@ -5,7 +5,8 @@
   bench_arithmetic
   bench_binary
   bench_utf8
-  bench_streaming)
+  bench_streaming
+  bench_feed)
  (libraries parseff angstrom bigstringaf mparser re benchmark bench_support)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures)))
