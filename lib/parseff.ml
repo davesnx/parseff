@@ -585,6 +585,10 @@ module State = struct
   let[@inline always] frame_trail_depth (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 1) lsr frame_trail_shift
 
+  let[@inline always] frame_trail_depth_below (t : t) top =
+    Array.unsafe_get t.frames (((top - 1) * frame_stride) + 1)
+    lsr frame_trail_shift
+
   let[@inline always] frame_pos (t : t) frame =
     Array.unsafe_get t.frames (frame * frame_stride)
 
@@ -1475,20 +1479,26 @@ let[@inline always] bytes_kind n = (n lsl 3) lor tag_bytes
 
 let[@inline always] at_least_kind n = (n lsl 3) lor tag_at_least
 
+let big_bytes_payload = 0
+let big_at_least_payload = 1
+let big_field_payload = 2
+let big_none_payload = 8
+let negative_count_payload = 9
+let[@inline always] big_kind payload = (payload lsl 3) lor tag_big
+
 let[@inline never] fail_bytes st n =
   if n <= max_small_count then
     fail_int st st.pos (bytes_kind n)
   else
-    fail_str st st.pos tag_big (string_of_int n)
+    fail_str st st.pos (big_kind big_bytes_payload) (string_of_int n)
 
 let[@inline never] fail_at_least st n =
   if n <= max_small_count then
     fail_int st st.pos (at_least_kind n)
   else
-    fail_str st st.pos ((1 lsl 3) lor tag_big) (string_of_int n)
-let none_kind = (8 lsl 3) lor tag_big
-let negative_count_payload = 9
-let negative_count_kind = (negative_count_payload lsl 3) lor tag_big
+    fail_str st st.pos (big_kind big_at_least_payload) (string_of_int n)
+let none_kind = big_kind big_none_payload
+let negative_count_kind = big_kind negative_count_payload
 
 let[@inline never] fail_negative_count st n =
   fail_str st st.pos negative_count_kind (string_of_int n)
@@ -2385,6 +2395,7 @@ let skip_to target =
 let ctx_stride = 2
 let ctx_cut_bit = 1
 let ctx_delimited_bit = 2
+let ctx_start_shift = 2
 
 let[@inline never] ctx_grow st =
   let old = st.ctx in
@@ -2418,7 +2429,7 @@ let[@inline always] context_run st delimited start name p =
   let m = d * ctx_stride in
   Array.unsafe_set st.ctx m st.frames_top;
   Array.unsafe_set st.ctx (m + 1)
-    ((start lsl 2) lor (Bool.to_int delimited * ctx_delimited_bit));
+    ((start lsl ctx_start_shift) lor (Bool.to_int delimited * ctx_delimited_bit));
   if Array.unsafe_get st.ctx_names d != name then
     Array.unsafe_set st.ctx_names d name;
   st.ctx_top <- d + 1;
@@ -2915,11 +2926,9 @@ let prec_accept st operand start top prec = function
       top
 
 let prec_lower st frame start top prec =
-  let base = frame * frame_stride in
-  let flags = Array.unsafe_get st.frames (base + 1) in
   let again =
-    st.diag_len <> Array.unsafe_get st.frames (base + 2)
-    || State.trail_depth st <> flags lsr frame_trail_shift
+    st.diag_len <> State.frame_diag_len st frame
+    || State.trail_depth st <> State.frame_trail_depth st frame
   in
   let after = st.pos in
   if again then
@@ -2931,7 +2940,7 @@ let prec_lower st frame start top prec =
       if again then
         State.pop_rewind_frame st frame
       else begin
-        State.reset_repeat_frame st base start;
+        State.reset_repeat_frame st (frame * frame_stride) start;
         st.pos <- after
       end;
       top
@@ -3765,7 +3774,7 @@ let[@inline] any_varint () =
 
 let int_kind index endian =
   let little = match endian with Big -> 0 | Little -> 1 in
-  ((2 + (index * 2) + little) lsl 3) lor tag_big
+  big_kind (big_field_payload + (index * 2) + little)
 
 let[@inline never] int16_mismatch st start endian expected actual =
   let b = Bytes.create 4 in
@@ -4061,9 +4070,9 @@ let more_alternatives n =
     string_of_int n ^ " more alternatives"
 
 let int_mismatch payload s =
-  let index = (payload - 2) / 2 in
+  let index = (payload - big_field_payload) / 2 in
   let suffix =
-    if (payload - 2) land 1 = 1 then
+    if (payload - big_field_payload) land 1 = 1 then
       "le"
     else
       "be"
@@ -4083,13 +4092,15 @@ let int_mismatch payload s =
         Printf.sprintf "0x%08lX" actual,
         4
       )
-  | _ ->
+  | 2 ->
       let expected = String.get_int64_be s 0 in
       let actual = String.get_int64_be s 8 in
       ( Printf.sprintf "int64%s 0x%016LX" suffix expected,
         Printf.sprintf "0x%016LX" actual,
         8
       )
+  | _ ->
+      failwith "Parseff: internal error: unknown field payload"
 
 let field_mismatch payload s =
   if payload = negative_count_payload then
@@ -4769,12 +4780,12 @@ let expected_of_far f =
           else
             string_of_int payload ^ " bytes"
         )
-    else if tag = tag_big && payload >= 2 then begin
+    else if tag = tag_big && payload >= big_field_payload then begin
       let label, _, _ = field_mismatch payload s in
       Label label
     end else if tag = tag_big then
       Label
-        ( if payload = 0 then
+        ( if payload = big_bytes_payload then
             s ^ " bytes"
           else
             "at least " ^ s ^ " characters"
@@ -4886,9 +4897,10 @@ let found_of_far st f pos =
     let kind = far_item_kind f i in
     let tag = kind land 7 and payload = kind lsr 3 in
     if kind <> none_kind then begin
-      if not (tag = tag_bytes || (tag = tag_big && payload = 0)) then
+      if not (tag = tag_bytes || (tag = tag_big && payload = big_bytes_payload))
+      then
         all_short := false;
-      if tag = tag_big && payload >= 2 then begin
+      if tag = tag_big && payload >= big_field_payload then begin
         let ((_, found, _) as v) = field_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
@@ -5213,7 +5225,7 @@ let outer_contexts st pos =
   for d = st.ctx_top - 1 downto 0 do
     let m = d * ctx_stride in
     let flags = Array.unsafe_get st.ctx (m + 1) in
-    let start = flags lsr 2 in
+    let start = flags lsr ctx_start_shift in
     if pos > start then
       acc :=
         ( Array.unsafe_get st.ctx_names d,
@@ -5615,16 +5627,10 @@ module Ref = struct
       c.mark <- 0
     end;
     let top = st.frames_top in
-    if
-      top > 0
-      && c.mark
-         <= Array.unsafe_get st.frames (((top - 1) * frame_stride) + 1)
-            lsr frame_trail_shift
-    then begin
+    if top > 0 && c.mark <= State.frame_trail_depth_below st top then begin
       let next = st.trail in
       let (Undo u) = next in
-      if u.depth <= Array.unsafe_get st.frames 1 lsr frame_trail_shift then
-        u.next <- running_empty;
+      if u.depth <= State.frame_trail_depth st 0 then u.next <- running_empty;
       let depth = u.depth + 1 in
       c.mark <- depth;
       st.trail <- Undo { cell = c; old = c.value; depth; token; next }

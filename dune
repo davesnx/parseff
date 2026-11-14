@@ -3,7 +3,7 @@
  (mld_files README))
 
 (mdx
- (files README.mld lib/parseff.mli)
+ (files README.mld)
  (libraries parseff))
 
 (alias
