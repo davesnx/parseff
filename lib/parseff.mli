@@ -1194,7 +1194,8 @@ val list :
 
     When [element] fails with the error [e], [list] records [e], calls [sync ()]
     and puts [hole e] in the list, as {!recover} does. [~release], [~outer] and
-    [~record] are as in {!recover}.
+    [~record] are as in {!recover}. A {!commit} in [element] reaches no frame
+    outside [list], also at the end of the input, as in {!sep_by}.
 
     Without [~sep], [close] runs before each element. When [sync] consumes
     nothing, [list] skips one character past the error, as {!recover} does. An
@@ -1212,7 +1213,13 @@ val list :
     - When [close] is [true] before the first element, [element] runs without
       recovery: if it succeeds, its value is the first element; if it fails, the
       list is empty. A failure of {!fail} there is recorded first, since
-      {!sep_by} does not catch it and the plain parse fails.
+      {!sep_by} does not catch it and the plain parse fails. After a {!commit}
+      or a {!cut} in [element], or after {!many_iter} or another [*_iter]
+      function in it gave out a value, [list] does not go back: the failure,
+      also of {!fail}, is an error of the whole parse, as in {!sep_by}. One case
+      differs: a {!cut} inside a {!val:context} in [element] seals only the
+      frames inside that context, so a {!fail} after it is still recorded and
+      the list is empty.
     - [list] does not skip, as {!sep_by_recover}: [sync] must stop before the
       next separator and before the closing token, and {!skip_nested} does this.
       Thus a hole can be empty, as in [f(1, , 3)].
@@ -1650,12 +1657,17 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
     [many_iter] raises [Invalid_argument] when it is called inside
     {!look_ahead}, {!peek_with}, an operator lookup of {!precedence}, or
     {!capture} without [~release:true]. These always rewind on failure, or also
-    on success, so [f] could get a value that the parse then undoes. Inside
-    {!require}, or inside {!recover}, {!sep_by_recover} or an element of {!list}
-    without [~release:true], it raises when that call can recover: when the
-    runner got its collector as [~diagnostics] and input remains. Without the
-    collector, these run their parser directly and [many_iter] does not raise.
-    So test a parser that uses [many_iter] there with [~diagnostics].
+    on success, so [f] could get a value that the parse then undoes. The [close]
+    of {!list} runs inside {!look_ahead}. Inside {!require}, it raises when the
+    runner got its collector as [~diagnostics], also at the end of the input.
+    Inside {!recover}, {!sep_by_recover} or an element of {!list} without
+    [~release:true], it raises when the runner got its collector and input
+    remains. The first element of {!list} when [close] is [true] before it is
+    the exception: it runs without recovery, as an element of {!sep_by}, so
+    [many_iter] seals there and a later failure is an error of the whole parse.
+    Without the collector, all of these run their parser directly and
+    [many_iter] does not raise. So test a parser that uses [many_iter] there
+    with [~diagnostics].
 
     Unstable: this function can change in a 1.x release.
 
