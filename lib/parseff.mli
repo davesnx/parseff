@@ -748,6 +748,11 @@ val peek_with : (unit -> 'a) -> 'a * int
     To report an error of a token, return it in the value of [token] and record
     it with {!warn} in [advance].
 
+    Each call pushes and restores a rewind frame. In a loop that reads each
+    token this way, the pair needs about twice the instructions of a token kept
+    in a [ref] by hand. A token kept by hand is not put back by a rewind: the
+    parser must save and restore it.
+
     In {!parse_source}, the input that [parser] reads must fit in
     [~backtrack_window]. This includes the whitespace and comments that it skips
     before the token. *)
