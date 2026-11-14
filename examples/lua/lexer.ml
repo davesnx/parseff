@@ -1,8 +1,7 @@
-type Parseff.custom_error +=
-  | Lua of { msg : string; help : string option; eof : bool }
+type Parseff.custom_error += Lua of { msg : string; eof : bool }
 
-let error ?from ?notes ?help ?(eof = false) msg : 'a =
-  Parseff.error ?from ?notes (Lua { msg; help; eof })
+let error ?from ?upto ?notes ?help ?(eof = false) msg : 'a =
+  Parseff.error ?from ?upto ?notes ?help (Lua { msg; eof })
 
 let make_error ?from ?notes ?help ?eof msg =
   match

@@ -1,40 +1,6 @@
 let custom = function Lexer.Lua { msg; _ } -> msg | _ -> "unknown error"
 
-let help_of (e : Parseff.error) =
-  match e.kind with Custom (Lexer.Lua { help; _ }) -> help | _ -> None
-
-let gutter text =
-  let lines = String.split_on_char '\n' text in
-  let width line =
-    let k = ref 0 in
-    while !k < String.length line && line.[!k] = ' ' do
-      incr k
-    done;
-    if
-      !k > 0
-      && !k + 1 < String.length line
-      && (line.[!k] = '|' || line.[!k] = '*')
-      && line.[!k + 1] = ' '
-    then
-      Some !k
-    else
-      None
-  in
-  match List.find_map width lines with
-  | Some k ->
-      String.make k ' '
-  | None ->
-      "  "
-
-let with_help base help =
-  match help with
-  | None ->
-      base
-  | Some h ->
-      base ^ "\n" ^ gutter base ^ "* help: " ^ h
-
-let render ~name ?source e =
-  with_help (Parseff.render_error ~name ?source ~custom e) (help_of e)
+let render ~name ?source e = Parseff.render_error ~name ?source ~custom e
 
 let max_shown = 50
 let backtrack_window = 64 * 1024 * 1024
@@ -95,7 +61,7 @@ let render_window ~name (e : Parseff.error) =
   let stop = tee.base + (tee.hi - tee.lo) in
   let inside (r : Parseff.range) = r.start >= tee.base && r.stop <= stop in
   match e.kind with
-  | Custom (Lexer.Lua { msg; help; _ }) when inside e.range ->
+  | Custom (Lexer.Lua { msg; _ }) when inside e.range ->
       let shift = tee.base - (tee.line - 1) in
       let text =
         String.make (tee.line - 1) '\n'
@@ -116,7 +82,7 @@ let render_window ~name (e : Parseff.error) =
           e.notes
       in
       render ~name ~source:text
-        (Parser.error_at text (rebase e.range) ~notes ?help msg)
+        (Parser.error_at text (rebase e.range) ~notes ?help:e.help msg)
   | _ ->
       render ~name e
 
@@ -132,8 +98,8 @@ let analyse path ~on_statement ~on_errors =
         in
         let errors =
           match r with
-          | Ok stats ->
-              List.iter on_statement stats;
+          | Ok stat ->
+              Option.iter on_statement stat;
               errors
           | Error e ->
               errors @ [ e ]
@@ -141,7 +107,7 @@ let analyse path ~on_statement ~on_errors =
         on_errors (errors @ Lexer.take_fresh_lexical ())
       )
       (Parseff.parse_source_each ~max_depth:100_000 ~backtrack_window
-         ~diagnostics:Parser.errors source Parser.top
+         ~diagnostics:Parser.errors ~pending:Parser.pending source Parser.top
       )
   in
   try

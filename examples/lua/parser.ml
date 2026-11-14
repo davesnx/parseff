@@ -5,15 +5,6 @@ let errors : Parseff.error Parseff.Diagnostics.t = Parseff.Diagnostics.create ()
 type opener = { kind : string; at : range; indent : int }
 type closer = Chunk | End_only | If_branch | Until
 
-type Parseff.custom_error +=
-  | Deferred of {
-      from : int;
-      upto : int;
-      msg : string;
-      notes : Parseff.note list;
-      help : string option;
-    }
-
 let unclosed_hints : (string * range * range) list Parseff.Ref.t =
   Parseff.Ref.create []
 let else_ifs : (range * range) list Parseff.Ref.t = Parseff.Ref.create []
@@ -26,30 +17,6 @@ let is_eof () = match st.tok with Lexer.Eof -> true | _ -> false
 let is_kw k = match st.tok with Lexer.Kw k' -> k' == k | _ -> false
 let is_sym s = match st.tok with Lexer.Sym s' -> s' == s | _ -> false
 
-let advance_to q =
-  let p = Parseff.position () in
-  if q > p then ignore (Parseff.take_span (q - p))
-
-let defer ~from ~upto ?(notes = []) ?help msg : 'a =
-  Parseff.error (Deferred { from; upto; msg; notes; help })
-
-let materialize (e : Parseff.error) =
-  match e.kind with
-  | Custom (Deferred d) -> (
-      match
-        Parseff.capture (fun () ->
-            advance_to d.upto;
-            (Lexer.error ~from:d.from ~notes:d.notes ?help:d.help d.msg : unit)
-        )
-      with
-      | Error e ->
-          e
-      | Ok () ->
-          assert false
-    )
-  | _ ->
-      e
-
 let attempt f =
   let snap = Lexer.save () in
   match Parseff.capture f with
@@ -57,7 +24,7 @@ let attempt f =
       Ok v
   | Error e ->
       Lexer.restore snap;
-      Error (materialize e)
+      Error e
 
 let caused_by_lexical ?word ~region (e : Parseff.error) =
   (not (Lexer.is_lexical e))
@@ -1405,14 +1372,14 @@ and check_target t =
   | Name _ | Index _ ->
       ()
   | Call _ | Method_call _ ->
-      defer ~from:t.erange.start ~upto:t.erange.stop
+      Lexer.error ~from:t.erange.start ~upto:t.erange.stop
         "cannot assign to a function call"
   | Paren _ ->
-      defer ~from:t.erange.start ~upto:t.erange.stop
+      Lexer.error ~from:t.erange.start ~upto:t.erange.stop
         ~help:"remove the parentheses around the target"
         "cannot assign to a parenthesized expression"
   | _ ->
-      defer ~from:t.erange.start ~upto:t.erange.stop
+      Lexer.error ~from:t.erange.start ~upto:t.erange.stop
         "cannot assign to this expression"
 
 and not_a_statement e =
@@ -1438,7 +1405,7 @@ and not_a_statement e =
         None
   in
   let generic ?help msg =
-    defer ~from:e.erange.start ~upto:e.erange.stop ?help msg
+    Lexer.error ~from:e.erange.start ~upto:e.erange.stop ?help msg
   in
   match compound with
   | Some s -> (
@@ -1520,24 +1487,15 @@ let top () =
     started := true
   end;
   Lexer.trim_lines ();
-  let rec go acc =
-    let acc = match one () with Some s -> s :: acc | None -> acc in
-    let exhausted =
-      match Parseff.peek_char () with None -> true | Some _ -> false
-    in
-    if exhausted && not (is_eof ()) then
-      go acc
-    else
-      List.rev acc
-  in
-  go []
+  one ()
+
+let pending () = !started && not (is_eof ())
 
 let error_at source (r : range) ?notes ?help msg =
   match
     Parseff.parse ~consume:`Partial source (fun () ->
         if r.start > 0 then ignore (Parseff.take_span r.start);
-        if r.stop > r.start then ignore (Parseff.take_span (r.stop - r.start));
-        (Lexer.error ~from:r.start ?notes ?help msg : unit)
+        (Lexer.error ~from:r.start ~upto:r.stop ?notes ?help msg : unit)
     )
   with
   | Error e ->
