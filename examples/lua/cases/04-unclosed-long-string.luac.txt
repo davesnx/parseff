@@ -1,0 +1,1 @@
+luac: 04-unclosed-long-string.lua:4: unfinished long string (starting at line 1) near <eof>

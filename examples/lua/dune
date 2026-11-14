@@ -1,0 +1,8 @@
+(executable
+ (name main)
+ (libraries parseff))
+
+(cram
+ (deps
+  main.exe
+  (glob_files cases/*)))

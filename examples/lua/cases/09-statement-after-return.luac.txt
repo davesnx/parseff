@@ -1,0 +1,1 @@
+luac: 09-statement-after-return.lua:3: 'end' expected (to close 'function' at line 1) near 'print'
