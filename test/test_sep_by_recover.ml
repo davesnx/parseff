@@ -43,7 +43,7 @@ let string_literal () =
 
 let pairs = [ ('(', ')'); ('[', ']') ]
 
-let skip_value () =
+let skip_value =
   skip_nested
     ~atom:(fun () -> ignore (string_literal ()))
     pairs
@@ -173,7 +173,8 @@ let skip_only ?atom input =
     parse ~consume:`Partial input (fun () ->
         skip_nested ?atom
           [ ('(', ')'); ('[', ']'); ('{', '}') ]
-          (fun c -> c = ',');
+          (fun c -> c = ',')
+          ();
         position ()
     )
   with
@@ -211,7 +212,8 @@ let test_atom_failure_forgotten () =
         skip_nested
           ~atom:(fun () -> ignore (consume "abc"))
           []
-          (fun c -> c = ',');
+          (fun c -> c = ',')
+          ();
         char ';'
     )
   in
@@ -270,18 +272,34 @@ let test_same_as_sep_by () =
 
 let test_wrong_collector () =
   let d = Diagnostics.create () in
-  Alcotest.check_raises "raises"
-    (Invalid_argument
-       "Parseff.sep_by_recover: errors is not the collector given to the runner"
-    ) (fun () ->
-      ignore
-        (parse "1" (fun () ->
-             sep_by_recover d ~sync:skip_value (value d) comma
-               (fun _ -> Hole)
-               ()
-         )
+  let calls = ref 0 in
+  let list () =
+    sep_by_recover d
+      ~record:(fun _ _ -> incr calls)
+      ~sync:skip_value (value d) comma
+      (fun _ -> Hole)
+      ()
+  in
+  let plain () = sep_by ~at_least:1 (value d) comma () in
+  List.iter
+    (fun input ->
+      let expected = show_result (parse input (fun () -> List (plain ()))) in
+      Alcotest.(check string)
+        (input ^ ": no collector") expected
+        (show_result (parse input (fun () -> List (list ()))));
+      Alcotest.(check string)
+        (input ^ ": other collector")
+        expected
+        (show_result
+           (parse ~diagnostics:(Diagnostics.create ()) input (fun () ->
+                List (list ())
+            )
+           )
         )
-  )
+    )
+    [ "1"; "1, 2"; "1, ?, 3"; "?" ];
+  Alcotest.(check int) "record not called" 0 !calls;
+  Alcotest.(check int) "nothing recorded" 0 (Diagnostics.length d)
 
 let test_rollback () =
   let d = Diagnostics.create () in
@@ -325,7 +343,7 @@ let issue_60_list ?record ?(source = false) input =
       sep_by_recover
         ?record:(Option.map (fun f -> f d) record)
         d
-        ~sync:(fun () -> skip_nested [ ('[', ']') ] (fun c -> c = ','))
+        ~sync:(skip_nested [ ('[', ']') ] (fun c -> c = ','))
         element comma
         (fun _ -> Hole)
         ()
@@ -404,6 +422,146 @@ let test_record_arguments () =
     !seen;
   Alcotest.check errs "nothing recorded" [] (errors d)
 
+let test_release () =
+  let d = Diagnostics.create () in
+  let seen = ref [] in
+  let element () =
+    ignore (char 'a');
+    warn d (note "before");
+    commit ();
+    ignore (char 'b');
+    warn d (note "after");
+    ignore (char '!');
+    Int 1
+  in
+  let run ?release ?record () =
+    let r =
+      parse ~diagnostics:d "ab?,ab!" (fun () ->
+          List
+            (sep_by_recover ?release ?record d
+               ~sync:(fun () ->
+                 seen := position () :: !seen;
+                 skip_while (fun c -> c <> ',')
+               )
+               element
+               (fun () -> char ',')
+               (fun _ -> Hole)
+               ()
+            )
+      )
+    in
+    (show_result r, errors d)
+  in
+  let check name expected actual =
+    Alcotest.(check (pair string errs)) name expected actual
+  in
+  check "default"
+    ( "Ok [_; 1]",
+      [ (2, "expected '!', found '?'"); (5, "before"); (6, "after") ]
+    )
+    (run ());
+  Alcotest.(check (list int)) "default syncs from the start" [ 0 ] !seen;
+  seen := [];
+  check "release keeps the entries before the commit"
+    ( "Ok [_; 1]",
+      [
+        (1, "before");
+        (2, "expected '!', found '?'");
+        (5, "before");
+        (6, "after");
+      ]
+    )
+    (run ~release:true ());
+  Alcotest.(check (list int)) "release syncs from the commit" [ 1 ] !seen;
+  let inner = ref [] in
+  ignore
+    (run ~release:true
+       ~record:(fun _ l ->
+         inner := List.map (fun x -> error_message x.Diagnostics.value) l
+       )
+       ()
+    );
+  Alcotest.(check (list string))
+    "record gets the entries after the commit" [ "after" ] !inner
+
+let test_streaming_release () =
+  let input = "[" ^ String.make 40 ' ' ^ "?, 2]" in
+  let element () =
+    many
+      (fun () ->
+        ignore (char ' ');
+        cut ()
+      )
+      ()
+    |> ignore;
+    Int (int_of_string (take_while ~at_least:1 ~label:"integer" is_digit))
+  in
+  let run ?release () =
+    let d = Diagnostics.create () in
+    let r =
+      parse_source ~backtrack_window:16 ~diagnostics:d
+        (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
+        (fun () ->
+          ignore (char '[');
+          let xs =
+            sep_by_recover ?release d ~sync:skip_value element comma
+              (fun _ -> Hole)
+              ()
+          in
+          ignore (char ']');
+          List xs
+        )
+    in
+    match r with
+    | Error { kind = Backtrack_window_exceeded _; _ } ->
+        ("Backtrack_window_exceeded", [])
+    | r ->
+        (show_result r, errors d)
+  in
+  let check name expected actual =
+    Alcotest.(check (pair string errs)) name expected actual
+  in
+  check "default keeps the start of the element"
+    ("Backtrack_window_exceeded", [])
+    (run ());
+  check "release keeps the input after the last cut"
+    ("Ok [_; 2]", [ (41, "expected integer or ' ', found '?'") ])
+    (run ~release:true ())
+
+let test_failing_hole () =
+  let run input hole record =
+    let d = Diagnostics.create () in
+    show_result
+      (parse ~diagnostics:d input (fun () ->
+           ignore (char '[');
+           let xs =
+             sep_by_recover ?record d
+               ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ']'))
+               (fun () -> Int (Char.code (digit ()) - 48))
+               (fun () -> char ',')
+               hole ()
+           in
+           ignore (char ']');
+           List xs
+       )
+      )
+  in
+  let z _ =
+    ignore (char 'z');
+    Hole
+  in
+  let check name expected actual =
+    Alcotest.(check string) name expected actual
+  in
+  check "first element, hole" "Error at 2: expected 'z', found ','"
+    (run "[?,2]" z None);
+  check "later element, hole" "Error at 4: expected 'z', found ','"
+    (run "[1,?,2]" z None);
+  check "later element, record" "Error at 3: expected 'z', found '?'"
+    (run "[1,?,2]" (fun _ -> Hole) (Some (fun _ _ -> ignore (char 'z'))));
+  check "later element, fail in hole" "Error at 4: bad hole"
+    (run "[1,?,2]" (fun _ -> fail "bad hole") None)
+
 let test_outer_false () =
   let d = Diagnostics.create () in
   let run outer =
@@ -450,7 +608,7 @@ let table errors field () =
   skip_whitespace ();
   let fields =
     sep_by_recover errors
-      ~sync:(fun () -> skip_nested [ ('{', '}') ] (fun c -> c = ','))
+      ~sync:(skip_nested [ ('{', '}') ] (fun c -> c = ','))
       field separator
       (fun _ -> Hole)
       ()
@@ -532,6 +690,9 @@ let () =
           test_case "streaming" `Quick test_streaming;
           test_case "same as sep_by" `Quick test_same_as_sep_by;
           test_case "wrong collector" `Quick test_wrong_collector;
+          test_case "release" `Quick test_release;
+          test_case "failing hole or record" `Quick test_failing_hole;
+          test_case "streaming release" `Quick test_streaming_release;
           test_case "rollback" `Quick test_rollback;
           test_case "record" `Quick test_record;
           test_case "record: arguments" `Quick test_record_arguments;

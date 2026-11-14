@@ -148,7 +148,7 @@ x = 1; <hole>; z = 3; <hole>
 
 `sync` decides where parsing continues. A good sync point is a token that ends the broken construct. For a statement it is the `;`, and `skip_statement` consumes it.
 
-In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. Use `capture` here, not `recover`: a hole can be empty, as in `[1, , 3]`, and `recover` always consumes input. At the end of the input, call the element parser directly, as `recover` does. Every element now succeeds, so check for `]` with `Parseff.look_ahead` first. If lists can nest, count the brackets as you skip.
+In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. Use `Parseff.sep_by_recover` here, not `recover`: a hole can be empty, as in `[1, , 3]`, and `recover` always consumes input. `Parseff.skip_nested` skips up to the next `,` or to the `]` that closes the list, and counts the brackets of nested lists. A failing first element gives a hole, so check for `]` first.
 
 ```ocaml
 let array errors () =
@@ -156,25 +156,17 @@ let array errors () =
       let _ = Parseff.char '[' in
       ws ();
       let xs =
-        Parseff.or_
-          (fun () ->
-            let _ = Parseff.look_ahead (fun () -> Parseff.char ']') in
-            [])
-          (Parseff.sep_by
-             (fun () ->
-               if Parseff.peek_char () = None then Some (integer ())
-               else
-                 match Parseff.capture (fun () -> Some (integer ())) with
-                 | Ok x -> x
-                 | Error e ->
-                     Parseff.warn ~pos:e.range.start errors e;
-                     Parseff.skip_while (fun c -> c <> ',' && c <> ']');
-                     None)
-             (fun () ->
-               ws ();
-               let _ = Parseff.char ',' in
-               ws ()))
-          ()
+        if Parseff.peek_char () = Some ']' then []
+        else
+          Parseff.sep_by_recover errors
+            ~sync:(Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
+            (fun () -> Some (integer ()))
+            (fun () ->
+              ws ();
+              let _ = Parseff.char ',' in
+              ws ())
+            (fun _ -> None)
+            ()
       in
       ws ();
       let _ = Parseff.char ']' in
@@ -294,7 +286,7 @@ x = 1
 - : (string list, Parseff.error) result = Ok ["x = 1"; "<hole>"; "z = 3"]
 ```
 
-**At the end of the input, `recover` does not recover.** The parse fails as it would without `recover`:
+**A failure at the end of the input is not recovered.** The parse fails as it would without `recover`, with one error. Recorded, the failure would give a second error where the enclosing construct expects more input. `sep_by_recover` follows the same rule. `capture` returns such a failure as any other:
 
 ```ocaml
 # let errors = Parseff.Diagnostics.create () in
@@ -311,17 +303,32 @@ x = 1
 (Error "expected integer, found end of input", 0)
 ```
 
-**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~record:(fun e inner -> ...)`: it replaces the recording of `e`, and `inner` holds the removed errors.
+**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~record:(fun e inner -> ...)`: it replaces the recording of `e`, and `inner` holds the removed errors. `sep_by_recover` takes the same `~record`.
 
 **A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error. Pass `~outer:false` to keep only the contexts that the parser opened.
 
-**The collector must be the one given to the runner.** Otherwise `recover` raises `Invalid_argument`:
+**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover` and `sep_by_recover` call the parser directly, and `warn` records nothing. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
 
 ```ocaml
-# Parseff.parse input (statements (Parseff.Diagnostics.create ()));;
-Exception:
-Invalid_argument
- "Parseff.recover: errors is not the collector given to the runner".
+# Parseff.parse input (statements (Parseff.Diagnostics.create ()))
+  |> Result.map_error Parseff.error_message;;
+- : (stmt list, string) result = Error "expected integer, found ';'"
+```
+
+**A trace shows each recovered failure.** With `~trace`, each failure that `capture`, `recover` or `sep_by_recover` catches gives a `Captured` event, and `Parseff.print_trace` prints it as a `captured` line:
+
+```ocaml
+# let errors = Parseff.Diagnostics.create () in
+  Parseff.parse ~diagnostics:errors
+    ~trace:(Parseff.print_trace Format.std_formatter)
+    "let y = ;" (statements errors)
+  |> Result.is_ok;;
+statement @0
+statement failed @8 (from @0)
+captured @0: expected integer, found ';'
+statement @9
+statement failed @9 (from @9)
+- : bool = true
 ```
 
 **In streaming, `capture` keeps its input.** A construct longer than `~backtrack_window` fails with `Backtrack_window_exceeded`.

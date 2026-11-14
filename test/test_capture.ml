@@ -130,6 +130,57 @@ let test_recover_skips_delimiter () =
     [ (4, "expected integer, found ','") ]
     (entries d)
 
+let test_recover_range_after_input () =
+  let input = String.init 50 (fun i -> Char.chr (Char.code 'a' + (i mod 26))) in
+  let body d ahead () =
+    ignore (take 2);
+    recover d
+      ~sync:(fun () -> ())
+      (fun () ->
+        let p = position () in
+        fail ~from:(p + ahead) ~upto:(p + ahead + 1) "ahead"
+      )
+      (fun _ -> ());
+    let p = position () in
+    skip_while (fun _ -> true);
+    (p, position ())
+  in
+  let show = function
+    | Ok (p, stop) ->
+        Printf.sprintf "pos=%d end=%d" p stop
+    | Error e ->
+        "Error " ^ error_message e
+  in
+  List.iter
+    (fun (ahead, expected) ->
+      let d = Diagnostics.create () in
+      Alcotest.(check string)
+        (Printf.sprintf "memory, ahead %d" ahead)
+        expected
+        (show (parse ~diagnostics:d input (body d ahead)));
+      let d = Diagnostics.create () in
+      let source =
+        Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "stream, ahead %d" ahead)
+        expected
+        (show
+           (parse_source ~backtrack_window:16 ~diagnostics:d source
+              (body d ahead)
+           )
+        )
+    )
+    [
+      (0, "pos=3 end=50");
+      (1, "pos=4 end=50");
+      (20, "pos=23 end=50");
+      (47, "pos=50 end=50");
+      (48, "pos=50 end=50");
+      (100, "pos=50 end=50");
+      (100000, "pos=50 end=50");
+    ]
+
 type stmt = Let of string * int | SHole
 
 let pp_stmt = function
@@ -242,12 +293,9 @@ let test_stale_failure () =
     Alcotest.(check (pair string errs)) input (value, errors) (run input)
   in
   case "[1, 2, 3] x" "Error at 9: expected end of input, found ' '" [];
-  case "[\"ab, 2, 3]" "Ok [<hole>; 2; 3]"
-    [ (11, "expected '\"', found end of input") ];
-  case "[\"ab, 2, 3] x" "Error at 11: expected end of input, found ' '"
-    [ (13, "expected '\"', found end of input") ];
-  case "[\"ab, 2, 3" "Error at 10: expected ',' or ']', found end of input"
-    [ (10, "expected '\"', found end of input") ];
+  case "[\"ab, 2, 3]" "Error at 11: expected '\"', found end of input" [];
+  case "[\"ab, 2, 3] x" "Error at 13: expected '\"', found end of input" [];
+  case "[\"ab, 2, 3" "Error at 10: expected '\"', found end of input" [];
   case "[?, 2, 3 x" "Error at 9: expected ',' or ']', found 'x'"
     [ (1, "expected integer or '\"', found '?'") ]
 
@@ -830,10 +878,9 @@ let test_progress_to_end () =
     parse ~diagnostics:d "let x = 1; let y = 2"
       (program (recovering d ~sync:no_sync ~hole:SHole stmt))
   in
-  Alcotest.(check string) "value" "Ok [Let(x,1); <hole>]" (show_list pp_stmt r);
-  Alcotest.check errs "errors"
-    [ (20, "expected ';', found end of input") ]
-    (errors d)
+  Alcotest.(check string)
+    "value" "Error at 20: expected ';', found end of input" (show_list pp_stmt r);
+  Alcotest.check errs "errors" [] (errors d)
 
 let test_end_of_input () =
   let same input p_plain p_recover =
@@ -896,18 +943,76 @@ let test_from_before_start () =
   Alcotest.check errs "entries" [ (0, "bad") ] (entries d)
 
 let test_wrong_collector () =
-  let raises name f =
-    match f () with
-    | _ ->
-        Alcotest.fail (name ^ ": expected Invalid_argument")
-    | exception Invalid_argument _ ->
-        ()
+  let calls = ref 0 in
+  let p d () =
+    recover d ~record:(fun _ _ -> incr calls) ~sync:no_sync integer (fun _ -> 0)
   in
-  let p d () = recover d ~sync:no_sync integer (fun _ -> 0) in
-  raises "no collector" (fun () -> parse "1" (p (Diagnostics.create ())));
-  raises "other collector" (fun () ->
-      parse ~diagnostics:(Diagnostics.create ()) "1" (p (Diagnostics.create ()))
+  let d = Diagnostics.create () in
+  let same name run =
+    List.iter
+      (fun input ->
+        Alcotest.(check string)
+          (name ^ ", " ^ input ^ ": same as without recover")
+          (show_error (parse input integer))
+          (show_error (run input));
+        Alcotest.(check int) (name ^ ": record not called") 0 !calls;
+        Alcotest.(check int)
+          (name ^ ": nothing recorded")
+          0 (Diagnostics.length d)
+      )
+      [ "1"; "?"; "1?" ]
+  in
+  same "no collector" (fun input -> parse input (p d));
+  same "other collector" (fun input ->
+      parse ~diagnostics:(Diagnostics.create ()) input (p d)
   )
+
+let test_failure_at_end () =
+  let paren () =
+    ignore (char '(');
+    let n = integer () in
+    ignore (char ')');
+    Int n
+  in
+  let unfinished () =
+    ignore (char '"');
+    skip_while (fun c -> c <> '"');
+    if peek_char () = None then fail ~from:0 "unfinished string";
+    ignore (char '"');
+    Hole
+  in
+  let same input p =
+    let d = Diagnostics.create () in
+    let plain = parse input p in
+    let recovered =
+      parse ~diagnostics:d input (fun () ->
+          recover d ~sync:no_sync p (fun _ -> Hole)
+      )
+    in
+    Alcotest.(check string)
+      (input ^ ": same result")
+      (show_list pp_elt (Result.map (fun x -> [ x ]) plain))
+      (show_list pp_elt (Result.map (fun x -> [ x ]) recovered));
+    ( match (plain, recovered) with
+    | Error a, Error b ->
+        Alcotest.(check bool) (input ^ ": same error value") true (a = b)
+    | _ ->
+        Alcotest.fail (input ^ ": expected a failure")
+    );
+    Alcotest.check errs (input ^ ": no errors") [] (errors d)
+  in
+  same "(2" paren;
+  same "(" paren;
+  same "\"abc" unfinished;
+  let d = Diagnostics.create () in
+  let r =
+    parse ~diagnostics:d "(2]" (fun () ->
+        recover d ~sync:no_sync paren (fun _ -> Hole)
+    )
+  in
+  Alcotest.(check string)
+    "a failure before the end is recovered" "Ok" (show_error r);
+  Alcotest.check errs "recorded" [ (2, "expected ')', found ']'") ] (errors d)
 
 let test_failure_in_sync_or_hole () =
   let d = Diagnostics.create () in
@@ -1006,7 +1111,6 @@ let lost_top statement () =
   ignore (char '\n')
 
 let at_start (e : error) = e.range.start
-let at_stop (e : error) = e.range.stop
 
 let show_entries l =
   List.map
@@ -1049,115 +1153,6 @@ let test_inner_error_removed () =
              to_line_end ()
      )
     )
-
-let test_capture_with () =
-  let d = Diagnostics.create () in
-  let seen = ref [] in
-  let r =
-    parse ~diagnostics:d "ab\"x\n\"y\n" (fun () ->
-        ignore (char 'a');
-        match
-          capture_with d (fun () ->
-              ignore (char 'b');
-              lost_argument d ~pos:at_stop ();
-              ignore (char '\n');
-              lost_argument d ~pos:at_start ();
-              char '!'
-          )
-        with
-        | Ok _ ->
-            Alcotest.fail "expected a failure"
-        | Error (e, inner) ->
-            seen := show_entries inner;
-            Alcotest.(check int) "position restored" 1 (position ());
-            Alcotest.check errs "inner entries are removed" [] (errors d);
-            List.iter
-              (fun (x : _ Diagnostics.entry) -> warn ~pos:x.pos d x.value)
-              inner;
-            warn ~pos:e.range.start d e;
-            ignore (consume "b\"x\n\"y\n")
-    )
-  in
-  Alcotest.(check string) "value" "Ok" (show_error r);
-  Alcotest.check entry_list "removed entries, in order, with their offsets"
-    [ (4, (2, "unfinished string")); (5, (5, "unfinished string")) ]
-    !seen;
-  Alcotest.check entry_list "recorded again at the same offsets"
-    [
-      (4, (2, "unfinished string"));
-      (5, (5, "unfinished string"));
-      (7, (7, "expected '!', found '\\n'"));
-    ]
-    (entries d)
-
-let test_capture_with_scope () =
-  let d = Diagnostics.create () in
-  let other = Diagnostics.create () in
-  let r =
-    parse ~diagnostics:d "a" (fun () ->
-        warn d "before";
-        match
-          capture_with d (fun () ->
-              warn d "inside";
-              char 'a'
-          )
-        with
-        | Ok c ->
-            c
-        | Error _ ->
-            Alcotest.fail "expected success"
-    )
-  in
-  Alcotest.(check string) "success" "Ok" (show_error r);
-  Alcotest.(check (list string))
-    "success keeps the entries" [ "before"; "inside" ] (values d);
-  let r =
-    parse ~diagnostics:d "a" (fun () ->
-        warn d "before";
-        match
-          capture_with d (fun () ->
-              warn d "inside";
-              ignore
-                (optional
-                   (fun () ->
-                     warn d "branch";
-                     char 'b'
-                   )
-                   ()
-                );
-              warn d "inside 2";
-              char 'b'
-          )
-        with
-        | Ok _ ->
-            Alcotest.fail "expected a failure"
-        | Error (_, inner) ->
-            Alcotest.(check (list string))
-              "only the entries of the failed parser" [ "inside"; "inside 2" ]
-              (List.map (fun x -> x.Diagnostics.value) inner);
-            char 'a'
-    )
-  in
-  Alcotest.(check string) "failure" "Ok" (show_error r);
-  Alcotest.(check (list string))
-    "failure removes the entries" [ "before" ] (values d);
-  let r =
-    parse ~diagnostics:d "a" (fun () ->
-        match
-          capture_with other (fun () ->
-              warn d "inside";
-              char 'b'
-          )
-        with
-        | Ok _ ->
-            Alcotest.fail "expected a failure"
-        | Error (_, inner) ->
-            Alcotest.(check int) "other collector" 0 (List.length inner);
-            char 'a'
-    )
-  in
-  Alcotest.(check string) "other collector" "Ok" (show_error r);
-  Alcotest.(check (list string)) "entry removed" [] (values d)
 
 let test_nested_recovery_removed () =
   let input = "let a = [1, ?] let b = [2];" in
@@ -1391,6 +1386,40 @@ let test_recover_record () =
   Alcotest.check entry_list "record replaces the default" []
     (run ~record:(fun _ _ -> ()) ())
 
+let test_recover_record_scope () =
+  let d = Diagnostics.create () in
+  let seen = ref [] in
+  let r =
+    parse ~diagnostics:d "a" (fun () ->
+        warn d (note "before");
+        recover d
+          ~record:(fun _ inner ->
+            seen := List.map (fun x -> error_message x.Diagnostics.value) inner
+          )
+          ~sync:no_sync
+          (fun () ->
+            warn d (note "inside");
+            ignore
+              (optional
+                 (fun () ->
+                   warn d (note "branch");
+                   char 'b'
+                 )
+                 ()
+              );
+            warn d (note "inside 2");
+            ignore (char 'b')
+          )
+          ignore
+    )
+  in
+  Alcotest.(check string) "value" "Ok" (show_error r);
+  Alcotest.(check (list string))
+    "only the entries of the failed parser" [ "inside"; "inside 2" ] !seen;
+  Alcotest.(check (list string))
+    "failure removes the entries" [ "before" ]
+    (List.map error_message (values d))
+
 let test_recover_record_order () =
   let d = Diagnostics.create () in
   let seen = ref [] in
@@ -1491,15 +1520,6 @@ let test_outer_false () =
         [ "inner" ]
         (captured (capture ~outer:false) p);
       let d = Diagnostics.create () in
-      let with_d outer p = Result.map_error fst (capture_with ?outer d p) in
-      Alcotest.check ctx
-        (kind ^ ": capture_with default")
-        [ "outer"; "inner" ]
-        (captured (with_d None) p);
-      Alcotest.check ctx
-        (kind ^ ": capture_with ~outer:false")
-        [ "inner" ]
-        (captured (with_d (Some false)) p);
       let recovered outer =
         let r =
           parse ~consume:`Partial ~diagnostics:d "(ax" (fun () ->
@@ -1735,6 +1755,121 @@ let test_streaming_pins_start () =
        )
     )
 
+exception Io
+
+let byte_reads ?fail_at input =
+  let i = ref 0 in
+  Source.of_chunks (fun () ->
+      if Some !i = fail_at then raise Io;
+      if !i >= String.length input then
+        None
+      else begin
+        let c = String.make 1 input.[!i] in
+        incr i;
+        Some c
+      end
+  )
+
+let test_guard_read_raises () =
+  let outcome run =
+    match run () with
+    | Ok s ->
+        "Ok " ^ s
+    | Error e ->
+        "Error " ^ error_message e
+    | exception Io ->
+        "Io"
+    | exception exn ->
+        "raised " ^ Printexc.to_string exn
+  in
+  let two_then_fail () =
+    ignore (any_char ());
+    ignore (any_char ());
+    fail "x"
+  in
+  let in_capture p () =
+    ignore (capture p);
+    take_while (fun _ -> true)
+  in
+  let cases =
+    [
+      ( "recover",
+        fun d ->
+          in_capture (fun () ->
+              recover d ~sync:ignore two_then_fail (fun _ -> ())
+          )
+      );
+      ( "sep_by_recover",
+        fun d ->
+          in_capture (fun () ->
+              sep_by_recover d ~sync:ignore two_then_fail
+                (fun () -> char ',')
+                (fun _ -> ())
+                ()
+          )
+      );
+    ]
+  in
+  List.iter
+    (fun (name, p) ->
+      let d = Diagnostics.create () in
+      Alcotest.(check string)
+        (name ^ ": window exceeded in the guard")
+        "Error backtrack window of 2 bytes exceeded"
+        (outcome (fun () ->
+             parse_source ~backtrack_window:2 ~diagnostics:d (byte_reads "abcd")
+               (p d)
+         )
+        );
+      Alcotest.(check string)
+        (name ^ ": read raises in the guard")
+        "Io"
+        (outcome (fun () ->
+             parse_source ~diagnostics:d (byte_reads ~fail_at:2 "abcd") (p d)
+         )
+        )
+    )
+    cases
+
+let test_jump_read_raises () =
+  let input = String.make 50 'a' in
+  let body d () =
+    ignore (take 2);
+    recover d ~sync:ignore
+      (fun () ->
+        let p = position () in
+        fail ~from:(p + 20) ~upto:(p + 21) "ahead"
+      )
+      ignore;
+    position ()
+  in
+  let d = Diagnostics.create () in
+  ( match
+      parse_source ~diagnostics:d (byte_reads ~fail_at:10 input) (body d)
+    with
+  | exception Io ->
+      ()
+  | exception exn ->
+      Alcotest.fail ("raised " ^ Printexc.to_string exn)
+  | _ ->
+      Alcotest.fail "expected Io"
+  );
+  let d = Diagnostics.create () in
+  let r =
+    parse_source ~diagnostics:d ~consume:`Partial (byte_reads ~fail_at:10 input)
+      (fun () ->
+        match capture (fun () -> try body d () with Io -> -1) with
+        | Ok p ->
+            (p, position ())
+        | Error _ ->
+            (-2, position ())
+    )
+  in
+  Alcotest.(check (result (pair int int) string))
+    "the position after a raising read is inside the input"
+    (Ok (-1, 10))
+    (Result.map_error error_message r)
+
 let test_streaming_release () =
   let input = "let" ^ String.make 40 ' ' ^ "?" in
   let source () =
@@ -1881,6 +2016,8 @@ let () =
           test_case "empty element with capture" `Quick test_empty_element;
           test_case "recover skips a delimiter" `Quick
             test_recover_skips_delimiter;
+          test_case "recover: range after the input" `Quick
+            test_recover_range_after_input;
           test_case "grammar 2 with cut" `Quick test_grammar2;
           test_case "grammar 2 streaming" `Quick test_grammar2_streaming;
           test_case "stale failure" `Quick test_stale_failure;
@@ -1895,14 +2032,14 @@ let () =
           test_case "end of input" `Quick test_end_of_input;
           test_case "fail ~from before the start" `Quick test_from_before_start;
           test_case "wrong collector" `Quick test_wrong_collector;
+          test_case "failure at the end" `Quick test_failure_at_end;
           test_case "failure in sync or hole" `Quick
             test_failure_in_sync_or_hole;
           test_case "rollback" `Quick test_rollback;
           test_case "nested recovery is removed" `Quick
             test_nested_recovery_removed;
           test_case "inner error is removed" `Quick test_inner_error_removed;
-          test_case "capture_with" `Quick test_capture_with;
-          test_case "capture_with scope" `Quick test_capture_with_scope;
+          test_case "record: scope" `Quick test_recover_record_scope;
           test_case "record" `Quick test_recover_record;
           test_case "record: order" `Quick test_recover_record_order;
           test_case "record: release" `Quick test_recover_record_release;
@@ -1943,6 +2080,9 @@ let () =
           test_case "limits propagate" `Quick test_limits_propagate;
           test_case "streaming pins start" `Quick test_streaming_pins_start;
           test_case "streaming release" `Quick test_streaming_release;
+          test_case "read raises in the end check" `Quick test_guard_read_raises;
+          test_case "read raises in the forced step" `Quick
+            test_jump_read_raises;
           test_case "streaming release: commit inside recognize" `Quick
             test_streaming_release_commit_in_recognize;
           test_case "streaming nested release" `Quick

@@ -349,6 +349,8 @@ let test_trace_across_values () =
           Printf.sprintf "exit %s %d %d" name start stop
       | Fail { name; start; pos } ->
           Printf.sprintf "fail %s %d %d" name start pos
+      | Captured { start; error } ->
+          Printf.sprintf "captured %d %s" start (Parseff.error_message error)
     in
     events := s :: !events
   in

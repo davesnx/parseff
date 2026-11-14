@@ -343,6 +343,8 @@ let show_event = function
       Printf.sprintf "exit %s@%d..%d" name start stop
   | Fail { name; start; pos } ->
       Printf.sprintf "fail %s@%d from %d" name pos start
+  | Captured { start; error } ->
+      Printf.sprintf "captured @%d: %s" start (show_error error)
 
 let window_exceeded = "backtrack window exceeded"
 

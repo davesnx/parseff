@@ -39,7 +39,7 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 
 ## Collecting diagnostics
 
-Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. The parser must warn into the same collector. `warn` into a collector that the runner did not get does nothing.
+Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. The parser must warn into the same collector. `warn` into a collector that the runner did not get does nothing, and `recover` and `sep_by_recover` with such a collector do not recover.
 
 The result of the parse is the usual `Parseff.error` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
 

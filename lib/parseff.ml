@@ -216,10 +216,53 @@ let far_none =
     chain = [];
   }
 
+type expected =
+  | Char of Uchar.t
+  | Literal of string
+  | Label of string
+  | End_of_input
+
+type found = Text of string | End | Short of int | Value of string
+type range = range_data = { start : int; stop : int }
+type context = { name : string; start : int; delimited : bool }
+type note = note_data = { at : range option; text : string }
+
+type view = {
+  number : int;
+  text : string;
+  first : int;
+  left_cut : bool;
+  right_cut : bool;
+}
+
+type excerpt = {
+  views : view list;
+  frame_locs : (int * int * int option) option list;
+  char_column : int option;
+}
+
+type error_kind =
+  | Expected of { items : expected * expected list; found : found; more : int }
+  | Failed of string
+  | Custom of custom_error
+  | Depth_limit_exceeded of { limit : int }
+  | Backtrack_window_exceeded of { limit : int; oldest : int }
+
+type error = {
+  kind : error_kind;
+  range : range;
+  location : location option;
+  contexts : context list;
+  notes : note list;
+  help : string option;
+  excerpt : excerpt;
+}
+
 type trace_event =
   | Enter of { name : string; pos : int }
   | Return of { name : string; start : int; stop : int }
   | Fail of { name : string; start : int; pos : int }
+  | Captured of { start : int; error : error }
 
 type 'a cell = {
   mutable value : 'a;
@@ -2419,22 +2462,6 @@ let context ?(delimited = false) ?start name p =
   | Some f ->
       context_traced st f delimited start name p
 
-let print_trace ppf =
-  let depth = ref 0 in
-  let line fmt =
-    Format.fprintf ppf ("%s" ^^ fmt ^^ "@.") (String.make (2 * !depth) ' ')
-  in
-  function
-  | Enter { name; pos } ->
-      line "%s @%d" name pos;
-      incr depth
-  | Return { name; start; stop } ->
-      decr depth;
-      line "%s ok @%d..%d" name start stop
-  | Fail { name; start; pos } ->
-      decr depth;
-      line "%s failed @%d (from @%d)" name pos start
-
 let cut () =
   let st = get_state () in
   let d = st.ctx_top in
@@ -3566,48 +3593,6 @@ let location_of_position input pos =
   let line_idx = find_line idx pos in
   { offset = pos; line = line_idx + 1; col = pos - idx.starts.(line_idx) + 1 }
 
-type expected =
-  | Char of Uchar.t
-  | Literal of string
-  | Label of string
-  | End_of_input
-
-type found = Text of string | End | Short of int | Value of string
-type range = range_data = { start : int; stop : int }
-type context = { name : string; start : int; delimited : bool }
-type note = note_data = { at : range option; text : string }
-
-type view = {
-  number : int;
-  text : string;
-  first : int;
-  left_cut : bool;
-  right_cut : bool;
-}
-
-type excerpt = {
-  views : view list;
-  frame_locs : (int * int * int option) option list;
-  char_column : int option;
-}
-
-type error_kind =
-  | Expected of { items : expected * expected list; found : found; more : int }
-  | Failed of string
-  | Custom of custom_error
-  | Depth_limit_exceeded of { limit : int }
-  | Backtrack_window_exceeded of { limit : int; oldest : int }
-
-type error = {
-  kind : error_kind;
-  range : range;
-  location : location option;
-  contexts : context list;
-  notes : note list;
-  help : string option;
-  excerpt : excerpt;
-}
-
 let window_size = 240
 let max_frames = 5
 
@@ -3818,6 +3803,24 @@ let error_message ?custom e =
       Printf.sprintf "maximum nesting depth %d exceeded" limit
   | Backtrack_window_exceeded { limit; _ } ->
       Printf.sprintf "backtrack window of %d bytes exceeded" limit
+
+let print_trace ppf =
+  let depth = ref 0 in
+  let line fmt =
+    Format.fprintf ppf ("%s" ^^ fmt ^^ "@.") (String.make (2 * !depth) ' ')
+  in
+  function
+  | Enter { name; pos } ->
+      line "%s @%d" name pos;
+      incr depth
+  | Return { name; start; stop } ->
+      decr depth;
+      line "%s ok @%d..%d" name start stop
+  | Fail { name; start; pos } ->
+      decr depth;
+      line "%s failed @%d (from @%d)" name pos start
+  | Captured { start; error } ->
+      line "captured @%d: %s" start (error_message error)
 
 let is_continuation s len i =
   i < len && Char.code (Bytes.unsafe_get s i) land 0xC0 = 0x80
@@ -4849,10 +4852,18 @@ let outer_contexts st pos =
   done;
   !acc
 
+let captured st start e =
+  match st.trace with
+  | None ->
+      ()
+  | Some f ->
+      trace_emit st f (Captured { start; error = e })
+
 let capture_rewind st frame saved e =
   restore_rewind_frame st frame;
   State.pop_rewind_frame st frame;
   st.far <- saved;
+  captured st st.pos e;
   Stdlib.Error e
 
 let outer_of st outer pos =
@@ -4901,16 +4912,15 @@ let removed_entries (type d) st frame (c : d diagnostics) =
   else
     []
 
-let capture_entries st frame saved ~keep c e =
-  let inner =
-    if keep then
-      removed_entries st frame c
-    else
-      []
-  in
-  capture_rewind st frame saved (e, inner)
+let record_error errors st record e inner =
+  match record with
+  | None ->
+      record_diagnostic errors st e.range.start e
+  | Some f ->
+      f e inner
 
-let capture_in st ~release ~outer ~keep c p =
+let recovering st ~release ~outer ~record ~progress errors ~sync parser hole =
+  let start = st.pos in
   let frame =
     State.push_rewind_frame st
       ( if release then
@@ -4921,79 +4931,80 @@ let capture_in st ~release ~outer ~keep c p =
   in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match p () with
+  let more pos =
+    fill st ~keep_from:(State.frame_pos st frame) (pos + 1)
+    || pos < st.input_len
+  in
+  let fill_hole e =
+    let inner =
+      match record with None -> [] | Some _ -> removed_entries st frame errors
+    in
+    restore_rewind_frame st frame;
+    State.pop_rewind_frame st frame;
+    st.far <- saved;
+    let back = st.pos in
+    record_error errors st record e inner;
+    sync ();
+    if progress && st.pos = start then begin
+      let target = imax start e.range.start in
+      while target > st.input_len && refill_at st st.input_len st.input_len do
+        ()
+      done;
+      let p = imin target st.input_len in
+      st.pos <- p;
+      fill_uchar st ~keep_from:p p;
+      if p < st.input_len then
+        st.pos <- p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+    end;
+    let v = hole e in
+    captured st back e;
+    v
+  in
+  let leave exn =
+    State.pop_rewind_frame st frame;
+    far_merge st saved;
+    raise exn
+  in
+  let caught exn pos error =
+    match
+      if more pos then
+        Some (error ())
+      else
+        None
+    with
+    | Some e ->
+        fill_hole e
+    | None ->
+        leave exn
+    | exception other ->
+        leave other
+  in
+  match parser () with
   | v ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
-      Stdlib.Ok v
+      v
   | exception Fail ->
-      let e = error_of_far st (outer_of st outer st.far.pos) in
-      capture_entries st frame saved ~keep c e
-  | exception User_failure (pos, msg, x) ->
-      let e = error_failure st pos msg x (outer_of st outer pos) in
-      capture_entries st frame saved ~keep c e
+      caught Fail st.far.pos (fun () ->
+          error_of_far st (outer_of st outer st.far.pos)
+      )
+  | exception (User_failure (pos, msg, x) as exn) ->
+      caught exn pos (fun () ->
+          error_failure st pos msg x (outer_of st outer pos)
+      )
   | exception exn ->
-      State.pop_rewind_frame st frame;
-      far_merge st saved;
-      raise exn
-
-let capture_with ?(outer = true) c p =
-  let st = get_state () in
-  let frame = State.push_rewind_frame st frame_barrier in
-  let saved = st.far in
-  if saved != far_none then st.far <- far_none;
-  match p () with
-  | v ->
-      State.pop_rewind_frame st frame;
-      far_merge st saved;
-      Stdlib.Ok v
-  | exception Fail ->
-      let e = error_of_far st (outer_of st outer st.far.pos) in
-      capture_entries st frame saved ~keep:true c e
-  | exception User_failure (pos, msg, x) ->
-      let e = error_failure st pos msg x (outer_of st outer pos) in
-      capture_entries st frame saved ~keep:true c e
-  | exception exn ->
-      State.pop_rewind_frame st frame;
-      far_merge st saved;
-      raise exn
-
-let record_error errors st record e inner =
-  match record with
-  | None ->
-      record_diagnostic errors st e.range.start e
-  | Some f ->
-      f e inner
+      leave exn
 
 let recover ?(release = false) ?(outer = true) ?record errors ~sync parser hole
     =
   let st = get_state () in
-  if st.diag != errors.self then
-    invalid_arg
-      "Parseff.recover: errors is not the collector given to the runner";
-  if not (have st 1) then
+  if st.diag != errors.self || not (have st 1) then
     parser ()
   else
-    let start = st.pos in
-    match
-      capture_in st ~release ~outer ~keep:(record != None) errors parser
-    with
-    | Ok v ->
-        v
-    | Error (e, inner) ->
-        record_error errors st record e inner;
-        sync ();
-        if st.pos = start then begin
-          let p = imax start e.range.start in
-          st.pos <- p;
-          fill_uchar st ~keep_from:p p;
-          if p < st.input_len then
-            st.pos <-
-              p + imin (char_len st.input (p - st.base)) (st.input_len - p)
-        end;
-        hole e
+    recovering st ~release ~outer ~record ~progress:true errors ~sync parser
+      hole
 
-let skip_nested ?atom pairs stop =
+let skip_nested ?atom pairs stop () =
   let st = get_state () in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
@@ -5051,53 +5062,20 @@ let skip_nested ?atom pairs stop =
       far_merge st saved;
       raise exn
 
-let sep_by_recover ?(outer = true) ?record errors ~sync elem sep hole () =
+let sep_by_recover ?(release = false) ?(outer = true) ?record errors ~sync elem
+    sep hole () =
   let st = get_state () in
   if st.diag != errors.self then
-    invalid_arg
-      "Parseff.sep_by_recover: errors is not the collector given to the runner";
-  let item () =
-    if not (have st 1) then
-      elem ()
-    else
-      let start = st.pos in
-      let frame = State.push_rewind_frame st frame_barrier in
-      let saved = st.far in
-      if saved != far_none then st.far <- far_none;
-      let more pos = fill st ~keep_from:start (pos + 1) || pos < st.input_len in
-      let fill_hole e =
-        let inner =
-          match record with
-          | None ->
-              []
-          | Some _ ->
-              removed_entries st frame errors
-        in
-        restore_rewind_frame st frame;
-        State.pop_rewind_frame st frame;
-        st.far <- saved;
-        record_error errors st record e inner;
-        sync ();
-        hole e
-      in
-      let leave exn =
-        State.pop_rewind_frame st frame;
-        far_merge st saved;
-        raise exn
-      in
-      match elem () with
-      | v ->
-          State.pop_rewind_frame st frame;
-          far_merge st saved;
-          v
-      | exception Fail when more st.far.pos ->
-          fill_hole (error_of_far st (outer_of st outer st.far.pos))
-      | exception User_failure (pos, msg, x) when more pos ->
-          fill_hole (error_failure st pos msg x (outer_of st outer pos))
-      | exception exn ->
-          leave exn
-  in
-  sep_by ~at_least:1 item sep ()
+    sep_by ~at_least:1 elem sep ()
+  else
+    let item () =
+      if not (have st 1) then
+        elem ()
+      else
+        recovering st ~release ~outer ~record ~progress:false errors ~sync elem
+          hole
+    in
+    sep_by ~at_least:1 item sep ()
 
 let run_detailed st ~all thunk =
   let previous = State.enter st in
