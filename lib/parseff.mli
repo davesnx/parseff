@@ -761,7 +761,7 @@ val skip_to : int -> unit
     input that the parse has read. Each offset from the position to one that
     {!peek_with} returned is in the input read. *)
 
-val capture : (unit -> 'a) -> ('a, error) result
+val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
 
@@ -775,6 +775,18 @@ val capture : (unit -> 'a) -> ('a, error) result
     past [capture]. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
     not caught. In {!parse_source}, the input that [parser] reads must fit in
     [~backtrack_window].
+
+    With [~release:true], a {!commit} or {!cut} in [parser] that reaches
+    [capture] moves the rewind point to the position of that call. A later
+    failure of [parser] then goes back to that position, not to the start. It
+    removes only the diagnostics and the {!Ref} changes made after that call;
+    those made before it stay, as after a success. Do not parse the same input
+    again with another parser after [Error e]: skip from the current position,
+    and from [e.range.start] when it is later. A {!cut} also continues to the
+    frames outside [capture]. In {!parse_source}, only the input that [parser]
+    reads after the rewind point must fit in [~backtrack_window], so a parser
+    that calls {!cut} after each decided part can be longer than the window. The
+    default is [false].
 
     Example:
     {@ocaml[
@@ -819,6 +831,7 @@ val capture_with :
     ]} *)
 
 val recover :
+  ?release:bool ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -831,6 +844,10 @@ val recover :
 
     The errors that [parser] recorded in [errors] before it failed are removed,
     as with {!capture}: only [e] stays. To keep them, use {!capture_with}.
+
+    [~release] is given to {!capture}. With [~release:true], [sync] starts at
+    the last {!commit} or {!cut} that reached [recover], and the errors recorded
+    before that call stay.
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [recover] raises [Invalid_argument]. If [sync] consumes nothing,
@@ -853,6 +870,88 @@ val recover :
             (fun _ -> Hole)
         )
         ()
+    ]} *)
+
+val sep_by_recover :
+  error Diagnostics.t ->
+  sync:(unit -> unit) ->
+  (unit -> 'a) ->
+  (unit -> 'b) ->
+  (error -> 'a) ->
+  unit ->
+  'a list
+(** [sep_by_recover errors ~sync element separator hole] parses one or more
+    occurrences of [element] with [separator] between each pair, as {!sep_by}
+    does, and recovers from each [element] that fails. For a failure [e], it
+    records [e] in [errors], goes back to the start of the element, calls
+    [sync ()] to skip the broken element, and puts [hole e] in the list.
+
+    [sync] must stop before the next separator and before the token that closes
+    the list: {!skip_nested} does this for lists in brackets. Unlike {!recover},
+    [sep_by_recover] does not consume input when [sync] consumes nothing, so a
+    hole can be empty, as in [f(1, , 3)]. The list ends where [separator] fails.
+
+    A failure at the end of the input is not recovered: the parse fails there,
+    as with {!sep_by}. A failing first element gives a list with one hole, so
+    for a list that can be empty, test for the closing token first. [errors]
+    must be the collector given to the runner as [~diagnostics]; otherwise
+    [sep_by_recover] raises [Invalid_argument].
+
+    Example:
+    {@ocaml[
+    let arguments errors () =
+      let _ = char '(' in
+      let args =
+        if peek_char () = Some ')' then
+          []
+        else
+          sep_by_recover errors
+            ~sync:(fun () ->
+              skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ',')
+            )
+            expr
+            (fun () -> char ',')
+            (fun _ -> Hole)
+            ()
+      in
+      let _ = char ')' in
+      args
+    (* "(1, [2 3], 4)" -> [1; Hole; 4], with one error recorded *)
+    ]} *)
+
+val skip_nested :
+  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit
+(** [skip_nested pairs stop] skips input up to the end of a broken list element.
+    It is made for the [~sync] of {!sep_by_recover} and {!recover}.
+
+    [pairs] gives the brackets of the grammar as [(opening, closing)]
+    characters. The skip stops, without consuming, before the first of:
+
+    - a character for which [stop] is true, outside all brackets that the skip
+      opened;
+    - a closing character whose opening character the skip did not consume: it
+      closes a construct around the element;
+    - the end of the input.
+
+    Each kind of bracket is matched with its own kind. A closing character that
+    does not match the innermost open bracket closes the nearest open bracket of
+    its kind, and the brackets inside that one are taken as not closed. In
+    {v [1 2), 3 v} the closing parenthesis has no opening parenthesis, so the
+    skip stops before it.
+
+    [~atom] is a parser for a piece of input that the skip must take as a
+    whole, such as a string literal or a comment, so that a bracket or a
+    separator inside it is not counted. The skip tries [atom] at each position;
+    where [atom] fails or consumes nothing, the skip reads the next character.
+    The failures of [atom] do not appear in later errors.
+
+    Example:
+    {@ocaml[
+    let skip_argument () =
+      skip_nested ~atom:string_literal
+        [ ('(', ')'); ('[', ']'); ('{', '}') ]
+        (fun c -> c = ',')
+    (* on "g(1, 2) \"a,b\" x, 3)" it stops before ", 3)" *)
     ]} *)
 
 val commit : unit -> unit
