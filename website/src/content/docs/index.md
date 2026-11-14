@@ -15,7 +15,7 @@ Parseff is a direct-style parser combinator library for OCaml 5 where parsers ar
 - **Automatic backtracking** with [`Parseff.or_`](/parseff/api/combinators/#or_)
 - **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
 - [**Streaming support**](/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
 - [**Zero-copy span APIs**](/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](/parseff/api/zero-copy/) for hot paths
 
