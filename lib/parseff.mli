@@ -2500,7 +2500,9 @@ module Feed : sig
 
       An exception that the parser raises comes out of [feed], and the parse
       ends. Raises [Invalid_argument] after the parse ended, and when called
-      from inside a parser. *)
+      from inside a parser. A function that runs outside the parse, such as a
+      [trace] callback or the function given to {!take_iter} or {!many_iter},
+      may feed another feed, but its own feed raises [Invalid_argument]. *)
 
   val finish : 'a t -> ('a * string, error) Stdlib.result
   (** [finish t] tells the parse that the input ended, and runs the parser to

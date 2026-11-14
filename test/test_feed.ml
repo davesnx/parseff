@@ -136,6 +136,21 @@ let feed_chunks ?backtrack_window ?diagnostics ?trace parser chunks =
   in
   go chunks
 
+let feed_rest ?backtrack_window parser chunks =
+  let t = Parseff.Feed.start ?backtrack_window parser in
+  let rec go = function
+    | [] ->
+        Parseff.Feed.finish t
+    | chunk :: rest -> (
+        match Parseff.Feed.feed t chunk with
+        | Parseff.Feed.Await ->
+            go rest
+        | Parseff.Feed.Done r ->
+            Result.map (fun (v, left) -> (v, left ^ String.concat "" rest)) r
+      )
+  in
+  go chunks
+
 let split sizes input =
   let rec go pos i acc =
     if pos >= String.length input then
@@ -178,7 +193,7 @@ let cases =
     );
   ]
 
-let check_like_parse name chunking =
+let check_like_parse ?(cases = cases) name chunking =
   List.iter
     (fun (parser_name, parser, inputs) ->
       List.iter
@@ -228,6 +243,260 @@ let test_random_chunks () =
         )
     )
   done
+
+let joined f =
+  let b = Buffer.create 16 in
+  f (fun piece -> Buffer.add_string b (Parseff.span_to_string piece));
+  Buffer.contents b
+
+let digit c = c >= '0' && c <= '9'
+
+let frame_payload () =
+  let len = Parseff.any_uint8 () in
+  let body =
+    Parseff.within len (fun () -> Parseff.take_while (fun _ -> true))
+  in
+  let _ = Parseff.char ';' in
+  body
+
+let frame_iter () =
+  let len = Parseff.any_uint8 () in
+  let body =
+    Parseff.within len (fun () -> joined (fun add -> Parseff.take_iter len add))
+  in
+  let _ = Parseff.char ';' in
+  body
+
+let nested_frames () =
+  let outer = Parseff.any_uint8 () in
+  Parseff.within outer (fun () ->
+      let parts = ref [] in
+      Parseff.many_iter
+        (fun () ->
+          let n = Parseff.any_uint8 () in
+          Parseff.within n (fun () ->
+              joined (fun add -> Parseff.take_while_iter (fun _ -> true) add)
+          )
+        )
+        (fun s -> parts := s :: !parts)
+        ();
+      String.concat "|" (List.rev !parts)
+  )
+
+let numbers () =
+  let total = ref 0 in
+  Parseff.sep_by_iter
+    (fun () -> Parseff.take_while ~at_least:1 ~at_most:3 digit)
+    (fun () -> Parseff.char ',')
+    (fun n -> total := !total + int_of_string n)
+    ();
+  string_of_int !total
+
+let frame_cases =
+  [
+    ( "within",
+      frame_payload,
+      [ "\005hello;"; "\005hel"; "\003hello;"; "\000;"; "\005hello" ]
+    );
+    ( "within and take_iter",
+      frame_iter,
+      [ "\005hello;"; "\005hel"; "\020" ^ String.make 20 'x' ^ ";" ]
+    );
+    ( "nested within, many_iter, take_while_iter",
+      nested_frames,
+      [
+        "\009\003abc\002de\001f";
+        "\010\003abc\009defghijkl";
+        "\004\003abc";
+        "\011\003abc\002de\001f";
+      ]
+    );
+    ( "sep_by_iter and take_while ~at_most",
+      numbers,
+      [ "1,22,333"; "1,2222,3"; "12,"; "" ]
+    );
+  ]
+
+let test_frames_one_byte () =
+  check_like_parse ~cases:frame_cases "one byte" (split (fun _ -> 1))
+
+let test_frames_random_chunks () =
+  for seed = 1 to 50 do
+    let rs = Random.State.make [| seed |] in
+    check_like_parse ~cases:frame_cases (Printf.sprintf "seed %d" seed)
+      (fun input -> split (fun _ -> 1 + Random.State.int rs 6) input
+    )
+  done
+
+let test_frame_larger_than_window () =
+  let body = String.init 1000 (fun i -> Char.chr (97 + (i mod 26))) in
+  let input = "\003\232" ^ body ^ "!" in
+  let p () =
+    let len = Parseff.BE.any_uint16 () in
+    let b = Buffer.create 16 in
+    Parseff.within len (fun () ->
+        Parseff.take_iter len (fun piece ->
+            Buffer.add_string b (Parseff.span_to_string piece)
+        )
+    );
+    Buffer.contents b
+  in
+  List.iter
+    (fun size ->
+      match feed_rest ~backtrack_window:64 p (split (fun _ -> size) input) with
+      | Ok (v, rest) ->
+          Alcotest.(check bool)
+            (Printf.sprintf "body, chunks of %d" size)
+            true (v = body);
+          Alcotest.(check string) "leftover" "!" rest
+      | Error e ->
+          Alcotest.fail (Parseff.render_error e)
+    )
+    [ 1; 7; 64; 5000 ]
+
+let test_leftover_after_frame () =
+  let input = "\005hello;\002ab;rest" in
+  List.iter
+    (fun size ->
+      let chunks = split (fun _ -> size) input in
+      let rec go t values = function
+        | [] -> (
+            match Parseff.Feed.finish t with
+            | Ok (v, rest) ->
+                List.rev ((v, rest) :: values)
+            | Error e ->
+                Alcotest.fail (Parseff.render_error e)
+          )
+        | chunk :: chunks -> (
+            match Parseff.Feed.feed t chunk with
+            | Parseff.Feed.Await ->
+                go t values chunks
+            | Parseff.Feed.Done (Ok (v, rest)) ->
+                if List.length values = 0 then
+                  go
+                    (Parseff.Feed.start frame_payload)
+                    ((v, rest) :: values) (rest :: chunks)
+                else
+                  List.rev ((v, rest ^ String.concat "" chunks) :: values)
+            | Parseff.Feed.Done (Error e) ->
+                Alcotest.fail (Parseff.render_error e)
+          )
+      in
+      let label = Printf.sprintf "chunks of %d" size in
+      match go (Parseff.Feed.start frame_payload) [] chunks with
+      | [ (a, _); (b, rest) ] ->
+          Alcotest.(check (list string)) label [ "hello"; "ab" ] [ a; b ];
+          Alcotest.(check string) (label ^ ", leftover") "rest" rest
+      | _ ->
+          Alcotest.fail (label ^ ": expected two values")
+    )
+    [ 1; 3; 8; 9; 10; 11; 100 ]
+
+let test_dropped_in_frame () =
+  let t = Parseff.Feed.start frame_payload in
+  Alcotest.(check bool)
+    "waits inside the frame" true
+    (Parseff.Feed.feed t "\005he" = Parseff.Feed.Await);
+  Alcotest.(check string)
+    "parse after" "ok 1.2.3.4"
+    (show (Parseff.parse "1.2.3.4" ip_address));
+  Alcotest.(check string)
+    "parse_source after" "ok xy"
+    (show
+       (Parseff.parse_source
+          (Parseff.Source.of_seq (List.to_seq [ "\002"; "x"; "y;" ]))
+          frame_payload
+       )
+    );
+  Alcotest.(check bool)
+    "new feed after" true
+    (feed_chunks frame_payload [ "\001"; "z;" ] = Ok ("z", ""))
+
+let call_from_iter target =
+  let raised = ref "" in
+  let p self () =
+    Parseff.take_iter 2 (fun _ ->
+        try ignore (Parseff.Feed.feed (target self) "1.2.3.4")
+        with Invalid_argument msg -> raised := msg
+    );
+    ""
+  in
+  let rec t = lazy (Parseff.Feed.start (p (fun () -> Lazy.force t))) in
+  (Lazy.force t, raised)
+
+let test_feed_from_iter () =
+  let other = Parseff.Feed.start ip_address in
+  let t, raised = call_from_iter (fun _ -> other) in
+  Alcotest.(check bool)
+    "outer done" true
+    (Parseff.Feed.feed t "ab" = Parseff.Feed.Done (Ok ("", "")));
+  Alcotest.(check string) "no error" "" !raised;
+  Alcotest.(check bool)
+    "other fed from the iter function" true
+    (Parseff.Feed.finish other = Ok ("1.2.3.4", ""));
+  let t, raised = call_from_iter (fun self -> self ()) in
+  Alcotest.(check bool)
+    "own feed done" true
+    (Parseff.Feed.feed t "ab" = Parseff.Feed.Done (Ok ("", "")));
+  Alcotest.(check string)
+    "own feed from the iter function"
+    "Parseff.Feed.feed: called from its own parser" !raised
+
+let test_require_and_list () =
+  let errors = Parseff.Diagnostics.create () in
+  let p () =
+    let _ = Parseff.char '[' in
+    let items =
+      Parseff.list errors
+        ~sep:(fun () -> ignore (Parseff.char ','))
+        ~close:(fun () ->
+          Parseff.or_
+            (fun () -> Parseff.look_ahead (fun () -> Parseff.char ']') = ']')
+            (fun () -> false)
+            ()
+        )
+        ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ',' && c <> ']'))
+        (fun () -> Parseff.take_while ~at_least:1 digit)
+        (fun _ -> "?")
+        ()
+    in
+    Parseff.require errors (fun () -> ignore (Parseff.char ']')) ignore;
+    String.concat "," items
+  in
+  let show_diags () =
+    String.concat "; "
+      (List.map
+         (fun (d : Parseff.error Parseff.Diagnostics.entry) ->
+           Printf.sprintf "%d %s" d.pos (Parseff.error_message d.value)
+         )
+         (Parseff.Diagnostics.to_list errors)
+      )
+  in
+  List.iter
+    (fun input ->
+      let expected = show (Parseff.parse ~diagnostics:errors input p) in
+      let expected_diags = show_diags () in
+      List.iter
+        (fun size ->
+          let label = Printf.sprintf "%S, chunks of %d" input size in
+          let fed =
+            Result.map fst
+              (feed_chunks ~diagnostics:errors
+                 (fun () ->
+                   let v = p () in
+                   Parseff.end_of_input ();
+                   v
+                 )
+                 (split (fun _ -> size) input)
+              )
+          in
+          Alcotest.(check string) label expected (show fed);
+          Alcotest.(check string)
+            (label ^ ", diagnostics") expected_diags (show_diags ())
+        )
+        [ 1; 2; 5 ]
+    )
+    [ "[1,2,3]"; "[1,x,3]"; "[1,2"; "[1,,3]" ]
 
 let two_requests =
   "GET /a HTTP/1.1\r\nPOST /bb HTTP/1.1\r\nPUT /ccc HTTP/1.1\r\n"
@@ -691,6 +960,11 @@ let () =
           Alcotest.test_case "one byte at a time" `Quick test_one_byte;
           Alcotest.test_case "one chunk" `Quick test_one_chunk;
           Alcotest.test_case "random chunk sizes" `Quick test_random_chunks;
+          Alcotest.test_case "frames and iter, one byte" `Quick
+            test_frames_one_byte;
+          Alcotest.test_case "frames and iter, random chunks" `Quick
+            test_frames_random_chunks;
+          Alcotest.test_case "require and list" `Quick test_require_and_list;
         ]
       );
       ( "leftover",
@@ -699,6 +973,10 @@ let () =
             test_leftover_one_chunk;
           Alcotest.test_case "across chunks" `Quick test_leftover_across_chunks;
           Alcotest.test_case "large chunk" `Quick test_leftover_large_chunk;
+          Alcotest.test_case "frame larger than the window" `Quick
+            test_frame_larger_than_window;
+          Alcotest.test_case "leftover after a frame" `Quick
+            test_leftover_after_frame;
           Alcotest.test_case "chunk the parser did not read" `Quick
             test_leftover_not_read;
           Alcotest.test_case "many values by restart" `Quick test_many_values;
@@ -735,6 +1013,10 @@ let () =
           Alcotest.test_case "from inside a parser" `Quick
             test_from_inside_parser;
           Alcotest.test_case "empty chunk" `Quick test_empty_chunk;
+          Alcotest.test_case "dropped inside a frame" `Quick
+            test_dropped_in_frame;
+          Alcotest.test_case "feed from an iter function" `Quick
+            test_feed_from_iter;
           Alcotest.test_case "options" `Quick test_options;
         ]
       );
