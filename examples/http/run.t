@@ -143,3 +143,10 @@ A method longer than 32 bytes:
 
   $ (head -c 200000 /dev/zero | tr '\0' G; printf ' / HTTP/1.1\r\n\r\n') | ./main.exe requests
   error 501 Not Implemented at byte 0: limit of 32 exceeded
+
+A field name longer than 256 bytes. The many over the header lines stops at
+that line, but the limit failure is the furthest failure, so it is reported:
+
+  $ name=$(head -c 300 /dev/zero | tr '\0' N)
+  $ printf "GET / HTTP/1.1\r\n$name: v\r\n\r\n" | ./main.exe requests
+  error 431 Request Header Fields Too Large at byte 16: limit of 256 exceeded

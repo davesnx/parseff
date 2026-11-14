@@ -98,7 +98,6 @@ let field () =
       is_tchar
   in
   let _ = Parseff.char ':' in
-  Parseff.cut ();
   Parseff.skip_while is_ows;
   let value = Parseff.take_while ~at_most:max_value is_field_char in
   crlf ();

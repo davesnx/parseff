@@ -452,19 +452,45 @@ let test_within_regex_anchors () =
 
 let alpha c = c >= 'a' && c <= 'z'
 
-let test_limit_beats_farther_failures () =
+let test_limit_and_farther_failures () =
   both "take_while after a farther failure" "aaaaa"
     (fun () ->
       ignore (Parseff.optional (fun () -> Parseff.consume "aaaaX") ());
       Parseff.take_while ~at_most:2 alpha
     )
+    (check_message "expected \"X\", found 'a'");
+  both "take_while after a farther failure, with commit" "aaaaa"
+    (fun () ->
+      ignore (Parseff.optional (fun () -> Parseff.consume "aaaaX") ());
+      Parseff.or_
+        (fun () ->
+          Parseff.commit ();
+          Parseff.take_while ~at_most:2 alpha
+        )
+        (fun () -> "other branch")
+        ()
+    )
     (fun name -> check_limit name ~limit:2 ~range:(0, 3));
-  both "many after a farther failure" "aaaa"
+  both "many over a farther failure" "aaaa"
     (fun () ->
       Parseff.many ~at_most:1
         (Parseff.or_
            (fun () -> Parseff.consume "aaX")
            (fun () -> Parseff.consume "a")
+        )
+        ()
+    )
+    (check_message "expected \"X\", found 'a'");
+  both "many over a farther failure, with commit" "aaaa"
+    (fun () ->
+      Parseff.many ~at_most:1
+        (Parseff.or_
+           (fun () -> Parseff.consume "aaX")
+           (fun () ->
+             let a = Parseff.consume "a" in
+             Parseff.commit ();
+             a
+           )
         )
         ()
     )
@@ -573,8 +599,9 @@ let test_take_while_at_most_inside_within () =
 
 let test_take_while_at_most_negative () =
   Alcotest.check_raises "negative"
-    (Invalid_argument "Parseff.take_while: at_most must be at least 0")
-    (fun () ->
+    (Invalid_argument
+       "Parseff.take_while: at_most must be at least 0 and at least at_least"
+    ) (fun () ->
       ignore
         (Parseff.parse "" (fun () -> Parseff.take_while ~at_most:(-1) always))
   )
@@ -637,6 +664,298 @@ let test_uint24 () =
   both "truncated" "\x01\x02" Parseff.BE.any_uint24
     (check_message "expected 3 bytes, found only 2 (end of input)")
 
+let describe = function
+  | Ok s ->
+      "ok " ^ s
+  | Error (e : Parseff.error) ->
+      Printf.sprintf "[%d,%d) %s" e.range.start e.range.stop
+        (Parseff.error_message e)
+
+let same_as name input ~with_frame ~without =
+  Alcotest.(check string)
+    (name ^ " (string)")
+    (describe (Parseff.parse ~consume:`Partial input without))
+    (describe (Parseff.parse ~consume:`Partial input with_frame));
+  Alcotest.(check string)
+    (name ^ " (stream)")
+    (describe
+       (Parseff.parse_source ~consume:`Partial
+          (chunked_source ~chunk_size:4096 input)
+          without
+       )
+    )
+    (describe
+       (Parseff.parse_source ~consume:`Partial
+          (chunked_source ~chunk_size:4096 input)
+          with_frame
+       )
+    )
+
+let test_found_text_shared_with_outside () =
+  let x_or_y frame () =
+    Parseff.or_
+      (fun () ->
+        frame (fun () ->
+            ignore (Parseff.take 2);
+            String.make 1 (Parseff.char 'x')
+        )
+      )
+      (fun () ->
+        ignore (Parseff.take 2);
+        String.make 1 (Parseff.char 'y')
+      )
+      ()
+  in
+  same_as "or_ after a frame" "abzz"
+    ~with_frame:(x_or_y (Parseff.within 2))
+    ~without:(x_or_y (fun p -> p ()));
+  let help frame () =
+    Parseff.or_
+      (fun () ->
+        frame (fun () ->
+            Parseff.keyword "help";
+            ""
+        )
+      )
+      (fun () ->
+        Parseff.keyword "help";
+        ""
+      )
+      ()
+  in
+  same_as "keyword" "hello world"
+    ~with_frame:(help (Parseff.within 2))
+    ~without:(help (fun p -> p ()))
+
+let is_a c = c = 'a'
+
+let test_recovered_limit_leaves_no_trace () =
+  let g lim () =
+    ignore (Parseff.or_ (fun () -> Parseff.consume "aaaX") (fun () -> "") ());
+    ignore
+      (Parseff.or_
+         (fun () -> Parseff.take_while ?at_most:lim is_a)
+         (fun () -> Parseff.take_while is_a)
+         ()
+      );
+    String.make 1 (Parseff.char 'c')
+  in
+  same_as "or_ recovers from the limit" "aaab" ~with_frame:(g (Some 1))
+    ~without:(g None);
+  let h () =
+    ignore (Parseff.or_ (fun () -> Parseff.consume "aaaX") (fun () -> "") ());
+    ignore
+      (Parseff.optional
+         (fun () -> Parseff.many ~at_most:1 Parseff.any_char ())
+         ()
+      );
+    String.make 1 (Parseff.char 'c')
+  in
+  both "optional recovers from the limit" "aaab" h
+    (check_message "expected \"X\", found 'b'")
+
+let test_limit_through_look_ahead () =
+  both "look_ahead with a farther failure" "aaab"
+    (fun () ->
+      ignore (Parseff.optional (fun () -> Parseff.consume "aaaX") ());
+      Parseff.look_ahead (fun () -> Parseff.take_while ~at_most:1 is_a)
+    )
+    (check_message "expected \"X\", found 'b'");
+  both "look_ahead alone" "aaab"
+    (fun () -> Parseff.look_ahead (fun () -> Parseff.take_while ~at_most:1 is_a))
+    (fun name -> check_limit name ~limit:1 ~range:(0, 2))
+
+let regex_words n =
+  let input = String.concat " " (List.init n (fun _ -> "ab")) in
+  let word = Parseff.regex Re.(rep1 (rg 'a' 'z')) in
+  let parser () =
+    Parseff.within (String.length input) (fun () ->
+        Parseff.many
+          (fun () ->
+            let w = Parseff.match_regex word in
+            ignore (Parseff.optional (fun () -> Parseff.char ' ') ());
+            w
+          )
+          ()
+    )
+  in
+  let before = Gc.allocated_bytes () in
+  ( match Parseff.parse input parser with
+  | Ok l ->
+      Alcotest.(check int) "words" n (List.length l)
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+  );
+  Gc.allocated_bytes () -. before
+
+let test_regex_in_frame_is_linear () =
+  let small = regex_words 2_000 and large = regex_words 8_000 in
+  if large > 6. *. small then
+    Alcotest.failf
+      "allocation grows faster than the input: %.0f bytes for 2000, %.0f for \
+       8000"
+      small large
+
+let limit_parser at_most () =
+  Parseff.context "outer" (fun () ->
+      Parseff.context "inner" (fun () -> Parseff.take_while ~at_most is_a)
+  )
+
+let check_limit_contexts name ~limit ~range = function
+  | Error
+      ({ Parseff.kind = Custom (Parseff.Limit_exceeded { limit = l }); _ } as e)
+    ->
+      Alcotest.(check (pair int (pair int int)))
+        name (limit, range)
+        (l, (e.range.start, e.range.stop));
+      Alcotest.(check (list string))
+        (name ^ " contexts") [ "outer"; "inner" ]
+        (List.map (fun (c : Parseff.context) -> c.name) e.contexts)
+  | Error e ->
+      Alcotest.failf "%s: expected Limit_exceeded, got %s" name
+        (Parseff.error_message e)
+  | Ok _ ->
+      Alcotest.failf "%s: expected Limit_exceeded, got Ok" name
+
+let test_limit_with_a_parse_in_trace () =
+  let inner = ref None in
+  let trace = function
+    | Parseff.Fail _ when !inner = None ->
+        inner :=
+          Some
+            (Parseff.parse "bbbbbbbb" (fun () ->
+                 Parseff.take_while ~at_most:3 (fun c -> c = 'b')
+             )
+            )
+    | _ ->
+        ()
+  in
+  check_limit_contexts "parse A" ~limit:1 ~range:(0, 2)
+    (Parseff.parse ~trace "aaaa" (limit_parser 1));
+  match !inner with
+  | Some r ->
+      check_limit "parse B" ~limit:3 ~range:(0, 4) r
+  | None ->
+      Alcotest.fail "the trace function did not run"
+
+type _ Effect.t += Trace_pause : unit Effect.t
+
+let test_limit_with_a_pause_in_trace () =
+  let other = ref None in
+  let trace = function
+    | Parseff.Fail _ ->
+        Effect.perform Trace_pause
+    | _ ->
+        ()
+  in
+  let result =
+    Effect.Deep.match_with
+      (fun () -> Parseff.parse ~trace "aaaa" (limit_parser 1))
+      ()
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (e : a Effect.t) ->
+            match e with
+            | Trace_pause ->
+                Some
+                  (fun (k : (a, _) Effect.Deep.continuation) ->
+                    if !other = None then
+                      other :=
+                        Some
+                          (Parseff.parse "bbbbbbbb" (fun () ->
+                               Parseff.take_while ~at_most:3 (fun c -> c = 'b')
+                           )
+                          );
+                    Effect.Deep.continue k ()
+                  )
+            | _ ->
+                None
+          );
+      }
+  in
+  check_limit_contexts "parse A" ~limit:1 ~range:(0, 2) result;
+  match !other with
+  | Some r ->
+      check_limit "parse B" ~limit:3 ~range:(0, 4) r
+  | None ->
+      Alcotest.fail "the pause did not run"
+
+type _ Effect.t += Read_pause : unit Effect.t
+
+let test_limit_with_a_pause_in_recover () =
+  let input = "aaab" in
+  let pos = ref 0 in
+  let src =
+    Parseff.Source.of_function (fun buf off len ->
+        Effect.perform Read_pause;
+        let n = min (min 1 len) (String.length input - !pos) in
+        Bytes.blit_string input !pos buf off n;
+        pos := !pos + n;
+        n
+    )
+  in
+  let errors = Parseff.Diagnostics.create () in
+  let parser () =
+    ignore (Parseff.optional (fun () -> Parseff.consume "aaaX") ());
+    Parseff.recover errors
+      ~sync:(fun () -> Parseff.skip_while (fun _ -> true))
+      (fun () -> Parseff.take_while ~at_most:1 is_a)
+      (fun _ -> "hole")
+  in
+  let others = ref 0 in
+  let result =
+    Effect.Deep.match_with
+      (fun () -> Parseff.parse_source ~diagnostics:errors src parser)
+      ()
+      {
+        retc = Fun.id;
+        exnc = raise;
+        effc =
+          (fun (type a) (e : a Effect.t) ->
+            match e with
+            | Read_pause ->
+                Some
+                  (fun (k : (a, _) Effect.Deep.continuation) ->
+                    ( match
+                        Parseff.parse "bbbbbbbb" (fun () ->
+                            Parseff.take_while ~at_most:3 (fun c -> c = 'b')
+                        )
+                      with
+                    | Error _ ->
+                        incr others
+                    | Ok _ ->
+                        Alcotest.fail "parse B should fail"
+                    );
+                    Effect.Deep.continue k ()
+                  )
+            | _ ->
+                None
+          );
+      }
+  in
+  check_ok "recover" Alcotest.string "hole" result;
+  Alcotest.(check bool) "parses ran during the reads" true (!others > 0);
+  match Parseff.Diagnostics.to_list errors with
+  | [ { value = { kind = Custom (Parseff.Limit_exceeded { limit }); _ }; _ } ]
+    ->
+      Alcotest.(check int) "recorded limit" 1 limit
+  | l ->
+      Alcotest.failf "expected one limit error, got %d errors" (List.length l)
+
+let test_take_while_at_least_above_at_most () =
+  Alcotest.check_raises "at_least above at_most"
+    (Invalid_argument
+       "Parseff.take_while: at_most must be at least 0 and at least at_least"
+    ) (fun () ->
+      ignore
+        (Parseff.parse "aaa" (fun () ->
+             Parseff.take_while ~at_least:3 ~at_most:2 is_a
+         )
+        )
+  )
+
 let () =
   Alcotest.run "Protocol"
     [
@@ -689,9 +1008,29 @@ let () =
             test_take_while_at_most_negative;
           Alcotest.test_case "many" `Quick test_many_at_most;
           Alcotest.test_case "or_ recovers" `Quick test_limit_recovered_by_or;
-          Alcotest.test_case "limit beats farther failures" `Quick
-            test_limit_beats_farther_failures;
+          Alcotest.test_case "limit and farther failures" `Quick
+            test_limit_and_farther_failures;
         ]
       );
       ("uint24", [ Alcotest.test_case "BE and LE" `Quick test_uint24 ]);
+      ( "review 2",
+        [
+          Alcotest.test_case "found text shared with a failure outside" `Quick
+            test_found_text_shared_with_outside;
+          Alcotest.test_case "a recovered limit leaves no trace" `Quick
+            test_recovered_limit_leaves_no_trace;
+          Alcotest.test_case "limit through look_ahead" `Quick
+            test_limit_through_look_ahead;
+          Alcotest.test_case "regex in a frame is linear" `Quick
+            test_regex_in_frame_is_linear;
+          Alcotest.test_case "take_while at_least above at_most" `Quick
+            test_take_while_at_least_above_at_most;
+          Alcotest.test_case "limit with a parse in the trace function" `Quick
+            test_limit_with_a_parse_in_trace;
+          Alcotest.test_case "limit with a pause in the trace function" `Quick
+            test_limit_with_a_pause_in_trace;
+          Alcotest.test_case "limit with a pause in a read of recover" `Quick
+            test_limit_with_a_pause_in_recover;
+        ]
+      );
     ]

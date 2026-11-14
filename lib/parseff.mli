@@ -107,8 +107,10 @@ type custom_error +=
         (** The input went over a limit given with [~at_most] to
             {!val:take_while} or {!val:many}. [limit] is that value. The error
             range covers the run or the item that went over it, so a server can
-            answer "header too large" and not "bad request". Unstable: this case
-            can change in a 1.x release. *)
+            answer "header too large" and not "bad request". It is an ordinary
+            failure: when a failure is recorded farther in the input, the parse
+            reports that one; see {!val:take_while} for how {!commit} keeps the
+            limit. Unstable: this case can change in a 1.x release. *)
 
 (** What failed. These five cases are final until 2.0, so a match on all of them
     needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
@@ -484,13 +486,19 @@ val take_while :
     parse fails with [Backtrack_window_exceeded] first. So keep [at_most] well
     below [~backtrack_window].
 
-    The limit failure removes the failures recorded at or after the start of the
-    run, so that they cannot hide it. An alternative that an enclosing {!or_} or
-    {!optional} tries after it can still recover from it, or replace it with a
-    failure farther in the input. A parser that must report the limit calls
-    {!cut} before the run, or gives it no alternative. Raises [Invalid_argument]
-    when [at_most] is negative. Unstable: [~at_most] can change in a 1.x
-    release.
+    The limit failure follows the rule of every failure: the parse reports the
+    furthest failure. A failure that an earlier abandoned branch recorded
+    farther in the input, or an alternative that fails farther afterwards, is
+    reported in its place, and {!or_}, {!optional} and {!many} recover from it
+    as from any failure. A parser that must report the limit calls {!commit}
+    before the run, inside the {!or_}, {!optional} or other frame around it:
+    [commit] forgets the failures recorded at or beyond the current position and
+    seals that frame, so its alternatives are not tried. Outside any frame
+    [commit] does nothing. {!cut} seals the frames of the enclosing
+    {!val:context} but forgets no failure.
+
+    Raises [Invalid_argument] when [at_most] is negative or below [at_least].
+    Unstable: [~at_most] can change in a 1.x release.
 
     Example:
     {@ocaml[
@@ -847,7 +855,10 @@ val skip_to : int -> unit
 
     Raises [Invalid_argument] if [target] is before the position, or after the
     input that the parse has read. Each offset from the position to one that
-    {!peek_with} returned is in the input read. *)
+    {!peek_with} returned is in the input read, except inside {!within}: there
+    the input ends at the frame end, and a target past it raises
+    [Invalid_argument], also one that {!peek_with} returned outside the frame.
+*)
 
 val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
@@ -1324,13 +1335,12 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
     After [at_most] results, it runs [parser] once more. When that run succeeds
     and consumes input, the parse fails with
     [Custom (Limit_exceeded { limit = at_most })], and the error range covers
-    the extra item. The limit failure removes the failures recorded at or after
-    the start of the extra item, so that they cannot hide it. An alternative
-    that an enclosing {!or_} or {!optional} tries after it can still recover
-    from it, or replace it with a failure farther in the input. A parser that
-    must report the limit calls {!cut} before [many], or gives it no
-    alternative. Raises [Invalid_argument] when [at_most] is negative or below
-    [at_least]. Unstable: [~at_most] can change in a 1.x release.
+    the extra item. The limit failure follows the rule of every failure, as for
+    {!take_while}: a failure recorded farther in the input is reported in its
+    place, also one that the extra item records in a branch it abandons. A
+    {!commit} in [parser] once it has decided forgets those. Raises
+    [Invalid_argument] when [at_most] is negative or below [at_least]. Unstable:
+    [~at_most] can change in a 1.x release.
 
     Example:
     {@ocaml[
@@ -1812,7 +1822,17 @@ val within : int -> (unit -> 'a) -> 'a
 
     [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
     be larger than [~backtrack_window] when [parser] calls {!commit} as it
-    reads. Unstable: this function can change in a 1.x release.
+    reads. Two things copy inside a frame. {!match_regex} works on a copy of the
+    frame bytes read so far, from the byte before the position: it is made once
+    on string input, and again after each read on a stream, so its cost is the
+    size of the frame plus the size of each read. On string input, {!take_span},
+    {!take_while_span} and {!recognize_span} return copies, as they do with
+    {!parse_source}.
+
+    Inside the frame the input ends at the frame end, so {!skip_to} raises
+    [Invalid_argument] for a target past it, also for a position that
+    {!peek_with} returned outside the frame. Unstable: this function can change
+    in a 1.x release.
 
     Example:
     {@ocaml[
