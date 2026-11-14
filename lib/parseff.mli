@@ -564,9 +564,9 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
     When a parser fails and the position goes back, the diagnostics recorded
     since that position are removed. This holds for a branch of {!or_} or
     {!one_of}, an iteration of {!many}, {!optional}, and a {!capture} or
-    {!recover} whose parser fails. It also holds for a successful {!look_ahead},
-    and for a repetition iteration that succeeds without consuming input. A
-    {!Ref.set} is undone in the same cases.
+    {!recover} whose parser fails. It also holds for a successful {!look_ahead}
+    or {!peek_with}, and for a repetition iteration that succeeds without
+    consuming input. A {!Ref.set} is undone in the same cases.
 
     Thus a diagnostic recorded inside a construct is lost when an enclosing
     {!capture} or {!recover} fails later: only the error of the enclosing
@@ -694,6 +694,73 @@ val look_ahead : (unit -> 'a) -> 'a
     (* position hasn't moved *)
     ]} *)
 
+val peek_with : (unit -> 'a) -> 'a * int
+(** [peek_with parser] runs [parser] and returns its value with the position
+    where it stopped. It consumes no input: the position stays where it was
+    before. Fails if [parser] fails.
+
+    It follows the rule of {!look_ahead}: diagnostics recorded by [parser] with
+    {!warn} and {!Ref} writes made by [parser] are removed, a {!commit} or
+    {!cut} inside [parser] has no effect outside it, and the failures of its
+    probes are forgotten when it succeeds.
+
+    Use it with {!skip_to} to read a token once: look at the token, decide, then
+    move after it without a second scan. A parser with one token of lookahead
+    keeps the last result with the position where it was read. The position is
+    all that a rewind must put back, so {!or_}, {!many}, {!capture} and
+    {!recover} work with it.
+
+    {@ocaml[
+    type token = Name of string | Symbol of char | End
+
+    let token () =
+      skip_whitespace ();
+      match peek_char () with
+      | None ->
+          End
+      | Some 'a' .. 'z' ->
+          Name (take_while (fun c -> c >= 'a' && c <= 'z'))
+      | Some c ->
+          ignore (any_char ());
+          Symbol c
+
+    let read_at = ref (-1)
+    let current = ref End
+    let stop = ref 0
+
+    let peek () =
+      let here = position () in
+      if !read_at <> here then begin
+        let t, after = peek_with token in
+        read_at := here;
+        current := t;
+        stop := after
+      end;
+      !current
+
+    let advance () =
+      ignore (peek ());
+      skip_to !stop
+    ]}
+
+    Set [read_at] to [-1] before each parse.
+
+    To report an error of a token, return it in the value of [token] and record
+    it with {!warn} in [advance].
+
+    In {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window]. This includes the whitespace and comments that it skips
+    before the token. *)
+
+val skip_to : int -> unit
+(** [skip_to target] moves the position forward to [target], an absolute offset
+    as {!position} returns it. It reads nothing and never fails. Use it with a
+    position that {!peek_with} returned.
+
+    Raises [Invalid_argument] if [target] is before the position, or after the
+    input that the parse has read. Each offset from the position to one that
+    {!peek_with} returned is in the input read. *)
+
 val capture : ?release:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
@@ -818,9 +885,8 @@ val commit : unit -> unit
     expected.
 
     [commit ()] does nothing outside any frame. It does nothing inside
-    {!look_ahead}, and it does not reach the frames outside the look-ahead. When
-    the innermost frame is a {!capture} with [~release:true], [commit ()] moves
-    the rewind point of that [capture] to the current position.
+    {!look_ahead} or {!peek_with}, and it does not reach the frames outside the
+    look-ahead.
 
     [commit ()] does not seal or release outer frames. In
     [many (fun () -> or_ a b ())], a [commit ()] inside [a] seals the [or_]
@@ -887,9 +953,7 @@ val cut : unit -> unit
 (** [cut ()] declares that the construct that is running is decided. It seals
     every {!or_}, {!one_of}, {!many}, {!sep_by}, {!optional} and [fold_*] frame
     opened since the innermost enclosing {!val:context}, so none of them
-    backtracks after the cut. It stops at a {!look_ahead} and at a {!capture},
-    but it moves the rewind point of a {!capture} with [~release:true] to the
-    current position and continues past it.
+    backtracks after the cut. It stops at a {!look_ahead} or {!peek_with}.
 
     When the enclosing {!val:context} then fails, the frames outside it are
     sealed too, so an enclosing {!or_}, {!many} or {!sep_by} cannot swallow the

@@ -2132,6 +2132,30 @@ let look_ahead p =
       far_merge st saved;
       raise exn
 
+let peek_with p =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match p () with
+  | v ->
+      let stop = st.pos in
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      if st.far != saved then st.far <- saved;
+      (v, stop)
+  | exception exn ->
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
+let skip_to target =
+  let st = get_state () in
+  if target < st.pos || target > st.input_len then
+    invalid_arg "Parseff.skip_to: target is not in the input after the position";
+  st.pos <- target
+
 let ctx_stride = 2
 let ctx_cut_bit = 1
 let ctx_delimited_bit = 2
