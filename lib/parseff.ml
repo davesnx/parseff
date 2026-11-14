@@ -168,6 +168,8 @@ type source = {
   feed : feed;
   mutable eof : bool;
   mutable window : int;
+  mutable regex_text : string;
+  mutable regex_from : int;
 }
 
 and feed =
@@ -386,7 +388,14 @@ module Source = struct
   type nonrec bigstring = bigstring
 
   let make ~initial ~eof feed : t =
-    { initial; feed; eof; window = default_backtrack_window }
+    {
+      initial;
+      feed;
+      eof;
+      window = default_backtrack_window;
+      regex_text = "";
+      regex_from = max_int;
+    }
 
   let of_string s =
     make ~initial:s ~eof:true
@@ -479,6 +488,7 @@ module State = struct
 
   let for_source ~(src : source) ~max_depth ~backtrack_window ~trace =
     src.window <- backtrack_window;
+    src.regex_from <- max_int;
     make ~input:src.initial ~max_depth ~source:(Some src) ~trace
 
   let none = for_input ~input:"" ~max_depth:0 ~trace:None
@@ -1872,26 +1882,87 @@ let[@inline never] regex_window_error st src =
        )
     )
 
-let rec match_regex_source st src re label =
-  trim_input st;
-  let off = st.pos - st.base in
+let regex_text st src =
+  let want =
+    if st.pos > st.base then
+      st.pos - 1
+    else
+      st.pos
+  in
+  if
+    src.regex_from > want
+    || src.regex_from + String.length src.regex_text <> st.input_len
+  then
+    if Bytes.length st.input = st.input_len - st.base then begin
+      src.regex_text <- Bytes.unsafe_to_string st.input;
+      src.regex_from <- st.base
+    end else begin
+      src.regex_text <-
+        Bytes.sub_string st.input (want - st.base) (st.input_len - want);
+      src.regex_from <- want
+    end
+
+let regex_matched st stop =
+  let match_start = st.pos in
+  st.pos <- stop;
+  slice st match_start (stop - match_start)
+
+let regex_prefetch st src =
+  let quarter = imax 1 (src.window / 4) in
+  if
+    (not src.eof)
+    && st.input_len - st.pos < quarter
+    && src.window - (st.input_len - State.reclaim_floor st ~keep_from:st.pos)
+       >= quarter
+  then
+    ignore (regex_read_ahead st src (src.window / 2))
+
+let rec match_regex_source st src re label settled =
+  regex_text st src;
+  let text = src.regex_text in
+  let from = src.regex_from in
+  let off = st.pos - from in
+  if src.eof then
+    match Re.exec_partial_detailed ~pos:off re text with
+    | `Full g ->
+        regex_matched st (from + Re.Group.stop g 0)
+    | `Partial _ | `Mismatch ->
+        regex_failure st label
+  else if
+    settled || st.input_len - st.pos >= imax (src.window / 4) default_buf_size
+  then
+    match Re.exec_partial_detailed ~pos:off re text with
+    | `Full g when from + Re.Group.stop g 0 < st.input_len ->
+        regex_matched st (from + Re.Group.stop g 0)
+    | `Mismatch ->
+        regex_failure st label
+    | `Full _ | `Partial _ ->
+        regex_read_more st src re label settled
+  else
+    match Re.exec_partial ~pos:off re text with
+    | `Mismatch ->
+        regex_failure st label
+    | `Partial ->
+        regex_read_more st src re label settled
+    | `Full -> (
+        match Re.exec_partial_detailed ~pos:off re text with
+        | `Full g when from + Re.Group.stop g 0 < st.input_len ->
+            regex_matched st (from + Re.Group.stop g 0)
+        | _ ->
+            regex_read_more st src re label settled
+      )
+
+and regex_read_more st src re label settled =
   let ahead = st.input_len - st.pos in
-  match
-    Re.exec_partial_detailed ~pos:off re (Bytes.unsafe_to_string st.input)
-  with
-  | `Full g when src.eof || st.base + Re.Group.stop g 0 < st.input_len ->
-      let match_start = st.pos in
-      let match_end = st.base + Re.Group.stop g 0 in
-      st.pos <- match_end;
-      slice st match_start (match_end - match_start)
-  | `Mismatch ->
-      regex_failure st label
-  | _ when src.eof ->
-      regex_failure st label
-  | _ ->
-      if not (regex_read_ahead st src (ahead + imax 1 ahead)) then
-        regex_window_error st src;
-      match_regex_source st src re label
+  if regex_read_ahead st src (ahead + imax 1 ahead) then
+    match_regex_source st src re label settled
+  else
+    let from = src.regex_from in
+    match Re.exec_partial_detailed ~pos:(st.pos - from) re src.regex_text with
+    | `Full g when from + Re.Group.stop g 0 < st.input_len ->
+        regex_matched st (from + Re.Group.stop g 0)
+    | _ ->
+        regex_window_error st src
 
 let regex_frame_text st fr =
   let before p =
@@ -1946,13 +2017,15 @@ let[@inline never] handle_match_regex st re label =
           regex_failure st label
     )
   | Some src -> (
-      if (not src.eof) && st.input_len - st.pos < src.window / 2 then
-        ignore (regex_read_ahead st src (src.window / 2));
       match src.feed with
       | Frame fr ->
+          if (not src.eof) && st.input_len - st.pos < src.window / 2 then
+            ignore (regex_read_ahead st src (src.window / 2));
           match_regex_frame st src fr re label
       | Read _ | Chunks _ | Bigstrings _ ->
+          regex_prefetch st src;
           match_regex_source st src re label
+            (st.input_len - st.pos >= src.window / 2)
     )
 
 let[@inline never] need_bytes_slow st n =
@@ -2428,6 +2501,8 @@ let[@inline never] limited st stop f =
         feed = Frame fr;
         eof = ended || outer_len >= limit;
         window;
+        regex_text = "";
+        regex_from = max_int;
       };
   st.input_len <- imin outer_len limit;
   let leave () =

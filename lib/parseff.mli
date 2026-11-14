@@ -465,10 +465,12 @@ val match_regex : ?label:string -> regex -> string
     with [Backtrack_window_exceeded]. A regex that needs later bytes to choose a
     longer match can return the shorter one when the window is small: [a(bc)?]
     on ["abc"] can return ["a"] with a window below [6]. Before it matches, a
-    streaming [match_regex] reads ahead up to half the backtrack window, also
-    when the match then fails. A regex that can still match with more input, for
-    example one with a leading [.*], reads until the window is full and then
-    fails with [Backtrack_window_exceeded].
+    streaming [match_regex] reads ahead up to half the backtrack window when
+    less than a quarter of the window, or no byte, is buffered after the
+    position and the window has room for that much more, also when the match
+    then fails. A regex that can still match with more input, for example one
+    with a leading [.*], reads until the window is full and then fails with
+    [Backtrack_window_exceeded].
 
     Example:
     {@ocaml[

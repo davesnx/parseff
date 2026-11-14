@@ -307,6 +307,92 @@ let test_regex_first_head () =
        directly on the major heap per parse, expected at most 50"
       actual
 
+let word_re = Parseff.regex (Re.rep1 (Re.rg 'a' 'z'))
+let space_re = Parseff.regex (Re.char ' ')
+
+let word_and_space () =
+  ignore (Parseff.match_regex word_re);
+  ignore (Parseff.match_regex space_re)
+
+let regex_words_allocated ~window ~record size =
+  let input = String.concat "" (List.init (size / 5) (fun _ -> "abcd ")) in
+  let parser () =
+    if record = 0 then
+      ignore (Parseff.many word_and_space ())
+    else
+      for _ = 1 to size / record do
+        match
+          Parseff.capture (fun () ->
+              for _ = 1 to record / 5 do
+                word_and_space ()
+              done
+          )
+        with
+        | Ok () ->
+            ()
+        | Error error ->
+            Alcotest.fail (Parseff.render_error error)
+      done
+  in
+  let sent = ref 0 in
+  let source =
+    Parseff.Source.of_function (fun buf off len ->
+        if !sent = String.length input || len = 0 then
+          0
+        else begin
+          Bytes.set buf off input.[!sent];
+          incr sent;
+          1
+        end
+    )
+  in
+  Gc.full_major ();
+  let before = Gc.allocated_bytes () in
+  ( match
+      Parseff.parse_source ~backtrack_window:window source (fun () ->
+          parser ();
+          Parseff.end_of_input ()
+      )
+    with
+  | Ok () ->
+      ()
+  | Error error ->
+      Alcotest.fail (Parseff.render_error error)
+  );
+  (Gc.allocated_bytes () -. before) /. Float.of_int (Sys.word_size / 8)
+
+let test_regex_one_byte_reads () =
+  let growth ~window ~record size =
+    let small = regex_words_allocated ~window ~record size in
+    let large = regex_words_allocated ~window ~record (4 * size) in
+    if large > 8. *. small then
+      Alcotest.failf
+        "match_regex on reads of 1 byte with ~backtrack_window:%d and records \
+         of %d bytes allocated %.0f words for %d bytes and %.0f for %d bytes, \
+         expected at most 8 times more"
+        window record small size large (4 * size)
+  in
+  growth ~window:64 ~record:0 4_000;
+  growth ~window:64 ~record:40 4_000;
+  growth ~window:65536 ~record:0 16_000;
+  growth ~window:65536 ~record:16_000 16_000;
+  let size = 200_000 in
+  List.iter
+    (fun (small_record, large_record) ->
+      let small = regex_words_allocated ~window:64 ~record:small_record size in
+      let large =
+        regex_words_allocated ~window:65536 ~record:large_record size
+      in
+      if large > 1.5 *. small then
+        Alcotest.failf
+          "match_regex on %d bytes read 1 byte at a time allocated %.0f words \
+           with ~backtrack_window:64 and records of %d bytes, and %.0f words \
+           with ~backtrack_window:65536 and records of %d bytes, expected at \
+           most 1.5 times more"
+          size small small_record large large_record
+    )
+    [ (0, 0); (40, 40_000) ]
+
 let head_and_body = head ^ String.make 4000 'x'
 
 let full_source ?initial_buffer_size () =
@@ -417,6 +503,8 @@ let () =
           Alcotest.test_case "full first read" `Quick test_full_first_read;
           Alcotest.test_case "head that starts with match_regex" `Quick
             test_regex_first_head;
+          Alcotest.test_case "match_regex on reads of 1 byte" `Quick
+            test_regex_one_byte_reads;
         ]
       );
     ]
