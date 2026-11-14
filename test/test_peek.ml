@@ -350,6 +350,137 @@ let test_small_window_token_loop () =
     )
     [ 1; 3; 64 ]
 
+let test_failure_after_consuming () =
+  check_all "peek fails after it consumed" Fun.id "abc" "Ok abc" (fun () ->
+      or_
+        (fun () ->
+          fst
+            (peek_with (fun () ->
+                 ignore (char 'a');
+                 consume "x"
+             )
+            )
+        )
+        (fun () -> consume "abc")
+        ()
+  )
+
+let test_rule_in_token_loop () =
+  let words = 200 in
+  let input = String.concat " " (List.init words (fun _ -> "ab")) in
+  let word () =
+    skip_while (fun c -> c = ' ');
+    take_while is_alpha
+  in
+  let p d () =
+    let cell = Ref.create 0 in
+    let raised_at = ref [] in
+    let rec go n =
+      let start = position () in
+      warn d "outside";
+      ignore
+        (peek_with (fun () ->
+             warn d "inside";
+             word ()
+         )
+        );
+      let w, stop =
+        peek_with (fun () ->
+            Ref.set cell (n + 1);
+            word ()
+        )
+      in
+      if w = "" then
+        n
+      else begin
+        let after_commit =
+          or_
+            (fun () ->
+              ignore
+                (peek_with (fun () ->
+                     let w = word () in
+                     commit ();
+                     w
+                 )
+                );
+              consume "?"
+            )
+            (fun () -> fst (peek_with word))
+            ()
+        in
+        let after_cut =
+          or_
+            (fun () ->
+              ignore
+                (peek_with (fun () ->
+                     let w = word () in
+                     cut ();
+                     w
+                 )
+                );
+              consume "?"
+            )
+            (fun () -> fst (peek_with word))
+            ()
+        in
+        let after_failure =
+          or_
+            (fun () ->
+              fst
+                (peek_with (fun () ->
+                     ignore (word ());
+                     consume "?"
+                 )
+                )
+            )
+            (fun () -> fst (peek_with word))
+            ()
+        in
+        ( try
+            ignore
+              (peek_with (fun () ->
+                   ignore (word ());
+                   Ref.set cell (-1);
+                   raise Exit
+               )
+              )
+          with Exit ->
+            if position () <> start then raised_at := n :: !raised_at
+        );
+        if
+          after_commit <> w || after_cut <> w || after_failure <> w
+          || position () <> start
+          || Ref.get cell <> 0
+        then
+          fail (Printf.sprintf "word %d" n);
+        skip_to stop;
+        go (n + 1)
+      end
+    in
+    let n = go 0 in
+    Printf.sprintf "%d words, raised at %d positions" n (List.length !raised_at)
+  in
+  let expected = Printf.sprintf "Ok %d words, raised at 0 positions" words in
+  let check name result d =
+    Alcotest.(check string) name expected (show Fun.id result);
+    let outside =
+      List.for_all (fun (_, v) -> v = "outside") (entries d)
+      && List.length (entries d) = words + 1
+    in
+    Alcotest.(check bool) (name ^ ", diagnostics") true outside
+  in
+  let d = Diagnostics.create () in
+  check "string" (parse ~diagnostics:d ~consume:`Partial input (p d)) d;
+  List.iter
+    (fun chunk_size ->
+      let d = Diagnostics.create () in
+      check
+        (Printf.sprintf "chunk %d" chunk_size)
+        (run ~diagnostics:d ~backtrack_window:16 (Some chunk_size) input (p d))
+        d
+    )
+    [ 1; 3; 64 ]
+
 let test_location_after_skip () =
   let lines = 200 in
   let input = String.concat "\n" (List.init lines (fun _ -> "abcdefgh ij")) in
@@ -556,6 +687,9 @@ let () =
           test_case "nested" `Quick test_nested;
           test_case "nested rollback" `Quick test_nested_rollback;
           test_case "failure inside capture" `Quick test_failure_inside_capture;
+          test_case "failure after consuming" `Quick
+            test_failure_after_consuming;
+          test_case "rule in a token loop" `Quick test_rule_in_token_loop;
           test_case "stop after a backtrack" `Quick test_stop_after_backtrack;
           test_case "small window token loop" `Quick
             test_small_window_token_loop;
