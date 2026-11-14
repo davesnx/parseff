@@ -208,7 +208,7 @@ val of_seq : string Seq.t -> Source.t
 `Parseff.Source.of_function` creates a source from a low-level read function. The function signature matches POSIX `read(2)`: `read buf off len` fills `buf` starting at `off` with up to `len` bytes and returns the count actually written. Return `0` to signal EOF.
 
 ```ocaml
-val of_function : (bytes -> int -> int -> int) -> Source.t
+val of_function : ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> Source.t
 ```
 This is the low-level escape hatch for byte sources that natively fill a pre-allocated buffer. For most use cases, prefer `Parseff.Source.of_chunks` or `Parseff.Source.of_seq` which handle buffer management automatically.
 
@@ -224,6 +224,13 @@ This is the low-level escape hatch for byte sources that natively fill a pre-all
 
   let network_socket = Parseff.Source.of_function (fun buf off len ->
     Unix.recv socket buf off len []
+  )
+```
+The `~initial_buffer_size` parameter sets the first size of the read buffer, which is the `len` of the first `read` call (default: 2040 bytes). After a read that fills the buffer, the next read gets a buffer of 4096 bytes, or of `initial_buffer_size` bytes when that is larger. The larger buffer is allocated only when that read happens. A read that `match_regex` makes to look ahead does not use the read buffer: its `len` can be as large as the backtrack window. A source made for one short message, such as an HTTP request head, allocates less with an `initial_buffer_size` near the size of the message:
+
+```ocaml
+  let request_head = Parseff.Source.of_function ~initial_buffer_size:512 (fun buf off len ->
+    Unix.read fd buf off len
   )
 ```
 
