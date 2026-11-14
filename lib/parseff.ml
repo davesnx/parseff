@@ -122,7 +122,7 @@ type abort_frames = {
   mutable open_frames : (string * int * bool) list;
 }
 
-exception Depth_limit_exceeded of abort_frames
+exception Depth_limit_exceeded of int * abort_frames
 
 type line_index = {
   mutable starts : int array;
@@ -2413,7 +2413,7 @@ let[@inline always] context_run st delimited start name p =
       | User_failure (pos, _, x) when x.depth = d + 1 ->
           if pos > start then x.chain <- (name, start, delimited) :: x.chain;
           x.depth <- d
-      | Depth_limit_exceeded a | Backtrack_window_exceeded (_, a) ->
+      | Depth_limit_exceeded (_, a) | Backtrack_window_exceeded (_, a) ->
           if a.at > start then
             a.open_frames <- (name, start, delimited) :: a.open_frames
       | _ ->
@@ -2477,7 +2477,8 @@ let cut () =
 let rec_ p =
   let st = get_state () in
   if st.current_depth >= st.max_depth then
-    raise (Depth_limit_exceeded { at = st.pos; open_frames = [] });
+    raise
+      (Depth_limit_exceeded (st.max_depth, { at = st.pos; open_frames = [] }));
   st.current_depth <- st.current_depth + 1;
   match p () with
   | v ->
@@ -2628,9 +2629,20 @@ let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
   | Some d ->
       or_ (fold_left_one_or_more p op) (fun () -> d) ()
 
+(* A level takes 10 stack words native, 15 bytecode (OCaml 5.3). js_of_ocaml
+   and wasm_of_ocaml report [stack_limit = 0] (runtime gc.js, gc.wat). *)
+let fold_right_limit =
+  match (Gc.get ()).stack_limit with n when n > 0 -> n / 32 | _ -> max_int
+
 let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
     : 'a =
   let frame = State.push_rewind_frame st frame_choice in
+  if frame >= fold_right_limit then begin
+    State.pop_rewind_frame st frame;
+    raise
+      (Depth_limit_exceeded (fold_right_limit, { at = st.pos; open_frames = [] })
+      )
+  end;
   match
     let start = st.pos in
     let f = op () in
@@ -4374,9 +4386,14 @@ let render ?name ?source ?custom e =
       ()
   );
   ( match e.kind with
-  | Depth_limit_exceeded _ ->
+  | Depth_limit_exceeded { limit } ->
       gutter_star ();
-      Buffer.add_string b "help: raise ~max_depth"
+      Buffer.add_string b
+        ( if limit = fold_right_limit then
+            "help: raise the stack limit with OCAMLRUNPARAM=l"
+          else
+            "help: raise ~max_depth"
+        )
   | Backtrack_window_exceeded _ ->
       gutter_star ();
       Buffer.add_string b
@@ -5091,12 +5108,9 @@ let run_detailed st ~all thunk =
         Stdlib.Error (error_of_far st [])
     | exception User_failure (pos, msg, x) ->
         Stdlib.Error (error_failure st pos msg x [])
-    | exception Depth_limit_exceeded a ->
+    | exception Depth_limit_exceeded (limit, a) ->
         Stdlib.Error
-          (error_plain st a.at
-             (Depth_limit_exceeded { limit = st.max_depth })
-             a.open_frames
-          )
+          (error_plain st a.at (Depth_limit_exceeded { limit }) a.open_frames)
     | exception Backtrack_window_exceeded (info, a) ->
         Stdlib.Error
           (error_plain st a.at

@@ -502,6 +502,39 @@ let test_fold_right_non_otherwise () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let test_fold_right_failing_build () =
+  let parser =
+    Parseff.fold_right digit_value (fun () ->
+        let _ = Parseff.char '^' in
+        fun l r ->
+          if l = 0 then
+            Char.code (Parseff.char '!')
+          else
+            (l * 10) + r
+    )
+  in
+  match parse_with_pos "1^2^0^3" parser with
+  | Ok (value, pos) ->
+      Alcotest.(check int) "chain stops before the third '^'" 30 value;
+      Alcotest.(check int) "final position" 5 pos
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_fold_right_long_chain () =
+  let n = 10_000 in
+  let input = String.concat "^" (List.init n (fun _ -> "1")) in
+  let parser =
+    Parseff.fold_right digit_value (fun () ->
+        let _ = Parseff.char '^' in
+        ( + )
+    )
+  in
+  match Parseff.parse input parser with
+  | Ok value ->
+      Alcotest.(check int) "sum" n value
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
 let test_fold_left_requires_one () =
   let parser =
     Parseff.fold_left digit_value (fun () ->
@@ -2003,6 +2036,9 @@ let () =
           test_case "fold_right otherwise" `Quick test_fold_right_otherwise;
           test_case "fold_right non-otherwise" `Quick
             test_fold_right_non_otherwise;
+          test_case "fold_right failing build" `Quick
+            test_fold_right_failing_build;
+          test_case "fold_right long chain" `Quick test_fold_right_long_chain;
           test_case "fold_left requires one" `Quick test_fold_left_requires_one;
           test_case "fold_right requires one" `Quick
             test_fold_right_requires_one;
