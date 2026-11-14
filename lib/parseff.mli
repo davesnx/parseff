@@ -1488,6 +1488,10 @@ module Source : sig
       chunk of input. Return [Some s] with a non-empty string for data, or
       [None] to signal EOF. Empty strings ([Some ""]) are silently skipped.
 
+      Parseff can keep a chunk as its input with no copy, so a chunk must not
+      change after [read] returns it. This matters only for a string made with
+      [Bytes.unsafe_to_string] from bytes that are written again.
+
       This is the recommended way to wrap effectful or callback-based data
       sources:
 
@@ -1505,6 +1509,8 @@ module Source : sig
   val of_seq : string Seq.t -> t
   (** [of_seq seq] creates a source from a lazy sequence of string chunks. Each
       element is a chunk of input; the sequence ending ([Seq.Nil]) signals EOF.
+      As with {!of_chunks}, a chunk must not change after the sequence returns
+      it.
 
       {@ocaml skip[
       let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])

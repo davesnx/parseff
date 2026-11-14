@@ -146,6 +146,12 @@ This is the recommended way to wrap stateful or callback-based data sources.
 The library handles buffer management internally — no manual [Bytes.blit_string],
 position tracking, or [min] calculations needed.
 
+[of_chunks] has no read buffer. Parseff copies each chunk into its input. When
+it keeps no earlier input and takes the whole chunk, the chunk becomes the input
+with no copy. Thus a chunk must not change after the function returns it. This
+matters only for a string made with [Bytes.unsafe_to_string] from bytes that are
+written again.
+
 {@ocaml skip[
   (* Eio promise — await once, then signal EOF *)
   let fetched = ref false in
@@ -194,7 +200,8 @@ into a pre-allocated buffer:
 
 {!val:Parseff.Source.of_seq} creates a source from a lazy sequence of string
 chunks. Each element is a chunk of input; the sequence ending ([Seq.Nil]) signals
-EOF.
+EOF. It reads chunks as [of_chunks] does, so a chunk must not change after the
+sequence returns it.
 
 {@ocaml skip[val of_seq : string Seq.t -> Source.t]}
 
