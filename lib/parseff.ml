@@ -3849,17 +3849,21 @@ let window_start s len line_start focus =
   let start =
     ref (imin len (line_start + imax 0 (focus - (window_size / 2))))
   in
-  while is_continuation s len !start do
+  while !start < line_start + focus && is_continuation s len !start do
     incr start
   done;
   !start
 
 let window_stop s len start limit =
-  let stop = ref (imin limit (start + window_size)) in
-  while !stop > start && is_continuation s len !stop do
-    decr stop
+  let stop = imin limit (start + window_size) in
+  let back = ref stop in
+  while !back > imax start (stop - 3) && is_continuation s len !back do
+    decr back
   done;
-  !stop
+  if is_continuation s len !back then
+    stop
+  else
+    !back
 
 let window ~number ~first text focus =
   let len = String.length text in
