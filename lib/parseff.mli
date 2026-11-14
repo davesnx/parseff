@@ -1685,6 +1685,39 @@ module Source : sig
           end)
       ]} *)
 
+  type bigstring =
+    (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+  (** The buffer type of [Bigstringaf.t], [Cstruct.buffer] and
+      [Unix.read_bigarray]. *)
+
+  val of_bigstring_chunks : (unit -> (bigstring * int * int) option) -> t
+  (** [of_bigstring_chunks read] creates a source that calls [read ()] to obtain
+      the next chunk of input as a slice of a bigstring. Return
+      [Some (buf, off, len)] for the [len] bytes of [buf] that start at [off],
+      or [None] to signal EOF. Slices with [len = 0] are skipped, whatever their
+      [off]. Any other slice outside [buf] raises [Invalid_argument] from the
+      parse.
+
+      Parseff parses bytes, not bigstrings: it copies a slice into its input
+      buffer, at most 2040 bytes at a time, as the parser needs them. The bytes
+      of a slice must not change until the next call to [read], but [read] can
+      write the next chunk into the same buffer.
+
+      This fits I/O that reads into a bigstring, such as [Eio.Flow.single_read]
+      with a [Cstruct.t], or a network library that hands its read buffer to the
+      parser:
+
+      {@ocaml skip[
+      let buf = Cstruct.create 4096 in
+      let source =
+        Source.of_bigstring_chunks (fun () ->
+            match Eio.Flow.single_read flow buf with
+            | n -> Some (buf.buffer, buf.off, n)
+            | exception End_of_file -> None)
+      ]}
+
+      To parse a whole bigstring, give it as a single slice. *)
+
   val of_seq : string Seq.t -> t
   (** [of_seq seq] creates a source from a lazy sequence of string chunks. Each
       element is a chunk of input; the sequence ending ([Seq.Nil]) signals EOF.

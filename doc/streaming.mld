@@ -231,6 +231,69 @@ pieces:
   let source = Parseff.Source.of_seq (chunk_seq ~chunk_size:2 "hello world")
 ]}
 
+{2 [Source.of_bigstring_chunks]}
+
+{!val:Parseff.Source.of_bigstring_chunks} creates a source from a function that
+returns slices of bigstrings. A bigstring is the stdlib type
+[(char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t], the
+same type as [Bigstringaf.t] and the buffer of a [Cstruct.t]. Return
+[Some (buf, off, len)] for [len] bytes of [buf] from [off], or [None] to signal
+EOF. Slices with [len = 0] are skipped.
+
+{@ocaml skip[val of_bigstring_chunks :
+  (unit -> (Source.bigstring * int * int) option) -> Source.t]}
+
+Use it when the I/O layer reads into a bigstring, as Eio flows and most network
+libraries do. Parseff parses bytes, so it copies each slice into its input, at
+most 2040 bytes at a time, as the parser needs them. The copy takes about 2
+instructions per byte; parsing an HTTP request head takes about 40. The bytes of
+a slice must not change until the function is called again, so the function can
+read the next chunk into the same buffer:
+
+{@ocaml skip[
+  (* Eio flow read into one Cstruct buffer *)
+  let buf = Cstruct.create 4096 in
+  let source = Parseff.Source.of_bigstring_chunks (fun () ->
+      match Eio.Flow.single_read flow buf with
+      | n -> Some (buf.buffer, buf.off, n)
+      | exception End_of_file -> None) in
+  Parseff.parse_source source my_parser
+]}
+
+To parse a bigstring that you already hold, give it as one slice:
+
+{@ocaml[
+let parse_bigstring buf parser =
+  let sent = ref false in
+  let source =
+    Parseff.Source.of_bigstring_chunks (fun () ->
+        if !sent then None
+        else begin
+          sent := true;
+          Some (buf, 0, Bigarray.Array1.dim buf)
+        end)
+  in
+  Parseff.parse_source source parser
+
+let () =
+  let text = "key=value" in
+  let buf =
+    Bigarray.Array1.init Bigarray.char Bigarray.c_layout (String.length text)
+      (String.get text)
+  in
+  let pair () =
+    let key = Parseff.take_while (fun c -> c <> '=') in
+    let _ = Parseff.char '=' in
+    (key, Parseff.take_while (fun _ -> true))
+  in
+  match parse_bigstring buf pair with
+  | Ok pair -> assert (pair = ("key", "value"))
+  | Error e -> failwith (Parseff.render_error e)
+]}
+
+With [Bigstringaf], [Parseff.parse (Bigstringaf.substring buf ~off ~len) p]
+does the same with one copy.
+
 {2 [Source.of_function]}
 
 {!val:Parseff.Source.of_function} creates a source from a low-level read

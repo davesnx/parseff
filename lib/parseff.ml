@@ -150,6 +150,9 @@ type backtrack_window_error = { limit : int; oldest : int }
 
 exception Backtrack_window_exceeded of backtrack_window_error * abort_frames
 
+type bigstring =
+  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+
 type source = {
   initial : string;
   feed : feed;
@@ -165,11 +168,19 @@ and feed =
       mutable grow : bool;
     }
   | Chunks of chunks
+  | Bigstrings of bigstrings
 
 and chunks = {
   next : unit -> string option;
   mutable pending : string;
   mutable pending_pos : int;
+}
+
+and bigstrings = {
+  next_slice : unit -> (bigstring * int * int) option;
+  mutable slice : bigstring;
+  mutable slice_pos : int;
+  mutable slice_stop : int;
 }
 
 type far = {
@@ -303,6 +314,7 @@ let check_backtrack_window ?(name = "parse_source") w =
 
 module Source = struct
   type t = source
+  type nonrec bigstring = bigstring
 
   let make ~initial ~eof feed : t =
     { initial; feed; eof; window = default_backtrack_window }
@@ -347,6 +359,14 @@ module Source = struct
 
   let of_chunks next =
     make ~initial:"" ~eof:false (Chunks { next; pending = ""; pending_pos = 0 })
+
+  let empty_bigstring = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
+
+  let of_bigstring_chunks next_slice =
+    make ~initial:"" ~eof:false
+      (Bigstrings
+         { next_slice; slice = empty_bigstring; slice_pos = 0; slice_stop = 0 }
+      )
 
   let of_seq seq =
     let r = ref seq in
@@ -872,43 +892,76 @@ let[@inline never] handle_location st =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
-let[@inline never] append st ~floor ~spare ~own chunk off n =
+let[@inline never] relocate st ~floor ~adopt n =
   let cur_len = st.input_len - st.base in
-  if spare && Bytes.length st.input - cur_len >= n then begin
-    Bytes.blit_string chunk off st.input cur_len n;
-    st.input_len <- st.input_len + n
+  let floor = imax 0 (floor - 1) in
+  let drop = imin (imax 0 (floor - st.base)) cur_len in
+  let drop =
+    if drop > 0 then
+      ensure_line_index_preserved_through st floor - st.base
+    else
+      drop
+  in
+  let kept = cur_len - drop in
+  st.base <- st.base + drop;
+  if kept = 0 && String.length adopt = n then begin
+    st.input <- Bytes.unsafe_of_string adopt;
+    true
   end else begin
-    let floor = imax 0 (floor - 1) in
-    let drop = imin (imax 0 (floor - st.base)) cur_len in
-    let drop =
-      if drop > 0 then
-        ensure_line_index_preserved_through st floor - st.base
+    let room =
+      if
+        kept + n + imax kept n > young_buf_size
+        && (2 * kept) + n <= young_buf_size
+      then
+        young_buf_size - kept - n
       else
-        drop
+        imax kept n
     in
-    let kept = cur_len - drop in
-    if own && kept = 0 && off = 0 && n = String.length chunk then
-      st.input <- Bytes.unsafe_of_string chunk
-    else begin
-      let room =
-        if not spare then
-          0
-        else if
-          kept + n + imax kept n > young_buf_size
-          && (2 * kept) + n <= young_buf_size
-        then
-          young_buf_size - kept - n
-        else
-          imax kept n
-      in
-      let buf = Bytes.create (kept + n + room) in
-      Bytes.blit st.input drop buf 0 kept;
-      Bytes.blit_string chunk off buf kept n;
-      st.input <- buf
-    end;
-    st.base <- st.base + drop;
-    st.input_len <- st.input_len + n
+    let buf = Bytes.create (kept + n + room) in
+    Bytes.blit st.input drop buf 0 kept;
+    st.input <- buf;
+    false
   end
+
+let append st ~floor ~own chunk off n =
+  let adopted =
+    Bytes.length st.input - (st.input_len - st.base) < n
+    && begin
+      relocate st ~floor
+        ~adopt:
+          ( if own && off = 0 then
+              chunk
+            else
+              ""
+          )
+        n
+    end
+  in
+  if not adopted then
+    Bytes.blit_string chunk off st.input (st.input_len - st.base) n;
+  st.input_len <- st.input_len + n
+
+external bigstring_get64u : bigstring -> int -> int64 = "%caml_bigstring_get64u"
+
+external bytes_set64u : bytes -> int -> int64 -> unit = "%caml_bytes_set64u"
+
+let blit_bigstring src src_off dst dst_off n =
+  let i = ref 0 in
+  while !i <= n - 8 do
+    bytes_set64u dst (dst_off + !i) (bigstring_get64u src (src_off + !i));
+    i := !i + 8
+  done;
+  while !i < n do
+    Bytes.unsafe_set dst (dst_off + !i)
+      (Bigarray.Array1.unsafe_get src (src_off + !i));
+    incr i
+  done
+
+let append_bigstring st ~floor src off n =
+  if Bytes.length st.input - (st.input_len - st.base) < n then
+    ignore (relocate st ~floor ~adopt:"" n : bool);
+  blit_bigstring src off st.input (st.input_len - st.base) n;
+  st.input_len <- st.input_len + n
 
 let trim_input st =
   let len = st.input_len - st.base in
@@ -951,6 +1004,37 @@ let[@inline never] next_chunk st c =
   | None ->
       ()
 
+let[@inline never] next_slice st b =
+  State.suspend ();
+  let rec next () =
+    match b.next_slice () with Some (_, _, 0) -> next () | r -> r
+  in
+  let r =
+    match next () with
+    | r ->
+        r
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        State.resume st;
+        Printexc.raise_with_backtrace exn bt
+  in
+  State.resume st;
+  match r with
+  | Some (slice, off, len) ->
+      if off < 0 || len < 0 || off > Bigarray.Array1.dim slice - len then
+        invalid_arg
+          (Printf.sprintf
+             "Parseff.Source: slice off %d len %d is outside a bigstring of %d \
+              bytes"
+             off len
+             (Bigarray.Array1.dim slice)
+          );
+      b.slice <- slice;
+      b.slice_pos <- off;
+      b.slice_stop <- off + len
+  | None ->
+      ()
+
 let chunk_avail st c len =
   if c.pending_pos = String.length c.pending then next_chunk st c;
   imin len (String.length c.pending - c.pending_pos)
@@ -986,9 +1070,7 @@ let[@inline never] rec fill st ~keep_from need =
                   read_source st r.read tmp 0 (imin room (Bytes.length tmp))
                 in
                 if n > 0 then begin
-                  append st ~floor ~spare:true ~own:false
-                    (Bytes.unsafe_to_string tmp)
-                    0 n;
+                  append st ~floor ~own:false (Bytes.unsafe_to_string tmp) 0 n;
                   if n = Bytes.length tmp && n < r.tmp_cap then r.grow <- true
                 end;
                 n
@@ -1006,7 +1088,16 @@ let[@inline never] rec fill st ~keep_from need =
                 in
                 if n > 0 then begin
                   c.pending_pos <- off + n;
-                  append st ~floor ~spare:true ~own:true c.pending off n
+                  append st ~floor ~own:true c.pending off n
+                end;
+                n
+            | Bigstrings b ->
+                if b.slice_pos = b.slice_stop then next_slice st b;
+                let off = b.slice_pos in
+                let n = imin room (imin (b.slice_stop - off) young_buf_size) in
+                if n > 0 then begin
+                  b.slice_pos <- off + n;
+                  append_bigstring st ~floor b.slice off n
                 end;
                 n
           in

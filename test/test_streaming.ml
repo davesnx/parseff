@@ -842,6 +842,159 @@ let test_of_chunks_backtrack () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
+let bigstring_source ~size input =
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout (size + 5) in
+  let pos = ref 0 in
+  Parseff.Source.of_bigstring_chunks (fun () ->
+      let n = min size (String.length input - !pos) in
+      if n = 0 then
+        None
+      else begin
+        Bigarray.Array1.fill buf '#';
+        for i = 0 to n - 1 do
+          buf.{3 + i} <- input.[!pos + i]
+        done;
+        pos := !pos + n;
+        Some (buf, 3, n)
+      end
+  )
+
+let bigstring_sizes = [ 1; 7; 65_536 ]
+
+let bytes_source ~size input =
+  let pos = ref 0 in
+  Parseff.Source.of_function (fun buf off len ->
+      let n = min (min size len) (String.length input - !pos) in
+      Bytes.blit_string input !pos buf off n;
+      pos := !pos + n;
+      n
+  )
+
+let show_result show = function
+  | Ok v ->
+      "Ok " ^ show v
+  | Error e ->
+      "Error " ^ Parseff.render_error e
+
+let check_bigstring_like_string ?(consume = `All) name show parser input =
+  let in_memory = Parseff.parse ~consume input parser in
+  List.iter
+    (fun size ->
+      let expected =
+        Parseff.parse_source ~consume (bytes_source ~size input) parser
+      in
+      let got =
+        Parseff.parse_source ~consume (bigstring_source ~size input) parser
+      in
+      if got <> expected then
+        Alcotest.failf
+          "%s, slices of %d: of_function gives %s, of_bigstring_chunks gives %s"
+          name size
+          (show_result show expected)
+          (show_result show got);
+      match (in_memory, got) with
+      | Ok a, Ok b when a = b ->
+          ()
+      | Error _, Error _ ->
+          ()
+      | _ ->
+          Alcotest.failf "%s, slices of %d: parse gives %s, bigstring gives %s"
+            name size
+            (show_result show in_memory)
+            (show_result show got)
+    )
+    bigstring_sizes
+
+let request_line () =
+  let meth = Parseff.take_while ~at_least:1 (fun c -> c >= 'A' && c <= 'Z') in
+  let _ = Parseff.char ' ' in
+  let target = Parseff.take_while ~at_least:1 (fun c -> c <> ' ') in
+  let _ = Parseff.char ' ' in
+  let _ = Parseff.consume "HTTP/1.1" in
+  let _ = Parseff.consume "\r\n" in
+  (meth, target)
+
+let show_pair (a, b) = Printf.sprintf "(%S, %S)" a b
+
+let test_bigstring_literal_and_token_split () =
+  check_bigstring_like_string "request line" show_pair request_line
+    "GET /index.html HTTP/1.1\r\n";
+  check_bigstring_like_string "long token" show_pair request_line
+    ("POST /" ^ String.make 5000 'x' ^ " HTTP/1.1\r\n")
+
+let test_bigstring_errors () =
+  check_bigstring_like_string "literal mismatch" show_pair request_line
+    "GET / HTTP/1.0\r\n";
+  check_bigstring_like_string "early end" show_pair request_line "GET / HTT";
+  check_bigstring_like_string "trailing input" show_pair request_line
+    "GET / HTTP/1.1\r\nextra";
+  check_bigstring_like_string "empty token" show_pair request_line " / x";
+  check_bigstring_like_string "json error"
+    (fun _ -> "json")
+    json "{\"a\": [1, 2,, null]}";
+  check_bigstring_like_string "json"
+    (fun _ -> "json")
+    json "{\"a\": [1, 2, null], \"b\": \"text\"}"
+
+let test_bigstring_partial_and_backtrack () =
+  let parser () =
+    let s =
+      Parseff.or_
+        (fun () -> Parseff.consume "foobar")
+        (fun () -> Parseff.consume "foobaz")
+        ()
+    in
+    (s, Parseff.position ())
+  in
+  check_bigstring_like_string ~consume:`Partial "or_"
+    (fun (s, p) -> Printf.sprintf "(%S, %d)" s p)
+    parser "foobaz and more"
+
+let test_bigstring_large_input () =
+  let input =
+    String.init 60_003 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  check_bigstring_like_string "take_while"
+    (fun s -> Printf.sprintf "%d bytes" (String.length s))
+    (fun () -> Parseff.take_while (fun _ -> true))
+    input
+
+let test_bigstring_empty_slices_skipped () =
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 5 in
+  String.iteri (fun i c -> buf.{i} <- c) "hello";
+  let slices = ref [ (buf, 0, 0); (buf, 5, 0); (buf, 0, 2); (buf, 2, 3) ] in
+  let src =
+    Parseff.Source.of_bigstring_chunks (fun () ->
+        match !slices with
+        | [] ->
+            None
+        | x :: rest ->
+            slices := rest;
+            Some x
+    )
+  in
+  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  | Ok s ->
+      Alcotest.(check string) "matched" "hello" s
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_bigstring_slice_outside () =
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 4 in
+  List.iter
+    (fun (off, len) ->
+      let src =
+        Parseff.Source.of_bigstring_chunks (fun () -> Some (buf, off, len))
+      in
+      match Parseff.parse_source src Parseff.any_char with
+      | exception Invalid_argument _ ->
+          ()
+      | _ ->
+          Alcotest.failf "slice off %d len %d: expected Invalid_argument" off
+            len
+    )
+    [ (-1, 2); (0, 5); (3, 2); (1, -1) ]
+
 let test_large_input_grows_read_buffer () =
   let input =
     String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
@@ -2416,6 +2569,20 @@ let () =
             test_backtrack_across_chunk_borders;
           test_case "parse_source_each across chunk borders" `Quick
             test_each_across_chunk_borders;
+        ]
+      );
+      ( "Source.of_bigstring_chunks",
+        [
+          test_case "literal and token split across slices" `Quick
+            test_bigstring_literal_and_token_split;
+          test_case "same errors as parse" `Quick test_bigstring_errors;
+          test_case "partial and backtrack" `Quick
+            test_bigstring_partial_and_backtrack;
+          test_case "large input" `Quick test_bigstring_large_input;
+          test_case "empty slices skipped" `Quick
+            test_bigstring_empty_slices_skipped;
+          test_case "slice outside the bigstring" `Quick
+            test_bigstring_slice_outside;
         ]
       );
       ( "Source.of_seq",

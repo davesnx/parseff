@@ -346,7 +346,7 @@ let show_event = function
 
 let window_exceeded = "backtrack window exceeded"
 
-type feed = Function | Seq
+type feed = Function | Seq | Bigstring
 
 let chunked feed input sizes =
   let pos = ref 0 in
@@ -376,6 +376,21 @@ let chunked feed input sizes =
           Seq.Cons (String.sub input p n, seq)
       in
       Parseff.Source.of_seq seq
+  | Bigstring ->
+      let shift = 3 in
+      let len = String.length input in
+      let buf =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout (len + 5)
+      in
+      Bigarray.Array1.fill buf '#';
+      String.iteri (fun i c -> buf.{shift + i} <- c) input;
+      Parseff.Source.of_bigstring_chunks (fun () ->
+          if !pos >= len then
+            None
+          else
+            let p, n = next max_int in
+            Some (buf, shift + p, n)
+      )
 
 type runner = Memory | Stream of feed * int list * int
 
@@ -1201,11 +1216,20 @@ let streams =
   in
   List.map (fun (s, w) -> (Function, s, w)) sizes
   @ List.map (fun (s, w) -> (Seq, s, w)) sizes
+  @ List.map (fun (s, w) -> (Bigstring, s, w)) sizes
+  @ [ (Bigstring, [ 0; 2; 0; 0; 3 ], large_window) ]
   @ [ (Seq, [ 0; 2; 0; 0; 3 ], large_window); (Seq, [ 0; 1; 3 ], 3) ]
 
 let show_stream (feed, sizes, window) =
   Printf.sprintf "parse_source, %s, chunks [%s], backtrack_window %d"
-    (match feed with Function -> "of_function" | Seq -> "of_seq")
+    ( match feed with
+    | Function ->
+        "of_function"
+    | Seq ->
+        "of_seq"
+    | Bigstring ->
+        "of_bigstring_chunks"
+    )
     (String.concat "; " (List.map string_of_int sizes))
     window
 
