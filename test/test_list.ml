@@ -591,7 +591,7 @@ let test_sync_before_element () =
     "value" "Ok a_"
     (show_result (fun l -> String.of_seq (List.to_seq l)) r);
   Alcotest.check errs "errors"
-    [ (2, "expected ',', found '('"); (4, "expected ')', found ';'") ]
+    [ (4, "expected ')', found ';'"); (2, "expected ',', found '('") ]
     (entries d)
 
 type item = Num of int | Sum of int * int | Gap
@@ -652,7 +652,7 @@ let test_recover_in_element () =
   check "[1, (2 + ?), 4]" ("Ok 1,_,4", [ (9, "expected integer, found '?'") ]);
   check "[1 (2 + ?)]"
     ( "Ok 1,_",
-      [ (3, "expected ',', found '('"); (8, "expected integer, found '?'") ]
+      [ (8, "expected integer, found '?'"); (3, "expected ',', found '('") ]
     )
 
 let test_list_in_or_branch () =
@@ -864,8 +864,8 @@ let test_require_commit () =
   Alcotest.(check string)
     "value" "Ok"
     (show_result (fun () -> "") r |> String.trim);
-  Alcotest.check errs "an entry before a commit in the parser stays"
-    [ (0, "inner"); (0, "expected ')', found 'x'") ]
+  Alcotest.check errs "an insertion undoes what the parser did"
+    [ (0, "expected ')', found 'x'") ]
     (entries d);
   let branch d () =
     or_
@@ -895,6 +895,289 @@ let test_require_commit () =
     "commit in require: with the collector, it does not reach the or_"
     "Ok right"
     (show_result Fun.id (parse ~diagnostics:d "ac" (branch d)))
+
+let test_require_undoes_parser () =
+  let d = Diagnostics.create () in
+  let cut_in_require () =
+    or_
+      (fun () ->
+        require d
+          (fun () ->
+            cut ();
+            ignore (char 'x')
+          )
+          ignore;
+        ignore (char 'z');
+        "L"
+      )
+      (fun () ->
+        ignore (char 'y');
+        "R"
+      )
+      ()
+  in
+  Alcotest.(check string)
+    "a cut in require does not reach the or_" "Ok R"
+    (show_result Fun.id (parse ~diagnostics:d "y" cut_in_require));
+  let r = Ref.create 0 in
+  let d = Diagnostics.create () in
+  let value =
+    parse ~diagnostics:d "q" (fun () ->
+        Ref.set r 0;
+        require d
+          (fun () ->
+            Ref.set r 1;
+            commit ();
+            ignore (char 'x')
+          )
+          ignore;
+        ignore (char 'q');
+        Ref.get r
+    )
+  in
+  Alcotest.(check string)
+    "a Ref change before a commit is undone" "Ok 0"
+    (show_result string_of_int value)
+
+type custom_error += Probe_error
+
+let test_require_fail_rule () =
+  let run p =
+    let d = Diagnostics.create () in
+    let r =
+      parse ~diagnostics:d "ac" (fun () ->
+          require d
+            (fun () ->
+              or_
+                (fun () ->
+                  ignore (char 'a');
+                  ignore (char 'b')
+                )
+                p ()
+            )
+            ignore;
+          ignore (take 2)
+      )
+    in
+    (Result.is_ok r, entries d)
+  in
+  Alcotest.(check (pair bool errs))
+    "fail after a branch that read further: no insertion" (false, [])
+    (run (fun () -> fail "x"));
+  Alcotest.(check (pair bool errs))
+    "error after a branch that read further: no insertion" (false, [])
+    (run (fun () -> error Probe_error));
+  Alcotest.(check (pair bool errs))
+    "a primitive failure: no insertion" (false, [])
+    (run (fun () -> ignore (char 'z')))
+
+exception Stop
+
+let test_raising_callbacks () =
+  let digit_ws () =
+    let c = digit () in
+    ws ();
+    c
+  in
+  let sync = skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')') in
+  let guarded name input body =
+    let d = Diagnostics.create () in
+    let r =
+      parse ~diagnostics:d input (fun () ->
+          let v =
+            match
+              capture (fun () ->
+                  match body d with s -> s | exception Stop -> "stop"
+              )
+            with
+            | Ok s ->
+                s
+            | Error _ ->
+                "error"
+          in
+          let w =
+            try or_ (fun () -> body d) (fun () -> "or") () with Stop -> "stop"
+          in
+          ignore w;
+          ignore (take_while (fun _ -> true));
+          v
+      )
+    in
+    match r with
+    | Ok s ->
+        ignore s
+    | Error e ->
+        Alcotest.failf "%s: %s" name (error_message e)
+    | exception e ->
+        Alcotest.failf "%s: %s" name (Printexc.to_string e)
+  in
+  let sep_comma () =
+    ignore (char ',');
+    ws ()
+  in
+  let lst ?(record = fun _ _ -> ()) ?(sync = sync) ?(hole = fun _ -> '?')
+      ?(close = fun () -> peek_char () = Some ')') ?(sep = sep_comma)
+      ?(element = digit_ws) d =
+    String.of_seq
+      (List.to_seq (list ~record ~sep d ~close ~sync element hole ()))
+  in
+  let stop _ = raise Stop in
+  guarded "record, missing separator" "1 2)"
+    (lst ~record:(fun _ _ -> raise Stop));
+  guarded "record, element" "1, x)" (lst ~record:(fun _ _ -> raise Stop));
+  guarded "sync" "1, x)" (lst ~sync:(fun () -> raise Stop));
+  guarded "sync, missing separator" "1 x)" (lst ~sync:(fun () -> raise Stop));
+  guarded "hole" "1, x)" (lst ~hole:stop);
+  guarded "close" "1)" (lst ~close:(fun () -> raise Stop));
+  guarded "sep" "1, 2)" (lst ~sep:(fun () -> raise Stop));
+  guarded "element" "1 2)"
+    (lst ~element:(fun () ->
+         if peek_char () = Some '2' then
+           raise Stop
+         else
+           digit_ws ()
+     )
+    );
+  guarded "require: parser" "x" (fun d ->
+      require d (fun () -> raise Stop) ignore;
+      "r"
+  );
+  guarded "require: missing" "x" (fun d ->
+      require d (fun () -> ignore (char ')')) stop;
+      "r"
+  )
+
+let test_trace_order () =
+  let element d () =
+    let c =
+      recover d
+        ~sync:(fun () -> skip_while (fun c -> c = 'x'))
+        digit
+        (fun _ -> '?')
+    in
+    ignore (char ';');
+    ws ();
+    c
+  in
+  let events = ref [] in
+  let trace = function
+    | Captured { error; _ } ->
+        events := error_message error :: !events
+    | _ ->
+        ()
+  in
+  let d = Diagnostics.create () in
+  let r =
+    parse ~trace ~diagnostics:d "1; x)" (fun () ->
+        let l =
+          list
+            ~sep:(fun () ->
+              ignore (char ',');
+              ws ()
+            )
+            d
+            ~close:(fun () -> peek_char () = Some ')')
+            ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')'))
+            (element d)
+            (fun _ -> '!')
+            ()
+        in
+        ignore (char ')');
+        String.of_seq (List.to_seq l)
+    )
+  in
+  Alcotest.(check string) "value" "Ok 1!" (show_result Fun.id r);
+  Alcotest.check errs "entries"
+    [ (4, "expected ';', found ')'"); (3, "expected ',', found 'x'") ]
+    (entries d);
+  Alcotest.(check (list string))
+    "the event of the inner recover, then one event for each entry, in order"
+    [
+      "expected digit, found 'x'";
+      "expected ';', found ')'";
+      "expected ',', found 'x'";
+    ]
+    (List.rev !events)
+
+let test_first_element_fail () =
+  let element () =
+    let c = any_char () in
+    if c >= '0' && c <= '9' then
+      c
+    else
+      fail "not a digit"
+  in
+  let run diagnostics =
+    let d = Diagnostics.create () in
+    let parser () =
+      let l =
+        list
+          ~sep:(fun () -> ignore (char ','))
+          d
+          ~close:(fun () -> peek_char () = Some ')')
+          ~sync:ignore element
+          (fun _ -> '!')
+          ()
+      in
+      ignore (char ')');
+      String.of_seq (List.to_seq l)
+    in
+    let r =
+      if diagnostics then
+        parse ~diagnostics:d ")" parser
+      else
+        parse ")" parser
+    in
+    (show_result Fun.id r, entries d)
+  in
+  Alcotest.(check (pair string errs))
+    "with the collector: an empty list and the error"
+    ("Ok ", [ (1, "not a digit") ])
+    (run true);
+  Alcotest.(check (pair string errs))
+    "without the collector: as sep_by"
+    ("Error at 1: not a digit", [])
+    (run false)
+
+let test_no_collector_is_plain () =
+  let rs = Random.State.make [| 2026; 11; 17 |] in
+  let pieces = [| "{"; "}"; ","; ", "; "1"; "2 "; "+"; " "; "?"; "(" |] in
+  let unused = Diagnostics.create () in
+  let many_braces () =
+    sym '{' ();
+    let xs = many expr () in
+    sym '}' ();
+    xs
+  in
+  let list_many () =
+    sym '{' ();
+    let xs =
+      list unused ~close:(at '}') ~sync:ignore expr (fun _ -> Hole_expr) ()
+    in
+    require unused (sym '}') ignore;
+    xs
+  in
+  let same show input listed plain =
+    Alcotest.(check string)
+      input
+      (show_result show (parse input plain))
+      (show_result show (parse input listed))
+  in
+  for _ = 1 to 5000 do
+    let n = Random.State.int rs 10 in
+    let input =
+      "{"
+      ^ String.concat ""
+          (List.init n (fun _ ->
+               pieces.(Random.State.int rs (Array.length pieces))
+           )
+          )
+    in
+    same show_exprs input (braces unused) strict_braces;
+    same show_exprs input (braces ~trailing:true unused) loose_braces;
+    same show_opts input (opt_braces unused) opt_strict;
+    same show_exprs input list_many many_braces
+  done
 
 let test_require_furthest_failure () =
   let run p =
@@ -1069,6 +1352,16 @@ let () =
           test_case "a failed step leaves no entry and no event" `Quick
             test_failed_step_leaves_nothing;
           test_case "require: commit in the parser" `Quick test_require_commit;
+          test_case "require: undoes the parser" `Quick
+            test_require_undoes_parser;
+          test_case "require: fail follows the rule" `Quick
+            test_require_fail_rule;
+          test_case "callbacks that raise" `Quick test_raising_callbacks;
+          test_case "trace: events and entries agree" `Quick test_trace_order;
+          test_case "first element fails with fail" `Quick
+            test_first_element_fail;
+          test_case "without the collector: the plain parser" `Quick
+            test_no_collector_is_plain;
           test_case "require: the furthest failure decides" `Quick
             test_require_furthest_failure;
           test_case "recover inside an element" `Quick test_recover_in_element;

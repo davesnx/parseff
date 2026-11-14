@@ -257,7 +257,7 @@ let test_wrong_collector () =
       (fun _ -> Hole)
       ()
   in
-  let plain () = sep_by ~at_least:1 (value d) comma () in
+  let plain () = sep_by (value d) comma () in
   List.iter
     (fun input ->
       let expected = show_result (parse input (fun () -> List (plain ()))) in
