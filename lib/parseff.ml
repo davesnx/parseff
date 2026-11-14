@@ -140,6 +140,7 @@ type line_index = {
   mutable cut_line : int;
   mutable cut_at : int;
   mutable cut_chars : int;
+  mutable hint : int;
 }
 
 let frame_choice = 0
@@ -255,10 +256,22 @@ type view = {
   right_cut : bool;
 }
 
-type excerpt = {
+type shown = {
   views : view list;
   frame_locs : (int * int * int option) option list;
   char_column : int option;
+  built : bool;
+}
+
+type excerpt = {
+  mutable shown : shown;
+  kept : bytes;
+  kept_len : int;
+  kept_scanned : int;
+  error_pos : int;
+  error_place : location option;
+  error_frames : (string * int * bool) list;
+  marks : note_data list;
 }
 
 type error_kind =
@@ -841,6 +854,7 @@ let create_line_index () =
     cut_line = -1;
     cut_at = 0;
     cut_chars = 0;
+    hint = 0;
   }
 
 let find_newline s from limit =
@@ -898,11 +912,13 @@ let find_line idx offset =
   done;
   !lo
 
+external bytes_get64u : bytes -> int -> int64 = "%caml_bytes_get64u"
+
 let count_newlines s from limit =
   let n = ref 0 in
   let i = ref from in
   while !i + 8 <= limit do
-    let x = Int64.logxor (Bytes.get_int64_ne s !i) 0x0A0A0A0A0A0A0A0AL in
+    let x = Int64.logxor (bytes_get64u s !i) 0x0A0A0A0A0A0A0A0AL in
     let y =
       Int64.logor
         (Int64.add (Int64.logand x 0x7F7F7F7F7F7F7F7FL) 0x7F7F7F7F7F7F7F7FL)
@@ -4784,6 +4800,274 @@ let add_text b text =
     Buffer.add_string b text
   end
 
+let shown_of ~input ~base ~input_len ~source_open ~limit idx ~pos ~notes frames
+    =
+  extend_line_index idx ~base_offset:base input (imin pos input_len);
+  let floor = idx.starts.(0) in
+  let here =
+    if pos >= floor && pos <= input_len then begin
+      let li = find_line idx pos in
+      Some (li, idx.starts.(li), idx.line_base + li + 1)
+    end else
+      None
+  in
+  let char_column_of line_start p =
+    if p > input_len then
+      None
+    else if line_start >= base then
+      Some (1 + count_code_points ~limit input (line_start - base) (p - base))
+    else if idx.cut_line = line_start && idx.cut_at >= base && p >= idx.cut_at
+    then
+      Some
+        (1 + idx.cut_chars
+        + count_code_points ~limit input (idx.cut_at - base) (p - base)
+        )
+    else
+      None
+  in
+  let char_column =
+    Option.bind here (fun (_, line_start, _) -> char_column_of line_start pos)
+  in
+  let view ~number ~start ~focus =
+    if start < base || start > input_len then
+      None
+    else begin
+      let focus = imax 0 (imin focus (input_len - start)) in
+      let len = input_len - base in
+      let rel = start - base in
+      let scan_end from limit = find_newline input from limit in
+      let line_end = scan_end rel (imin len (rel + window_size + 1)) in
+      let ended = line_end < len && Bytes.unsafe_get input line_end = '\n' in
+      let strip_cr stop =
+        if stop > rel && Bytes.unsafe_get input (stop - 1) = '\r' then
+          stop - 1
+        else
+          stop
+      in
+      if line_end - rel <= window_size && (ended || line_end = len) then begin
+        let stop =
+          if ended || (line_end = len && not source_open) then
+            strip_cr line_end
+          else
+            line_end
+        in
+        Some
+          {
+            number;
+            text = Bytes.sub_string input rel (stop - rel);
+            first = start;
+            left_cut = false;
+            right_cut = (not ended) && source_open;
+          }
+      end else begin
+        let ws = window_start input len rel focus in
+        let limit = imin len (ws + window_size + 1) in
+        let nl = scan_end ws limit in
+        let ended = nl < len && Bytes.unsafe_get input nl = '\n' in
+        let line_stop =
+          if ended || (nl = len && not source_open) then
+            strip_cr nl
+          else
+            nl
+        in
+        let stop = imax ws (window_stop input len ws line_stop) in
+        Some
+          {
+            number;
+            text = Bytes.sub_string input ws (stop - ws);
+            first = ws + base;
+            left_cut = ws > rel;
+            right_cut =
+              stop < line_stop || ((not ended) && nl = len && source_open);
+          }
+      end
+    end
+  in
+  let locate p =
+    if p < idx.starts.(0) || p > input_len then
+      None
+    else begin
+      let l = find_line idx p in
+      Some (idx.line_base + l + 1, p - idx.starts.(l) + 1)
+    end
+  in
+  let frame_locs =
+    List.map
+      (fun (_, s, _) ->
+        Option.map
+          (fun (l, c) -> (l, c, char_column_of (s - c + 1) s))
+          (locate s)
+      )
+      frames
+  in
+  let error_view =
+    Option.bind here (fun (_, line_start, line) ->
+        let error_start =
+          if line_start >= base then
+            line_start
+          else begin
+            let e = ref base in
+            while
+              !e < pos && !e < input_len
+              && Char.code (Bytes.unsafe_get input (!e - base)) land 0xC0 = 0x80
+            do
+              incr e
+            done;
+            !e
+          end
+        in
+        Option.map
+          (fun (v : view) ->
+            { v with left_cut = v.left_cut || line_start < base }
+          )
+          (view ~number:line ~start:error_start ~focus:(pos - error_start))
+    )
+  in
+  let prev_view =
+    match here with
+    | Some (li, _, line) when li >= 1 ->
+        view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
+    | _ ->
+        None
+  in
+  let opener =
+    match here with
+    | Some (_, _, line) ->
+        List.fold_left2
+          (fun acc (_, s, delimited) loc ->
+            match loc with
+            | Some (l, c, _) when delimited && l < line ->
+                Some (s, l, c)
+            | _ ->
+                acc
+          )
+          None frames frame_locs
+    | None ->
+        None
+  in
+  let opener_view =
+    match opener with
+    | Some (s, l, c) ->
+        view ~number:l ~start:(s - c + 1) ~focus:(c - 1)
+    | None ->
+        None
+  in
+  let note_offset (n : note) =
+    match n.at with Some r -> r.start | None -> -1
+  in
+  let max_note = List.fold_left (fun m n -> imax m (note_offset n)) 0 notes in
+  if max_note > 0 then
+    extend_line_index idx ~base_offset:base input (imin max_note input_len);
+  let note_views =
+    List.filter_map
+      (fun n ->
+        let p = note_offset n in
+        if p < 0 then
+          None
+        else
+          match locate p with
+          | Some (l, c) ->
+              view ~number:l ~start:(p - c + 1) ~focus:(c - 1)
+          | None ->
+              None
+      )
+      notes
+  in
+  let views =
+    List.fold_left
+      (fun acc (v : view) ->
+        if List.exists (fun (u : view) -> u.number = v.number) acc then
+          acc
+        else
+          v :: acc
+      )
+      []
+      (List.filter_map Fun.id [ error_view; opener_view; prev_view ]
+      @ note_views
+      )
+    |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
+  in
+  let line_start_of n =
+    let l = n - 1 - idx.line_base in
+    if l >= 0 && l < idx.count then
+      Some idx.starts.(l)
+    else
+      None
+  in
+  let rec with_middles = function
+    | (a : view) :: (b : view) :: rest when b.number = a.number + 2 ->
+        let middle =
+          match line_start_of (a.number + 1) with
+          | Some start ->
+              view ~number:(a.number + 1) ~start ~focus:0
+          | None ->
+              None
+        in
+        a :: (Option.to_list middle @ with_middles (b :: rest))
+    | a :: rest ->
+        a :: with_middles rest
+    | [] ->
+        []
+  in
+  { views = with_middles views; frame_locs; char_column; built = true }
+
+let pending = { views = []; frame_locs = []; char_column = None; built = false }
+
+let window_index x (l : location) =
+  let idx = create_line_index () in
+  let text = x.kept in
+  let line_start = l.offset - l.col + 1 in
+  let prev =
+    if line_start > 0 then
+      last_newline text 0 (line_start - 1) + 1
+    else
+      line_start
+  in
+  let w = List.fold_left (fun w (_, s, _) -> imin w s) prev x.error_frames in
+  let w =
+    List.fold_left
+      (fun w (n : note) ->
+        match n.at with Some r -> imin w r.start | None -> w
+      )
+      w x.marks
+  in
+  let w = imax 0 w in
+  let first =
+    if w >= prev then
+      prev
+    else
+      last_newline text 0 w + 1
+  in
+  idx.starts.(0) <- first;
+  idx.scanned_up_to <- first;
+  idx.line_base <- l.line - 1 - count_newlines text first line_start;
+  let reach =
+    List.fold_left (fun m (_, s, _) -> imax m s) (-1) x.error_frames
+  in
+  extend_line_index idx text (imin x.kept_scanned reach);
+  idx
+
+let shown x =
+  if x.shown.built then
+    x.shown
+  else begin
+    let idx =
+      match x.error_place with
+      | Some l ->
+          window_index x l
+      | None ->
+          let idx = create_line_index () in
+          extend_line_index idx x.kept x.kept_scanned;
+          idx
+    in
+    let s =
+      shown_of ~input:x.kept ~base:0 ~input_len:x.kept_len ~source_open:false
+        ~limit:max_int idx ~pos:x.error_pos ~notes:x.marks x.error_frames
+    in
+    x.shown <- s;
+    s
+  end
+
 let render ?name ?source ?custom e =
   let src =
     match source with Some s -> Some (s, source_line_starts s) | None -> None
@@ -4802,7 +5086,8 @@ let render ?name ?source ?custom e =
               )
           )
     | None, Some l ->
-        Some (l, Some (Option.value e.excerpt.char_column ~default:l.col))
+        Some
+          (l, Some (Option.value (shown e.excerpt).char_column ~default:l.col))
     | None, None ->
         None
   in
@@ -4820,14 +5105,14 @@ let render ?name ?source ?custom e =
         in
         Some (l.line, l.col, shown)
     | None ->
-        List.nth e.excerpt.frame_locs i
+        List.nth (shown e.excerpt).frame_locs i
   in
   let get number focus =
     match src with
     | Some (s, starts) ->
         source_view s starts number focus
     | None ->
-        List.find_opt (fun v -> v.number = number) e.excerpt.views
+        List.find_opt (fun v -> v.number = number) (shown e.excerpt).views
   in
   let header_column =
     match where with Some (loc, Some c) -> Some (loc.line, c) | _ -> None
@@ -4880,7 +5165,7 @@ let render ?name ?source ?custom e =
                 else
                   None
               )
-              e.excerpt.views
+              (shown e.excerpt).views
       )
   in
   let error_view =
@@ -5196,8 +5481,27 @@ let render ?name ?source ?custom e =
 
 let render_error = render
 
+let expected_rank = function
+  | Label _ ->
+      0
+  | Char _ ->
+      1
+  | Literal _ ->
+      2
+  | End_of_input ->
+      3
+
+let compare_expected a b =
+  match (a, b) with
+  | Char x, Char y ->
+      Int.compare (Uchar.to_int x) (Uchar.to_int y)
+  | Label x, Label y | Literal x, Literal y ->
+      String.compare x y
+  | _ ->
+      Int.compare (expected_rank a) (expected_rank b)
+
 let expected_of_far f =
-  let describe (kind, s) =
+  let describe kind s =
     let payload = kind lsr 3 in
     let tag = kind land 7 in
     if tag = tag_char then
@@ -5235,61 +5539,128 @@ let expected_of_far f =
             "at least " ^ string_of_int payload ^ " characters"
         )
   in
-  let key = function
-    | Label l ->
-        (0, l)
-    | Char u ->
-        (1, utf8_of_uchar u)
-    | Literal l ->
-        (2, l)
-    | End_of_input ->
-        (3, "")
-  in
-  let raw =
-    List.init f.n (fun i -> (far_item_kind f i, far_item_str f i))
-    @ match far_over f with Some o -> List.rev o.oitems | None -> []
-  in
-  let items =
-    List.filter_map
-      (fun (k, s) ->
-        if k = none_kind then
-          None
-        else
-          Some (describe (k, s))
-      )
-      raw
-  in
-  let items =
-    List.filter
-      (function
+  let total = f.n + far_over_len f in
+  if total = 1 && f.n = 1 then
+    if f.k0 = none_kind then
+      ([], 0)
+    else
+      ([ describe f.k0 f.s0 ], 0)
+  else
+    let items = Array.make total End_of_input in
+    let n = ref 0 in
+    for i = 0 to f.n - 1 do
+      let k = far_item_kind f i in
+      if k <> none_kind then begin
+        items.(!n) <- describe k (far_item_str f i);
+        incr n
+      end
+    done;
+    ( match far_over f with
+    | Some o ->
+        let rec add = function
+          | [] ->
+              ()
+          | (k, s) :: rest ->
+              add rest;
+              if k <> none_kind then begin
+                items.(!n) <- describe k s;
+                incr n
+              end
+        in
+        add o.oitems
+    | None ->
+        ()
+    );
+    let ascii_lo = ref 0 and ascii_hi = ref 0 and ascii_top = ref 0 in
+    for i = 0 to !n - 1 do
+      match items.(i) with
+      | Char u when Uchar.to_int u < 0x80 ->
+          let c = Uchar.to_int u in
+          if c < 62 then
+            ascii_lo := !ascii_lo lor (1 lsl c)
+          else if c < 124 then
+            ascii_hi := !ascii_hi lor (1 lsl (c - 62))
+          else
+            ascii_top := !ascii_top lor (1 lsl (c - 124))
+      | _ ->
+          ()
+    done;
+    let kept = ref 0 in
+    for i = 0 to !n - 1 do
+      let e = items.(i) in
+      let shadowed =
+        match e with
         | Literal l when String.length l = 1 ->
-            not
-              (List.exists
-                 (function Char u -> utf8_of_uchar u = l | _ -> false)
-                 items
-              )
+            let c = Char.code l.[0] in
+            if c < 62 then
+              !ascii_lo land (1 lsl c) <> 0
+            else if c < 124 then
+              !ascii_hi land (1 lsl (c - 62)) <> 0
+            else if c < 0x80 then
+              !ascii_top land (1 lsl (c - 124)) <> 0
+            else
+              false
         | _ ->
-            true
-        )
-      items
-  in
-  let seen = Hashtbl.create 16 in
-  let items =
-    List.filter
-      (fun e ->
-        let k = key e in
-        (not (Hashtbl.mem seen k))
-        &&
-        ( Hashtbl.add seen k ();
-          true
-        )
+            false
+      in
+      if not shadowed then begin
+        items.(!kept) <- e;
+        incr kept
+      end
+    done;
+    let n = !kept in
+    if n <= 1 then
+      ( ( if n = 0 then
+            []
+          else
+            [ items.(0) ]
+        ),
+        0
       )
-      items
-  in
-  let kept = List.filteri (fun i _ -> i < far_total_capacity) items in
-  ( List.sort (fun a b -> compare (key a) (key b)) kept,
-    List.length items - List.length kept
-  )
+    else begin
+      let order = Array.make n 0 in
+      for k = 1 to n - 1 do
+        order.(k) <- k
+      done;
+      if n <= far_total_capacity then
+        for k = 1 to n - 1 do
+          let e = items.(k) in
+          let j = ref (k - 1) in
+          while !j >= 0 && compare_expected items.(order.(!j)) e > 0 do
+            order.(!j + 1) <- order.(!j);
+            decr j
+          done;
+          order.(!j + 1) <- k
+        done
+      else
+        Array.stable_sort
+          (fun i j -> compare_expected items.(i) items.(j))
+          order;
+      let d = ref 1 in
+      for k = 1 to n - 1 do
+        if compare_expected items.(order.(k)) items.(order.(!d - 1)) <> 0 then begin
+          order.(!d) <- order.(k);
+          incr d
+        end
+      done;
+      let d = !d in
+      let order, shown =
+        if d <= far_total_capacity then
+          (order, d)
+        else begin
+          let first = Array.sub order 0 d in
+          Array.sort Int.compare first;
+          let first = Array.sub first 0 far_total_capacity in
+          Array.sort (fun i j -> compare_expected items.(i) items.(j)) first;
+          (first, far_total_capacity)
+        end
+      in
+      let l = ref [] in
+      for k = shown - 1 downto 0 do
+        l := items.(order.(k)) :: !l
+      done;
+      (!l, d - shown)
+    end
 
 let unread_limit st =
   match st.source with
@@ -5367,255 +5738,137 @@ let found_of_far st f pos =
     | _ ->
         found_of st stop pos
 
-let build st ~pos ?(notes = []) ?help kind span frames =
-  let idx =
+let scan_location input ~from ~lines ~start pos =
+  let n = count_newlines input from pos in
+  let start =
+    if n > 0 then
+      last_newline input from pos + 1
+    else
+      start
+  in
+  Some { offset = pos; line = lines + n + 1; col = pos - start + 1 }
+
+let memory_location st pos =
+  if pos < 0 || pos > st.input_len then
+    None
+  else
     match st.line_index with
+    | Some idx when idx.scanned_up_to >= pos ->
+        let li = find_line idx pos in
+        Some
+          {
+            offset = pos;
+            line = idx.line_base + li + 1;
+            col = pos - idx.starts.(li) + 1;
+          }
     | Some idx ->
-        idx
+        scan_location st.input ~from:idx.scanned_up_to
+          ~lines:(idx.line_base + idx.count - 1)
+          ~start:idx.starts.(idx.count - 1)
+          pos
     | None ->
-        let idx = create_line_index () in
-        st.line_index <- Some idx;
-        idx
+        scan_location st.input ~from:0 ~lines:0 ~start:0 pos
+
+let build st ~last ~pos ?(notes = []) ?help kind span frames =
+  let contexts =
+    List.map (fun (name, start, delimited) -> { name; start; delimited }) frames
   in
-  extend_line_index idx ~base_offset:st.base st.input (imin pos st.input_len);
-  let floor = idx.starts.(0) in
-  let here =
-    if pos >= floor && pos <= st.input_len then begin
-      let li = find_line idx pos in
-      Some (li, idx.starts.(li), idx.line_base + li + 1)
-    end else
-      None
-  in
-  let location =
-    Option.map
-      (fun (_, line_start, line) ->
-        { offset = pos; line; col = pos - line_start + 1 }
-      )
-      here
-  in
-  let char_column_of line_start p =
-    if p > st.input_len then
-      None
-    else if line_start >= st.base then
-      Some
-        (1
-        + count_code_points ~limit:(unread_limit st) st.input
-            (line_start - st.base) (p - st.base)
-        )
-    else if
-      idx.cut_line = line_start && idx.cut_at >= st.base && p >= idx.cut_at
-    then
-      Some
-        (1 + idx.cut_chars
-        + count_code_points ~limit:(unread_limit st) st.input
-            (idx.cut_at - st.base) (p - st.base)
-        )
-    else
-      None
-  in
-  let char_column =
-    Option.bind here (fun (_, line_start, _) -> char_column_of line_start pos)
-  in
-  let source_open =
-    match st.source with Some src -> not src.eof | None -> false
-  in
-  let view ~number ~start ~focus =
-    if start < st.base || start > st.input_len then
-      None
-    else begin
-      let focus = imax 0 (imin focus (st.input_len - start)) in
-      let input = st.input in
-      let len = st.input_len - st.base in
-      let rel = start - st.base in
-      let scan_end from limit = find_newline input from limit in
-      let line_end = scan_end rel (imin len (rel + window_size + 1)) in
-      let ended = line_end < len && Bytes.unsafe_get input line_end = '\n' in
-      let strip_cr stop =
-        if stop > rel && Bytes.unsafe_get input (stop - 1) = '\r' then
-          stop - 1
-        else
-          stop
+  match st.source with
+  | None ->
+      let location = memory_location st pos in
+      let scanned =
+        match st.line_index with
+        | Some idx ->
+            imax idx.scanned_up_to idx.hint
+        | None ->
+            0
       in
-      if line_end - rel <= window_size && (ended || line_end = len) then begin
-        let stop =
-          if ended || (line_end = len && not source_open) then
-            strip_cr line_end
-          else
-            line_end
+      if not last then begin
+        let reach =
+          List.fold_left
+            (fun m (n : note) ->
+              match n.at with Some r -> imax m r.start | None -> m
+            )
+            pos notes
         in
-        Some
+        let reach = imin reach st.input_len in
+        match st.line_index with
+        | Some idx ->
+            if reach > idx.hint then idx.hint <- reach
+        | None ->
+            if reach > 0 then begin
+              let idx = create_line_index () in
+              idx.hint <- reach;
+              st.line_index <- Some idx
+            end
+      end;
+      {
+        kind;
+        range = span;
+        location;
+        contexts;
+        notes;
+        help;
+        excerpt =
           {
-            number;
-            text = Bytes.sub_string input rel (stop - rel);
-            first = start;
-            left_cut = false;
-            right_cut = (not ended) && source_open;
-          }
-      end else begin
-        let ws = window_start input len rel focus in
-        let limit = imin len (ws + window_size + 1) in
-        let nl = scan_end ws limit in
-        let ended = nl < len && Bytes.unsafe_get input nl = '\n' in
-        let line_stop =
-          if ended || (nl = len && not source_open) then
-            strip_cr nl
-          else
-            nl
-        in
-        let stop = imax ws (window_stop input len ws line_stop) in
-        Some
-          {
-            number;
-            text = Bytes.sub_string input ws (stop - ws);
-            first = ws + st.base;
-            left_cut = ws > rel;
-            right_cut =
-              stop < line_stop || ((not ended) && nl = len && source_open);
-          }
-      end
-    end
-  in
-  let locate p =
-    if p < idx.starts.(0) || p > st.input_len then
-      None
-    else begin
-      let l = find_line idx p in
-      Some (idx.line_base + l + 1, p - idx.starts.(l) + 1)
-    end
-  in
-  let frame_locs =
-    List.map
-      (fun (_, s, _) ->
-        Option.map
-          (fun (l, c) -> (l, c, char_column_of (s - c + 1) s))
-          (locate s)
-      )
-      frames
-  in
-  let error_view =
-    Option.bind here (fun (_, line_start, line) ->
-        let error_start =
-          if line_start >= st.base then
-            line_start
-          else begin
-            let e = ref st.base in
-            while
-              !e < pos && !e < st.input_len
-              && Char.code (Bytes.unsafe_get st.input (!e - st.base)) land 0xC0
-                 = 0x80
-            do
-              incr e
-            done;
-            !e
-          end
-        in
-        Option.map
-          (fun (v : view) ->
-            { v with left_cut = v.left_cut || line_start < st.base }
-          )
-          (view ~number:line ~start:error_start ~focus:(pos - error_start))
-    )
-  in
-  let prev_view =
-    match here with
-    | Some (li, _, line) when li >= 1 ->
-        view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
-    | _ ->
-        None
-  in
-  let opener =
-    match here with
-    | Some (_, _, line) ->
-        List.fold_left2
-          (fun acc (_, s, delimited) loc ->
-            match loc with
-            | Some (l, c, _) when delimited && l < line ->
-                Some (s, l, c)
-            | _ ->
-                acc
-          )
-          None frames frame_locs
-    | None ->
-        None
-  in
-  let opener_view =
-    match opener with
-    | Some (s, l, c) ->
-        view ~number:l ~start:(s - c + 1) ~focus:(c - 1)
-    | None ->
-        None
-  in
-  let note_offset (n : note) =
-    match n.at with Some r -> r.start | None -> -1
-  in
-  let max_note = List.fold_left (fun m n -> imax m (note_offset n)) 0 notes in
-  if max_note > 0 then
-    extend_line_index idx ~base_offset:st.base st.input
-      (imin max_note st.input_len);
-  let note_views =
-    List.filter_map
-      (fun n ->
-        let p = note_offset n in
-        if p < 0 then
+            shown = pending;
+            kept = st.input;
+            kept_len = st.input_len;
+            kept_scanned = scanned;
+            error_pos = pos;
+            error_place = location;
+            error_frames = frames;
+            marks = notes;
+          };
+      }
+  | Some src ->
+      let idx =
+        match st.line_index with
+        | Some idx ->
+            idx
+        | None ->
+            let idx = create_line_index () in
+            st.line_index <- Some idx;
+            idx
+      in
+      if idx.hint > idx.scanned_up_to then
+        extend_line_index idx ~base_offset:st.base st.input idx.hint;
+      let shown =
+        shown_of ~input:st.input ~base:st.base ~input_len:st.input_len
+          ~source_open:(not src.eof) ~limit:(unread_limit st) idx ~pos ~notes
+          frames
+      in
+      let location =
+        if pos >= idx.starts.(0) && pos <= st.input_len then begin
+          let li = find_line idx pos in
+          Some
+            {
+              offset = pos;
+              line = idx.line_base + li + 1;
+              col = pos - idx.starts.(li) + 1;
+            }
+        end else
           None
-        else
-          match locate p with
-          | Some (l, c) ->
-              view ~number:l ~start:(p - c + 1) ~focus:(c - 1)
-          | None ->
-              None
-      )
-      notes
-  in
-  let views =
-    List.fold_left
-      (fun acc (v : view) ->
-        if List.exists (fun (u : view) -> u.number = v.number) acc then
-          acc
-        else
-          v :: acc
-      )
-      []
-      (List.filter_map Fun.id [ error_view; opener_view; prev_view ]
-      @ note_views
-      )
-    |> List.sort (fun (a : view) (b : view) -> compare a.number b.number)
-  in
-  let line_start_of n =
-    let l = n - 1 - idx.line_base in
-    if l >= 0 && l < idx.count then
-      Some idx.starts.(l)
-    else
-      None
-  in
-  let rec with_middles = function
-    | (a : view) :: (b : view) :: rest when b.number = a.number + 2 ->
-        let middle =
-          match line_start_of (a.number + 1) with
-          | Some start ->
-              view ~number:(a.number + 1) ~start ~focus:0
-          | None ->
-              None
-        in
-        a :: (Option.to_list middle @ with_middles (b :: rest))
-    | a :: rest ->
-        a :: with_middles rest
-    | [] ->
-        []
-  in
-  let views = with_middles views in
-  {
-    kind;
-    range = span;
-    location;
-    contexts =
-      List.map
-        (fun (name, start, delimited) -> { name; start; delimited })
-        frames;
-    notes;
-    help;
-    excerpt = { views; frame_locs; char_column };
-  }
+      in
+      {
+        kind;
+        range = span;
+        location;
+        contexts;
+        notes;
+        help;
+        excerpt =
+          {
+            shown;
+            kept = Bytes.empty;
+            kept_len = 0;
+            kept_scanned = 0;
+            error_pos = pos;
+            error_place = None;
+            error_frames = [];
+            marks = [];
+          };
+      }
 
 let extras_span pos (x : fail_extra) =
   let a =
@@ -5632,7 +5885,7 @@ let extras_span pos (x : fail_extra) =
   in
   { start = imin a z; stop = imax a z }
 
-let error_of_far st outer =
+let error_of_far ~last st outer =
   let f = st.far in
   let pos = f.pos in
   if pos < 0 then
@@ -5640,28 +5893,30 @@ let error_of_far st outer =
   let frames = outer @ far_chain st in
   match f.extra with
   | Payload e when f.special = special_user ->
-      build st ~pos (Custom e) { start = pos; stop = pos } frames
+      build st ~last ~pos (Custom e) { start = pos; stop = pos } frames
   | Payload_ext (e, x) when f.special = special_user ->
       let span = extras_span pos x in
-      build st ~pos:span.start ~notes:x.notes ?help:x.help (Custom e) span
+      build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Custom e) span
         frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
-          build st ~pos (Failed "no alternative matched")
+          build st ~last ~pos (Failed "no alternative matched")
             { start = pos; stop = pos }
             frames
       | x :: xs, more ->
           let found, span = found_of_far st f pos in
-          build st ~pos (Expected { items = (x, xs); found; more }) span frames
+          build st ~last ~pos
+            (Expected { items = (x, xs); found; more })
+            span frames
       end
 
-let error_plain st pos kind frames =
-  build st ~pos kind { start = pos; stop = pos } frames
+let error_plain ~last st pos kind frames =
+  build st ~last ~pos kind { start = pos; stop = pos } frames
 
-let error_failure st pos msg (x : fail_extra) outer =
+let error_failure ~last st pos msg (x : fail_extra) outer =
   let span = extras_span pos x in
-  build st ~pos:span.start ~notes:x.notes ?help:x.help (Failed msg) span
+  build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Failed msg) span
     (outer @ x.chain)
 
 let outer_contexts st pos =
@@ -5719,10 +5974,10 @@ let capture ?(release = false) ?(outer = true) p =
       Stdlib.Ok v
   | exception Fail ->
       capture_rewind st frame saved
-        (error_of_far st (outer_of st outer st.far.pos))
+        (error_of_far ~last:false st (outer_of st outer st.far.pos))
   | exception User_failure (pos, msg, x) ->
       capture_rewind st frame saved
-        (error_failure st pos msg x (outer_of st outer pos))
+        (error_failure ~last:false st pos msg x (outer_of st outer pos))
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -5814,11 +6069,11 @@ let recovering st ~release ~outer ~record ~progress errors ~sync parser hole =
       v
   | exception Fail ->
       caught Fail st.far.pos (fun () ->
-          error_of_far st (outer_of st outer st.far.pos)
+          error_of_far ~last:false st (outer_of st outer st.far.pos)
       )
   | exception (User_failure (pos, msg, x) as exn) ->
       caught exn pos (fun () ->
-          error_failure st pos msg x (outer_of st outer pos)
+          error_failure ~last:false st pos msg x (outer_of st outer pos)
       )
   | exception exn ->
       leave exn
@@ -5920,9 +6175,9 @@ let failed_at st start = function
 
 let error_of_exn st outer = function
   | User_failure (pos, msg, x) ->
-      error_failure st pos msg x (outer_of st outer pos)
+      error_failure ~last:false st pos msg x (outer_of st outer pos)
   | _ ->
-      error_of_far st (outer_of st outer st.far.pos)
+      error_of_far ~last:false st (outer_of st outer st.far.pos)
 
 let require errors parser missing =
   let st = get_state () in
@@ -6054,7 +6309,9 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
             far_back st saved;
             List.rev acc
           end else
-            let e = error_of_far st (outer_of st outer st.far.pos) in
+            let e =
+              error_of_far ~last:false st (outer_of st outer st.far.pos)
+            in
             far_back st saved;
             missing_separator s acc at e
       | exception exn ->
@@ -6105,15 +6362,18 @@ let run_detailed st ~all thunk =
     | v ->
         Stdlib.Ok v
     | exception Fail ->
-        Stdlib.Error (error_of_far st [])
+        Stdlib.Error (error_of_far ~last:true st [])
     | exception User_failure (pos, msg, x) ->
-        Stdlib.Error (error_failure st pos msg x [])
+        Stdlib.Error (error_failure ~last:true st pos msg x [])
     | exception Depth_limit_exceeded (limit, a) ->
         Stdlib.Error
-          (error_plain st a.at (Depth_limit_exceeded { limit }) a.open_frames)
+          (error_plain ~last:true st a.at
+             (Depth_limit_exceeded { limit })
+             a.open_frames
+          )
     | exception Backtrack_window_exceeded (info, a) ->
         Stdlib.Error
-          (error_plain st a.at
+          (error_plain ~last:true st a.at
              (Backtrack_window_exceeded
                 { limit = info.limit; oldest = info.oldest }
              )
@@ -6207,7 +6467,9 @@ let parse_source_each ?(max_depth = 128)
           ended := true;
           Seq.Cons
             ( Error
-                (error_plain st start (Failed "the parser consumed no input") []),
+                (error_plain ~last:false st start
+                   (Failed "the parser consumed no input") []
+                ),
               node (i + 1)
             )
       | Ok (Some v) ->
