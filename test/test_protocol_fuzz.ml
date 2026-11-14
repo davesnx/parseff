@@ -205,6 +205,69 @@ let small_window_results t src =
   else
     [ Parseff.parse_source ~backtrack_window:small_window src t.parser ]
 
+let chunks_of ~chunk_size input =
+  List.init
+    ((String.length input + chunk_size - 1) / chunk_size)
+    (fun i ->
+      String.sub input (i * chunk_size)
+        (min chunk_size (String.length input - (i * chunk_size)))
+    )
+
+let feed_run parser chunks =
+  let t = Parseff.Feed.start parser in
+  let rec go fed = function
+    | [] ->
+        (Parseff.Feed.finish t, fed, [])
+    | chunk :: rest -> (
+        let fed = fed + String.length chunk in
+        match Parseff.Feed.feed t chunk with
+        | Parseff.Feed.Await ->
+            go fed rest
+        | Parseff.Feed.Done r ->
+            (r, fed, rest)
+      )
+  in
+  go 0 chunks
+
+let normal ~offset = function
+  | Ok v ->
+      Ok v
+  | Error e ->
+      Error (offset + e.Parseff.range.start, kind_of e)
+
+let fed_results t ~chunk_size input =
+  let chunks = chunks_of ~chunk_size input in
+  if not t.each then
+    let whole () =
+      let v = t.parser () in
+      Parseff.end_of_input ();
+      v
+    in
+    let r, _, _ = feed_run whole chunks in
+    [ normal ~offset:0 (Result.map fst r) ]
+  else
+    let rec values offset chunks =
+      if chunks = [] then
+        []
+      else
+        match feed_run t.parser chunks with
+        | Ok (v, rest), fed, chunks ->
+            let used = fed - String.length rest in
+            if used = 0 then
+              [ Error (offset, `Failed "the parser consumed no input") ]
+            else
+              Ok v
+              :: values (offset + used)
+                   ( if rest = "" then
+                       chunks
+                     else
+                       rest :: chunks
+                   )
+        | Error e, _, _ ->
+            [ normal ~offset (Error e) ]
+    in
+    values 0 chunks
+
 let rec agree ~small a b =
   match (a, b) with
   | [], [] ->
@@ -265,6 +328,9 @@ let check_case t seed case =
       in
       if not (agree ~small:false reference streamed) then
         Alcotest.failf "%s: streamed result differs on %S" what input;
+      let fed = run ~what input (fun () -> fed_results t ~chunk_size input) in
+      if fed <> List.map (normal ~offset:0) reference then
+        Alcotest.failf "%s: Feed result differs on %S" what input;
       let small =
         run ~what input (fun () ->
             small_window_results t (source ~chunk_size input)

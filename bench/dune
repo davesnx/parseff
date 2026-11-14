@@ -6,6 +6,7 @@
   bench_binary
   bench_utf8
   bench_streaming
+  bench_feed
   bench_http)
  (libraries
   parseff
