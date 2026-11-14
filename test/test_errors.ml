@@ -3100,8 +3100,8 @@ let test_excerpt_contains_error () =
         Parseff.render_error ~name:"input" ?source e
   in
   let escapes n = String.concat "" (List.init n (fun _ -> "\\x80")) in
-  let check label input row =
-    let expected = lines [ "input:1:101: [error] here"; row; "  |    ^" ] in
+  let check ?(caret = "  |    ^") label input row =
+    let expected = lines [ "input:1:101: [error] here"; row; caret ] in
     Alcotest.(check string) label expected (render input);
     Alcotest.(check string)
       (label ^ ", ~source") expected
@@ -3112,7 +3112,11 @@ let test_excerpt_contains_error () =
     ("1 | ..." ^ escapes 200 ^ "tail");
   check "continuation bytes to the window end"
     (String.make 600 '\x80' ^ "\n")
-    ("1 | ..." ^ escapes 237 ^ "...")
+    ("1 | ..." ^ escapes 240 ^ "...");
+  check "stray continuation byte at the window end"
+    ~caret:("  | " ^ String.make 100 ' ' ^ "^")
+    (String.make 236 'a' ^ "\xF0\x9F\x98\x80\x80" ^ String.make 60 'b' ^ "\n")
+    ("1 | " ^ String.make 236 'a' ^ "\xF0\x9F\x98\x80...")
 
 let render_after_stale ?backtrack_window ~read stale input parser =
   let off = ref 0 in
