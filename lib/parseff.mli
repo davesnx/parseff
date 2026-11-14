@@ -318,7 +318,7 @@ type trace_event = private
           [Error error]. [recover] and [sep_by_recover] give it after [sync],
           [~record] and [hole] return, so the events of [sync] and [hole] come
           first. When one of them fails, the failure was not recovered and no
-          event is given. *)
+          event is given. Unstable: this event can change in a 1.x release. *)
 
 val print_trace : Format.formatter -> trace_event -> unit
 (** [print_trace ppf] is a [trace] callback that prints each event on its own
@@ -927,7 +927,9 @@ val recover :
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
+(** Unstable: this function can change in a 1.x release.
+
+    [recover errors ~sync parser hole] runs [parser] with {!capture}. If
     [parser] fails with the error [e], [recover] records [e] in [errors], calls
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
@@ -995,7 +997,9 @@ val sep_by_recover :
   (error -> 'a) ->
   unit ->
   'a list
-(** [sep_by_recover errors ~sync element separator hole] parses one or more
+(** Unstable: this function can change in a 1.x release.
+
+    [sep_by_recover errors ~sync element separator hole] parses one or more
     occurrences of [element] with [separator] between each pair, as {!sep_by}
     does, and recovers from each [element] that fails. For a failure [e], it
     records [e] in [errors], goes back to the start of the element, calls
@@ -1287,7 +1291,9 @@ val list :
 
 val skip_nested :
   ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit -> unit
-(** [skip_nested pairs stop ()] skips input up to the end of a broken list
+(** Unstable: this function can change in a 1.x release.
+
+    [skip_nested pairs stop ()] skips input up to the end of a broken list
     element. It is made for the [~sync] of {!sep_by_recover} and {!recover}:
     [~sync:(skip_nested pairs stop)].
 
