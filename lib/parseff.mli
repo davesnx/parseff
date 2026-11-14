@@ -99,6 +99,8 @@ type custom_error = ..
     own cases with [type Parseff.custom_error += Too_large of int] and match
     them as [Custom (Too_large n)]. *)
 
+(** What failed. These five cases are final until 2.0, so a match on all of them
+    needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
@@ -278,7 +280,10 @@ end
     abandoned, so a backtrack shows as an [Enter] before the end of the previous
     event. A [Captured] event shows a failure that {!val:capture},
     {!val:recover} or {!val:sep_by_recover} caught, so the parse continued.
-    Positions are absolute byte offsets. *)
+    Positions are absolute byte offsets.
+
+    A 1.x release can add events: end a match on [trace_event] with a [_] case.
+*)
 type trace_event = private
   | Enter of { name : string; pos : int }
       (** A {!val:context} named [name] started at byte offset [pos]. *)
