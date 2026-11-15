@@ -105,11 +105,7 @@ type fail_extra = {
   upto : int;
   notes : note_data list;
   help : string option;
-  mutable depth : int;
-  mutable chain : (string * int * bool) list;
 }
-
-exception User_failure of int * string * fail_extra
 
 let no_end = max_int
 
@@ -125,6 +121,7 @@ type far_extra =
   | Over of over
   | Payload of custom_error
   | Payload_ext of custom_error * fail_extra
+  | Payload_failure of string * fail_extra
 type abort_frames = {
   at : int;
   mutable open_frames : (string * int * bool) list;
@@ -2579,9 +2576,7 @@ let[@inline never] limited st stop f =
 let[@inline never] fail_limit st ~from ~upto limit =
   fail_user st upto
     (Payload_ext
-       ( Limit_exceeded { limit },
-         { from; upto; notes = []; help = None; depth = 0; chain = [] }
-       )
+       (Limit_exceeded { limit }, { from; upto; notes = []; help = None })
     )
 
 let[@inline never] scan_until st ~keep_from start stop pred =
@@ -2673,18 +2668,14 @@ let[@inline] match_regex ?label re =
 
 let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
   let st = get_state () in
-  raise
-    (User_failure
-       (st.pos, msg, { from; upto; notes; help; depth = st.ctx_top; chain = [] })
-    )
+  fail_user st st.pos (Payload_failure (msg, { from; upto; notes; help }))
 
 let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
   let st = get_state () in
   if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
   else
-    fail_user st st.pos
-      (Payload_ext (e, { from; upto; notes; help; depth = 0; chain = [] }))
+    fail_user st st.pos (Payload_ext (e, { from; upto; notes; help }))
 
 let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     (value : d) =
@@ -2693,9 +2684,19 @@ let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
     st.diag_len <- st.diag_len + 1
   end
 
+let[@inline never] warn_wrong_collector () =
+  invalid_arg
+    "Parseff.warn: these diagnostics are not the ones passed to the running \
+     parse as ~diagnostics"
+
 let[@inline] warn ?pos c value =
   let st = get_state () in
-  record_diagnostic c st (match pos with Some p -> p | None -> st.pos) value
+  if st.diag == c.self then begin
+    c.rev <-
+      { pos = (match pos with Some p -> p | None -> st.pos); value } :: c.rev;
+    st.diag_len <- st.diag_len + 1
+  end else
+    match st.diag with No_sink -> () | Sink _ -> warn_wrong_collector ()
 
 let[@inline] commit () =
   let st = get_state () in
@@ -2890,9 +2891,6 @@ let[@inline always] context_run st delimited start name p =
       raise_notrace Fail
   | exception exn ->
       ( match exn with
-      | User_failure (pos, _, x) when x.depth = d + 1 ->
-          if pos > start then x.chain <- (name, start, delimited) :: x.chain;
-          x.depth <- d
       | Depth_limit_exceeded (_, a) | Backtrack_window_exceeded (_, a) ->
           if a.at > start then
             a.open_frames <- (name, start, delimited) :: a.open_frames
@@ -5996,6 +5994,10 @@ let error_of_far ~last st outer =
       let span = extras_span pos x in
       build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Custom e) span
         frames
+  | Payload_failure (m, x) when f.special = special_user ->
+      let span = extras_span pos x in
+      build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Failed m) span
+        frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
@@ -6011,11 +6013,6 @@ let error_of_far ~last st outer =
 
 let error_plain ~last st pos kind frames =
   build st ~last ~pos kind { start = pos; stop = pos } frames
-
-let error_failure ~last st pos msg (x : fail_extra) outer =
-  let span = extras_span pos x in
-  build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Failed msg) span
-    (outer @ x.chain)
 
 let outer_contexts st pos =
   let acc = ref [] in
@@ -6077,9 +6074,6 @@ let capture ?(release = false) ?(outer = true) p =
   | exception Fail ->
       capture_rewind st frame saved
         (error_of_far ~last:false st (outer_of st outer st.far.pos))
-  | exception User_failure (pos, msg, x) ->
-      capture_rewind st frame saved
-        (error_failure ~last:false st pos msg x (outer_of st outer pos))
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -6174,17 +6168,14 @@ let recovering st ~release ~outer ~record ~progress errors ~sync parser hole =
       let f = st.far in
       let at =
         match f.extra with
-        | Payload_ext (_, x) when f.special = special_user ->
+        | (Payload_ext (_, x) | Payload_failure (_, x))
+          when f.special = special_user ->
             imin f.pos (extras_span f.pos x).start
         | _ ->
             f.pos
       in
       caught Fail at (fun () ->
           error_of_far ~last:false st (outer_of st outer st.far.pos)
-      )
-  | exception (User_failure (pos, msg, x) as exn) ->
-      caught exn (imin pos (extras_span pos x).start) (fun () ->
-          error_failure ~last:false st pos msg x (outer_of st outer pos)
       )
   | exception exn ->
       leave exn
@@ -6278,17 +6269,7 @@ let far_from st start =
 
 let far_back st saved = if st.far != saved then far_merge st saved
 
-let failed_at st start = function
-  | User_failure (pos, _, _) ->
-      pos = start && st.far.pos <= start
-  | _ ->
-      st.far.pos = start
-
-let error_of_exn st outer = function
-  | User_failure (pos, msg, x) ->
-      error_failure ~last:false st pos msg x (outer_of st outer pos)
-  | _ ->
-      error_of_far ~last:false st (outer_of st outer st.far.pos)
+let failed_at st start = st.far.pos = start
 
 let require errors parser missing =
   let st = get_state () in
@@ -6304,16 +6285,13 @@ let require errors parser missing =
         State.pop_rewind_frame st frame;
         far_merge st saved;
         v
-    | exception ((Fail | User_failure _) as exn) when failed_at st start exn ->
-        ( match exn with
-        | Fail when saved.pos = start ->
-            let own = st.far in
-            st.far <- saved;
-            far_merge st own
-        | _ ->
-            ()
-        );
-        let e = error_of_exn st true exn in
+    | exception Fail when failed_at st start ->
+        if saved.pos = start then begin
+          let own = st.far in
+          st.far <- saved;
+          far_merge st own
+        end;
+        let e = error_of_far ~last:false st (outer_of st true st.far.pos) in
         restore_rewind_frame st frame;
         State.pop_rewind_frame st frame;
         st.far <-
@@ -6389,8 +6367,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
           st.recovery_off <- st.recovery_off - 1;
           raise exn
     in
-    let rec plain_step ~expected frame =
-      let start = st.pos in
+    let plain_step ~expected frame =
       let saved = st.far in
       if (not expected) && saved != far_none then st.far <- far_none;
       match unrecovered () with
@@ -6402,19 +6379,12 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
           restore_rewind_frame st frame;
           State.pop_rewind_frame st frame;
           None
-      | exception (User_failure _ as exn)
-        when not (State.frame_committed st frame) ->
-          let e = error_of_exn st outer exn in
-          if not expected then st.far <- saved;
-          restore_rewind_frame st frame;
-          State.pop_rewind_frame st frame;
-          inserted start e;
-          None
       | exception exn ->
           far_back st saved;
           State.pop_rewind_frame st frame;
           raise exn
-    and inserted at e =
+    in
+    let inserted at e =
       State.seal_recovered st;
       record_error errors st record e [];
       captured st at e
@@ -6536,9 +6506,9 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
         match element () with
         | v ->
             v
-        | exception ((Fail | User_failure _) as exn) ->
-            at_start := failed_at st at exn;
-            raise exn
+        | exception Fail ->
+            at_start := failed_at st at;
+            raise_notrace Fail
       in
       let record e inner =
         if !at_start then raise Not_an_element;
@@ -6556,7 +6526,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
             List.rev (v :: acc)
           else
             after s (v :: acc)
-      | exception (Fail | User_failure _) ->
+      | exception Fail ->
           restore_rewind_frame st frame;
           State.pop_rewind_frame st frame;
           List.rev acc
@@ -6586,8 +6556,6 @@ let run_detailed st ~all thunk =
         Stdlib.Ok v
     | exception Fail ->
         Stdlib.Error (error_of_far ~last:true st [])
-    | exception User_failure (pos, msg, x) ->
-        Stdlib.Error (error_failure ~last:true st pos msg x [])
     | exception Depth_limit_exceeded (limit, a) ->
         Stdlib.Error
           (error_plain ~last:true st a.at

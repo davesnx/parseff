@@ -42,7 +42,7 @@ type g =
   | Warn of int
   | Set of int
   | Get
-  | Fail_hard
+  | Fail_msg
   | Raise
   | Try of g * g
   | Rec of g
@@ -149,8 +149,8 @@ let rec show_g = function
       Printf.sprintf "Set %d" k
   | Get ->
       "Get"
-  | Fail_hard ->
-      "Fail_hard"
+  | Fail_msg ->
+      "Fail_msg"
   | Raise ->
       "Raise"
   | Try (a, b) ->
@@ -312,8 +312,8 @@ let rec run cx g =
       Unit
   | Get ->
       Int (Parseff.Ref.get cx.cell)
-  | Fail_hard ->
-      Parseff.fail "hard"
+  | Fail_msg ->
+      Parseff.fail "message"
   | Raise ->
       raise Boom
   | Try (a, b) -> (
@@ -326,7 +326,7 @@ and combine cx o () =
   let v = run cx o in
   fun a b -> Bin (v, a, b)
 
-type cls = Success | Soft | Hard of int | Depth of int | Window | Escaped
+type cls = Success | Soft | Depth of int | Window | Escaped
 
 type outcome = {
   cls : cls;
@@ -485,8 +485,6 @@ let run_real ?(traced = false) ~partial runner g input =
         (Success, Ok v)
     | Error { kind = Backtrack_window_exceeded _; _ } ->
         (Window, Error window_exceeded)
-    | Error ({ kind = Failed "hard"; _ } as e) ->
-        (Hard e.range.start, Error (show_error e))
     | Error ({ kind = Depth_limit_exceeded _; _ } as e) ->
         (Depth e.range.start, Error (show_error e))
     | Error e ->
@@ -520,7 +518,6 @@ type mst = { pos : int; diags : (int * int) list; cell : int }
 
 exception M_fail of mst
 exception M_boom of mst
-exception M_hard of int * mst
 exception M_depth of int * mst
 
 (* The first step of the right operand of an [infix_right] whose operator and
@@ -784,8 +781,6 @@ let rec ev m env g st =
           raise (M_fail st)
       | exception M_boom _ ->
           raise (M_boom st)
-      | exception M_hard (p, _) ->
-          raise (M_hard (p, st))
       | exception M_depth (p, _) ->
           raise (M_depth (p, st))
     )
@@ -823,7 +818,7 @@ let rec ev m env g st =
       match ev m (push (Barrier st.pos) env) a st with
       | v, st ->
           (Cap_ok v, st)
-      | exception (M_fail _ | M_hard _) ->
+      | exception M_fail _ ->
           (Cap_err "", st)
     )
   | Capture_release a -> (
@@ -831,7 +826,7 @@ let rec ev m env g st =
       match ev m (push (Captured saved) env) a st with
       | v, st ->
           (Cap_ok v, st)
-      | exception (M_fail _ | M_hard _) ->
+      | exception M_fail _ ->
           (Cap_err "", !saved)
     )
   | Warn k ->
@@ -840,8 +835,8 @@ let rec ev m env g st =
       (Unit, { st with cell = k })
   | Get ->
       (Int st.cell, st)
-  | Fail_hard ->
-      raise (M_hard (st.pos, st))
+  | Fail_msg ->
+      raise (M_fail st)
   | Raise ->
       raise (M_boom st)
   | Try (a, b) -> (
@@ -979,7 +974,6 @@ and expression m env atom table st =
 type model_outcome =
   | M_success of value * mst
   | M_soft of mst
-  | M_hard_at of int * mst
   | M_depth_at of int * mst
   | M_escaped of mst
 
@@ -1000,8 +994,6 @@ let run_model ~partial g input =
         end
     | exception M_fail st ->
         M_soft st
-    | exception M_hard (p, st) ->
-        M_hard_at (p, st)
     | exception M_depth (p, st) ->
         M_depth_at (p, st)
     | exception M_boom st ->
@@ -1034,19 +1026,13 @@ let show_model = function
       "Ok " ^ show_value v
   | M_soft _ ->
       "a failure"
-  | M_hard_at (p, _) ->
-      Printf.sprintf "fail \"hard\" at %d" p
   | M_depth_at (p, _) ->
       Printf.sprintf "depth limit at %d" p
   | M_escaped _ ->
       "Boom escaped"
 
 let model_state = function
-  | M_success (_, st)
-  | M_soft st
-  | M_hard_at (_, st)
-  | M_depth_at (_, st)
-  | M_escaped st ->
+  | M_success (_, st) | M_soft st | M_depth_at (_, st) | M_escaped st ->
       st
 
 let agrees mo (o : outcome) =
@@ -1059,7 +1045,7 @@ let agrees mo (o : outcome) =
       v = erase v'
   | M_soft _, Soft, _ | M_escaped _, Escaped, _ ->
       true
-  | M_hard_at (p, _), Hard p', _ | M_depth_at (p, _), Depth p', _ ->
+  | M_depth_at (p, _), Depth p', _ ->
       p = p'
   | _ ->
       false
@@ -1105,7 +1091,7 @@ let leaf rs =
   | 20 ->
       Get
   | _ -> (
-      match int rs 3 with 0 -> Fail_hard | 1 -> Raise | _ -> Get
+      match int rs 3 with 0 -> Fail_msg | 1 -> Raise | _ -> Get
     )
 
 let rec gen rs size =
@@ -1181,7 +1167,7 @@ and unseal = function
     | Warn _
     | Set _
     | Get
-    | Fail_hard
+    | Fail_msg
     | Raise ) as g ->
       g
   | Seq (a, b) ->

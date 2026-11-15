@@ -312,7 +312,7 @@ x = 1
 
 **A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error. Pass `~outer:false` to keep only the contexts that the parser opened.
 
-**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover` and `sep_by_recover` call the parser directly, and `warn` records nothing. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
+**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover` and `sep_by_recover` call the parser directly, and `warn` records nothing when the runner got no collector. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
 
 ```ocaml
 # Parseff.parse input (statements (Parseff.Diagnostics.create ()))

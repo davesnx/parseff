@@ -206,7 +206,7 @@ let number () =
 
 ### `fail`
 
-`Parseff.fail` aborts parsing with an error message.
+`Parseff.fail` fails with an error message. Like any other failure, it lets `Parseff.or_` and the repetition combinators try something else. Call `Parseff.cut` before it to make the failure final.
 
 ```ocaml
 val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a

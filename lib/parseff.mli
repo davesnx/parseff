@@ -7,7 +7,7 @@
 
     {@ocaml[
     let digit_value () =
-      let c = satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
+      let c = Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9') in
       Char.code c - Char.code '0'
 
     let ip_address () =
@@ -357,20 +357,21 @@ val parse :
     [diagnostics] is the collector given to {!warn}, {!recover} and
     {!sep_by_recover}. The runner empties it before the parser starts. Read it
     with {!Diagnostics.to_list} after the parse, whether the result is [Ok] or
-    [Error]. With any other collector, {!warn} records nothing, and {!recover}
-    and {!sep_by_recover} do not recover: the parse fails at the first error, as
-    without them. Thus the same parser can report every error with
-    [~diagnostics] and stop at the first one without it.
+    [Error]. With any other collector, {!recover} and {!sep_by_recover} do not
+    recover: the parse fails at the first error, as without them. Thus the same
+    parser can report every error with [~diagnostics] and stop at the first one
+    without it. {!warn} records nothing when the runner got no [~diagnostics],
+    and raises [Invalid_argument] when it got another collector.
 
     [trace] receives a {!type:trace_event} when a {!val:context} starts, returns
     and fails. {!print_trace} prints the events as a tree. An exception from
     [trace] stops the parse, and [parse] raises it again.
 
     When a parse fails, the error is the furthest failure: the failure of any
-    primitive that happened at the highest input position, including primitives
-    in branches that [or_], [many], [sep_by], [optional] or [fold_*] abandoned.
-    The [Expected] kind lists everything that was expected at that position,
-    sorted and without duplicates:
+    primitive, {!fail} or {!val-error} that happened at the highest input
+    position, including failures in branches that [or_], [many], [sep_by],
+    [optional] or [fold_*] abandoned. The [Expected] kind lists everything that
+    was expected at that position, sorted and without duplicates:
     [expected "else", "if", or "while", found 'xyz']. A failure at the end of
     the input says [found end of input] and keeps the expected set.
 
@@ -558,8 +559,7 @@ val sep_by_take_span :
 
 val fail :
   ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
-(** [fail ?from ?upto ?notes ?help msg] aborts parsing with a [Failed msg]
-    error.
+(** [fail ?from ?upto ?notes ?help msg] fails with a [Failed msg] error.
 
     [~from] and [~upto] make the error cover the bytes from [from] to [upto]
     instead of a single position, and [~notes] attaches {!type:note}s. Each of
@@ -593,14 +593,19 @@ val fail :
         n
     ]}
 
-    Failures from [fail] are not caught by backtracking combinators ({!val:or_},
-    {!val:many}, {!val:one_of}, {!val:optional}, {!val:look_ahead}) or
-    relabeling combinators ({!val:expect}, {!val:one_of_labeled}). Once raised,
-    a failure propagates all the way to the runner.
+    [fail] fails as a primitive does: {!or_}, {!one_of}, {!many}, {!sep_by},
+    {!optional}, the [fold_*] combinators and {!look_ahead} go back and try the
+    next option. The parse reports [Failed msg] only when it is the furthest
+    failure, as {!parse} says. At the same position, a [fail] wins over
+    [Expected], and between two failures of [fail] or {!val-error} the first one
+    wins. {!expect} and {!one_of_labeled} do not relabel it.
 
-    For typed errors, see {!val-error}. For errors that should participate in
-    backtracking, the parser should signal failure through the parsing
-    combinators themselves (e.g. {!consume}, {!satisfy}).
+    To make the failure final for the enclosing combinators, call {!cut} before
+    it: after [cut (); fail msg], no enclosing {!or_}, {!many} or similar
+    combinator tries another option. The reported error is still the furthest
+    failure, so a deeper failure recorded earlier in the construct, such as one
+    of a branch that read further and failed, is reported instead of [msg]. For
+    typed errors, see {!val-error}.
 
     Example:
     {@ocaml[
@@ -656,14 +661,15 @@ val error :
     the same position, a custom error wins over [Expected]. Between two custom
     errors at the same position, the first one wins.
 
-    For a simpler string-based alternative that also escapes backtracking, see
-    {!val:fail}. *)
+    For a string message with the same rules, see {!val:fail}. *)
 
 val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
 (** [warn diagnostics d] records [d] at the current position and continues
-    parsing. [warn ~pos diagnostics d] records it at the byte offset [pos].
-    [diagnostics] must be the collector given to the runner as [~diagnostics];
-    for any other collector [warn] records nothing.
+    parsing. [warn ~pos diagnostics d] records it at the byte offset [pos]. When
+    the runner got no [~diagnostics], [warn] records nothing, so a parser that
+    warns also runs without a collector. When the runner got a collector,
+    [diagnostics] must be that collector: for any other one [warn] raises
+    [Invalid_argument].
 
     A diagnostic lives as long as the input position that it was recorded at.
     When a parser fails and the position goes back, the diagnostics recorded
@@ -888,19 +894,18 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
 
-    If [parser] succeeds, [capture] returns [Ok v]. If [parser] fails, also with
-    {!fail} or {!val-error}, [capture] returns [Error e], where [e] is the
-    furthest failure inside [parser], built as {!parse} builds an error. The
-    position then goes back to where [capture] started, and the diagnostics that
-    [parser] recorded are removed, also those of a {!capture} or {!recover}
-    inside [parser] that recovered. This rule is final; the [~record] of
-    {!recover} gets the removed diagnostics. A {!cut} or {!commit} in [parser]
-    does not reach past [capture]. A recovery in [parser] that recovered does:
-    the frames around [capture] can no longer go back, whether [parser] then
-    succeeds or fails, as {!recover} says. [Depth_limit_exceeded] and
-    [Backtrack_window_exceeded] are not caught. In {!parse_source}, the input
-    that [parser] reads must fit in [~backtrack_window]. A traced parse gets a
-    [Captured] event for [Error e].
+    If [parser] succeeds, [capture] returns [Ok v]. If [parser] fails, [capture]
+    returns [Error e], where [e] is the furthest failure inside [parser], built
+    as {!parse} builds an error. The position then goes back to where [capture]
+    started, and the diagnostics that [parser] recorded are removed, also those
+    of a {!capture} or {!recover} inside [parser] that recovered. This rule is
+    final; the [~record] of {!recover} gets the removed diagnostics. A {!cut} or
+    {!commit} in [parser] does not reach past [capture]. A recovery in [parser]
+    that recovered does: the frames around [capture] can no longer go back,
+    whether [parser] then succeeds or fails, as {!recover} says.
+    [Depth_limit_exceeded] and [Backtrack_window_exceeded] are not caught. In
+    {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window]. A traced parse gets a [Captured] event for [Error e].
 
     [capture] also returns a failure at the end of the input. A parser that
     records it and continues usually fails again at the end, so the input gets
@@ -1078,9 +1083,9 @@ val sep_by_recover :
     A separator before the closing token, as in [{1, 2,}], is read as a
     separator and an empty element, which is recorded as an error. When the
     grammar allows it, make [separator] fail when the closing token follows, and
-    parse an optional separator before the closing token. The failure must be
-    one that {!sep_by} goes back from, such as a {!look_ahead} of {!satisfy}: a
-    {!fail} is not undone, so the parse fails.
+    parse an optional separator before the closing token, for example with a
+    {!look_ahead} of {!satisfy}. A failure after a {!cut} or {!commit} in
+    [separator] is not undone, so the parse fails.
     {@ocaml[
     let separator () =
       skip_whitespace ();
@@ -1245,11 +1250,10 @@ val list :
     it were [true]. Where [close] is [true], [element] runs without recovery, as
     in {!many}: also the recovery functions inside it run as without the
     collector. A value that consumed input is kept and the list goes on. An
-    element that fails or consumes nothing ends the list. A failure of {!fail}
-    there is recorded and ends the list. After a {!commit} or a {!cut} in
-    [element], or after {!many_iter} or another [*_iter] function in it gave out
-    a value, [list] does not go back: the failure, also of {!fail}, is an error
-    of the whole parse, as in {!many}.
+    element that fails or consumes nothing ends the list. After a {!commit} or a
+    {!cut} in [element], or after {!many_iter} or another [*_iter] function in
+    it gave out a value, [list] does not go back: the failure is an error of the
+    whole parse, as in {!many}.
 
     When [element] fails with the error [e], [list] records [e], calls [sync ()]
     and puts [hole e] in the list, as {!recover} does. [~release], [~outer] and
@@ -1271,11 +1275,7 @@ val list :
     consume nothing.
     - When [close] is [true] before the first element, [element] runs without
       recovery: if it succeeds, its value is the first element; if it fails, the
-      list is empty. A failure of {!fail} there is recorded first, since
-      {!sep_by} does not catch it and the plain parse fails. One case differs
-      from {!sep_by}: a {!cut} inside a {!val:context} in [element] seals only
-      the frames inside that context, so a {!fail} after it is still recorded
-      and the list is empty.
+      list is empty, as with {!sep_by}.
     - [list] does not skip, as {!sep_by_recover}: [sync] must stop before the
       next separator and before the closing token, and {!skip_nested} does this.
       Thus a hole can be empty, as in [f(1, , 3)].
@@ -1552,10 +1552,9 @@ val expect : string -> (unit -> 'a) -> 'a
     [expected digit] at offset [3], and [expected key] on ["foo"]. A failure at
     the end of the input keeps its expected items and says [found end of input].
 
-    Failures from {!val:fail} propagate unchanged (there is no way to intercept
-    them). Custom errors raised via {!val-error} propagate unchanged — this lets
-    you use [expect] around parsers that perform validation without losing the
-    structured error:
+    Failures of {!val:fail} and {!val-error} are not relabeled: they keep their
+    message or value. This lets you use [expect] around parsers that perform
+    validation without losing the structured error:
 
     {@ocaml[
     type custom_error += Out_of_range of int
@@ -1603,8 +1602,8 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 
     Each branch is wrapped by {!expect} with its label, so only failures at the
     position where [one_of_labeled] started are relabeled. A branch that fails
-    deeper keeps its own message. Custom errors raised via {!val-error} inside
-    any branch propagate unchanged.
+    deeper keeps its own message. Failures of {!val:fail} and {!val-error} are
+    not relabeled, as with {!expect}.
 
     Example:
     {@ocaml[

@@ -709,7 +709,7 @@ let test_escaping_exceptions () =
       ()
   in
   check "or_ Exit" in_or raise_exit ("Exit", 1, 1);
-  check "or_ fail" in_or call_fail ("error stop", 1, 1);
+  check "or_ fail" in_or call_fail ("error stop", 0, 0);
   check "or_ error" in_or call_error (custom, 0, 0);
   check "optional error" in_optional call_error (custom, 0, 0);
   check "optional Exit" in_optional raise_exit ("Exit", 1, 1);

@@ -865,13 +865,44 @@ let test_one_of_success () =
 let raises_invalid_argument f =
   match f () with _ -> false | exception Invalid_argument _ -> true
 
-let test_warn_into_other_collector_is_a_noop () =
+let test_warn_into_other_collector_raises () =
   let given = Parseff.Diagnostics.create () in
   let other = Parseff.Diagnostics.create () in
+  let raises label run =
+    match run () with
+    | exception Invalid_argument _ ->
+        ()
+    | _ ->
+        Alcotest.failf "%s: expected Invalid_argument" label
+  in
+  raises "other collector" (fun () ->
+      Parseff.parse ~diagnostics:given "" (fun () ->
+          Parseff.warn given "z";
+          Parseff.warn other "x"
+      )
+  );
+  raises "other collector with ~pos" (fun () ->
+      Parseff.parse ~diagnostics:given "" (fun () ->
+          Parseff.warn ~pos:3 other "y"
+      )
+  );
+  Alcotest.(check int) "other is empty" 0 (Parseff.Diagnostics.length other);
+  ( match
+      Parseff.parse "" (fun () ->
+          Parseff.warn other "x";
+          2
+      )
+    with
+  | Ok n ->
+      Alcotest.(check int) "no collector given: value" 2 n
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  Alcotest.(check int)
+    "no collector given: nothing recorded" 0
+    (Parseff.Diagnostics.length other);
   ( match
       Parseff.parse ~diagnostics:given "" (fun () ->
-          Parseff.warn other "x";
-          Parseff.warn ~pos:3 other "y";
           Parseff.warn given "z";
           1
       )
@@ -881,22 +912,7 @@ let test_warn_into_other_collector_is_a_noop () =
   | Error _ ->
       Alcotest.fail "Expected success"
   );
-  Alcotest.(check int) "other is empty" 0 (Parseff.Diagnostics.length other);
-  Alcotest.(check int) "given has one" 1 (Parseff.Diagnostics.length given);
-  ( match
-      Parseff.parse "" (fun () ->
-          Parseff.warn other "x";
-          2
-      )
-    with
-  | Ok n ->
-      Alcotest.(check int) "plain parse value" 2 n
-  | Error _ ->
-      Alcotest.fail "Expected success"
-  );
-  Alcotest.(check int)
-    "still empty after a plain parse" 0
-    (Parseff.Diagnostics.length other)
+  Alcotest.(check int) "given has one" 1 (Parseff.Diagnostics.length given)
 
 let test_collector_is_reset_by_each_parse () =
   let diagnostics = Parseff.Diagnostics.create () in
@@ -2167,8 +2183,8 @@ let () =
           test_case "preserves end_of_input semantics" `Quick
             test_parse_consume_all_preserves_end_of_input_semantics;
           test_case "warn ~pos nonzero" `Quick test_warn_pos_nonzero;
-          test_case "warn into another collector is a no-op" `Quick
-            test_warn_into_other_collector_is_a_noop;
+          test_case "warn into another collector raises" `Quick
+            test_warn_into_other_collector_raises;
           test_case "collector reset by each parse" `Quick
             test_collector_is_reset_by_each_parse;
           test_case "collector in use by a nested parse" `Quick

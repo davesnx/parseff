@@ -1176,13 +1176,49 @@ let test_first_element_fail () =
     (show_result Fun.id r, entries d)
   in
   Alcotest.(check (pair string errs))
-    "with the collector: an empty list and the error"
-    ("Ok ", [ (1, "not a digit") ])
-    (run true);
+    "with the collector: an empty list and no entry" ("Ok ", []) (run true);
   Alcotest.(check (pair string errs))
-    "without the collector: as sep_by"
-    ("Error at 1: not a digit", [])
-    (run false)
+    "without the collector: as sep_by" ("Ok ", []) (run false)
+
+let test_fail_at_close_ends_list () =
+  let element () =
+    let c = any_char () in
+    if is_digit c then
+      c
+    else
+      fail "not a digit"
+  in
+  let parser ?sep ?trailing d () =
+    let l =
+      list ?sep ?trailing d
+        ~close:(fun () -> peek_char () = Some ')')
+        ~sync:ignore element
+        (fun _ -> '!')
+        ()
+    in
+    ignore (char ')');
+    String.of_seq (List.to_seq l)
+  in
+  let run ?sep ?trailing input =
+    let unused = Diagnostics.create () in
+    let plain =
+      show_result Fun.id (parse input (parser ?sep ?trailing unused))
+    in
+    let d = Diagnostics.create () in
+    let collected =
+      show_result Fun.id (parse ~diagnostics:d input (parser ?sep ?trailing d))
+    in
+    (plain, collected, entries d)
+  in
+  let check name input ?sep ?trailing expected =
+    Alcotest.(check (triple string string errs))
+      name (expected, expected, []) (run ?sep ?trailing input)
+  in
+  check "no separator" "12)" "Ok 12";
+  check "no separator, empty" ")" "Ok ";
+  check "after a trailing separator" "1,2,)"
+    ~sep:(fun () -> ignore (char ','))
+    ~trailing:true "Ok 12"
 
 let test_no_collector_is_plain () =
   let rs = Random.State.make [| 2026; 11; 17 |] in
@@ -1640,12 +1676,7 @@ let test_commit_at_end () =
         "Ok ALT",
         "Ok NONE"
       );
-      ( "then fail",
-        (fun () -> fail "u"),
-        false,
-        "Error at 2: u",
-        "Error at 2: u"
-      );
+      ("then fail", (fun () -> fail "u"), false, "Ok ALT", "Ok NONE");
     ]
   in
   List.iter
@@ -1827,9 +1858,9 @@ let test_commit_in_first_at_closer () =
       ignore (char 'a');
       fail "u"
     )
-    ~collector:"f got 0; Ok |ab; entries [1:u]"
-    ~plain:"f got 0; Error at 1: u; entries []";
-  pin "known difference: cut inside a context, then fail"
+    ~collector:"f got 0; Ok |ab; entries []"
+    ~plain:"f got 0; Ok |ab; entries []";
+  pin "cut inside a context, then fail"
     (fun () ->
       context "c" (fun () ->
           ignore (char 'a');
@@ -1837,7 +1868,7 @@ let test_commit_in_first_at_closer () =
           fail "u"
       )
     )
-    ~collector:"f got 0; Ok |ab; entries [1:u]"
+    ~collector:"f got 0; Error at 1: u; entries []"
     ~plain:"f got 0; Error at 1: u; entries []"
 
 let () =
@@ -1875,6 +1906,8 @@ let () =
           test_case "trace: events and entries agree" `Quick test_trace_order;
           test_case "first element fails with fail" `Quick
             test_first_element_fail;
+          test_case "fail at the closer ends the list" `Quick
+            test_fail_at_close_ends_list;
           test_case "without the collector: the plain parser" `Quick
             test_no_collector_is_plain;
           test_case "iter: first element at the closer" `Quick
