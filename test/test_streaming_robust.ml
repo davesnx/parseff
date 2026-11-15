@@ -273,6 +273,124 @@ let test_regex_pinned_match_at_buffer_end () =
   | Error _ ->
       Alcotest.fail "wrong error"
 
+exception Blocked
+
+let blocking_src parts =
+  let parts = ref parts in
+  Parseff.Source.of_function (fun b o l ->
+      match !parts with
+      | [] ->
+          raise Blocked
+      | s :: rest ->
+          let n = min l (String.length s) in
+          Bytes.blit_string s 0 b o n;
+          parts :=
+            if n = String.length s then
+              rest
+            else
+              String.sub s n (String.length s - n) :: rest;
+          n
+  )
+
+let test_regex_feed_stops_after_value () =
+  let re = Parseff.regex (Re.rep1 (Re.rg 'a' 'z')) in
+  let feed =
+    Parseff.parse_partial (fun () ->
+        let s = Parseff.match_regex re in
+        ignore (Parseff.char ';');
+        s
+    )
+  in
+  match Parseff.feed feed "abc;def" with
+  | Done (Ok (s, rest)) ->
+      Alcotest.(check (pair string string)) "value" ("abc", "def") (s, rest)
+  | Done (Error e) ->
+      Alcotest.fail (Parseff.error_message e)
+  | Await ->
+      Alcotest.fail "Await after a complete value"
+
+let test_regex_no_read_past_decided_match () =
+  List.iter
+    (fun (name, re, parts, expected) ->
+      match
+        Parseff.parse_source ~consume:`Partial (blocking_src parts) (fun () ->
+            Parseff.match_regex (Parseff.regex re)
+        )
+      with
+      | Ok s ->
+          Alcotest.(check string) name expected s
+      | Error e ->
+          Alcotest.failf "%s: %s" name (Parseff.error_message e)
+      | exception Blocked ->
+          Alcotest.failf "%s: read after a decided match" name
+    )
+    [
+      ("word", Re.rep1 (Re.rg 'a' 'z'), [ "abc;" ], "abc");
+      ("word in parts", Re.rep1 (Re.rg 'a' 'z'), [ "ab"; "c;" ], "abc");
+      ("before a newline", Re.rep1 (Re.rg 'a' 'z'), [ "abc\n" ], "abc");
+    ]
+
+let regex_on_string re data =
+  Parseff.parse ~consume:`Partial data (fun () ->
+      Parseff.match_regex (Parseff.regex re)
+  )
+
+let regex_on_stream ?backtrack_window re data chunk =
+  Parseff.parse_source ~consume:`Partial ?backtrack_window (fn_src data chunk)
+    (fun () -> Parseff.match_regex (Parseff.regex re)
+  )
+
+let show = function
+  | Ok s ->
+      Printf.sprintf "Ok %d bytes" (String.length s)
+  | Error { Parseff.kind = Backtrack_window_exceeded _; _ } ->
+      "Backtrack_window_exceeded"
+  | Error e ->
+      "Error " ^ Parseff.error_message e
+
+let x_bc = Re.seq [ Re.rep (Re.char 'x'); Re.opt (Re.str "bc") ]
+
+let test_regex_longer_match_like_string () =
+  let data = String.make 32767 'x' ^ "bc;" in
+  let expected = show (regex_on_string x_bc data) in
+  Alcotest.(check string) "string" "Ok 32769 bytes" expected;
+  List.iter
+    (fun chunk ->
+      Alcotest.(check string)
+        (Printf.sprintf "reads of %d" chunk)
+        expected
+        (show (regex_on_stream x_bc data chunk))
+    )
+    [ 1; 7; 4096 ]
+
+let test_regex_small_window_no_short_match () =
+  List.iter
+    (fun chunk ->
+      Alcotest.(check string)
+        (Printf.sprintf "reads of %d" chunk)
+        "Backtrack_window_exceeded"
+        (show (regex_on_stream ~backtrack_window:3 x_bc "xxbc" chunk))
+    )
+    [ 1; 4096 ]
+
+let test_regex_leol_like_string () =
+  let re = Re.seq [ Re.rep (Re.compl [ Re.char '\n' ]); Re.leol ] in
+  List.iter
+    (fun data ->
+      let expected = show (regex_on_string re data) in
+      List.iter
+        (fun (backtrack_window, chunk) ->
+          Alcotest.(check string)
+            (Printf.sprintf "%S, window %d, reads of %d" data backtrack_window
+               chunk
+            )
+            expected
+            (show (regex_on_stream ~backtrack_window re data chunk))
+        )
+        [ (6, 1); (6, 3); (65536, 1); (65536, 3); (65536, 4096) ]
+    )
+    [ "ab\ncd"; "ab\n"; "ab"; "\n\n" ]
+
 let test_small_window_rejected () =
   List.iter
     (fun w ->
@@ -356,6 +474,19 @@ let () =
           test_case "regex pinned match at buffer end" `Quick
             test_regex_pinned_match_at_buffer_end;
           test_case "small window rejected" `Quick test_small_window_rejected;
+        ]
+      );
+      ( "regex on buffered bytes",
+        [
+          test_case "feed stops after the value" `Quick
+            test_regex_feed_stops_after_value;
+          test_case "no read past a decided match" `Quick
+            test_regex_no_read_past_decided_match;
+          test_case "longer match as on a string" `Quick
+            test_regex_longer_match_like_string;
+          test_case "small window, no shorter match" `Quick
+            test_regex_small_window_no_short_match;
+          test_case "leol as on a string" `Quick test_regex_leol_like_string;
         ]
       );
       ( "source validation",

@@ -169,3 +169,33 @@ that line, but the limit failure is the furthest failure, so it is reported:
   $ name=$(head -c 300 /dev/zero | tr '\0' N)
   $ printf "GET / HTTP/1.1\r\n$name: v\r\n\r\n" | ./main.exe requests
   error 431 Request Header Fields Too Large at byte 16: limit of 256 exceeded
+
+A body larger than the window is 413, not 431, whether it has a
+Content-Length or comes in one chunk:
+
+  $ body=$(head -c 2000 /dev/zero | tr '\0' b)
+  $ printf "POST / HTTP/1.1\r\nContent-Length: 2000\r\n\r\n$body" | ./main.exe --window 1024 requests
+  error 413 Content Too Large at byte 41: backtrack window of 1024 bytes exceeded
+  $ printf "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n7d0\r\n$body\r\n0\r\n\r\n" | ./main.exe --window 1024 requests
+  error 413 Content Too Large at byte 52: backtrack window of 1024 bytes exceeded
+
+An HTTP/1.0 message with Transfer-Encoding has faulty framing (RFC 9112
+section 6.1), also with chunked alone. The error ends the sequence, so the
+server closes the connection:
+
+  $ printf 'POST / HTTP/1.0\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\nGET / HTTP/1.1\r\n\r\n' | ./main.exe requests
+  error 400 Bad Request at byte 47: Transfer-Encoding in an HTTP/1.0 message
+
+A response to HEAD, and a 2xx response to CONNECT, have no body, whatever
+their framing headers say (RFC 9112 section 6.3). --method gives the method
+of the request:
+
+  $ printf 'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n' | ./main.exe --method HEAD response
+  HTTP/1.1 200 OK
+    Content-Length: 2
+  $ printf 'HTTP/1.1 200 OK\r\n\r\n' | ./main.exe --method CONNECT response
+  HTTP/1.1 200 OK
+  $ printf 'HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 2\r\n\r\nno' | ./main.exe --method CONNECT response
+  HTTP/1.1 407 Proxy Authentication Required
+    Content-Length: 2
+    body: "no"
