@@ -343,14 +343,16 @@ let test_trace_across_values () =
   let trace (e : Parseff.trace_event) =
     let s =
       match e with
-      | Enter { name; pos } ->
+      | Parseff.Enter { name; pos } ->
           Printf.sprintf "enter %s %d" name pos
-      | Return { name; start; stop } ->
+      | Parseff.Return { name; start; stop } ->
           Printf.sprintf "exit %s %d %d" name start stop
-      | Fail { name; start; pos } ->
+      | Parseff.Fail { name; start; pos } ->
           Printf.sprintf "fail %s %d %d" name start pos
-      | Captured { start; error } ->
+      | Parseff.Captured { start; error } ->
           Printf.sprintf "captured %d %s" start (Parseff.error_message error)
+      | _ ->
+          "other event"
     in
     events := s :: !events
   in

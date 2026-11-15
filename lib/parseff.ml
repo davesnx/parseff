@@ -99,7 +99,15 @@ end
 type custom_error = ..
 type custom_error += Limit_exceeded of { limit : int }
 
-exception Fail
+(* The public trace event [Fail], added at the end of this file, is an
+   extension constructor too, and a structure cannot define two extension
+   constructors with one name. *)
+module Fail_exception = struct
+  exception Fail
+end
+
+open Fail_exception
+
 type fail_extra = {
   from : int;
   upto : int;
@@ -291,11 +299,15 @@ type error = {
   excerpt : excerpt;
 }
 
-type trace_event =
-  | Enter of { name : string; pos : int }
-  | Return of { name : string; start : int; stop : int }
-  | Fail of { name : string; start : int; pos : int }
-  | Captured of { start : int; error : error }
+type trace_event = ..
+
+module Trace_event = struct
+  type trace_event +=
+    | Enter of { name : string; pos : int }
+    | Return of { name : string; start : int; stop : int }
+    | Fail of { name : string; start : int; pos : int }
+    | Captured of { start : int; error : error }
+end
 
 type 'a cell = {
   mutable value : 'a;
@@ -2448,7 +2460,7 @@ let[@inline] consume s =
   let st = get_state () in
   handle_consume st s
 
-let label_satisfy = "at least 1 character"
+let label_satisfy = "matching character"
 
 let[@inline] satisfy ?(label = label_satisfy) pred =
   let st = get_state () in
@@ -2911,17 +2923,17 @@ let[@inline never] trace_emit st f event =
       Printexc.raise_with_backtrace exn bt
 
 let[@inline never] context_traced st f delimited start name p =
-  trace_emit st f (Enter { name; pos = start });
+  trace_emit st f (Trace_event.Enter { name; pos = start });
   match context_run st delimited start name p with
   | v ->
-      trace_emit st f (Return { name; start; stop = st.pos });
+      trace_emit st f (Trace_event.Return { name; start; stop = st.pos });
       v
   | exception Fail ->
-      trace_emit st f (Fail { name; start; pos = st.pos });
+      trace_emit st f (Trace_event.Fail { name; start; pos = st.pos });
       raise_notrace Fail
   | exception exn ->
       let bt = Printexc.get_raw_backtrace () in
-      trace_emit st f (Fail { name; start; pos = st.pos });
+      trace_emit st f (Trace_event.Fail { name; start; pos = st.pos });
       Printexc.raise_with_backtrace exn bt
 
 let[@inline never] context_start st start =
@@ -4715,17 +4727,19 @@ let print_trace ppf =
     Format.fprintf ppf ("%s" ^^ fmt ^^ "@.") (String.make (2 * !depth) ' ')
   in
   function
-  | Enter { name; pos } ->
+  | Trace_event.Enter { name; pos } ->
       line "%s @%d" name pos;
       incr depth
-  | Return { name; start; stop } ->
+  | Trace_event.Return { name; start; stop } ->
       decr depth;
       line "%s ok @%d..%d" name start stop
-  | Fail { name; start; pos } ->
+  | Trace_event.Fail { name; start; pos } ->
       decr depth;
       line "%s failed @%d (from @%d)" name pos start
-  | Captured { start; error } ->
+  | Trace_event.Captured { start; error } ->
       line "captured @%d: %s" start (error_message error)
+  | _ ->
+      ()
 
 let is_continuation s len i =
   i < len && Char.code (Bytes.unsafe_get s i) land 0xC0 = 0x80
@@ -6035,7 +6049,7 @@ let captured st start e =
   | None ->
       ()
   | Some f ->
-      trace_emit st f (Captured { start; error = e })
+      trace_emit st f (Trace_event.Captured { start; error = e })
 
 let capture_rewind st frame saved e =
   let recovered = State.frame_recovered st frame in
@@ -6836,3 +6850,9 @@ module Ref = struct
     end;
     c.value <- value
 end
+
+type trace_event +=
+  | Enter = Trace_event.Enter
+  | Return = Trace_event.Return
+  | Fail = Trace_event.Fail
+  | Captured = Trace_event.Captured

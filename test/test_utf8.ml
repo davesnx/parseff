@@ -76,6 +76,19 @@ let test_satisfy_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
+let test_satisfy_default_label () =
+  match
+    Parseff.parse "\xC3\xA9" (fun () ->
+        Parseff.Utf8.satisfy (fun u -> Uchar.to_int u < 0x80)
+    )
+  with
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error e ->
+      Alcotest.(check string)
+        "error message" "expected matching character, found '\xC3\xA9'"
+        (Parseff.error_message e)
+
 let test_satisfy_eof () =
   match
     Parseff.parse "" (fun () ->
@@ -582,6 +595,7 @@ let () =
           test_case "3-byte (CJK)" `Quick test_satisfy_3byte;
           test_case "4-byte (emoji)" `Quick test_satisfy_4byte;
           test_case "failure" `Quick test_satisfy_failure;
+          test_case "default label" `Quick test_satisfy_default_label;
           test_case "eof" `Quick test_satisfy_eof;
           test_case "invalid UTF-8" `Quick test_satisfy_invalid_utf8;
         ]
