@@ -1003,7 +1003,20 @@ let test_failure_at_end () =
   in
   same "(2" paren;
   same "(" paren;
-  same "\"abc" unfinished;
+  let d = Diagnostics.create () in
+  let r =
+    parse ~diagnostics:d "\"abc" (fun () ->
+        recover d
+          ~sync:(fun () -> skip_while (fun _ -> true))
+          unfinished
+          (fun _ -> Hole)
+    )
+  in
+  Alcotest.(check string)
+    "an error that starts before the end is recovered" "Ok" (show_error r);
+  Alcotest.check errs "recorded at its start"
+    [ (0, "unfinished string") ]
+    (errors d);
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "(2]" (fun () ->
@@ -1075,8 +1088,10 @@ let test_rollback () =
           ()
     )
   in
-  Alcotest.(check string) "value" "Ok" (show_error r);
-  Alcotest.check errs "entry removed" [] (errors d)
+  Alcotest.(check string)
+    "a recovery commits to the branch"
+    "Error at 2: expected 'z', found end of input" (show_error r);
+  Alcotest.check errs "entry kept" [ (1, "expected 'b', found '1'") ] (errors d)
 
 let lost_input = "x = 1\nprint(\"hi)\n"
 

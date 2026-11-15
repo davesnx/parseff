@@ -224,28 +224,29 @@ let run_array input =
 
 ## A list with a closing token
 
-Inside `Parseff.many`, `recover` would read the `}` of a block as a broken statement and skip it. Stop the loop at the closing token before you call `recover`, and make `sync` stop before that token too:
+Inside `Parseff.many`, `recover` would read the `}` of a block as a broken statement and skip it: a loop is a choice, and a recovery inside it takes the choice. Use `Parseff.list` with `~close`. Where `close` is true, `list` runs the statement without recovery, as `many` does, and stops when it fails, so the `}` goes to `Parseff.require`. Make `sync` stop before that token too:
 
 ```ocaml
 let skip_in_block () =
   Parseff.skip_while (fun c -> c <> ';' && c <> '}');
-  ignore (Parseff.optional (fun () -> Parseff.char ';') ())
+  ignore (Parseff.optional (fun () -> Parseff.char ';') ());
+  ws ()
 
 let block errors () =
   let _ = Parseff.char '{' in
+  ws ();
   let stmts =
-    Parseff.many
+    Parseff.list errors
+      ~close:(fun () -> Parseff.peek_char () = Some '}')
+      ~sync:skip_in_block
       (fun () ->
+        let s = statement () in
         ws ();
-        let _ =
-          Parseff.look_ahead (fun () ->
-              Parseff.satisfy ~label:"statement" (fun c -> c <> '}'))
-        in
-        Parseff.recover errors ~sync:skip_in_block statement (fun _ -> Hole))
+        s)
+      (fun _ -> Hole)
       ()
   in
-  ws ();
-  let _ = Parseff.char '}' in
+  Parseff.require errors (fun () -> ignore (Parseff.char '}')) ignore;
   stmts
 ```
 
@@ -275,7 +276,9 @@ x = 1
 
 ## Limits
 
-**Recovery inside a choice takes the choice.** A `recover`, `require` or `list` in a branch of `or_`, `one_of` or `optional`, or inside `look_ahead`, recovers there: the branch succeeds with a recorded error and a hole, and the other alternatives do not run. Input that another alternative accepts is then reported as an error. Call recovery after the token that selects the branch, or around the whole choice, not inside a branch.
+**Recovery inside a choice takes the choice.** A `recover`, `require` or `list` in a branch of `or_`, `one_of` or `optional` recovers there: the branch succeeds with a recorded error and a hole, and the other alternatives do not run, also when the branch fails later. Input that another alternative accepts is then reported as an error. Call recovery after the token that selects the branch, or around the whole choice, not inside a branch. A loop is a choice too: use `list` with `~close`. Inside `look_ahead` and `peek_with`, the recovery functions do not recover.
+
+**`cut` and `commit` reach past a recovery.** A `cut` or `commit` inside `recover`, `sep_by_recover` or `require` seals the enclosing frames as it does without the collector. Thus a parse with the collector that returns `Ok v` and records no error returns `Ok v` without it.
 
 **`recover` always consumes input.** Here `sync` does nothing, and `recover` skips the `;` where the second statement failed. To continue without consuming input, use `capture`.
 
@@ -288,7 +291,7 @@ x = 1
 - : (string list, Parseff.error) result = Ok ["x = 1"; "<hole>"; "z = 3"]
 ```
 
-**A failure at the end of the input is not recovered.** The parse fails as it would without `recover`, with one error. Recorded, the failure would give a second error where the enclosing construct expects more input. `sep_by_recover` follows the same rule. `capture` returns such a failure as any other:
+**A failure at the end of the input is not recovered.** The parse fails as it would without `recover`, with one error. Recorded, the failure would give a second error where the enclosing construct expects more input. A failure is at the end when its error range starts there too, so a `fail ~from` an earlier position is recovered. `sep_by_recover` and `list` follow the same rule: the element fails as in `sep_by` and `many`, so the list ends before it. `capture` returns such a failure as any other:
 
 ```ocaml
 # let errors = Parseff.Diagnostics.create () in
