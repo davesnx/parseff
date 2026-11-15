@@ -1,14 +1,18 @@
+[@@@alert "-unstable"]
+
 let show (e : Parseff.trace_event) =
   match e with
-  | Enter { name; pos } ->
+  | Parseff.Enter { name; pos } ->
       Printf.sprintf "enter %s %d" name pos
-  | Return { name; start; stop } ->
+  | Parseff.Return { name; start; stop } ->
       Printf.sprintf "exit %s %d %d" name start stop
-  | Fail { name; start; pos } ->
+  | Parseff.Fail { name; start; pos } ->
       Printf.sprintf "fail %s %d %d" name start pos
-  | Captured { start; error } ->
+  | Parseff.Captured { start; error } ->
       Printf.sprintf "captured %d %d %s" start error.range.start
         (Parseff.error_message error)
+  | _ ->
+      "other event"
 
 let one_byte_source s =
   let i = ref 0 in

@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let n =

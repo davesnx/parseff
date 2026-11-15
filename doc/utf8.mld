@@ -36,7 +36,7 @@ let field () =
 {!val:Parseff.Utf8.satisfy} decodes the next UTF-8 code point and tests it
 against a predicate. Advances by 1--4 bytes depending on the encoding. The
 [~label] is used in error messages; without it, the error says
-[expected at least 1 character].
+[expected matching character].
 
 {@ocaml skip[val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t]}
 

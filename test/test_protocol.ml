@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 let chunked_source ~chunk_size input =
   let pos = ref 0 in
   Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
