@@ -189,8 +189,6 @@ and frame = {
   first : int;
   limit : int;
   mutable outer_len : int;
-  mutable text : string;
-  mutable text_from : int;
 }
 
 and chunks = {
@@ -1898,6 +1896,18 @@ let[@inline never] regex_window_error st src =
        )
     )
 
+let[@inline never] regex_back st src want =
+  match src.feed with
+  | Frame fr ->
+      imax st.base
+        ( if fr.first > st.base then
+            fr.first - 1
+          else
+            fr.first
+        )
+  | Read _ | Chunks _ | Bigstrings _ ->
+      want
+
 let regex_text st src =
   let want =
     if st.pos > st.base then
@@ -1913,9 +1923,15 @@ let regex_text st src =
       src.regex_text <- Bytes.unsafe_to_string st.input;
       src.regex_from <- st.base
     end else begin
+      let from =
+        if src.regex_from > want && src.regex_from < max_int then
+          regex_back st src want
+        else
+          want
+      in
       src.regex_text <-
-        Bytes.sub_string st.input (want - st.base) (st.input_len - want);
-      src.regex_from <- want
+        Bytes.sub_string st.input (from - st.base) (st.input_len - from);
+      src.regex_from <- from
     end
 
 let regex_matched st stop =
@@ -1980,44 +1996,6 @@ and regex_read_more st src re label settled =
     | _ ->
         regex_window_error st src
 
-let regex_frame_text st fr =
-  let before p =
-    if p > st.base then
-      p - 1
-    else
-      p
-  in
-  let want = before st.pos in
-  if fr.text_from > want || fr.text_from + String.length fr.text <> st.input_len
-  then begin
-    let from =
-      if fr.text_from > want then
-        imax st.base (before fr.first)
-      else
-        want
-    in
-    fr.text <- Bytes.sub_string st.input (from - st.base) (st.input_len - from);
-    fr.text_from <- from
-  end
-
-let rec match_regex_frame st src fr re label =
-  regex_frame_text st fr;
-  let ahead = st.input_len - st.pos in
-  match Re.exec_partial_detailed ~pos:(st.pos - fr.text_from) re fr.text with
-  | `Full g when src.eof || fr.text_from + Re.Group.stop g 0 < st.input_len ->
-      let match_start = st.pos in
-      let match_end = fr.text_from + Re.Group.stop g 0 in
-      st.pos <- match_end;
-      slice st match_start (match_end - match_start)
-  | `Mismatch ->
-      regex_failure st label
-  | _ when src.eof ->
-      regex_failure st label
-  | _ ->
-      if not (regex_read_ahead st src (ahead + imax 1 ahead)) then
-        regex_window_error st src;
-      match_regex_frame st src fr re label
-
 let[@inline never] handle_match_regex st re label =
   match st.source with
   | None -> (
@@ -2032,17 +2010,10 @@ let[@inline never] handle_match_regex st re label =
       | exception Not_found ->
           regex_failure st label
     )
-  | Some src -> (
-      match src.feed with
-      | Frame fr ->
-          if (not src.eof) && st.input_len - st.pos < src.window / 2 then
-            ignore (regex_read_ahead st src (src.window / 2));
-          match_regex_frame st src fr re label
-      | Read _ | Chunks _ | Bigstrings _ ->
-          regex_prefetch st src;
-          match_regex_source st src re label
-            (st.input_len - st.pos >= src.window / 2)
-    )
+  | Some src ->
+      regex_prefetch st src;
+      match_regex_source st src re label
+        (st.input_len - st.pos >= src.window / 2)
 
 let[@inline never] need_bytes_slow st n =
   if not (have st n) then fail_int st st.pos (bytes_kind n)
@@ -2507,9 +2478,7 @@ let[@inline never] limited st stop f =
             (stop, src.eof, src.window)
       )
   in
-  let fr =
-    { outer; first = start; limit; outer_len; text = ""; text_from = max_int }
-  in
+  let fr = { outer; first = start; limit; outer_len } in
   st.source <-
     Some
       {
