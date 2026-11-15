@@ -27,7 +27,7 @@
   test_list_sep_by
   test_peek
   test_differential
-  test_feed
+  test_partial
   test_protocol
   test_protocol_fuzz
   test_iter)
