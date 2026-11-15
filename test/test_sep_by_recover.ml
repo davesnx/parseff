@@ -311,8 +311,12 @@ let test_rollback () =
        )
       )
   in
-  Alcotest.(check string) "value" "Ok _" (show_result r);
-  Alcotest.check errs "errors of the abandoned branch are removed" [] (errors d)
+  Alcotest.(check string)
+    "a recovery commits to the branch"
+    "Error at 8: expected ',' or ']', found '}'" (show_result r);
+  Alcotest.check errs "the recorded errors stay"
+    [ (4, "expected integer, found '?'") ]
+    (errors d)
 
 let note ?from msg =
   match capture (fun () -> (fail ?from msg : unit)) with

@@ -30,7 +30,8 @@
   test_feed
   test_protocol
   test_protocol_fuzz
-  test_iter)
+  test_iter
+  test_recovery_property)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest re uucp))
 
