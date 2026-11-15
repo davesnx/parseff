@@ -113,6 +113,136 @@ let test_seal_reaches_outer_frames () =
     )
     ~plain:"Ok a"
 
+let holes_then_ax d () =
+  let l =
+    many
+      (fun () -> recover d ~sync:ignore (fun () -> consume "ab") (fun _ -> "H"))
+      ()
+  in
+  String.concat "" l ^ consume "ax"
+
+let alt () =
+  ignore (consume "ax");
+  "ALT"
+
+let test_replay_without_recovery () =
+  same "or_" "ax" (fun d () -> or_ (holes_then_ax d) alt ()) ~plain:"Ok ax";
+  check "or_, the next alternative recovers" "ax"
+    (fun d () ->
+      or_
+        (fun () ->
+          let s = holes_then_ax d () in
+          s ^ String.make 1 (char 'q')
+        )
+        (fun () ->
+          require d (fun () -> consume "b") (fun _ -> "M") ^ consume "ax"
+        )
+        ()
+    )
+    ~plain:"Error at 2: expected 'q' or \"b\", found end of input"
+    ~collector:("Ok Max", 1);
+  same "optional" "ax"
+    (fun d () ->
+      match optional (holes_then_ax d) () with Some v -> v | None -> alt ()
+    )
+    ~plain:"Ok ax";
+  same "one_of" "ax"
+    (fun d () -> one_of [ holes_then_ax d; holes_then_ax d; alt ] ())
+    ~plain:"Ok ax";
+  let y_or_holes d () =
+    match peek_char () with Some 'y' -> consume "y" | _ -> holes_then_ax d ()
+  in
+  same "many" "yax"
+    (fun d () -> String.concat "," (many (y_or_holes d) ()))
+    ~plain:"Ok y,ax";
+  same "many ~at_most" "yax"
+    (fun d () -> String.concat "," (many ~at_most:3 (y_or_holes d) ()))
+    ~plain:"Ok y,ax";
+  same "sep_by" "y,ax"
+    (fun d () ->
+      String.concat "," (sep_by (y_or_holes d) (fun () -> char ',') ())
+    )
+    ~plain:"Ok y,ax";
+  same "many_iter" "yax"
+    (fun d () ->
+      let b = Buffer.create 8 in
+      many_iter (y_or_holes d) (Buffer.add_string b) ();
+      Buffer.contents b
+    )
+    ~plain:"Ok yax";
+  same "fold_left" "yax"
+    (fun d () -> fold_left (y_or_holes d) (fun () a b -> a ^ "+" ^ b) ())
+    ~plain:"Ok y+ax";
+  same "fold_right" "yax"
+    (fun d () -> fold_right (y_or_holes d) (fun () a b -> a ^ "+" ^ b) ())
+    ~plain:"Ok y+ax";
+  same "fold_left ~otherwise" "ax"
+    (fun d () ->
+      fold_left (holes_then_ax d)
+        (fun () a b -> a ^ "+" ^ b)
+        ~otherwise:"none" ()
+    )
+    ~plain:"Ok ax";
+  let operand d () =
+    match peek_char () with
+    | Some 'a' ->
+        holes_then_ax d ()
+    | _ ->
+        String.make 1 (digit ())
+  in
+  let rest () =
+    match optional (fun () -> consume "+ax") () with Some s -> s | None -> ""
+  in
+  let plus () a b = a ^ "+" ^ b in
+  same "precedence" "1+ax"
+    (fun d () ->
+      let v =
+        precedence ~operand:(operand d)
+          ~operator:(fun () ->
+            match peek_char () with
+            | Some '+' ->
+                ignore (char '+');
+                Some (1, infix_left plus)
+            | _ ->
+                None
+          )
+          ()
+      in
+      v ^ ";" ^ rest ()
+    )
+    ~plain:"Ok 1+ax;";
+  same "expression" "1+ax"
+    (fun d () ->
+      let v =
+        expression ~operand:(operand d)
+          [
+            [
+              infix_left (fun () ->
+                  ignore (char '+');
+                  plus ()
+              );
+            ];
+          ]
+          ()
+      in
+      v ^ ";" ^ rest ()
+    )
+    ~plain:"Ok 1+ax;";
+  same "expression, prefix" "-ax"
+    (fun d () ->
+      expression ~operand:(operand d)
+        [
+          [
+            prefix (fun () ->
+                ignore (char '-');
+                fun a -> "-" ^ a
+            );
+          ];
+        ]
+        ()
+    )
+    ~plain:"Ok -ax"
+
 let test_seal_after_recovery () =
   check "a later failure after a recovery" "axq"
     (fun d () ->
@@ -654,6 +784,22 @@ let test_sound_cases () =
   List.iter
     (fun (g, input) -> sound g input)
     [
+      ( Seq
+          ( List
+              ( List
+                  ( Seq (List (Chr 'a', true, false, None), Seq (Commit, Any)),
+                    true,
+                    true,
+                    Some ']'
+                  ),
+                false,
+                true,
+                None
+              ),
+            Guard (List (Seq (Require Any, Ctx Commit), false, true, None))
+          ),
+        "ba[,b"
+      );
       ( Recover
           ( true,
             Require
@@ -667,6 +813,21 @@ let test_sound_cases () =
       ( Many
           (Many (Many (Require (Seq (Sep_rec (Guard Cut), Seq (Chr 'b', Cut)))))),
         ",b"
+      );
+      ( Many
+          (Recover
+             ( true,
+               Many
+                 (Seq
+                    ( Guard
+                        (Many (Recover (false, Or (Cut, Chr 'b'), Skip_to ']'))),
+                      Seq (Require (Chr ']'), Many (Chr 'b'))
+                    )
+                 ),
+               Nothing
+             )
+          ),
+        ""
       );
       ( Capture
           (Many
@@ -816,6 +977,8 @@ let () =
             test_seal_reaches_outer_frames;
           Alcotest.test_case "commit and cut after a recovery" `Quick
             test_seal_after_recovery;
+          Alcotest.test_case "a recovered branch that fails runs again" `Quick
+            test_replay_without_recovery;
           Alcotest.test_case "a loop of statements with close" `Quick
             test_loop_with_close;
           Alcotest.test_case "list: an element cut short at the end" `Quick

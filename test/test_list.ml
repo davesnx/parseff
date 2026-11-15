@@ -1796,8 +1796,7 @@ let test_commit_never_reaches_the_caller () =
           (fun collector ->
             let a = alone collector in
             let expected =
-              if ok a || (collector && not (String.ends_with ~suffix:"[]" a))
-              then
+              if ok a then
                 a
               else
                 "f got 0; Ok ALT; entries []"

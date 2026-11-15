@@ -928,12 +928,13 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
     started, and the diagnostics that [parser] recorded are removed, also those
     of a {!capture} or {!recover} inside [parser] that recovered. This rule is
     final; the [~record] of {!recover} gets the removed diagnostics. A {!cut} or
-    {!commit} in [parser] does not reach past [capture]. A recovery in [parser]
-    that recovered does: the frames around [capture] can no longer go back,
-    whether [parser] then succeeds or fails, as {!recover} says.
-    [Depth_limit_exceeded] and [Backtrack_window_exceeded] are not caught. In
-    {!parse_source}, the input that [parser] reads must fit in
-    [~backtrack_window]. A traced parse gets a [Captured] event for [Error e].
+    {!commit} in [parser] does not reach past [capture]. When [parser] fails
+    after a recovery in it, [capture] does not run it again: [e] is the failure
+    of the run with recovery. The frames around [capture] treat a recovery in
+    [parser] as their own, as {!recover} says. [Depth_limit_exceeded] and
+    [Backtrack_window_exceeded] are not caught. In {!parse_source}, the input
+    that [parser] reads must fit in [~backtrack_window]. A traced parse gets a
+    [Captured] event for [Error e].
 
     [capture] also returns a failure at the end of the input. A parser that
     records it and continues usually fails again at the end, so the input gets
@@ -990,17 +991,22 @@ val recover :
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
 
-    A recovery decides the constructs around it. When [recover],
-    {!sep_by_recover}, {!require} or {!list} records an error and goes on, the
-    enclosing {!or_}, {!one_of}, {!optional} and repetitions, up to the nearest
-    {!capture}, can no longer go back: a later failure in them is an error of
-    the whole parse, as after {!cut}. So a recovery inside a branch takes that
-    branch: the other alternatives do not run, also when the branch fails later,
-    and input that another alternative accepts is reported as an error. Call
-    recovery only after the choice is decided: after the token that selects the
-    branch, or around the whole {!or_} or {!one_of}, not inside a branch. Inside
-    {!look_ahead}, {!peek_with} and an operator lookup of {!precedence}, the
-    recovery functions do not recover: they run as without the collector.
+    A recovery does not decide the constructs around it. When [recover],
+    {!sep_by_recover}, {!require} or {!list} records an error and goes on, and a
+    branch of an enclosing {!or_}, {!one_of} or {!optional}, a step of a
+    repetition or a fold, or an operand of {!precedence} or {!expression} then
+    fails, that construct removes the errors recorded in the branch and runs the
+    branch again without recovery. It then goes on as without the collector: it
+    tries the next alternative, or ends the repetition, so input that another
+    alternative accepts is not reported as an error. The next alternative runs
+    with recovery. The rest of a repetition, a fold or an expression runs
+    without it. A {!commit} or {!cut} before the recovery still decides the
+    construct. One after the recovery does not, as the run without recovery may
+    not reach it. A branch that recovers and then fails thus runs twice. To keep
+    the errors of a branch, call recovery after the token that selects it, then
+    {!commit}, or around the whole {!or_} or {!one_of}. Inside {!look_ahead},
+    {!peek_with} and an operator lookup of {!precedence}, the recovery functions
+    do not recover: they run as without the collector.
 
     A loop is a choice too: {!many} stops where its element fails. In
     [many (fun () -> recover errors ~sync statement hole)], [recover] also
@@ -1205,8 +1211,8 @@ val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
     A {!commit} or {!cut} in [parser] reaches the frames outside [require], with
     the collector and without it, so an {!or_} around [require] does not take
     its other branch after them. An insertion undoes all that [parser] did: the
-    position, the diagnostics and the {!Ref} changes. It decides the constructs
-    around it, as {!recover} says.
+    position, the diagnostics and the {!Ref} changes. When a construct around it
+    fails later, that construct runs again without recovery, as {!recover} says.
 
     In byte mode, a token parser usually skips the whitespace after it. Then [e]
     points after that whitespace, not at the end of the previous token.

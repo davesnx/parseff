@@ -126,7 +126,10 @@ let rec run env = function
   | Or (a, b) ->
       let s = save env in
       or_
-        (fun () -> run env a)
+        (fun () ->
+          restore env s;
+          run env a
+        )
         (fun () ->
           restore env s;
           check env "or_ right branch";
@@ -136,16 +139,31 @@ let rec run env = function
       check env "after or_"
   | Optional a ->
       let s = save env in
-      if optional (fun () -> run env a) () = None then restore env s;
+      if
+        optional
+          (fun () ->
+            restore env s;
+            run env a
+          )
+          ()
+        = None
+      then
+        restore env s;
       check env "after optional"
   | Many a ->
       let s = ref (save env) in
+      let pending = ref false in
       ignore
         (many
            (fun () ->
-             s := save env;
+             if !pending then
+               restore env !s
+             else
+               s := save env;
+             pending := true;
              check env "many iteration";
-             run env a
+             run env a;
+             pending := false
            )
            ()
         );
@@ -158,7 +176,15 @@ let rec run env = function
       check env "after look_ahead"
   | Capture a ->
       let s = save env in
-      if Result.is_error (capture (fun () -> run env a)) then restore env s;
+      if
+        Result.is_error
+          (capture (fun () ->
+               restore env s;
+               run env a
+           )
+          )
+      then
+        restore env s;
       check env "after capture"
   | Recover (a, sync) ->
       let s = save env in
@@ -168,7 +194,10 @@ let rec run env = function
           check env "recover sync";
           run env sync
         )
-        (fun () -> run env a)
+        (fun () ->
+          restore env s;
+          run env a
+        )
         (fun _ -> ());
       check env "after recover"
   | Context a ->
@@ -249,7 +278,15 @@ let run_program ~streaming program input =
   let env = make_env () in
   let top () =
     let s = save env in
-    if Result.is_error (capture (fun () -> run env program)) then restore env s;
+    if
+      Result.is_error
+        (capture (fun () ->
+             restore env s;
+             run env program
+         )
+        )
+    then
+      restore env s;
     check env "end of the parser"
   in
   let result =

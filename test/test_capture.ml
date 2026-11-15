@@ -1091,9 +1091,8 @@ let test_rollback () =
     )
   in
   Alcotest.(check string)
-    "a recovery commits to the branch"
-    "Error at 2: expected 'z', found end of input" (show_error r);
-  Alcotest.check errs "entry kept" [ (1, "expected 'b', found '1'") ] (errors d)
+    "the alternative runs as without a collector" "Ok" (show_error r);
+  Alcotest.check errs "the entry is rolled back" [] (errors d)
 
 let lost_input = "x = 1\nprint(\"hi)\n"
 

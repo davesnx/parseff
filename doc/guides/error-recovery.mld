@@ -288,14 +288,17 @@ x = 1
 
 {1 Limits}
 
-{b Recovery inside a choice takes the choice.} A [recover], [require] or [list]
-in a branch of [or_], [one_of] or [optional] recovers there: the branch
-succeeds with a recorded error and a hole, and the other alternatives do not
-run, also when the branch fails later. Input that another alternative accepts
-is then reported as an error. Call recovery after the token that selects the
-branch, or around the whole choice, not inside a branch. A loop is a choice
-too: use [list] with [~close]. Inside [look_ahead] and [peek_with], the
-recovery functions do not recover.
+{b A branch that recovers and then fails runs again without recovery.} A
+[recover], [require] or [list] in a branch of [or_], [one_of] or [optional], in
+a step of a repetition or a fold, or in an operand of [precedence] or
+[expression], recovers there. When the branch then fails, the construct removes
+the errors recorded in it, runs it again without recovery, and goes on as
+without the collector: the next alternative runs, or the repetition ends. Input
+that another alternative accepts is thus not reported as an error. A [commit]
+or [cut] before the recovery still decides the construct. To keep the errors of
+a branch, recover after the token that selects it, then [commit], or around the
+whole choice. A loop is a choice too: use [list] with [~close]. Inside
+[look_ahead] and [peek_with], the recovery functions do not recover.
 
 {b [cut] and [commit] reach past a recovery.} A [cut] or [commit] inside
 [recover], [sep_by_recover] or [require] seals the enclosing frames as it does
