@@ -282,11 +282,13 @@ let content_length headers =
   | _ ->
       Parseff.error (Bad_framing "invalid Content-Length")
 
-let chunked headers =
+let chunked ~version headers =
   match values "transfer-encoding" headers with
   | [] ->
       false
   | te ->
+      if version < (1, 1) then
+        Parseff.error (Bad_framing "Transfer-Encoding in an HTTP/1.0 message");
       if values "content-length" headers <> [] then
         Parseff.error
           (Bad_framing "Transfer-Encoding and Content-Length together");
@@ -304,8 +306,8 @@ let chunked headers =
             (Bad_framing "chunked must be the final transfer coding, once")
       end
 
-let body headers =
-  if chunked headers then
+let body ~version headers =
+  if chunked ~version headers then
     Raw (fst (chunked_body ()))
   else
     match content_length headers with
@@ -319,18 +321,24 @@ let body headers =
             Raw (Parseff.take n)
       )
 
-let response_body (head : response) =
-  if head.status < 200 || head.status = 204 || head.status = 304 then
+let response_body ~meth (head : response) =
+  if
+    meth = "HEAD" || head.status < 200 || head.status = 204 || head.status = 304
+    || (meth = "CONNECT" && head.status < 300)
+  then
     No_body
-  else if chunked head.headers || content_length head.headers <> None then
-    body head.headers
+  else if
+    chunked ~version:head.version head.headers
+    || content_length head.headers <> None
+  then
+    body ~version:head.version head.headers
   else
     Raw (Parseff.take_while (fun _ -> true))
 
 let request () =
-  let head = request_head () in
+  let head = Parseff.context "head" request_head in
   Parseff.commit ();
-  let body = body head.headers in
+  let body = body ~version:head.version head.headers in
   (head, body)
 
 let status_of_error (e : Parseff.error) =
@@ -347,7 +355,11 @@ let status_of_error (e : Parseff.error) =
   | Custom (Parseff.Limit_exceeded _)
     when innermost = "header section" || innermost = "trailer section" ->
       (431, "Request Header Fields Too Large")
-  | Backtrack_window_exceeded _ ->
+  | Backtrack_window_exceeded _
+    when List.exists (fun (c : Parseff.context) -> c.name = "head") e.contexts
+    ->
       (431, "Request Header Fields Too Large")
+  | Backtrack_window_exceeded _ ->
+      (413, "Content Too Large")
   | _ ->
       (400, "Bad Request")

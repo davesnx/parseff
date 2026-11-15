@@ -173,7 +173,8 @@ let csv_value () =
 position. Build the regex with {!val:Parseff.regex}, which compiles an [Re.t]
 anchored at the position where the match starts, so a failed match examines
 only the bytes that the regex needs to fail, not the rest of the input. In
-streaming mode, [match_regex] still reads ahead up to half the backtrack window.
+streaming mode, [match_regex] reads only when the buffered bytes cannot decide
+the match, and gives the same result as on a string.
 
 {@ocaml skip[
 val regex : Re.t -> Parseff.regex

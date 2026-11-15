@@ -28,12 +28,12 @@ let requests ~buf_size ~window =
       )
     (Parseff.parse_source_each ~backtrack_window:window src Http.request)
 
-let response () =
+let response ~meth =
   let input = In_channel.input_all stdin in
   match
     Parseff.parse input (fun () ->
         let head = Http.response_head () in
-        (head, Http.response_body head)
+        (head, Http.response_body ~meth head)
     )
   with
   | Ok ((head : Http.response), body) ->
@@ -56,19 +56,24 @@ let chunked () =
 let () =
   let buf_size = ref 4096 in
   let window = ref 65_536 in
+  let meth = ref "GET" in
   let mode = ref "" in
   Arg.parse
     [
       ("--chunk", Arg.Set_int buf_size, "N read stdin N bytes at a time");
       ("--window", Arg.Set_int window, "N backtrack window in bytes");
+      ( "--method",
+        Arg.Set_string meth,
+        "M method of the request that the response answers"
+      );
     ]
     (fun m -> mode := m)
-    "main.exe [--chunk N] [--window N] requests|response|chunked";
+    "main.exe [--chunk N] [--window N] [--method M] requests|response|chunked";
   match !mode with
   | "requests" ->
       requests ~buf_size:!buf_size ~window:!window
   | "response" ->
-      response ()
+      response ~meth:!meth
   | "chunked" ->
       chunked ()
   | m ->

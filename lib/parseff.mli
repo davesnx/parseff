@@ -462,23 +462,20 @@ val match_regex : ?label:string -> regex -> string
     rest of the input. [Re.bol] and word boundaries see the byte before the
     current position.
 
-    In streaming mode, a match and the byte after it must fit in the backtrack
-    window, unless the source ends after the match. Otherwise the parse fails
-    with [Backtrack_window_exceeded]. A match is taken as final when one byte
-    after it is buffered, with or without {!within}. This has two known limits,
-    which depend on the read size and do not show when the whole match and the
-    bytes after it arrive in one read: [Re.leol] can match before a newline that
-    is not the last byte of the input, when that newline is the last byte read
-    ([[^\n]*] then [Re.leol] on ["ab\ncd"] can return ["ab"]); and a match that
-    could go on can come back shorter than on a string, when the bytes read so
-    far end right after it ([x*(bc)?] on ["xxbc"] can return ["xx"]; with small
-    reads this also happens at the default window, when the match reaches about
-    half the window). Before it matches, a streaming [match_regex] reads ahead
-    up to half the backtrack window when less than a quarter of the window, or
-    no byte, is buffered after the position and the window has room for that
-    much more, also when the match then fails. A regex that can still match with
-    more input, for example one with a leading [.*], reads until the window is
-    full and then fails with [Backtrack_window_exceeded].
+    In streaming mode, [match_regex] first runs the regex on the bytes that are
+    already buffered. It reads only when those bytes cannot decide the result,
+    one read at a time, and runs the regex again from the position after each
+    read. A streaming match gives the same result as on a string. The match is
+    decided when the regex cannot use more bytes, which needs the byte after the
+    match or the end of the source, with or without {!within}. A match and the
+    bytes needed to decide it must fit in the backtrack window. Otherwise the
+    parse fails with [Backtrack_window_exceeded]: [x*(bc)?] on ["xxbc"] with a
+    window of [3] fails, and a regex that can still match with more input, for
+    example one with a leading [.*], reads until the window is full and then
+    fails. When the last buffered byte is a newline that [Re.leol] could test,
+    the result waits for the next byte or the end of the source. As the regex
+    runs again after each read, a long match that arrives in many small reads
+    costs time in proportion to its length times the number of reads.
 
     Example:
     {@ocaml[
@@ -2188,19 +2185,19 @@ val within : int -> (unit -> 'a) -> 'a
 
     [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
     be larger than [~backtrack_window] when [parser] calls {!commit} as it
-    reads. Two things copy inside a frame. {!match_regex} works on a copy of the
-    frame bytes read so far, as it does with no frame: the copy starts at the
-    byte before the position and is made again only after a read, or when a call
-    is at a position before it. In that case it starts at the byte before the
-    frame start, or at the frame start when that byte is not buffered, or at the
-    oldest byte still buffered when the frame start is not, so on string input
-    it is made at most twice per frame. It reads ahead as with no frame, up to
-    the frame end, so a regex inside a frame behaves as on a stream with no
-    frame, with the limits that {!match_regex} states: with a window of a few
-    bytes it can fail with [Backtrack_window_exceeded], or return another match,
-    where a regex in a frame returned a value before. On string input,
-    {!take_span}, {!take_while_span} and {!recognize_span} return copies, as
-    they do with {!parse_source}.
+    reads. Two things copy inside a frame. Once the frame end is buffered,
+    {!match_regex} works on a copy of the frame bytes, as it does at the end of
+    a source with no frame: the copy starts at the byte before the position and
+    is made again only when a call is at a position before it. In that case it
+    starts at the byte before the frame start, or at the frame start when that
+    byte is not buffered, or at the oldest byte still buffered when the frame
+    start is not, so on string input it is made at most twice per frame. Before
+    the frame end is buffered, it reads as with no frame, up to the frame end,
+    so a regex inside a frame behaves as on a stream with no frame, with the
+    limits that {!match_regex} states: with a window of a few bytes it can fail
+    with [Backtrack_window_exceeded] where a regex in a frame returned a value
+    before. On string input, {!take_span}, {!take_while_span} and
+    {!recognize_span} return copies, as they do with {!parse_source}.
 
     Inside the frame the input ends at the frame end, so {!skip_to} raises
     [Invalid_argument] for a target past it, also for a position that
@@ -2404,8 +2401,8 @@ val parse_source :
     parsing fails with [Backtrack_window_exceeded]. Use {!commit} to seal
     branches once the grammar has clearly chosen them.
 
-    [backtrack_window] must be at least [2], because {!match_regex} reads ahead
-    half of the window. Smaller values raise [Invalid_argument].
+    [backtrack_window] must be at least [2]. Smaller values raise
+    [Invalid_argument].
 
     Only the source's read function may suspend, for example to wait on an Eio
     promise or yield to a scheduler. Two parses on one domain can then run

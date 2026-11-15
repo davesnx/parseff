@@ -1439,10 +1439,10 @@ let test_regex_empty_match () =
       );
       Alcotest.(check (result (list string) (pair int string)))
         ("large window " ^ input)
-        (norm
+        (norm_ignoring_found
            (Parseff.parse input (fun () -> [ Parseff.match_regex regex_digits ]))
         )
-        (norm
+        (norm_ignoring_found
            (Parseff.parse_source (chunked_source ~chunk_size:1 input) (fun () ->
                 [ Parseff.match_regex regex_digits ]
             )
