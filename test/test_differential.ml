@@ -405,7 +405,7 @@ let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
     v
   in
   let t =
-    Parseff.Feed.start ~max_depth ~backtrack_window ~diagnostics ?trace p
+    Parseff.parse_partial ~max_depth ~backtrack_window ~diagnostics ?trace p
   in
   let len = String.length input in
   let check fed = function
@@ -419,8 +419,9 @@ let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
         in
         if leftover <> String.sub input stop (fed - stop) then
           failwith
-            (Printf.sprintf "Feed: leftover %S after %d of %d fed bytes"
-               leftover stop fed
+            (Printf.sprintf
+               "parse_partial: leftover %S after %d of %d fed bytes" leftover
+               stop fed
             );
         Ok v
     | Error e ->
@@ -428,14 +429,14 @@ let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
   in
   let rec go pos turn =
     if pos >= len then
-      check pos (Parseff.Feed.finish t)
+      check pos (Parseff.finish t)
     else
       let size = List.nth sizes (turn mod List.length sizes) in
       let n = min size (len - pos) in
-      match Parseff.Feed.feed t (String.sub input pos n) with
-      | Parseff.Feed.Await ->
+      match Parseff.feed t (String.sub input pos n) with
+      | Parseff.Await ->
           go (pos + n) (turn + 1)
-      | Parseff.Feed.Done r ->
+      | Parseff.Done r ->
           check (pos + n) r
   in
   go 0 0
@@ -1295,7 +1296,7 @@ let show_stream (feed, sizes, window) =
     | Bigstring ->
         "parse_source, of_bigstring_chunks"
     | Push ->
-        "Feed"
+        "parse_partial"
     )
     (String.concat "; " (List.map string_of_int sizes))
     window
@@ -1398,7 +1399,8 @@ let () =
     [
       ( "random grammars",
         [
-          Alcotest.test_case "model, parse, parse_source and Feed agree" `Quick
+          Alcotest.test_case
+            "model, parse, parse_source and parse_partial agree" `Quick
             test_random_grammars;
         ]
       );

@@ -260,16 +260,16 @@ let chunks_of ~chunk_size input =
     )
 
 let feed_run parser chunks =
-  let t = Parseff.Feed.start parser in
+  let t = Parseff.parse_partial parser in
   let rec go fed = function
     | [] ->
-        (Parseff.Feed.finish t, fed, [])
+        (Parseff.finish t, fed, [])
     | chunk :: rest -> (
         let fed = fed + String.length chunk in
-        match Parseff.Feed.feed t chunk with
-        | Parseff.Feed.Await ->
+        match Parseff.feed t chunk with
+        | Parseff.Await ->
             go fed rest
-        | Parseff.Feed.Done r ->
+        | Parseff.Done r ->
             (r, fed, rest)
       )
   in
@@ -376,7 +376,7 @@ let check_case t seed case =
         Alcotest.failf "%s: streamed result differs on %S" what input;
       let fed = run ~what input (fun () -> fed_results t ~chunk_size input) in
       if fed <> List.map (normal ~offset:0) reference then
-        Alcotest.failf "%s: Feed result differs on %S" what input;
+        Alcotest.failf "%s: parse_partial result differs on %S" what input;
       let small =
         run ~what input (fun () ->
             small_window_results t (source ~chunk_size input)

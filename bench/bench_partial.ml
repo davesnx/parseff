@@ -57,15 +57,15 @@ let pull chunks () =
   check (Parseff.parse_source ~consume:`Partial source parser)
 
 let push chunks () =
-  let t = Parseff.Feed.start parser in
+  let t = Parseff.parse_partial parser in
   let rec go = function
     | [] ->
-        Parseff.Feed.finish t
+        Parseff.finish t
     | chunk :: tail -> (
-        match Parseff.Feed.feed t chunk with
-        | Parseff.Feed.Await ->
+        match Parseff.feed t chunk with
+        | Parseff.Await ->
             go tail
-        | Parseff.Feed.Done r ->
+        | Parseff.Done r ->
             r
       )
   in
@@ -74,9 +74,9 @@ let push chunks () =
 let cases =
   [
     ("parse_source, one chunk", pull one_chunk);
-    ("Feed, one chunk", push one_chunk);
+    ("parse_partial, one chunk", push one_chunk);
     ("parse_source, 64-byte chunks", pull small_chunks);
-    ("Feed, 64-byte chunks", push small_chunks);
+    ("parse_partial, 64-byte chunks", push small_chunks);
   ]
 
 let iterations = 500_000L
@@ -93,18 +93,18 @@ let words_per_parse run =
   (Gc.minor_words () -. before) /. float_of_int n
 
 let () =
-  match Sys.getenv_opt "PARSEFF_FEED_CASE" with
+  match Sys.getenv_opt "PARSEFF_PARTIAL_CASE" with
   | Some name ->
       let run = List.assoc name cases in
       let n =
         Option.fold ~none:1 ~some:int_of_string
-          (Sys.getenv_opt "PARSEFF_FEED_ITERATIONS")
+          (Sys.getenv_opt "PARSEFF_PARTIAL_ITERATIONS")
       in
       for _ = 1 to n do
         run ()
       done
   | None ->
-      Bench_style.print_banner "Feed Benchmark";
+      Bench_style.print_banner "parse_partial Benchmark";
       Bench_style.print_label_value "Request head"
         (Printf.sprintf "%d bytes" (String.length head));
       Bench_style.print_section "Minor words per parse";
@@ -129,9 +129,10 @@ let () =
         Bench_report.print_gc_quick ~title:"GC Quick Stats (single batch)"
           benches
       in
-      Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_feed"
-        ~bench_name:"Feed Benchmark"
+      Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_partial"
+        ~bench_name:"parse_partial Benchmark"
         [ { section with title = "Request head" } ];
       Bench_style.print_notice "Tip"
-        "set PARSEFF_FEED_CASE to a case name and PARSEFF_FEED_ITERATIONS to \
-         run one case without output, for perf stat."
+        "set PARSEFF_PARTIAL_CASE to a case name and \
+         PARSEFF_PARTIAL_ITERATIONS to run one case without output, for perf \
+         stat."
