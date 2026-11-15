@@ -63,7 +63,7 @@ let pair () =
 
 ### `satisfy`
 
-`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages. Without it, the error says `expected at least 1 character`, as for `take_while ~at_least:1`.
+`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages. Without it, the error says `expected matching character`.
 
 ```ocaml
 val satisfy : ?label:string -> (char -> bool) -> char

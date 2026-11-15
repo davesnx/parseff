@@ -26,7 +26,26 @@
           Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
       | Error e ->
           prerr_endline (Parseff.render_error ~name:"address" e)
-    ]} *)
+    ]}
+
+    {1 Stability}
+
+    A 1.x release does not break the API, except for the parts marked unstable.
+    The unstable values have the alert [unstable]. The compiler shows this alert
+    only when you enable it: add [-alert +unstable] to the [flags] of your dune
+    stanza to find the unstable parts that you use, and write
+    [[@@@alert "-unstable"]] at the top of a file to silence it there. The
+    standard library uses the same alert, for example on [Domain]. The
+    [~at_most] arguments of {!val:take_while} and {!val:many}, the
+    [Limit_exceeded] error and the [Captured] trace event are unstable too, but
+    have no alert.
+
+    A 1.x release can add events to {!type:trace_event} and fields to some
+    records; {!type:error_kind} says which types are final until 2.0.
+
+    {!val:regex} takes an [Re.t], so the API of 1.x uses the type [Re.t] of the
+    [re] library. Add [re] to the [libraries] of your dune stanza to build a
+    regex. *)
 
 (** {1 Span Type} *)
 
@@ -50,7 +69,7 @@ val span_get : span -> int -> char
 
 (** {1 Location Type} *)
 
-type location = { offset : int; line : int; col : int }
+type location = private { offset : int; line : int; col : int }
 (** A source location. [line] and [col] are 1-based. [col] counts bytes from the
     start of the line (not characters — relevant for UTF-8). *)
 
@@ -115,7 +134,12 @@ type custom_error +=
             limit. Unstable: this case can change in a 1.x release. *)
 
 (** What failed. These five cases are final until 2.0, so a match on all of them
-    needs no [_] case. A new kind of error is a {!custom_error} in [Custom]. *)
+    needs no [_] case. A new kind of error is a {!custom_error} in [Custom].
+
+    The cases of {!type:expected} and {!type:found} and the fields of
+    {!type:range} and {!type:note} are final until 2.0 too. A 1.x release can
+    add fields to {!type:location}, {!type:context} and {!type:error}, so match
+    them with [_], as in [{ line; col; _ }]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
@@ -288,6 +312,7 @@ end
 
 (** {1 Trace} *)
 
+type trace_event = private ..
 (** An event of a traced parse, see the [trace] argument of {!val:parse}.
 
     Each {!val:context} call gives one [Enter], then the events nested in it,
@@ -297,30 +322,34 @@ end
     {!val:recover} or {!val:sep_by_recover} caught, so the parse continued.
     Positions are absolute byte offsets.
 
-    A 1.x release can add events: end a match on [trace_event] with a [_] case.
-*)
-type trace_event = private
+    A 1.x release can add events, so a match on [trace_event] needs a [_] case.
+    Without it the compiler gives warning 8. You can match the events but not
+    build them or add new ones. *)
+
+type trace_event +=
+  private
   | Enter of { name : string; pos : int }
-      (** A {!val:context} named [name] started at byte offset [pos]. *)
+        (** A {!val:context} named [name] started at byte offset [pos]. *)
   | Return of { name : string; start : int; stop : int }
-      (** The construct returned. It read the bytes from [start] to [stop]. *)
+        (** The construct returned. It read the bytes from [start] to [stop]. *)
   | Fail of { name : string; start : int; pos : int }
-      (** The construct failed or raised. [pos] is the parser position when it
-          ended. The error position is in the {!type:error}. *)
+        (** The construct failed or raised. [pos] is the parser position when it
+            ended. The error position is in the {!type:error}. *)
   | Captured of { start : int; error : error }
-      (** A {!val:capture}, {!val:recover} or {!val:sep_by_recover} caught
-          [error] and went back to [start]: the start of its parser, or with
-          [~release:true] the last {!val:commit}, {!val:cut} or value given out
-          by {!val:many_iter}, {!val:sep_by_iter}, {!val:take_iter} or
-          {!val:take_while_iter} that reached it. {!val:require} and {!val:list}
-          give it for each error that they record, with [start] where the
-          missing part was inserted. A recovery inside a parser that is later
-          undone, such as the [close] of {!val:list} or a branch of {!val:or_},
-          still gives its event. [capture] gives the event when it returns
-          [Error error]. [recover] and [sep_by_recover] give it after [sync],
-          [~record] and [hole] return, so the events of [sync] and [hole] come
-          first. When one of them fails, the failure was not recovered and no
-          event is given. Unstable: this event can change in a 1.x release. *)
+        (** A {!val:capture}, {!val:recover} or {!val:sep_by_recover} caught
+            [error] and went back to [start]: the start of its parser, or with
+            [~release:true] the last {!val:commit}, {!val:cut} or value given
+            out by {!val:many_iter}, {!val:sep_by_iter}, {!val:take_iter} or
+            {!val:take_while_iter} that reached it. {!val:require} and
+            {!val:list} give it for each error that they record, with [start]
+            where the missing part was inserted. A recovery inside a parser that
+            is later undone, such as the [close] of {!val:list} or a branch of
+            {!val:or_}, still gives its event. [capture] gives the event when it
+            returns [Error error]. [recover] and [sep_by_recover] give it after
+            [sync], [~record] and [hole] return, so the events of [sync] and
+            [hole] come first. When one of them fails, the failure was not
+            recovered and no event is given. Unstable: this event can change in
+            a 1.x release. *)
 
 val print_trace : Format.formatter -> trace_event -> unit
 (** [print_trace ppf] is a [trace] callback that prints each event on its own
@@ -421,8 +450,7 @@ val consume : string -> string
 val satisfy : ?label:string -> (char -> bool) -> char
 (** [satisfy ?label fun] matches the next character if [fun] returns [true] for
     it. If the character doesn't match or input is empty, fails with
-    [expected <label>]. Without [~label] the label is ["at least 1 character"],
-    as for [take_while ~at_least:1].
+    [expected <label>]. Without [~label] the label is ["matching character"].
 
     Example:
     {@ocaml[
@@ -949,6 +977,7 @@ val recover :
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
+[@@alert unstable "This value can change in a 1.x release."]
 (** Unstable: this function can change in a 1.x release.
 
     [recover errors ~sync parser hole] runs [parser] with {!capture}. If
@@ -1054,6 +1083,7 @@ val sep_by_recover :
   (error -> 'a) ->
   unit ->
   'a list
+[@@alert unstable "This value can change in a 1.x release."]
 (** Unstable: this function can change in a 1.x release.
 
     [sep_by_recover errors ~sync element separator hole] parses one or more
@@ -1139,6 +1169,7 @@ val sep_by_recover :
     ]} *)
 
 val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
+[@@alert unstable "This value can change in a 1.x release."]
 (** [require errors parser missing] runs [parser]. If the furthest failure of
     [parser] is at the position where [require] started, [require] records the
     error [e] in [errors], goes back to that position and returns [missing e]:
@@ -1233,6 +1264,7 @@ val list :
   (error -> 'a) ->
   unit ->
   'a list
+[@@alert unstable "This value can change in a 1.x release."]
 (** [list errors ~close ~sync element hole ()] parses [element] again and again,
     as {!many} does, and recovers from each [element] that fails, except where
     [close ()] is [true] or the input ends. It is one loop for a list of
@@ -1370,6 +1402,7 @@ val list :
 
 val skip_nested :
   ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit -> unit
+[@@alert unstable "This value can change in a 1.x release."]
 (** Unstable: this function can change in a 1.x release.
 
     [skip_nested pairs stop ()] skips input up to the end of a broken list
@@ -1688,6 +1721,7 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     loop stops after an iteration that consumes no input, as in {!many}. *)
 
 val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
+[@@alert unstable "This value can change in a 1.x release."]
 (** [many_iter parser f] is {!many} that builds no list: it gives each value of
     [parser] to [f], in order, and returns [()]. The stop rules and [~at_least]
     are the same as in {!many}.
@@ -1755,6 +1789,7 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
 
 val sep_by_iter :
   ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit -> unit
+[@@alert unstable "This value can change in a 1.x release."]
 (** [sep_by_iter element separator f] is {!sep_by} that builds no list: it gives
     each [element] value to [f], as {!many_iter} does. The stop rules and
     [~at_least] are the same as in {!sep_by}. A failure in [separator] after a
@@ -1795,7 +1830,7 @@ val fold_left :
     gives [otherwise], with the position unchanged. A later failure that a
     {!commit} or {!cut} decided is the failure of the fold, as without
     [~otherwise]. To return [otherwise] on any failure, as before 0.6, write
-    [or_ (fold_left element op) (fun () -> otherwise) ()].
+    [or_ (fun () -> fold_left element op ()) (fun () -> otherwise) ()].
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
@@ -1819,7 +1854,7 @@ val fold_right :
     gives [otherwise], with the position unchanged. A later failure that a
     {!commit} or {!cut} decided is the failure of the fold, as without
     [~otherwise]. To return [otherwise] on any failure, as before 0.6, write
-    [or_ (fold_right element op) (fun () -> otherwise) ()].
+    [or_ (fun () -> fold_right element op ()) (fun () -> otherwise) ()].
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
@@ -2219,6 +2254,7 @@ val take_span : int -> span
     ]} *)
 
 val within : int -> (unit -> 'a) -> 'a
+[@@alert unstable "This value can change in a 1.x release."]
 (** [within n parser] runs [parser] on the next [n] bytes exactly, as the
     payload of a frame with a length prefix. [parser] sees the end of the input
     after [n] bytes: {!end_of_input} succeeds there, and a read past it fails
@@ -2261,6 +2297,7 @@ val within : int -> (unit -> 'a) -> 'a
     ]} *)
 
 val take_iter : int -> (span -> unit) -> unit
+[@@alert unstable "This value can change in a 1.x release."]
 (** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
     in pieces, in order, with no empty piece. Joined, the pieces are the [n]
     bytes. With {!parse} there is one piece. With {!parse_source} a piece is the
@@ -2294,6 +2331,7 @@ val take_iter : int -> (span -> unit) -> unit
     ]} *)
 
 val take_while_iter : (char -> bool) -> (span -> unit) -> unit
+[@@alert unstable "This value can change in a 1.x release."]
 (** [take_while_iter pred f] reads bytes while [pred] holds, like {!take_while},
     and gives them to [f] in pieces as {!take_iter} does. It never fails. When
     the first byte does not match, [f] is not called.
@@ -2543,7 +2581,7 @@ type 'a partial
     may use it at a time; the result of two domains that use one partial parse
     at the same time is not defined.
 
-    Unstable: {!parse_partial}, {!feed} and {!finish} can change in a 0.x
+    Unstable: {!parse_partial}, {!feed} and {!finish} can change in a 1.x
     release.
 
     Example:
@@ -2580,6 +2618,7 @@ val parse_partial :
   ?trace:(trace_event -> unit) ->
   (unit -> 'a) ->
   'a partial
+[@@alert unstable "This value can change in a 1.x release."]
 (** [parse_partial parser] is a parse of [parser] that has no input yet. The
     parser starts at the first {!feed} or {!finish}. The arguments are those of
     {!parse_source}, without [consume]. Positions count from the first byte of
@@ -2588,6 +2627,7 @@ val parse_partial :
     [diagnostics] stays in use from the first {!feed} until the parse ends. *)
 
 val feed : 'a partial -> string -> 'a step
+[@@alert unstable "This value can change in a 1.x release."]
 (** [feed t chunk] gives [chunk] to the parse and runs the parser until it needs
     more input or ends. An empty [chunk] gives no input and returns [Await] when
     the parse waits.
@@ -2605,6 +2645,7 @@ val feed : 'a partial -> string -> 'a step
 *)
 
 val finish : 'a partial -> ('a * string, error) Stdlib.result
+[@@alert unstable "This value can change in a 1.x release."]
 (** [finish t] tells the parse that the input ended, and runs the parser to the
     end. A parser that waits for more input then succeeds or fails as
     {!parse_source} does at the end of its source. [finish] on a parse with no
@@ -2773,9 +2814,8 @@ module Utf8 : sig
   (** [satisfy ?label pred] decodes the next UTF-8 code point and checks it
       against [pred]. Advances by the number of bytes in the UTF-8 encoding
       (1--4). Fails with [expected <label>] if the predicate returns [false] or
-      the input ends. Without [~label] the label is ["at least 1 character"], as
-      for [take_while ~at_least:1]. Invalid UTF-8 fails with
-      [expected valid UTF-8], whatever [label] is.
+      the input ends. Without [~label] the label is ["matching character"].
+      Invalid UTF-8 fails with [expected valid UTF-8], whatever [label] is.
 
       Example:
       {@ocaml[

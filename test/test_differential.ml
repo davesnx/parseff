@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 type value =
   | Unit
   | Chr of char
@@ -339,12 +341,14 @@ type outcome = {
 let show_event = function
   | Parseff.Enter { name; pos } ->
       Printf.sprintf "enter %s@%d" name pos
-  | Return { name; start; stop } ->
+  | Parseff.Return { name; start; stop } ->
       Printf.sprintf "exit %s@%d..%d" name start stop
-  | Fail { name; start; pos } ->
+  | Parseff.Fail { name; start; pos } ->
       Printf.sprintf "fail %s@%d from %d" name pos start
-  | Captured { start; error } ->
+  | Parseff.Captured { start; error } ->
       Printf.sprintf "captured @%d: %s" start (show_error error)
+  | _ ->
+      "other event"
 
 let window_exceeded = "backtrack window exceeded"
 
