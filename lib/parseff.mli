@@ -543,8 +543,10 @@ val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
 (** [sep_by_take ~ws ~sep is_value_char] parses a list of values separated by
     [sep]. Characters where [ws] returns [true] are skipped around each
     separator. Each value consists of characters where [is_value_char] returns
-    [true]. Returns a list of matched strings. Runs entirely in a single
-    operation for maximum efficiency. *)
+    [true]. Returns a list of matched strings. Values must be nonempty: on a
+    trailing or doubled separator, [sep_by_take] stops before that separator and
+    the whitespace in front of it, and leaves them unread. Runs entirely in a
+    single operation for maximum efficiency. *)
 
 val take_while_span : (char -> bool) -> span
 (** [take_while_span fun] like {!take_while} but returns a zero-copy

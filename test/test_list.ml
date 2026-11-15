@@ -939,6 +939,46 @@ let test_require_undoes_parser () =
     "a Ref change before a commit is undone" "Ok 0"
     (show_result string_of_int value)
 
+let test_dropped_element_undoes_ref () =
+  let run ?sep input element =
+    let cell = Ref.create 0 in
+    let d = Diagnostics.create () in
+    show_result string_of_int
+      (parse ~consume:`Partial ~diagnostics:d input (fun () ->
+           ignore
+             (list ?sep d
+                ~close:(fun () -> false)
+                ~sync:ignore (element cell) ignore ()
+             );
+           Ref.get cell
+       )
+      )
+  in
+  let plain input parser =
+    let cell = Ref.create 0 in
+    show_result string_of_int
+      (parse ~consume:`Partial input (fun () ->
+           ignore (parser cell ());
+           Ref.get cell
+       )
+      )
+  in
+  let set cell () = Ref.set cell 1 in
+  let second cell () =
+    if at 'x' () then
+      ignore (char 'x')
+    else
+      Ref.set cell 2
+  in
+  let sep () = () in
+  Alcotest.(check string) "many" "Ok 0" (plain "x" (fun c -> many (set c)));
+  Alcotest.(check string) "no progress" "Ok 0" (run "x" set);
+  Alcotest.(check string)
+    "sep_by" "Ok 0"
+    (plain "xy" (fun c -> sep_by (second c) sep));
+  Alcotest.(check string)
+    "no progress after a separator" "Ok 0" (run ~sep "xy" second)
+
 type custom_error += Probe_error
 
 let test_require_fail_rule () =
@@ -1822,6 +1862,8 @@ let () =
           test_case "require: commit in the parser" `Quick test_require_commit;
           test_case "require: undoes the parser" `Quick
             test_require_undoes_parser;
+          test_case "a dropped element undoes its Ref changes" `Quick
+            test_dropped_element_undoes_ref;
           test_case "require: fail follows the rule" `Quick
             test_require_fail_rule;
           test_case "callbacks that raise" `Quick test_raising_callbacks;

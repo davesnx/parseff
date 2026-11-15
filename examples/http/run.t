@@ -41,6 +41,25 @@ A response head with a body:
     Content-Length: 2
     body: "hi"
 
+A response without Content-Length or Transfer-Encoding: the body runs to the
+end of the input. A 204 response has no body:
+
+  $ printf 'HTTP/1.1 200 OK\r\n\r\nhi' | ./main.exe response
+  HTTP/1.1 200 OK
+    body: "hi"
+  $ printf 'HTTP/1.1 204 No Content\r\n\r\n' | ./main.exe response
+  HTTP/1.1 204 No Content
+
+Form names and values decode '+' and %XX after the split. A malformed %
+sequence stays as it is:
+
+  $ printf 'POST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 19\r\n\r\nq=a+b%%26c&%%41=%%zz%%4' | ./main.exe requests
+  POST / HTTP/1.1
+    Content-Type: application/x-www-form-urlencoded
+    Content-Length: 19
+    form: q = a b&c
+    form: A = %zz%4
+
 A chunked body with a trailer:
 
   $ printf '5\r\nhello\r\n6\r\n world\r\n0\r\nExpires: never\r\n\r\n' | ./main.exe chunked

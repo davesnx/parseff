@@ -54,9 +54,11 @@ Fewer parser round-trips means less work overall. A fused operation parses a who
 
 ```
 Operation                              Replaces
-sep_by_take ~ws ~sep pred              sep_by (take_while pred) (skip_while ws; char sep; skip_while ws)
+sep_by_take ~ws ~sep pred              sep_by (take_while ~at_least:1 pred) (skip_while ws; char sep; skip_while ws)
 sep_by_take_span ~ws ~sep pred         Same, but returns spans instead of strings
 ```
+
+Values must be nonempty: on a trailing or doubled separator, `sep_by_take` stops before that separator and the whitespace in front of it, and leaves them unread.
 
 ### Use zero-copy spans
 

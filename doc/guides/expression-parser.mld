@@ -249,10 +249,15 @@ parentheses.
 A table also takes {!val:Parseff.infix_right} operators such as [^],
 {!val:Parseff.prefix} operators such as unary [-], and
 {!val:Parseff.postfix} operators such as [!]. After each operand,
-[expression] uses the first operator whose token parser succeeds, starting
-with the operators that bind tightest to that operand. When the operand after
-it fails, it tries the next operator, so [<] can come before [<<]. A postfix operator has no operand: when one postfix
-token starts another token, such as [!] and [!=], put the longer token first.
+{!val:Parseff.expression} runs token parsers until one succeeds. It first
+tries the levels that can take that operand: every level at the first operand,
+and after an operator the levels above it, plus its own level when it is
+right-associative ({!val:Parseff.infix_right}). It tries these levels in table
+order, lowest level first. When none of them matches, it moves on to the lower
+levels. When the operand after an operator fails, it tries the next operator,
+so [<] can come before [<<]. A postfix operator has no operand: when one
+postfix token starts another token, such as [!] and [!=], put the longer token
+first.
 
 {1 One lookup per operand: [precedence]}
 
