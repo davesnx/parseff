@@ -33,7 +33,7 @@ let response () =
   match
     Parseff.parse input (fun () ->
         let head = Http.response_head () in
-        (head, Http.body head.headers)
+        (head, Http.response_body head)
     )
   with
   | Ok ((head : Http.response), body) ->

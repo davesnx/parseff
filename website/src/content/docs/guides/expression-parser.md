@@ -217,7 +217,7 @@ and factor () =
 
 Each operator parser parses its token and returns the function that builds the node, as the `op` argument of `fold_left` does. `factor` calls `expr` again for parentheses.
 
-A table also takes `Parseff.infix_right` operators such as `^`, `Parseff.prefix` operators such as unary `-`, and `Parseff.postfix` operators such as `!`. After each operand, `expression` uses the first operator whose token parser succeeds, starting with the operators that bind tightest to that operand. When the operand after it fails, it tries the next operator, so `<` can come before `<<`. A postfix operator has no operand: when one postfix token starts another token, such as `!` and `!=`, put the longer token first.
+A table also takes `Parseff.infix_right` operators such as `^`, `Parseff.prefix` operators such as unary `-`, and `Parseff.postfix` operators such as `!`. After each operand, `Parseff.expression` runs token parsers until one succeeds. It first tries the levels that can take that operand: every level at the first operand, and after an operator the levels above it, plus its own level when it is right-associative (`Parseff.infix_right`). It tries these levels in table order, lowest level first. When none of them matches, it moves on to the lower levels. When the operand after an operator fails, it tries the next operator, so `<` can come before `<<`. A postfix operator has no operand: when one postfix token starts another token, such as `!` and `!=`, put the longer token first.
 
 ## One lookup per operand: `precedence`
 

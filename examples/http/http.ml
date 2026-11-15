@@ -231,6 +231,22 @@ let chunked_body () =
   let trailers = fields "trailer section" () in
   (Buffer.contents buf, trailers)
 
+let form_char () =
+  match Parseff.any_char () with
+  | '+' ->
+      ' '
+  | '%' ->
+      Parseff.or_
+        (fun () -> Char.chr (Parseff.within 2 Parseff.hex_integer))
+        (fun () -> '%')
+        ()
+  | c ->
+      c
+
+let form_decode s =
+  String.of_seq
+    (List.to_seq (Result.get_ok (Parseff.parse s (Parseff.many form_char))))
+
 let form_field () =
   let key =
     Parseff.take_while ~at_least:1 ~label:"form key" (fun c ->
@@ -245,7 +261,7 @@ let form_field () =
       )
       ()
   in
-  (key, Option.value value ~default:"")
+  (form_decode key, form_decode (Option.value value ~default:""))
 
 let form () = Parseff.sep_by form_field (fun () -> Parseff.char '&') ()
 
@@ -302,6 +318,14 @@ let body headers =
         | _ ->
             Raw (Parseff.take n)
       )
+
+let response_body (head : response) =
+  if head.status < 200 || head.status = 204 || head.status = 304 then
+    No_body
+  else if chunked head.headers || content_length head.headers <> None then
+    body head.headers
+  else
+    Raw (Parseff.take_while (fun _ -> true))
 
 let request () =
   let head = request_head () in

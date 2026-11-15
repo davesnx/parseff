@@ -2911,7 +2911,7 @@ let[@inline never] many_at_most st at_least at_most p =
   if at_most < 0 || at_most < at_least then
     invalid_arg "Parseff.many: at_most must be at least 0 and at least at_least";
   let acc = ref (many_required p [] at_least) in
-  let n = ref at_least in
+  let n = ref (imax 0 at_least) in
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
   match
@@ -5775,6 +5775,12 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
   in
   match st.source with
   | None ->
+      ( match st.line_index with
+      | Some idx when idx.hint > idx.scanned_up_to ->
+          extend_line_index idx ~base_offset:st.base st.input idx.hint
+      | _ ->
+          ()
+      );
       let location = memory_location st pos in
       let scanned =
         match st.line_index with
@@ -6254,18 +6260,31 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
         recovering st ~release ~outer ~record ~progress:(Option.is_none sep)
           errors ~sync element hole
     in
+    let guarded frame f =
+      match f () with
+      | v ->
+          v
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
+    in
     let rec steps acc =
       if closed () then
         List.rev acc
       else
         let start = st.pos in
         let recorded = st.diag_len in
-        let v = item () in
-        if st.pos <> start then
+        let frame = State.push_rewind_frame st frame_choice in
+        let v = guarded frame item in
+        if st.pos <> start then (
+          State.pop_rewind_frame st frame;
           steps (v :: acc)
-        else if st.diag_len = recorded then
+        ) else if st.diag_len = recorded then (
+          restore_rewind_frame st frame;
+          State.pop_rewind_frame st frame;
           List.rev acc
-        else begin
+        ) else begin
+          State.pop_rewind_frame st frame;
           sync ();
           if st.pos = start && have st 1 then skip_char st;
           steps (v :: acc)
@@ -6301,21 +6320,29 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
     and after s acc =
       let at = st.pos in
       let saved = far_from st at in
+      let frame = State.push_rewind_frame st frame_choice in
       match optional s () with
       | Some _ ->
           far_back st saved;
-          if trailing && closed () then
+          if trailing && guarded frame closed then (
+            State.pop_rewind_frame st frame;
             List.rev acc
-          else
+          ) else
             let recorded = st.diag_len in
-            let v = item () in
-            if st.pos <> at then
+            let v = guarded frame item in
+            if st.pos <> at then (
+              State.pop_rewind_frame st frame;
               after s (v :: acc)
-            else if st.diag_len = recorded then
+            ) else if st.diag_len = recorded then (
+              restore_rewind_frame st frame;
+              State.pop_rewind_frame st frame;
               List.rev acc
-            else
+            ) else (
+              State.pop_rewind_frame st frame;
               List.rev (v :: acc)
+            )
       | None ->
+          State.pop_rewind_frame st frame;
           if closed () then begin
             far_back st saved;
             List.rev acc
@@ -6326,6 +6353,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
             far_back st saved;
             missing_separator s acc at e
       | exception exn ->
+          State.pop_rewind_frame st frame;
           far_back st saved;
           raise exn
     and missing_separator s acc at e =
