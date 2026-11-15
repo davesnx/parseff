@@ -243,6 +243,26 @@ let test_replay_without_recovery () =
     )
     ~plain:"Ok -ax"
 
+let hole_then_xyz d () =
+  let h = recover d ~sync:ignore (fun () -> consume "ab") (fun _ -> "H") in
+  let s = consume "xyz" in
+  h ^ s ^ String.make 1 (char ';')
+
+let test_replay_error () =
+  let err = "Error at 0: expected \"ab\" or \"q\", found 'zxyzw'" in
+  same "or_" "zxyzw"
+    (fun d () -> or_ (hole_then_xyz d) (fun () -> consume "q") ())
+    ~plain:err;
+  same "many" "zxyzw"
+    (fun d () ->
+      let l = many (hole_then_xyz d) () in
+      String.concat "" l ^ consume "q"
+    )
+    ~plain:err;
+  same "one_of" "zxyzw"
+    (fun d () -> one_of [ hole_then_xyz d; (fun () -> consume "q") ] ())
+    ~plain:err
+
 let test_seal_after_recovery () =
   check "a later failure after a recovery" "axq"
     (fun d () ->
@@ -741,13 +761,35 @@ let outcome_of ~collector g input =
     else
       parse input p
   in
-  (Result.map_error (fun e -> e.range.start) r, Diagnostics.length d)
+  (r, Diagnostics.length d)
+
+let rec has_list = function
+  | List _ ->
+      true
+  | Eps | Chr _ | Any | Commit | Cut ->
+      false
+  | Opt a
+  | Many a
+  | Look a
+  | Peek a
+  | Ctx a
+  | Guard a
+  | Capture a
+  | Require a
+  | Sep_rec a
+  | Recover (_, a, _) ->
+      has_list a
+  | Seq (a, b) | Or (a, b) ->
+      has_list a || has_list b
+
+let error_fields e = (e.range, render_error e)
 
 let show_outcome = function
   | Ok v, n ->
       Printf.sprintf "Ok %S with %d diagnostics" v n
-  | Error p, n ->
-      Printf.sprintf "Error at %d with %d diagnostics" p n
+  | Error e, n ->
+      Printf.sprintf "Error at %d (%s) with %d diagnostics" e.range.start
+        (error_message e) n
 
 let mismatch kind g input plain coll =
   Alcotest.failf "%s: %s on %S: plain %s, collector %s" kind (show_g g) input
@@ -765,6 +807,10 @@ let sound g input =
       ()
   | (Ok _, 0), _ ->
       mismatch "Ok with no diagnostic on input the plain parser rejects" g input
+        plain coll
+  | (Error c, 0), (Error p, _)
+    when (not (has_list g)) && error_fields c <> error_fields p ->
+      mismatch "Error with no diagnostic differs from the plain Error" g input
         plain coll
   | _ ->
       ()
@@ -887,6 +933,72 @@ let test_sound_cases () =
           ),
         "b,,b"
       );
+      ( Seq
+          ( Or (Seq (Any, Chr 'b'), Recover (false, Cut, Nothing)),
+            Recover
+              ( false,
+                List (List (Ctx Commit, true, true, None), true, true, Some ']'),
+                Nothing
+              )
+          ),
+        "],"
+      );
+      ( Seq
+          ( Many (Many (Seq (Commit, Chr 'a'))),
+            Recover (true, Recover (false, Opt Cut, Skip_to 'b'), Skip_to 'b')
+          ),
+        "]b],,[a"
+      );
+      ( Require
+          (Require
+             (Require
+                (Seq
+                   ( Opt (Seq (Chr 'b', Eps)),
+                     Ctx (Recover (true, Commit, Nothing))
+                   )
+                )
+             )
+          ),
+        ",[b,a]"
+      );
+      ( Sep_rec
+          (Ctx
+             (Opt
+                (Guard
+                   (Many
+                      (Capture
+                         (Require
+                            (Or
+                               (Look (Chr '['), Recover (true, Chr 'a', Nothing))
+                            )
+                         )
+                      )
+                   )
+                )
+             )
+          ),
+        "]b]]a[]"
+      );
+      ( Many
+          (Require
+             (Many
+                (Ctx
+                   (Recover
+                      ( true,
+                        Ctx
+                          (Or
+                             ( Seq (Chr 'b', Chr 'b'),
+                               Sep_rec (Seq (Cut, Chr 'a'))
+                             )
+                          ),
+                        Nothing
+                      )
+                   )
+                )
+             )
+          ),
+        "bb,,aa["
+      );
     ]
 
 let rec sentence rs b = function
@@ -979,6 +1091,7 @@ let () =
             test_seal_after_recovery;
           Alcotest.test_case "a recovered branch that fails runs again" `Quick
             test_replay_without_recovery;
+          Alcotest.test_case "the error of a re-run" `Quick test_replay_error;
           Alcotest.test_case "a loop of statements with close" `Quick
             test_loop_with_close;
           Alcotest.test_case "list: an element cut short at the end" `Quick
