@@ -61,7 +61,7 @@ address:1:11: [error] expected digit, found end of input
 - **Automatic backtracking** with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
 - **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
 - [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
 - [**Zero-copy span APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](https://davesnx.github.io/parseff/api/zero-copy/) for hot paths
 
@@ -90,7 +90,7 @@ See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) 
 
 - Open an issue to discuss proposed changes
 - Write tests for new features
-- Run `make fmt` before submitting
+- Run `make format` before submitting
 - Ensure all tests pass with `make test`
 
 ## License
