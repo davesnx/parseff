@@ -60,12 +60,8 @@ create-switch: ## Create opam switch
 install: ## Install dependencies
 	opam install . --deps-only --with-test --with-doc --with-dev-setup -y
 
-.PHONY: setup-githooks
-setup-githooks: ## Setup githooks
-	git config core.hooksPath .githooks
-
 .PHONY: init
-init: setup-githooks create-switch install ## Create a local dev enviroment
+init: create-switch install ## Create a local dev enviroment
 
 BENCH_FILES := $(wildcard bench/bench_*.ml)
 BENCH_NAMES := $(patsubst bench/bench_%.ml,bench-%,$(BENCH_FILES))
