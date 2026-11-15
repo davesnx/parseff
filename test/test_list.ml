@@ -1327,6 +1327,474 @@ let test_streaming () =
   | Error e ->
       Alcotest.fail (error_message e)
 
+let given = Buffer.create 16
+
+let iter_a () =
+  take_while_iter
+    (fun c -> c = 'a')
+    (fun sp -> Buffer.add_string given (span_to_string sp))
+
+let comma_only () = ignore (char ',')
+let rest () = take_while (fun _ -> true)
+
+let run_iter ?(window = 4) ~collector ~stream input p =
+  Buffer.clear given;
+  let d = Diagnostics.create () in
+  let r =
+    match
+      match (stream, collector) with
+      | false, true ->
+          parse ~diagnostics:d input (p d)
+      | false, false ->
+          parse input (p d)
+      | true, true ->
+          parse_source ~backtrack_window:window ~diagnostics:d
+            (bytes_source input) (p d)
+      | true, false ->
+          parse_source ~backtrack_window:window (bytes_source input) (p d)
+    with
+    | Ok s ->
+        "Ok " ^ s
+    | Error e ->
+        Printf.sprintf "Error at %d: %s" e.range.start (error_message e)
+    | exception Invalid_argument _ ->
+        "Invalid_argument"
+  in
+  Printf.sprintf "f got %d; %s; entries [%s]" (Buffer.length given) r
+    (String.concat "; "
+       (List.map
+          (fun (x : _ Diagnostics.entry) ->
+            Printf.sprintf "%d:%s" x.pos (error_message x.value)
+          )
+          (Diagnostics.to_list d)
+       )
+    )
+
+let check_iter name input p ~collector ~plain =
+  List.iter
+    (fun stream ->
+      let where =
+        if stream then
+          "stream, reads of 1, window 4"
+        else
+          "string"
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "%s, %s, with the collector" name where)
+        collector
+        (run_iter ~collector:true ~stream input p);
+      Alcotest.(check string)
+        (Printf.sprintf "%s, %s, without the collector" name where)
+        plain
+        (run_iter ~collector:false ~stream input p)
+    )
+    [ false; true ]
+
+let at_closer failure d () =
+  let l =
+    list ~sep:comma_only d
+      ~close:(fun () -> peek_char () = Some 'a')
+      ~sync:ignore
+      (fun () ->
+        iter_a ();
+        failure ();
+        "e"
+      )
+      (fun _ -> "H")
+      ()
+  in
+  String.concat "," l ^ "|" ^ rest ()
+
+let a20b = String.make 20 'a' ^ "b"
+
+let test_iter_first_at_closer () =
+  check_iter "first element at the closer, then fail" a20b
+    (at_closer (fun () -> fail "u"))
+    ~collector:"f got 20; Error at 20: u; entries []"
+    ~plain:"f got 20; Error at 20: u; entries []";
+  check_iter "first element at the closer, then a primitive failure" a20b
+    (at_closer (fun () -> ignore (char 'z')))
+    ~collector:"f got 20; Error at 20: expected 'z', found 'b'; entries []"
+    ~plain:"f got 20; Error at 20: expected 'z', found 'b'; entries []"
+
+let iter_element () =
+  if peek_char () = Some 'a' then begin
+    iter_a ();
+    ignore (char 'b')
+  end;
+  "e"
+
+let iter_in_element ~release =
+  let name what =
+    what
+    ^
+    if release then
+      " with ~release:true"
+    else
+      ""
+  in
+  let collector value =
+    if release then
+      Printf.sprintf "f got 2; Ok %s|; entries []" value
+    else
+      "f got 0; Invalid_argument; entries []"
+  in
+  check_iter
+    (name "an element without ~sep")
+    "baab"
+    (fun d () ->
+      ignore (char 'b');
+      let l =
+        list ~release d
+          ~close:(fun () -> false)
+          ~sync:ignore iter_element
+          (fun _ -> "H")
+          ()
+      in
+      String.concat "," l ^ "|" ^ rest ()
+    )
+    ~collector:(collector "e") ~plain:"f got 2; Ok e|; entries []";
+  check_iter
+    (name "an element after a separator")
+    "b,aab"
+    (fun d () ->
+      ignore (char 'b');
+      let l =
+        list ~release ~sep:comma_only d
+          ~close:(fun () -> false)
+          ~sync:ignore iter_element
+          (fun _ -> "H")
+          ()
+      in
+      String.concat "," l ^ "|" ^ rest ()
+    )
+    ~collector:(collector "e,e") ~plain:"f got 2; Ok e,e|; entries []"
+
+let test_iter_element () = iter_in_element ~release:false
+let test_iter_element_release () = iter_in_element ~release:true
+
+let test_iter_missing_separator () =
+  check_iter "an element after a missing separator" "b aab"
+    (fun d () ->
+      ignore (char 'b');
+      let l =
+        list ~sep:comma_only d
+          ~close:(fun () -> false)
+          ~sync:ignore
+          (fun () ->
+            if peek_char () = Some ' ' then ignore (char ' ');
+            iter_element ()
+          )
+          (fun _ -> "H")
+          ()
+      in
+      String.concat "," l ^ "|" ^ rest ()
+    )
+    ~collector:"f got 0; Invalid_argument; entries []"
+    ~plain:"f got 2; Ok e|; entries []"
+
+let test_iter_at_end () =
+  check_iter "an element after a separator at the end of the input" "b1,"
+    (fun d () ->
+      ignore (char 'b');
+      let l =
+        list ~sep:comma_only d
+          ~close:(fun () -> false)
+          ~sync:ignore
+          (fun () ->
+            if peek_char () = Some '1' then
+              ignore (char '1')
+            else begin
+              iter_a ();
+              ignore (char 'z')
+            end;
+            "e"
+          )
+          (fun _ -> "H")
+          ()
+      in
+      String.concat "," l ^ "|" ^ rest ()
+    )
+    ~collector:
+      "f got 0; Error at 3: expected 'z', found end of input; entries []"
+    ~plain:"f got 0; Ok e|,; entries []"
+
+let test_iter_close () =
+  check_iter "close" "aab"
+    (fun d () ->
+      let l =
+        list ~sep:comma_only d
+          ~close:(fun () ->
+            iter_a ();
+            true
+          )
+          ~sync:ignore
+          (fun () -> "e")
+          (fun _ -> "H")
+          ()
+      in
+      String.concat "," l ^ "|" ^ rest ()
+    )
+    ~collector:"f got 0; Invalid_argument; entries []"
+    ~plain:"f got 0; Ok e|aab; entries []"
+
+let test_iter_require () =
+  check_iter "require" "aab"
+    (fun d () ->
+      require d
+        (fun () ->
+          iter_a ();
+          (fail "u" : unit)
+        )
+        ignore;
+      rest ()
+    )
+    ~collector:"f got 0; Invalid_argument; entries []"
+    ~plain:"f got 2; Error at 2: u; entries []";
+  check_iter "require at the end of the input" ""
+    (fun d () ->
+      require d
+        (fun () ->
+          iter_a ();
+          ignore (char ')')
+        )
+        ignore;
+      rest ()
+    )
+    ~collector:"f got 0; Invalid_argument; entries []"
+    ~plain:"f got 0; Error at 0: expected ')', found end of input; entries []"
+
+let commit_at_end ~release tail d () =
+  let l =
+    list ~release ~sep:comma_only d
+      ~close:(fun () -> peek_char () = Some ')')
+      ~sync:ignore
+      (fun () ->
+        if peek_char () = Some 'n' then begin
+          ignore (char 'n');
+          "n"
+        end else begin
+          commit ();
+          tail ()
+        end
+      )
+      (fun _ -> "H")
+      ()
+  in
+  String.concat "," l
+
+let test_commit_at_end () =
+  let tails =
+    [
+      ("then later a failure", (fun () -> "e"), true, "Ok ALT", "Ok NONE");
+      ( "then a primitive failure",
+        (fun () ->
+          ignore (char 'z');
+          "e"
+        ),
+        false,
+        "Ok ALT",
+        "Ok NONE"
+      );
+      ( "then fail",
+        (fun () -> fail "u"),
+        false,
+        "Error at 2: u",
+        "Error at 2: u"
+      );
+    ]
+  in
+  List.iter
+    (fun release ->
+      List.iter
+        (fun (name, tail, later, in_or, in_optional) ->
+          let left d () =
+            let s = commit_at_end ~release tail d () in
+            if later then ignore (char 'q');
+            s
+          in
+          let name =
+            name
+            ^
+            if release then
+              ", ~release:true"
+            else
+              ""
+          in
+          check_iter
+            ("commit at the end of the input, in or_, " ^ name)
+            "n,"
+            (fun d () ->
+              or_
+                (fun () -> left d ())
+                (fun () ->
+                  ignore (rest ());
+                  "ALT"
+                )
+                ()
+            )
+            ~collector:(Printf.sprintf "f got 0; %s; entries []" in_or)
+            ~plain:(Printf.sprintf "f got 0; %s; entries []" in_or);
+          check_iter
+            ("commit at the end of the input, in optional, " ^ name)
+            "n,"
+            (fun d () ->
+              match optional (fun () -> left d ()) () with
+              | Some s ->
+                  s
+              | None ->
+                  ignore (rest ());
+                  "NONE"
+            )
+            ~collector:(Printf.sprintf "f got 0; %s; entries []" in_optional)
+            ~plain:(Printf.sprintf "f got 0; %s; entries []" in_optional)
+        )
+        tails
+    )
+    [ false; true ]
+
+let committing_braces d () =
+  sym '{' ();
+  let xs =
+    list ~sep:(sym ',') d
+      ~close:(fun () -> peek_char () = Some '}' || peek_char () = Some '^')
+      ~sync:skip_argument
+      (fun () ->
+        match peek_char () with
+        | Some '^' ->
+            ignore (char '^');
+            commit ();
+            ignore (char '1');
+            ws ();
+            "^1"
+        | None ->
+            commit ();
+            ignore (char '1');
+            "e"
+        | _ ->
+            let s =
+              take_while ~at_least:1 ~label:"digit" (fun c -> c = '1' || c = '2')
+            in
+            ws ();
+            s
+      )
+      (fun _ -> "H")
+      ()
+  in
+  require d (sym '}') ignore;
+  end_of_input ();
+  String.concat "," xs
+
+let test_commit_never_reaches_the_caller () =
+  let rs = Random.State.make [| 2026; 11; 18 |] in
+  let pieces = [| "{"; "}"; ","; ", "; "1"; "2 "; "^"; "^1"; " "; "x" |] in
+  for _ = 1 to 5000 do
+    let n = Random.State.int rs 8 in
+    let input =
+      String.concat ""
+        (List.init n (fun _ ->
+             pieces.(Random.State.int rs (Array.length pieces))
+         )
+        )
+    in
+    List.iter
+      (fun stream ->
+        let run collector p =
+          run_iter ~window:64 ~collector ~stream input (fun d () -> p d)
+        in
+        let alone collector = run collector (fun d -> committing_braces d ()) in
+        let in_or collector =
+          run collector (fun d ->
+              or_
+                (fun () -> committing_braces d ())
+                (fun () ->
+                  ignore (rest ());
+                  "ALT"
+                )
+                ()
+          )
+        in
+        let ok r = String.length r > 13 && String.sub r 0 12 = "f got 0; Ok " in
+        List.iter
+          (fun collector ->
+            let a = alone collector in
+            let expected =
+              if ok a then
+                a
+              else
+                "f got 0; Ok ALT; entries []"
+            in
+            Alcotest.(check string)
+              (Printf.sprintf "%S, collector %b, stream %b: or_ around list"
+                 input collector stream
+              )
+              expected (in_or collector)
+          )
+          [ true; false ];
+        let plain = alone false in
+        if ok plain then
+          Alcotest.(check string)
+            (Printf.sprintf "%S, stream %b: valid input" input stream)
+            plain (alone true)
+      )
+      [ false; true ]
+  done
+
+let test_commit_in_first_at_closer () =
+  let first element d () =
+    let l =
+      list ~sep:comma_only d
+        ~close:(fun () -> peek_char () = Some 'a')
+        ~sync:ignore element
+        (fun _ -> "H")
+        ()
+    in
+    String.concat "," l ^ "|" ^ rest ()
+  in
+  let pin name element ~collector ~plain =
+    check_iter name "ab" (first element) ~collector ~plain
+  in
+  pin "commit after a, then fail"
+    (fun () ->
+      ignore (char 'a');
+      commit ();
+      fail "u"
+    )
+    ~collector:"f got 0; Error at 1: u; entries []"
+    ~plain:"f got 0; Error at 1: u; entries []";
+  pin "cut after a, then fail"
+    (fun () ->
+      ignore (char 'a');
+      cut ();
+      fail "u"
+    )
+    ~collector:"f got 0; Error at 1: u; entries []"
+    ~plain:"f got 0; Error at 1: u; entries []";
+  pin "commit at the start, then fail"
+    (fun () ->
+      commit ();
+      fail "u"
+    )
+    ~collector:"f got 0; Error at 0: u; entries []"
+    ~plain:"f got 0; Error at 0: u; entries []";
+  pin "no commit, then fail"
+    (fun () ->
+      ignore (char 'a');
+      fail "u"
+    )
+    ~collector:"f got 0; Ok |ab; entries [1:u]"
+    ~plain:"f got 0; Error at 1: u; entries []";
+  pin "known difference: cut inside a context, then fail"
+    (fun () ->
+      context "c" (fun () ->
+          ignore (char 'a');
+          cut ();
+          fail "u"
+      )
+    )
+    ~collector:"f got 0; Ok |ab; entries [1:u]"
+    ~plain:"f got 0; Error at 1: u; entries []"
+
 let () =
   let open Alcotest in
   run "List"
@@ -1362,6 +1830,22 @@ let () =
             test_first_element_fail;
           test_case "without the collector: the plain parser" `Quick
             test_no_collector_is_plain;
+          test_case "iter: first element at the closer" `Quick
+            test_iter_first_at_closer;
+          test_case "iter: an element" `Quick test_iter_element;
+          test_case "iter: an element, ~release:true" `Quick
+            test_iter_element_release;
+          test_case "iter: after a missing separator" `Quick
+            test_iter_missing_separator;
+          test_case "iter: at the end of the input" `Quick test_iter_at_end;
+          test_case "iter: close" `Quick test_iter_close;
+          test_case "iter: require" `Quick test_iter_require;
+          test_case "commit in an element at the end of the input" `Quick
+            test_commit_at_end;
+          test_case "a commit in list never reaches the caller" `Quick
+            test_commit_never_reaches_the_caller;
+          test_case "commit or cut in the first element at the closer" `Quick
+            test_commit_in_first_at_closer;
           test_case "require: the furthest failure decides" `Quick
             test_require_furthest_failure;
           test_case "recover inside an element" `Quick test_recover_in_element;

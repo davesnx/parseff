@@ -6272,8 +6272,18 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
   ) else
     let closed () = (not (have st 1)) || look_ahead close in
     let item () =
-      recovering st ~release ~outer ~record ~progress:(Option.is_none sep)
-        errors ~sync element hole
+      if not (have st 1) then begin
+        let frame = State.push_rewind_frame st frame_choice in
+        match element () with
+        | v ->
+            State.pop_rewind_frame st frame;
+            v
+        | exception exn ->
+            State.pop_rewind_frame st frame;
+            raise exn
+      end else
+        recovering st ~release ~outer ~record ~progress:(Option.is_none sep)
+          errors ~sync element hole
     in
     let rec steps acc =
       if closed () then
@@ -6304,7 +6314,8 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
             restore_rewind_frame st frame;
             State.pop_rewind_frame st frame;
             []
-        | exception (User_failure _ as exn) ->
+        | exception (User_failure _ as exn)
+          when not (State.frame_committed st frame) ->
             let e = error_of_exn st outer exn in
             restore_rewind_frame st frame;
             State.pop_rewind_frame st frame;
