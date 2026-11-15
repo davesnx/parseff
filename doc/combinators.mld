@@ -257,7 +257,10 @@ one is kept.
 {!val:Parseff.cut} declares that the construct that is running is decided.
 {!val:Parseff.commit} seals the nearest frame only. [cut] seals every [or_],
 [one_of], [many], [sep_by], [optional] and [fold_*] frame that was opened since
-the innermost enclosing [context]. It stops at {!val:Parseff.look_ahead}.
+the innermost enclosing [context]. It stops at {!val:Parseff.look_ahead},
+{!val:Parseff.peek_with} or {!val:Parseff.capture}. With
+[capture ~release:true], it moves the rewind point of the [capture] to the
+position of the cut and continues.
 
 {@ocaml skip[val cut : unit -> unit]}
 

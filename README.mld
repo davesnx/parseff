@@ -43,8 +43,9 @@ let () =
       prerr_endline (Parseff.render_error ~name:"address" e)
 ]}
 
-A failed parse returns one [Parseff.error]. [Parseff.render_error] prints the
-message, the source line and a caret under the failure:
+The program prints [Parsed: 192.168.1.1]. A failed parse returns one
+[Parseff.error]. On ["192.168.1."], [Parseff.render_error] prints the message,
+the source line and a caret under the failure:
 
 {v
 address:1:11: [error] expected digit, found end of input
@@ -60,7 +61,7 @@ v}
 - {b Automatic backtracking} with {{:https://davesnx.github.io/parseff/api/combinators/#or_}[Parseff.or_]}
 - {b Minimal dependency footprint} only [re] for regex support and [uucp] for Unicode support
 - {{:https://davesnx.github.io/parseff/api/streaming/}{b Streaming support}}
-- {b Domain-safe} each {{:https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics}[Parseff.parse]} / {{:https://davesnx.github.io/parseff/api/streaming/#parse_source}[Parseff.parse_source]} call is self-contained with no global mutable state, so independent parses can run in parallel across domains
+- {b Domain-safe} each {{:https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics}[Parseff.parse]} / {{:https://davesnx.github.io/parseff/api/streaming/#parse_source}[Parseff.parse_source]} call keeps its state per domain, so independent parses can run in parallel across domains
 - {{:https://davesnx.github.io/parseff/api/zero-copy/}{b Zero-copy span APIs}} for low-allocation parsing
 - {{:https://davesnx.github.io/parseff/api/zero-copy/}{b Fused operations}} for hot paths
 
@@ -88,7 +89,7 @@ See the {{:https://davesnx.github.io/parseff/guides/comparison/}full comparison}
 
 - Open an issue to discuss proposed changes
 - Write tests for new features
-- Run [make fmt] before submitting
+- Run [make format] before submitting
 - Ensure all tests pass with [make test]
 
 {1 License}

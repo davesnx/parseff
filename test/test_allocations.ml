@@ -57,6 +57,28 @@ let test_failed_parses () =
         ()
   )
 
+let request_line () =
+  ignore (Parseff.take_while ~at_least:1 (fun c -> c <> ' '));
+  ignore (Parseff.char ' ');
+  ignore (Parseff.take_while ~at_least:1 (fun c -> c <> ' '));
+  ignore (Parseff.char ' ');
+  ignore (Parseff.consume "HTTP/");
+  Parseff.digit ()
+
+let test_dropped_failures () =
+  check_failed_parse "request line cut after 21 bytes" 120.
+    "GET /index.html HTTP/" request_line;
+  let line = String.make 39 'a' ^ "\n" in
+  let input =
+    String.concat "" (List.init 50 (fun _ -> line))
+    ^ "#"
+    ^ String.concat "" (List.init 50 (fun _ -> line))
+  in
+  check_failed_parse "failure after 2000 bytes of 4001" 120. input (fun () ->
+      Parseff.skip_while (fun c -> c = 'a' || c = '\n');
+      Parseff.end_of_input ()
+  )
+
 let test_render_error () =
   let error =
     failed_error "z" (fun () ->
@@ -307,6 +329,92 @@ let test_regex_first_head () =
        directly on the major heap per parse, expected at most 50"
       actual
 
+let word_re = Parseff.regex (Re.rep1 (Re.rg 'a' 'z'))
+let space_re = Parseff.regex (Re.char ' ')
+
+let word_and_space () =
+  ignore (Parseff.match_regex word_re);
+  ignore (Parseff.match_regex space_re)
+
+let regex_words_allocated ~window ~record size =
+  let input = String.concat "" (List.init (size / 5) (fun _ -> "abcd ")) in
+  let parser () =
+    if record = 0 then
+      ignore (Parseff.many word_and_space ())
+    else
+      for _ = 1 to size / record do
+        match
+          Parseff.capture (fun () ->
+              for _ = 1 to record / 5 do
+                word_and_space ()
+              done
+          )
+        with
+        | Ok () ->
+            ()
+        | Error error ->
+            Alcotest.fail (Parseff.render_error error)
+      done
+  in
+  let sent = ref 0 in
+  let source =
+    Parseff.Source.of_function (fun buf off len ->
+        if !sent = String.length input || len = 0 then
+          0
+        else begin
+          Bytes.set buf off input.[!sent];
+          incr sent;
+          1
+        end
+    )
+  in
+  Gc.full_major ();
+  let before = Gc.allocated_bytes () in
+  ( match
+      Parseff.parse_source ~backtrack_window:window source (fun () ->
+          parser ();
+          Parseff.end_of_input ()
+      )
+    with
+  | Ok () ->
+      ()
+  | Error error ->
+      Alcotest.fail (Parseff.render_error error)
+  );
+  (Gc.allocated_bytes () -. before) /. Float.of_int (Sys.word_size / 8)
+
+let test_regex_one_byte_reads () =
+  let growth ~window ~record size =
+    let small = regex_words_allocated ~window ~record size in
+    let large = regex_words_allocated ~window ~record (4 * size) in
+    if large > 8. *. small then
+      Alcotest.failf
+        "match_regex on reads of 1 byte with ~backtrack_window:%d and records \
+         of %d bytes allocated %.0f words for %d bytes and %.0f for %d bytes, \
+         expected at most 8 times more"
+        window record small size large (4 * size)
+  in
+  growth ~window:64 ~record:0 4_000;
+  growth ~window:64 ~record:40 4_000;
+  growth ~window:65536 ~record:0 16_000;
+  growth ~window:65536 ~record:16_000 16_000;
+  let size = 200_000 in
+  List.iter
+    (fun (small_record, large_record) ->
+      let small = regex_words_allocated ~window:64 ~record:small_record size in
+      let large =
+        regex_words_allocated ~window:65536 ~record:large_record size
+      in
+      if large > 1.5 *. small then
+        Alcotest.failf
+          "match_regex on %d bytes read 1 byte at a time allocated %.0f words \
+           with ~backtrack_window:64 and records of %d bytes, and %.0f words \
+           with ~backtrack_window:65536 and records of %d bytes, expected at \
+           most 1.5 times more"
+          size small small_record large large_record
+    )
+    [ (0, 0); (40, 40_000) ]
+
 let head_and_body = head ^ String.make 4000 'x'
 
 let full_source ?initial_buffer_size () =
@@ -334,6 +442,61 @@ let test_full_first_read () =
   check "~initial_buffer_size:512" (Some 512);
   check "the default size" None
 
+let digit () = Char.code (Parseff.any_char ()) - Char.code '0'
+
+let token c build () =
+  ignore (Parseff.char c);
+  build
+
+let add = Parseff.infix_left (token '+' ( + ))
+let mul = Parseff.infix_left (token '*' ( * ))
+
+let table = Parseff.[ [ add; infix_left (token '-' ( - )) ]; [ mul ] ]
+
+let operator () =
+  match Parseff.peek_char () with
+  | Some '+' ->
+      Some (1, add)
+  | Some '*' ->
+      Some (2, mul)
+  | _ ->
+      None
+
+let parse_words input parser =
+  words_per_call (fun () -> Parseff.parse ~consume:`Partial input parser)
+
+let test_operators () =
+  let operand = parse_words "1" digit in
+  List.iter
+    (fun (name, maximum, input, parser) ->
+      let actual = parse_words input parser -. operand in
+      if actual > maximum then
+        Alcotest.failf
+          "%s on %S allocated %.6f minor words more than its operand, expected \
+           at most %.0f"
+          name input actual maximum
+    )
+    [
+      ("expression", 46., "1", Parseff.expression ~operand:digit table);
+      ("expression", 62., "1+2+3", Parseff.expression ~operand:digit table);
+      ("expression", 67., "1+2*3+4", Parseff.expression ~operand:digit table);
+      ( "precedence",
+        13.,
+        "1",
+        fun () -> Parseff.precedence ~operand:digit ~operator ()
+      );
+      ( "precedence",
+        39.,
+        "1+2+3",
+        fun () -> Parseff.precedence ~operand:digit ~operator ()
+      );
+      ( "precedence",
+        49.,
+        "1+2*3+4",
+        fun () -> Parseff.precedence ~operand:digit ~operator ()
+      );
+    ]
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -341,11 +504,16 @@ let () =
         [
           Alcotest.test_case "stopping failures" `Quick test_stopping_failures;
           Alcotest.test_case "failed parses" `Quick test_failed_parses;
+          Alcotest.test_case "dropped failed parses" `Quick
+            test_dropped_failures;
           Alcotest.test_case "render_error" `Quick test_render_error;
         ]
       );
       ( "success paths",
         [ Alcotest.test_case "consume" `Quick test_consume_success ]
+      );
+      ( "operators",
+        [ Alcotest.test_case "expression and precedence" `Quick test_operators ]
       );
       ( "source reads",
         [
@@ -359,6 +527,8 @@ let () =
           Alcotest.test_case "full first read" `Quick test_full_first_read;
           Alcotest.test_case "head that starts with match_regex" `Quick
             test_regex_first_head;
+          Alcotest.test_case "match_regex on reads of 1 byte" `Quick
+            test_regex_one_byte_reads;
         ]
       );
     ]

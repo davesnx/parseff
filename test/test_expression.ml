@@ -384,6 +384,269 @@ let test_long_flat () =
   | Error e ->
       Alcotest.fail (Parseff.error_message e)
 
+let test_long_right_chain () =
+  let table = Parseff.[ [ infix_right (int_op '^' ( + )) ] ] in
+  let input = String.concat "^" (List.init 100_000 (fun _ -> "1")) in
+  match Parseff.parse input (Parseff.expression ~operand:digit_value table) with
+  | Ok n ->
+      Alcotest.(check int) "sum" 100_000 n
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+let test_shared_prefix_levels () =
+  let c_like =
+    Parseff.
+      [
+        [ infix_left (bin "<") ];
+        [ infix_left (bin "<<") ];
+        [ infix_left (bin "*") ];
+      ]
+  in
+  check c_like "1<2<<3" "Ok (1<(2<<3))";
+  check c_like "1*2<<3" "Ok ((1*2)<<3)";
+  check c_like "1<<2<3" "Ok ((1<<2)<3)";
+  check c_like "1*2<3<<4*5" "Ok ((1*2)<(3<<(4*5)))"
+
+let test_build_effects_on_retry () =
+  let run input =
+    let notes = Parseff.Diagnostics.create () in
+    let calls = ref 0 in
+    let noted s () =
+      tok s ();
+      fun a b ->
+        incr calls;
+        Parseff.warn notes (a ^ s ^ b);
+        "(" ^ a ^ s ^ b ^ ")"
+    in
+    let table =
+      Parseff.
+        [
+          [ infix_left (noted "<") ];
+          [ infix_left (noted "<<") ];
+          [ infix_left (noted "*") ];
+        ]
+    in
+    let r =
+      Parseff.parse ~consume:`Partial ~diagnostics:notes input (fun () ->
+          let e = expr table () in
+          e ^ "@" ^ string_of_int (Parseff.position ())
+      )
+    in
+    Printf.sprintf "%s, notes [%s], %d calls" (show r)
+      (String.concat "; "
+         (List.map
+            (fun (e : string Parseff.Diagnostics.entry) -> e.value)
+            (Parseff.Diagnostics.to_list notes)
+         )
+      )
+      !calls
+  in
+  Alcotest.(check string)
+    "next operator fails" "Ok (1*2)@3, notes [1*2], 1 calls" (run "1*2<)");
+  Alcotest.(check string)
+    "retry binds tighter" "Ok ((1*2)<<3)@6, notes [1*2; (1*2)<<3], 2 calls"
+    (run "1*2<<3")
+
+module Annotation_example = struct
+  open Parseff
+
+  module Ops : sig
+    val add : (int, [> `Infix ]) operator
+    val neg : (int, [> `Prefix ]) operator
+  end = struct
+    let add : (int, _) operator =
+      infix_left (fun () ->
+          ignore (char '+');
+          ( + )
+      )
+
+    let neg : (int, _) operator =
+      prefix (fun () ->
+          ignore (char '-');
+          ( ~- )
+      )
+  end
+
+  type grammar = {
+    table : (int, [ `Infix | `Prefix | `Postfix ]) operator list list;
+  }
+
+  let grammar = { table = [ [ Ops.add ]; [ Ops.neg ] ] }
+
+  let expr () =
+    expression
+      ~operand:(fun () -> Char.code (digit ()) - Char.code '0')
+      grammar.table ()
+end
+
+let test_annotation_example () =
+  Alcotest.(check (result int string))
+    "-1+-2" (Ok (-3))
+    (Result.map_error Parseff.error_message
+       (Parseff.parse "-1+-2" Annotation_example.expr)
+    )
+
+let test_zero_width_steps () =
+  let raw s () = ignore (Parseff.consume s) in
+  let bin s () =
+    raw s ();
+    fun a b -> "(" ^ a ^ s ^ b ^ ")"
+  in
+  let post s () =
+    raw s ();
+    fun a -> "(" ^ a ^ s ^ ")"
+  in
+  let digit () = String.make 1 (Parseff.digit ()) in
+  let maybe () =
+    match Parseff.optional Parseff.digit () with
+    | Some d ->
+        String.make 1 d
+    | None ->
+        "_"
+  in
+  let run operand table input =
+    show (Parseff.parse input (Parseff.expression ~operand table))
+  in
+  let a = Parseff.[ [ infix_left (bin "+") ]; [ postfix (post "") ] ] in
+  let b =
+    Parseff.
+      [
+        [ infix_left (bin "+") ];
+        [ infix_right (bin "*") ];
+        [ postfix (post "") ];
+      ]
+  in
+  let c = Parseff.[ [ infix_left (bin "") ]; [ postfix (post "^") ] ] in
+  let d = Parseff.[ [ infix_right (bin "") ] ] in
+  let e = Parseff.[ [ postfix (post ""); infix_left (bin "+") ] ] in
+  let f =
+    Parseff.
+      [
+        [ infix_left (bin "") ]; [ infix_left (bin "") ]; [ postfix (post "!") ];
+      ]
+  in
+  List.iter
+    (fun (operand, table, input, expected) ->
+      Alcotest.(check string) input expected (run operand table input)
+    )
+    [
+      (digit, a, "0+1+2", "Ok ((0+1)+2)");
+      (digit, a, "0", "Ok 0");
+      (digit, b, "0*1+2", "Ok ((0*1)+2)");
+      (digit, b, "0+1*2*3", "Ok (0+(1*(2*3)))");
+      (maybe, c, "2^", "Ok (2(_^))");
+      (maybe, c, "2^^", "Ok (2((_^)^))");
+      (maybe, c, "23^", "Ok (2(3^))");
+      (maybe, c, "2", "Ok 2");
+      (digit, d, "012", "Ok (0(12))");
+      (maybe, d, "", "Ok _");
+      (digit, e, "1+2", "Error@1 expected end of input, found '+'");
+      (maybe, f, "1!", "Ok (1(_(_!)))");
+      (maybe, f, "!", "Ok (_(_(_!)))");
+    ]
+
+let sized_source size input =
+  let pos = ref 0 in
+  Parseff.Source.of_function ~initial_buffer_size:size (fun buf off len ->
+      let n = min len (min size (String.length input - !pos)) in
+      Bytes.blit_string input !pos buf off n;
+      pos := !pos + n;
+      n
+  )
+
+let test_commit_in_token_streaming () =
+  let token ~commit_first () =
+    if commit_first then Parseff.commit ();
+    ignore (Parseff.consume "!=");
+    if not commit_first then Parseff.commit ();
+    ignore (Parseff.peek_char ());
+    fun a b -> "(" ^ a ^ "!=" ^ b ^ ")"
+  in
+  let plus () =
+    ignore (Parseff.char '+');
+    fun a -> "+" ^ a
+  in
+  let rec expr table () = Parseff.expression ~operand:(operand table) table ()
+  and operand table () =
+    Parseff.or_
+      (fun () -> String.make 1 (Parseff.digit ()))
+      (fun () ->
+        ignore (Parseff.char '(');
+        let e = Parseff.rec_ (expr table) in
+        ignore (Parseff.char ')');
+        "[" ^ e ^ "]"
+      )
+      ()
+  in
+  List.iter
+    (fun (table, input, streams) ->
+      let expected = show (Parseff.parse input (expr table)) in
+      List.iter
+        (fun (size, window) ->
+          Alcotest.(check string)
+            (Printf.sprintf "%s, reads of %d, window %d" input size window)
+            expected
+            (show
+               (Parseff.parse_source ~backtrack_window:window
+                  (sized_source size input) (expr table)
+               )
+            )
+        )
+        streams
+    )
+    [
+      ( Parseff.[ [ infix_right (token ~commit_first:false) ] ],
+        "2!=1!=3!=4!=5",
+        [ (7, 2); (2, 3); (1, 2); (1, 16) ]
+      );
+      ( Parseff.[ [ infix_right (token ~commit_first:true); prefix plus ] ],
+        "++0!=(2)!=2!=2",
+        [ (1, 3); (1, 16); (1, 65536) ]
+      );
+    ]
+
+let test_token_runs_once () =
+  let run act =
+    let calls = ref 0 in
+    let notes = Parseff.Diagnostics.create () in
+    let cell = Parseff.Ref.create 0 in
+    let token () =
+      incr calls;
+      ignore (Parseff.consume "!=");
+      act notes cell;
+      fun a b -> "(" ^ a ^ "!=" ^ b ^ ")"
+    in
+    let r =
+      Parseff.parse ~diagnostics:notes "1!=2!=3"
+        (Parseff.expression
+           ~operand:(fun () -> String.make 1 (Parseff.digit ()))
+           Parseff.[ [ infix_left token ]; [ infix_left (bin "*") ] ]
+        )
+    in
+    Printf.sprintf "%s, %d calls, %d notes, ref %d" (show r) !calls
+      (Parseff.Diagnostics.length notes)
+      (Parseff.Ref.get cell)
+  in
+  List.iter
+    (fun (name, act, expected) ->
+      Alcotest.(check string) name expected (run act)
+    )
+    [
+      ("no effect", (fun _ _ -> ()), "Ok ((1!=2)!=3), 3 calls, 0 notes, ref 0");
+      ( "warn",
+        (fun d _ -> Parseff.warn d "seen"),
+        "Ok ((1!=2)!=3), 3 calls, 2 notes, ref 0"
+      );
+      ( "Ref.set",
+        (fun _ c -> Parseff.Ref.set c (Parseff.Ref.get c + 1)),
+        "Ok ((1!=2)!=3), 3 calls, 0 notes, ref 2"
+      );
+      ( "commit",
+        (fun _ _ -> Parseff.commit ()),
+        "Ok ((1!=2)!=3), 3 calls, 0 notes, ref 0"
+      );
+    ]
+
 let test_streaming_window () =
   let b = Buffer.create 10_000 in
   for i = 0 to 4_999 do
@@ -728,28 +991,6 @@ module Precedence = struct
     in
     Alcotest.(check string) "left" "Ok (12)" (run Parseff.infix_left);
     Alcotest.(check string) "right" "Ok (12)" (run Parseff.infix_right)
-
-  let test_prefix_rejected () =
-    let operator () = Some (1, Parseff.prefix (fun () a -> a)) in
-    Alcotest.check_raises "prefix"
-      (Invalid_argument
-         "Parseff.precedence: operator returned a prefix operator"
-      ) (fun () ->
-        ignore
-          (Parseff.parse "1" (Parseff.precedence ~operand:digit_value ~operator))
-    )
-
-  let test_prefix_below_min () =
-    let operator () = Some (1, Parseff.prefix (fun () a -> a)) in
-    Alcotest.check_raises "prefix below min"
-      (Invalid_argument
-         "Parseff.precedence: operator returned a prefix operator"
-      ) (fun () ->
-        ignore
-          (Parseff.parse ~consume:`Partial "1+"
-             (Parseff.precedence ~min:2 ~operand:digit_value ~operator)
-          )
-    )
 
   let test_precedence_limits () =
     let run left right input =
@@ -1114,18 +1355,84 @@ module Precedence = struct
         )
     in
     let by_table = Parseff.expression ~operand:digit table in
-    let by_lookup = Parseff.precedence ~operand:digit ~operator in
+    let by_lookup () = Parseff.precedence ~operand:digit ~operator () in
+    List.iter
+      (fun (name, p, input, expected) ->
+        Alcotest.(check string) name expected (run p input)
+      )
+      [
+        ( "expression, infix_left",
+          by_table,
+          "1+2",
+          "Error@3 expected '#' or \"!\", found end of input"
+        );
+        ( "expression, postfix",
+          by_table,
+          "1!",
+          "Error@2 expected '#', found end of input"
+        );
+        ( "precedence, infix_left",
+          by_lookup,
+          "1+2",
+          "Error@3 expected '#', found end of input"
+        );
+        ( "precedence, postfix",
+          by_lookup,
+          "1!",
+          "Error@2 expected '#', found end of input"
+        );
+        ( "precedence, infix_left at max_int",
+          by_lookup,
+          "1-2",
+          "Error@3 expected '#', found end of input"
+        );
+      ]
+
+  let test_build_fails_prefix () =
+    let failing_pre () =
+      tok "-" ();
+      fun a ->
+        ignore (Parseff.char '#');
+        "(-" ^ a ^ ")"
+    in
+    let failing s () =
+      tok s ();
+      fun a b ->
+        ignore (Parseff.char '#');
+        "(" ^ a ^ s ^ b ^ ")"
+    in
+    let run table input =
+      show
+        (Parseff.parse ~consume:`Partial input (fun () ->
+             let e =
+               Parseff.expression
+                 ~operand:(fun () -> String.make 1 (Parseff.digit ()))
+                 table ()
+             in
+             e ^ "@" ^ string_of_int (Parseff.position ())
+         )
+        )
+    in
+    let failing_prefix =
+      Parseff.[ [ infix_left (bin "+") ]; [ prefix failing_pre ] ]
+    in
+    let failing_inside =
+      Parseff.
+        [
+          [ infix_left (bin "+") ];
+          [ prefix (pre "-") ];
+          [ infix_left (failing "*") ];
+        ]
+    in
     Alcotest.(check string)
-      "expression drops the infix operator" "Ok 1@1" (run by_table "1+2");
+      "prefix" "Error@2 expected '#', found end of input"
+      (run failing_prefix "-1");
     Alcotest.(check string)
-      "expression drops the postfix operator" "Ok 1@1" (run by_table "1!");
+      "prefix after an operator" "Error@4 expected '#', found end of input"
+      (run failing_prefix "1+-2");
     Alcotest.(check string)
-      "precedence fails for a deferred build function"
-      "Error@3 expected '#', found end of input" (run by_lookup "1+2");
-    Alcotest.(check string)
-      "precedence drops the postfix operator" "Ok 1@1" (run by_lookup "1!");
-    Alcotest.(check string)
-      "precedence drops infix_left at max_int" "Ok 1@1" (run by_lookup "1-2")
+      "infix inside a prefix operand" "Error@4 expected '#', found end of input"
+      (run failing_inside "-1*2")
 
   let test_build_effects () =
     let run ~noisy input =
@@ -1334,8 +1641,6 @@ module Precedence = struct
       test_case "long chains use no depth" `Quick test_long_chains;
       test_case "commit in operator" `Quick test_commit_in_operator;
       test_case "operator and operand without progress" `Quick test_no_progress;
-      test_case "prefix rejected" `Quick test_prefix_rejected;
-      test_case "prefix rejected below min" `Quick test_prefix_below_min;
       test_case "precedence at max_int and min_int" `Quick
         test_precedence_limits;
       test_case "commit in build function" `Quick test_commit_in_build;
@@ -1343,6 +1648,7 @@ module Precedence = struct
       test_case "commit and cut in the lookup" `Quick test_commit_in_lookup;
       test_case "lookup changes undone" `Quick test_lookup_undone;
       test_case "build function fails" `Quick test_build_fails;
+      test_case "prefix build function fails" `Quick test_build_fails_prefix;
       test_case "build effects" `Quick test_build_effects;
       test_case "same as expression" `Quick test_same_as_expression;
       test_case "doc example" `Quick test_doc_example;
@@ -1395,6 +1701,16 @@ let () =
           test_case "prefix without progress, committed" `Quick
             test_prefix_no_progress_sealed;
           test_case "long flat chain" `Quick test_long_flat;
+          test_case "zero-width steps" `Quick test_zero_width_steps;
+          test_case "annotated operators" `Quick test_annotation_example;
+          test_case "commit in a token parser, streaming" `Quick
+            test_commit_in_token_streaming;
+          test_case "token parser runs once" `Quick test_token_runs_once;
+          test_case "long infix_right chain" `Quick test_long_right_chain;
+          test_case "build effects when an operator fails" `Quick
+            test_build_effects_on_retry;
+          test_case "shared prefix across levels" `Quick
+            test_shared_prefix_levels;
           test_case "streaming window" `Quick test_streaming_window;
           test_case "doc example" `Quick test_doc_example;
           test_case "guide example" `Quick test_guide_example;

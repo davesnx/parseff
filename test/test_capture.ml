@@ -2006,6 +2006,419 @@ let test_streaming_nested_release () =
     (Error "Backtrack_window_exceeded", [])
     (run ())
 
+let release_state run =
+  let d = Diagnostics.create () in
+  let cell = Ref.create 0 in
+  let r =
+    parse ~diagnostics:d "x" (fun () ->
+        let v = run d cell in
+        ignore (char 'x');
+        v
+    )
+  in
+  ( (match r with Ok v -> "Ok " ^ v | Error e -> "Error " ^ error_message e),
+    Diagnostics.length d,
+    Ref.get cell
+  )
+
+let release_outcome = Alcotest.(triple string int int)
+
+let test_release_keeps_inner_rewinds () =
+  let warning =
+    match parse "" (fun () -> fail "inner warning") with
+    | Error e ->
+        e
+    | Ok () ->
+        Alcotest.fail "expected a failure"
+  in
+  let empty_steps d cell () =
+    String.concat ""
+      (many
+         (fun () ->
+           Ref.set cell 2;
+           warn d warning;
+           cut ();
+           ""
+         )
+         ()
+      )
+  in
+  let plain = release_state (fun d cell -> empty_steps d cell ()) in
+  Alcotest.check release_outcome "plain many undoes the empty step"
+    ("Ok ", 0, 0) plain;
+  Alcotest.check release_outcome "capture ~release:true" plain
+    (release_state (fun d cell ->
+         match capture ~release:true (empty_steps d cell) with
+         | Ok v ->
+             v
+         | Error _ ->
+             "E"
+     )
+    );
+  Alcotest.check release_outcome "recover ~release:true" plain
+    (release_state (fun d cell ->
+         recover ~release:true d ~sync:ignore (empty_steps d cell) (fun _ -> "H")
+     )
+    );
+  Alcotest.check release_outcome "sep_by_recover ~release:true" plain
+    (release_state (fun d cell ->
+         String.concat ","
+           (sep_by_recover ~release:true d ~sync:ignore (empty_steps d cell)
+              (fun () -> char ',')
+              (fun _ -> "H")
+              ()
+           )
+     )
+    );
+  let other = Ref.create 0 in
+  let set_after_cut d cell () =
+    String.concat ""
+      (many
+         (fun () ->
+           Ref.set cell 2;
+           cut ();
+           Ref.set other 5;
+           ""
+         )
+         ()
+      )
+    ^ string_of_int (Ref.get other)
+    ^
+    ( ignore d;
+      ""
+    )
+  in
+  Alcotest.check release_outcome
+    "a Ref.set after the cut keeps the undo entries"
+    (release_state (fun d cell -> set_after_cut d cell ()))
+    (release_state (fun d cell ->
+         match capture ~release:true (set_after_cut d cell) with
+         | Ok v ->
+             v
+         | Error _ ->
+             "E"
+     )
+    );
+  Alcotest.check release_outcome
+    "a commit inside many seals many and does not reach the capture"
+    (release_state (fun d cell ->
+         String.concat ""
+           (many
+              (fun () ->
+                Ref.set cell 2;
+                warn d warning;
+                commit ();
+                ""
+              )
+              ()
+           )
+     )
+    )
+    (release_state (fun d cell ->
+         match
+           capture ~release:true (fun () ->
+               String.concat ""
+                 (many
+                    (fun () ->
+                      Ref.set cell 2;
+                      warn d warning;
+                      commit ();
+                      ""
+                    )
+                    ()
+                 )
+           )
+         with
+         | Ok v ->
+             v
+         | Error _ ->
+             "E"
+     )
+    )
+
+let test_release_keeps_effects_before_the_cut () =
+  let warning =
+    match parse "" (fun () -> fail "kept warning") with
+    | Error e ->
+        e
+    | Ok () ->
+        Alcotest.fail "expected a failure"
+  in
+  Alcotest.check release_outcome "the capture keeps what came before the cut"
+    ("Ok E", 1, 3)
+    (release_state (fun d cell ->
+         match
+           capture ~release:true (fun () ->
+               Ref.set cell 3;
+               warn d warning;
+               cut ();
+               ignore (char 'y');
+               "y"
+           )
+         with
+         | Ok v ->
+             v
+         | Error _ ->
+             "E"
+     )
+    )
+
+let release_live_words elements =
+  let r = Ref.create 0 in
+  let at = ref 0 and n = ref 0 in
+  let result =
+    parse_source ~backtrack_window:64
+      (Source.of_seq (Seq.init elements (fun _ -> "a")))
+      (fun () ->
+        match
+          capture ~release:true (fun () ->
+              ignore
+                ( fold_left
+                    (fun () ->
+                      ignore (any_char ());
+                      Ref.set r (Ref.get r + 1);
+                      cut ();
+                      incr n;
+                      if !n = elements then begin
+                        Gc.full_major ();
+                        at := (Gc.stat ()).Gc.live_words
+                      end;
+                      1
+                    )
+                    (fun () -> ( + ))
+                    ()
+                  : int
+                  )
+          )
+        with
+        | Ok () ->
+            ()
+        | Error _ ->
+            ()
+      )
+  in
+  Alcotest.(check bool) "parsed" true (Result.is_ok result);
+  !at
+
+let test_release_memory_bounded_with_ref () =
+  let small = release_live_words 10_000
+  and large = release_live_words 200_000 in
+  Alcotest.(check bool)
+    (Printf.sprintf "live words %d after 10000 elements, %d after 200000" small
+       large
+    )
+    true
+    (large - small < 2_000)
+
+let release_warning () =
+  match parse "" (fun () -> fail "step warning") with
+  | Error e ->
+      e
+  | Ok () ->
+      Alcotest.fail "expected a failure"
+
+let after_failure ~release ?(input = "x") body =
+  let d = Diagnostics.create () in
+  let cell = Ref.create 0 in
+  let w = release_warning () in
+  let effects ~warns () =
+    Ref.set cell 1;
+    if warns then warn d w;
+    cut ()
+  in
+  let r =
+    parse ~diagnostics:d ~consume:`Partial input (fun () ->
+        match
+          capture ~release (fun () ->
+              body d cell effects;
+              (fail "after" : unit)
+          )
+        with
+        | Ok () ->
+            "Ok"
+        | Error e ->
+            error_message e
+    )
+  in
+  ( (match r with Ok v -> v | Error e -> "parse error " ^ error_message e),
+    Diagnostics.length d,
+    Ref.get cell
+  )
+
+let test_release_clamps_the_capture () =
+  let check name body =
+    Alcotest.check release_outcome name ("after", 0, 0)
+      (after_failure ~release:true body)
+  in
+  check "trail: a Ref.set after an empty step is undone" (fun _ cell effects ->
+      ignore (many (fun () -> effects ~warns:false ()) ());
+      Ref.set cell 2
+  );
+  check "diagnostics: a warning after an empty step is removed" (fun d _ _ ->
+      let w = release_warning () in
+      ignore
+        (many
+           (fun () ->
+             warn d w;
+             cut ()
+           )
+           ()
+        );
+      warn d w
+  )
+
+let test_release_construct_rewinds () =
+  let x () = ignore (optional (fun () -> char 'x') ()) in
+  let num () =
+    x ();
+    1
+  in
+  let constructs =
+    [
+      ("many", fun _ _ effects -> ignore (many (effects ~warns:true) ()));
+      ( "fold_left",
+        fun _ _ effects ->
+          ignore
+            (fold_left num
+               (fun () ->
+                 effects ~warns:true ();
+                 ( + )
+               )
+               ()
+            )
+      );
+      ( "fold_right",
+        fun _ _ effects ->
+          ignore
+            (fold_right num
+               (fun () ->
+                 effects ~warns:true ();
+                 ( + )
+               )
+               ()
+            )
+      );
+      ("sep_by", fun _ _ effects -> ignore (sep_by num (effects ~warns:true) ()));
+      ( "precedence",
+        fun _ _ effects ->
+          let seen = ref false in
+          ignore
+            (precedence
+               ~operand:(fun () ->
+                 if !seen then effects ~warns:true ();
+                 num ()
+               )
+               ~operator:(fun () ->
+                 if !seen then
+                   None
+                 else begin
+                   seen := true;
+                   Some (1, infix_left (fun () -> ( + )))
+                 end
+               )
+               ()
+            )
+      );
+      ( "expression",
+        fun _ _ effects ->
+          ignore
+            (expression
+               ~operand:(fun () ->
+                 x ();
+                 1
+               )
+               [
+                 [
+                   infix_left (fun () ->
+                       effects ~warns:true ();
+                       ( + )
+                   );
+                 ];
+               ]
+               ()
+            )
+      );
+      ( "one_of",
+        fun _ _ effects ->
+          ignore
+            (one_of
+               [
+                 (fun () ->
+                   ignore (many (effects ~warns:true) ());
+                   char 'x'
+                 );
+                 (fun () -> char 'z');
+               ]
+               ()
+            )
+      );
+      ( "require",
+        fun d _ effects ->
+          ignore
+            (require d
+               (fun () ->
+                 effects ~warns:true ();
+                 ignore (char 'q')
+               )
+               ignore
+            )
+      );
+      ( "list",
+        fun d _ effects ->
+          ignore
+            (list ~release:true d
+               ~close:(fun () -> false)
+               ~sync:ignore
+               (fun () ->
+                 match peek_char () with
+                 | Some _ ->
+                     ignore (char 'x')
+                 | None ->
+                     effects ~warns:false ()
+               )
+               ignore ()
+            )
+      );
+      ( "recover ~release",
+        fun d _ effects ->
+          recover ~release:true d ~sync:ignore
+            (fun () -> ignore (many (effects ~warns:true) ()))
+            ignore
+      );
+      ( "sep_by_iter",
+        fun _ _ effects ->
+          sep_by_iter num (effects ~warns:true) (fun _ -> ()) ()
+      );
+      ( "take_while_iter",
+        fun _ _ effects ->
+          ignore
+            (many
+               (fun () ->
+                 effects ~warns:true ();
+                 take_while_iter (fun _ -> false) ignore
+               )
+               ()
+            )
+      );
+    ]
+  in
+  List.iter
+    (fun (name, body) ->
+      Alcotest.check release_outcome
+        (name ^ ": the step that goes back undoes its effects")
+        ("after", 0, 0)
+        (after_failure ~release:true body);
+      match after_failure ~release:false body with
+      | plain ->
+          Alcotest.check release_outcome
+            (name ^ ": same as plain capture")
+            plain
+            (after_failure ~release:true body)
+      | exception Invalid_argument _ ->
+          ()
+    )
+    constructs
+
 let () =
   let open Alcotest in
   run "Capture"
@@ -2080,6 +2493,16 @@ let () =
           test_case "limits propagate" `Quick test_limits_propagate;
           test_case "streaming pins start" `Quick test_streaming_pins_start;
           test_case "streaming release" `Quick test_streaming_release;
+          test_case "release keeps inner rewinds" `Quick
+            test_release_keeps_inner_rewinds;
+          test_case "release keeps effects before the cut" `Quick
+            test_release_keeps_effects_before_the_cut;
+          test_case "release: memory bounded with Ref.set and cut" `Quick
+            test_release_memory_bounded_with_ref;
+          test_case "release: a step that goes back lowers the capture" `Quick
+            test_release_clamps_the_capture;
+          test_case "release: each construct undoes its empty step" `Quick
+            test_release_construct_rewinds;
           test_case "read raises in the end check" `Quick test_guard_read_raises;
           test_case "read raises in the forced step" `Quick
             test_jump_read_raises;

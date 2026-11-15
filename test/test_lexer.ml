@@ -475,6 +475,23 @@ let test_window_keeps_read_bytes () =
   Alcotest.(check string)
     "token bytes kept while it is read" "Ok wxyz w 50" (show_result Fun.id r)
 
+let test_window_keeps_read_bytes_within () =
+  let lexer = Lexer.create ~skip:skip_whitespace spelled in
+  let input = String.concat " " (List.init 50 (fun _ -> "wxyz")) in
+  let r =
+    parse_source ~backtrack_window:6 (chunked ~chunk_size:1 input) (fun () ->
+        within (String.length input) (fun () ->
+            let first = Lexer.peek lexer in
+            let c = peek_char () in
+            let l = many (fun () -> Lexer.next lexer) () in
+            Printf.sprintf "%s %c %d" first (Option.get c) (List.length l)
+        )
+    )
+  in
+  Alcotest.(check string)
+    "token bytes kept while it is read in within" "Ok wxyz w 50"
+    (show_result Fun.id r)
+
 let test_window_streams_tokens () =
   let n = 2000 in
   let input =
@@ -877,6 +894,8 @@ let () =
             test_window_holds_token;
           Alcotest.test_case "window keeps the bytes of a read" `Quick
             test_window_keeps_read_bytes;
+          Alcotest.test_case "window keeps the bytes of a read in within" `Quick
+            test_window_keeps_read_bytes_within;
           Alcotest.test_case "many tokens, small window" `Quick
             test_window_streams_tokens;
           Alcotest.test_case "parse_source_each" `Quick test_source_each;

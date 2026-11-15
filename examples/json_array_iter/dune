@@ -1,0 +1,6 @@
+(executable
+ (name main)
+ (libraries parseff))
+
+(cram
+ (deps main.exe))

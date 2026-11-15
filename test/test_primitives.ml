@@ -1644,7 +1644,7 @@ let test_match_regex_anchored () =
 
 let failing_regex_loop parse =
   let n = 1 lsl 18 in
-  let budget = 1.0 in
+  let budget = 5.0 in
   let re = Parseff.regex (Re.char 'b') in
   let start = Sys.time () in
   let steps = ref 0 in

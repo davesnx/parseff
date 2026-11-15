@@ -1515,13 +1515,13 @@ let test_render_streaming_opener_dropped () =
       Alcotest.(check bool)
         "header" true
         (has "stream:501:1: [error] expected \"]\" or \"ab\\n\", found 'x'");
-      Alcotest.(check bool) "error line" true (has "501 | x");
+      Alcotest.(check bool) "error line" true (has "501 | x...");
       Alcotest.(check bool)
         "context start is a byte offset" true
         (has "* while parsing list, from byte 0");
       Alcotest.(check bool) "no opener corner" false (has "╭");
       Alcotest.(check bool) "no gutter bar" false (has "│");
-      Alcotest.(check bool) "plain caret row" true (has "501 | x\n    | ^");
+      Alcotest.(check bool) "plain caret row" true (has "501 | x...\n    | ^");
       let full = Parseff.render_error ~name:"stream" ~source:input e in
       let has_full sub =
         let n = String.length sub in
@@ -3073,7 +3073,9 @@ let test_error_start_in_dropped_input () =
         "input:2:101: [error] here";
         "1 |   {";
         "  | \xE2\x95\xAD\xE2\x94\x80\xE2\x95\xAF";
-        "2 | \xE2\x94\x82 ...tail";
+        "2 | \xE2\x94\x82 ..."
+        ^ String.concat "" (List.init 200 (fun _ -> "\\x80"))
+        ^ "tail";
         "  | \xE2\x95\xB0\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80\xE2\x94\x80^";
         "  * while parsing block, from 1:1";
       ]
@@ -3084,6 +3086,118 @@ let test_error_start_in_dropped_input () =
   Alcotest.(check string)
     "framed, ~source" framed_render
     (render ~source:framed_input framed_input framed)
+
+let test_excerpt_contains_error () =
+  let render ?source input =
+    match
+      Parseff.parse_source ~consume:`Partial (Parseff.Source.of_string input)
+        (fun () ->
+          ignore (Parseff.take 100);
+          Parseff.fail "here"
+      )
+    with
+    | Stdlib.Ok () ->
+        Alcotest.fail "expected an error"
+    | Stdlib.Error (e : Parseff.error) ->
+        Parseff.render_error ~name:"input" ?source e
+  in
+  let escapes n = String.concat "" (List.init n (fun _ -> "\\x80")) in
+  let check ?(caret = "  |    ^") label input row =
+    let expected = lines [ "input:1:101: [error] here"; row; caret ] in
+    Alcotest.(check string) label expected (render input);
+    Alcotest.(check string)
+      (label ^ ", ~source") expected
+      (render ~source:input input)
+  in
+  check "run of continuation bytes before the error"
+    (String.make 300 '\x80' ^ "tail\n")
+    ("1 | ..." ^ escapes 200 ^ "tail");
+  check "continuation bytes to the window end"
+    (String.make 600 '\x80' ^ "\n")
+    ("1 | ..." ^ escapes 240 ^ "...");
+  check "stray continuation byte at the window end"
+    ~caret:("  | " ^ String.make 100 ' ' ^ "^")
+    (String.make 236 'a' ^ "\xF0\x9F\x98\x80\x80" ^ String.make 60 'b' ^ "\n")
+    ("1 | " ^ String.make 236 'a' ^ "\xF0\x9F\x98\x80...")
+
+let render_after_stale ?backtrack_window ~read stale input parser =
+  let off = ref 0 in
+  let source =
+    Parseff.Source.of_function (fun buf o len ->
+        let n = min (min len read) (String.length input - !off) in
+        Bytes.blit_string input !off buf o n;
+        off := !off + n;
+        n
+    )
+  in
+  Gc.minor ();
+  for _ = 1 to 1000 do
+    ignore (Sys.opaque_identity (Bytes.make 1000 stale))
+  done;
+  Gc.minor ();
+  match Parseff.parse_source ?backtrack_window source parser with
+  | Stdlib.Ok () ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error (e : Parseff.error) ->
+      ( header_of (Parseff.render_error e),
+        header_of (Parseff.render_error ~source:input e)
+      )
+
+let stale_bytes = [ '\x82'; '\xAC'; 'a' ]
+
+let test_unread_bytes_column () =
+  let input = "a\xE2\x82\xAC\xE2\x82\xAC" in
+  List.iter
+    (fun stale ->
+      let label = Printf.sprintf "stale %C" stale in
+      let streamed, with_source =
+        render_after_stale ~read:6 stale input (fun () ->
+            ignore (Parseff.take 5);
+            Parseff.fail "here"
+        )
+      in
+      Alcotest.(check string)
+        (label ^ ": ~source") "1:3: [error] here" with_source;
+      Alcotest.(check string) label with_source streamed
+    )
+    stale_bytes
+
+let test_unread_bytes_found () =
+  let input = "a\xE2\x82\xAC\xE2\x82\xAC" in
+  List.iter
+    (fun stale ->
+      Alcotest.(check string)
+        (Printf.sprintf "stale %C" stale)
+        "1:3: [error] expected 'x', found '\\xE2\\x82'"
+        (fst
+           (render_after_stale ~read:6 stale input (fun () ->
+                ignore (Parseff.take 4);
+                ignore (Parseff.char 'x')
+            )
+           )
+        )
+    )
+    stale_bytes
+
+let test_unread_bytes_cut_line () =
+  let input = String.concat "" (List.init 20 (fun _ -> "\xE2\x82\xAC")) in
+  List.iter
+    (fun stale ->
+      let label = Printf.sprintf "stale %C" stale in
+      let streamed, with_source =
+        render_after_stale ~backtrack_window:8 ~read:2 stale input (fun () ->
+            for _ = 1 to 10 do
+              ignore (Parseff.take 3)
+            done;
+            ignore (Parseff.take 2);
+            Parseff.fail "here"
+        )
+      in
+      Alcotest.(check string)
+        (label ^ ": ~source") "1:11: [error] here" with_source;
+      Alcotest.(check string) label with_source streamed
+    )
+    stale_bytes
 
 let test_location_after_dropped_lines () =
   let input = "ab\ncd\n" ^ String.make 50 'e' ^ "\nf" in
@@ -3983,10 +4097,210 @@ let test_char_and_one_byte_literal_print_once () =
      )
     )
 
+let json_error input =
+  match
+    Parseff.parse input (fun () ->
+        let v = ctx_json_parser () in
+        Parseff.end_of_input ();
+        v
+    )
+  with
+  | Stdlib.Ok _ ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error e ->
+      e
+
+let opener_lines =
+  lines
+    [
+      "input.json:4:5: [error] expected ',' or '}', found '\"'";
+      "2 |     \"config\": {";
+      "  | ╭─────────────╯";
+      "3 | │     \"a\": 1";
+      "4 | │     \"b\": 2";
+      "  | ╰─────^";
+      "  * while parsing object, from 2:13";
+      "  * while parsing object, from 1:1";
+    ]
+
+let test_render_after_input_dropped () =
+  let error =
+    json_error
+      (Bytes.to_string
+         (Bytes.of_string
+            "{\n  \"config\": {\n    \"a\": 1\n    \"b\": 2\n  }\n}"
+         )
+      )
+  in
+  Gc.full_major ();
+  let other = json_error "[1, 2,, 3]" in
+  Gc.compact ();
+  check_render "rendered after the input went out of scope" opener_lines
+    (Parseff.render_error ~name:"input.json" error);
+  check_render "the other error"
+    (lines
+       [
+         "input.json:1:7: [error] expected value, found ','";
+         "1 | [1, 2,, 3]";
+         "  |       ^";
+         "  * while parsing array, from 1:1";
+       ]
+    )
+    (Parseff.render_error ~name:"input.json" other);
+  check_render "rendered a second time" opener_lines
+    (Parseff.render_error ~name:"input.json" error)
+
+let reused_source scratch text =
+  let off = ref 0 in
+  Parseff.Source.of_function ~initial_buffer_size:4 (fun buf o len ->
+      let n =
+        min (min len (Bytes.length scratch)) (String.length text - !off)
+      in
+      Bytes.blit_string text !off scratch 0 n;
+      Bytes.blit scratch 0 buf o n;
+      off := !off + n;
+      n
+  )
+
+let test_stream_render_after_reuse () =
+  let scratch = Bytes.create 4 in
+  let captured = ref None in
+  let parser () =
+    ( match Parseff.capture (fun () -> Parseff.consume "key: valuX") with
+    | Ok _ ->
+        ()
+    | Error e ->
+        captured := Some e
+    );
+    ignore (Parseff.consume "key: ");
+    ignore (Parseff.take_while (fun c -> c <> '\n'));
+    ignore (Parseff.char '\n');
+    ignore (Parseff.consume "next: ");
+    Parseff.digit ()
+  in
+  let error =
+    match
+      Parseff.parse_source ~backtrack_window:16
+        (reused_source scratch "key: value\nnext: x\n")
+        parser
+    with
+    | Stdlib.Ok _ ->
+        Alcotest.fail "expected an error"
+    | Stdlib.Error e ->
+        e
+  in
+  Bytes.fill scratch 0 (Bytes.length scratch) '#';
+  ignore
+    (Parseff.parse_source ~backtrack_window:16
+       (reused_source scratch "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz") (fun () ->
+         Parseff.char 'a'
+     )
+    );
+  Gc.full_major ();
+  check_render "the parse error"
+    (lines
+       [
+         "2:7: [error] expected digit, found 'x'";
+         "1 | key: value";
+         "2 | next: x";
+         "  |       ^";
+       ]
+    )
+    (Parseff.render_error error);
+  match !captured with
+  | None ->
+      Alcotest.fail "expected a captured error"
+  | Some e ->
+      check_render "the captured error"
+        (lines
+           [
+             "1:10: [error] expected \"X\", found 'e'";
+             "1 | key: value";
+             "  |          ^";
+           ]
+        )
+        (Parseff.render_error e)
+
+let marshal_error delimited =
+  let parser () =
+    ignore (Parseff.take 14);
+    Parseff.context ~delimited "c"
+      (fun () ->
+        ignore (Parseff.take 4);
+        Parseff.fail "boom"
+      )
+      ()
+  in
+  match Parseff.parse "first line\nsecond é line\nthird" parser with
+  | Stdlib.Ok () ->
+      Alcotest.fail "expected an error"
+  | Stdlib.Error e ->
+      e
+
+let test_marshal_before_render () =
+  List.iter
+    (fun delimited ->
+      let e = marshal_error delimited in
+      let copy : Parseff.error =
+        Marshal.from_string (Marshal.to_string e []) 0
+      in
+      ignore (Hashtbl.hash e);
+      Alcotest.(check bool) "equal copy" true (copy = e);
+      Alcotest.(check int) "compare copy" 0 (compare copy e);
+      let copied = Parseff.render_error copy in
+      check_render
+        (Printf.sprintf "copy before render, delimited %b" delimited)
+        (Parseff.render_error (marshal_error delimited))
+        copied;
+      Alcotest.(check bool)
+        "shows the error line" true
+        (String.length copied > 40)
+    )
+    [ true; false ]
+
+let test_context_after_captured_error () =
+  let parser () =
+    ignore (Parseff.capture (fun () -> Parseff.consume "a\nb\nc\nX"));
+    ignore (Parseff.consume "a\nb\n");
+    Parseff.context "ctx"
+      (fun () ->
+        ignore (Parseff.char 'c');
+        Parseff.fail ~from:0 ~upto:1 "ranged"
+      )
+      ()
+  in
+  check_render "context line after a captured error"
+    (lines
+       [
+         "1:1: [error] ranged";
+         "1 | a";
+         "  | ^";
+         "  * while parsing ctx, from 3:1";
+       ]
+    )
+    ( match Parseff.parse "a\nb\nc\nd" parser with
+    | Stdlib.Ok () ->
+        "ok"
+    | Stdlib.Error e ->
+        Parseff.render_error e
+    )
+
 let () =
   let open Alcotest in
   run "Errors"
     [
+      ( "late rendering",
+        [
+          test_case "marshal before the first render" `Quick
+            test_marshal_before_render;
+          test_case "context after a captured error" `Quick
+            test_context_after_captured_error;
+          test_case "after the input went out of scope" `Quick
+            test_render_after_input_dropped;
+          test_case "stream error after the buffer was reused" `Quick
+            test_stream_render_after_reuse;
+        ]
+      );
       ( "context restoration",
         [
           test_case "exception leaves context" `Quick
@@ -4199,8 +4513,14 @@ let () =
             test_cut_line_context_column;
           test_case "error start in dropped input" `Quick
             test_error_start_in_dropped_input;
+          test_case "excerpt contains the error" `Quick
+            test_excerpt_contains_error;
           test_case "location after dropped lines" `Quick
             test_location_after_dropped_lines;
+          test_case "unread bytes: column" `Quick test_unread_bytes_column;
+          test_case "unread bytes: found" `Quick test_unread_bytes_found;
+          test_case "unread bytes: dropped line start" `Quick
+            test_unread_bytes_cut_line;
           test_case "context column in code points" `Quick
             test_context_column_in_code_points;
           test_case "take reports what is left" `Quick

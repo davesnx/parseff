@@ -66,7 +66,7 @@ let () =
 ```
 Use this when a human-readable string is enough.
 
-`~from` makes the error cover the bytes from `from` to the current position instead of a single position, so the rendered error underlines the whole value. `~notes` attaches annotations: a note with a range is underlined in the source excerpt with its text, a note without one is printed as a `* note:` line.
+`~from` and `~upto` make the error cover the bytes from `from` to `upto` instead of a single position, so the rendered error underlines the whole value. Each defaults to the current position. `~notes` attaches annotations: a note with a range is underlined in the source excerpt with its text, a note without one is printed as a `* note:` line. `~help` tells the user how to correct the input; it is printed as a `* help:` line after the notes.
 
 ```ocaml
 let octet () =
@@ -181,7 +181,7 @@ Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it 
 
 ## `context` and `cut`
 
-`Parseff.context` names a construct, for example `"array"`. A failure inside it remembers the constructs that were open, outermost first. `Parseff.cut` says that the construct is decided: after `cut`, a failure inside the construct is not retried by an enclosing `or_`, `many` or `sep_by`. Use `cut` after the token that identifies the construct, such as `let` in a `let` statement. See [`combinators`](./combinators.md).
+`Parseff.context` names a construct, for example `"array"`. A failure inside it remembers the constructs that were open, outermost first. `~start` gives the position where the construct starts, when the opening token is already consumed. `Parseff.cut` says that the construct is decided: after `cut`, a failure inside the construct is not retried by an enclosing `or_`, `many` or `sep_by`. Use `cut` after the token that identifies the construct, such as `let` in a `let` statement. See [`combinators`](./combinators.md).
 
 To report every error of a parse instead of the first, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
 
@@ -213,6 +213,7 @@ type error = {
       (** line and column of [range.start], [None] when the line is not known; [col] counts bytes, the column [render_error] prints counts Unicode characters *)
   contexts : context list;  (** open constructs, outermost first *)
   notes : note list;
+  help : string option;  (** the text given with [~help] *)
   excerpt : excerpt;
 }
 ```
@@ -251,15 +252,16 @@ input.json:4:5: [error] expected ',' or '}', found '"'
 - The header is `name:line:col: [error] message`. Without `~name` it starts at `line:col`.
 - The message is `expected A, B, or C, found X`. A message lists at most 8 expected items, then `, or N more alternatives`. `found X` is a quoted identifier-like run (up to 32 bytes, `found 'abc'...` when it is cut) or one code point, with control bytes, non-breaking spaces and other invisible code points escaped as `\x1B` or `\u{00A0}`, or `end of input`. A `take` that finds too few bytes says `found only 3 (end of input)`, and a binary integer that differs says `expected int16be 0x0001, found 0x0002`.
 - When the line of the error is not known, which happens in streaming when the position is older than the buffered input, the header is `input.json: byte N: [error] message` and there is no excerpt. The `*` lines are then indented by two spaces.
-- Carets cover the range, one per code point. Tabs in the line are kept, so the caret lines up for any tab width. Control bytes, invalid UTF-8 bytes and C1 control characters in the line print as the escapes of the message, such as `\x1B`, and the carets cover the whole escape.
+- Carets cover the range and count terminal cells: a wide character such as `名` takes two, and a combining mark takes none. Tabs in the line are kept, so the caret lines up for any tab width. Control bytes, invalid UTF-8 bytes and C1 control characters in the line print as the escapes of the message, such as `\x1B`, and the carets cover the whole escape.
 - `* while parsing name, from line:col` lines come from `Parseff.context`, innermost first, at most five; when only one more is hidden it is printed too. A construct made with `~delimited:true` that started on an earlier line is shown as a bar that joins its opening token to the caret: `╭─╯` under the opener, `│` on the lines in between and `╰──^` at the failure. A single hidden line between the opener and the failure is shown, longer gaps become a `...` row in the gutter.
 - Notes print as `* note:` lines, or as a `-` underline on their line when they have a range.
 - A `Parseff.rec_` nested deeper than `~max_depth` and a streaming parse that exceeds `~backtrack_window` keep the `* while parsing` lines that were open, and end with `* help: raise ~max_depth` or `* help: call commit or cut earlier, or raise ~backtrack_window`.
+- An error made with `~help` ends with a `* help:` line that prints its text.
 - `~custom` is a printer `custom_error -> string` for `Custom` errors. Without it, the message is `custom error (no ~custom printer given)`.
 - The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the context line then says `from byte N`. `Parseff.error_message` returns only the one-line message.
 
-The columns of the header and of the `* while parsing` lines count Unicode characters (code points), like the carets, while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the character column is not known: the header is `input.json: byte N: [error] ...`, the excerpt of the error line is still printed and cut on the left with `...`, and the context line says `from byte N`.
+The columns of the header and of the `* while parsing` lines count Unicode characters (code points), while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the header still has the line and the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the column is `location.col`, which counts bytes. The excerpt shows the kept part of the line, cut on the left with `...`, with carets only under the kept part of the range and no caret row when the whole range is dropped. A context line for a context that starts in the dropped part of the line says `from byte N`.
 
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'

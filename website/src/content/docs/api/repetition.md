@@ -216,7 +216,7 @@ let subtraction () =
     ()
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ```
-With `~otherwise`, returns the fallback if zero elements match:
+With `~otherwise`, returns the fallback if zero elements match. Only a failure of the first element gives the fallback: a later failure after a `Parseff.commit` or `Parseff.cut` is the failure of the fold.
 
 ```ocaml
 let maybe_subtract () =
@@ -233,7 +233,7 @@ let maybe_subtract () =
 
 ### `fold_right`
 
-`Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Use `~otherwise` to provide a fallback value when no elements match. The loop stops after an operator and element that together consume no input, and that pair is not applied.
+`Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Use `~otherwise` to provide a fallback value when no elements match; as for `fold_left`, only a failure of the first element gives it. The loop stops after an operator and element that together consume no input, and that pair is not applied.
 
 ```ocaml
 val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
@@ -257,7 +257,24 @@ let power () =
 As in `fold_left`, the loop stops after an infix operator and its right operand that together consume no input, and that operator is not applied. This also applies to `infix_right`.
 
 ```ocaml
-val expression : operand:(unit -> 'a) -> 'a operator list list -> unit -> 'a
+val expression :
+  operand:(unit -> 'a) ->
+  ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
+  unit ->
+  'a
+```
+
+### `precedence`
+
+`Parseff.precedence` runs the loop of `expression` with a lookup function in place of a table. After each operand, the lookup returns the precedence and the operator, or `None`. It takes infix and postfix operators only; a prefix operator is a type error. Parse a prefix operator in `operand`.
+
+```ocaml
+val precedence :
+  ?min:int ->
+  operand:(unit -> 'a) ->
+  operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
+  unit ->
+  'a
 ```
 
 ## Complete example: JSON array

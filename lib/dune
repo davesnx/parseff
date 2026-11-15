@@ -1,6 +1,12 @@
 (library
  (name parseff)
  (public_name parseff)
+ (modules parseff)
  (libraries re uucp)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures -inline 50)))
+
+(mdx
+ (files parseff.mli)
+ (preludes mdx_prelude.ml)
+ (libraries parseff re uucp))
