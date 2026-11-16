@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 open Benchmark
 
 let head =

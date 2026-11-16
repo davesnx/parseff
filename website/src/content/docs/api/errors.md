@@ -40,7 +40,7 @@ let () =
 
 ## `fail`
 
-Abort parsing with a message. The message is returned as `Error { kind = Failed msg; ... }`.
+Fail with a message. The message is returned as `Error { kind = Failed msg; ... }`.
 
 ```ocaml
 val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
@@ -65,6 +65,24 @@ let () =
   | Error _ -> ()
 ```
 Use this when a human-readable string is enough.
+
+`fail` behaves like any other failure for backtracking, as `Parseff.error` does: `Parseff.or_` and the repetition combinators absorb it and try something else, and it is reported when it is the furthest failure. To make the failure final, call `Parseff.cut` before it:
+
+```ocaml
+let checked_byte () =
+  let n =
+    int_of_string
+      (Parseff.take_while ~at_least:1
+         (fun c -> c >= '0' && c <= '9')
+         ~label:"digit")
+  in
+  if n <= 255 then n
+  else begin
+    Parseff.cut ();
+    Parseff.fail "number must be between 0 and 255"
+  end
+```
+`cut` seals the choices around it, so no enclosing `Parseff.or_` or `Parseff.many` tries another option after the message. The reported error is still the furthest failure: a deeper failure recorded earlier in the construct, such as one of a branch that read further and failed, is reported instead of the message.
 
 `~from` and `~upto` make the error cover the bytes from `from` to `upto` instead of a single position, so the rendered error underlines the whole value. Each defaults to the current position. `~notes` attaches annotations: a note with a range is underlined in the source excerpt with its text, a note without one is printed as a `* note:` line. `~help` tells the user how to correct the input; it is printed as a `* help:` line after the notes.
 
@@ -188,7 +206,7 @@ To report every error of a parse instead of the first, see the [Error recovery](
 
 ## Which error a parse reports
 
-When a parse fails, Parseff reports the *furthest* failure: the failure of any primitive that happened at the highest input position, also inside branches that `or_`, `many`, `sep_by`, `optional` or `fold_left` abandoned. Everything that was expected at that position is merged into one message, sorted and without duplicates:
+When a parse fails, Parseff reports the *furthest* failure: the failure of any primitive, `fail` or `error` that happened at the highest input position, also inside branches that `or_`, `many`, `sep_by`, `optional` or `fold_left` abandoned. Everything that was expected at that position is merged into one message, sorted and without duplicates:
 
 ```ocaml
 (* "x" with one_of [consume "if"; consume "else"; consume "while"] *)
@@ -222,7 +240,7 @@ type error = {
 `kind` says what happened:
 
 - `Expected { items; found; more }`: a primitive failed. `items` is everything that was expected at the furthest failure position, sorted and without duplicates: `Char`, `Literal`, `Label` or `End_of_input`. `found` is `Text` with the text at that position, `End` at the end of the input, `Short n` when a read of a fixed number of bytes, such as `take`, found only `n` bytes before the end of the input, or `Value` with the integer read in the same width when `BE.int16` and its relatives do not match. Characters print as `'x'`, literals as `"abc"` and labels as written. `items` holds at most 64 items; `more` counts the alternatives past that, `0` otherwise.
-- `Failed msg`: a failure raised with `Parseff.fail`, or `"no alternative matched"` when `one_of []` is the only failure at the furthest position. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. Unlike `Expected`, `fail` is not caught by backtracking combinators (`Parseff.or_`, `Parseff.many`, etc.) or relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`).
+- `Failed msg`: a failure raised with `Parseff.fail`, or `"no alternative matched"` when `one_of []` is the only failure at the furthest position. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. A `fail` does not merge: at the same position it wins over `Expected`, and the first of two `fail` or `error` failures wins. Relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`) do not relabel it.
 - `Custom e`: a value given to `Parseff.error`.
 - `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
 - `Backtrack_window_exceeded { limit; oldest }`: a streaming parser needed more rewind history than `~backtrack_window` allows.

@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 exception Boom
 
 let generated ?(chunk = 7) next =

@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 type json =
   | Null
   | Bool of bool

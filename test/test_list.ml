@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 open Parseff
 
 type expr = Num of int | Add of expr * expr | Hole_expr
@@ -264,7 +266,10 @@ let test_braces () =
       [ (1, "expected integer, found ','"); (2, "expected integer, found '}'") ]
     );
   check "{1, 2" ("Ok 1,2", [ (5, "expected ',' or '}', found end of input") ]);
-  check "{1, " ("Error at 4: expected integer, found end of input", []);
+  check "{1, "
+    ( "Error at 4: expected integer, found end of input",
+      [ (2, "expected '}', found ','") ]
+    );
   check ~trailing:true "{1, 2,}" ("Ok 1,2", []);
   check ~trailing:true "{1, 2, }" ("Ok 1,2", []);
   check ~trailing:true "{}" ("Ok ", []);
@@ -827,10 +832,14 @@ let test_failed_step_leaves_nothing () =
   let d = Diagnostics.create () in
   let r = parse ~trace ~diagnostics:d "[1 (2" (paren_list d) in
   Alcotest.(check string)
-    "value" "Error at 5: expected ')', found end of input"
+    "value" "Error at 3: expected end of input, found '('"
     (show_result (fun _ -> "") r);
-  Alcotest.check errs "no entry" [] (entries d);
-  Alcotest.check errs "no event" [] !events;
+  Alcotest.check errs "the list ends before the element, as sep_by does"
+    [ (3, "expected ',' or ']', found '('") ]
+    (entries d);
+  Alcotest.check errs "one event"
+    [ (3, "expected ',' or ']', found '('") ]
+    !events;
   let d = Diagnostics.create () in
   let r =
     parse_source ~backtrack_window:3 ~diagnostics:d
@@ -892,8 +901,8 @@ let test_require_commit () =
     "Error at 1: expected 'b', found 'c'"
     (show_result Fun.id (parse "ac" (branch d)));
   Alcotest.(check string)
-    "commit in require: with the collector, it does not reach the or_"
-    "Ok right"
+    "commit in require: with the collector, it reaches the or_"
+    "Error at 1: expected 'b', found 'c'"
     (show_result Fun.id (parse ~diagnostics:d "ac" (branch d)))
 
 let test_require_undoes_parser () =
@@ -917,7 +926,7 @@ let test_require_undoes_parser () =
       ()
   in
   Alcotest.(check string)
-    "a cut in require does not reach the or_" "Ok R"
+    "a cut in require reaches the or_" "Error at 0: expected 'z', found 'y'"
     (show_result Fun.id (parse ~diagnostics:d "y" cut_in_require));
   let r = Ref.create 0 in
   let d = Diagnostics.create () in
@@ -1171,13 +1180,49 @@ let test_first_element_fail () =
     (show_result Fun.id r, entries d)
   in
   Alcotest.(check (pair string errs))
-    "with the collector: an empty list and the error"
-    ("Ok ", [ (1, "not a digit") ])
-    (run true);
+    "with the collector: an empty list and no entry" ("Ok ", []) (run true);
   Alcotest.(check (pair string errs))
-    "without the collector: as sep_by"
-    ("Error at 1: not a digit", [])
-    (run false)
+    "without the collector: as sep_by" ("Ok ", []) (run false)
+
+let test_fail_at_close_ends_list () =
+  let element () =
+    let c = any_char () in
+    if is_digit c then
+      c
+    else
+      fail "not a digit"
+  in
+  let parser ?sep ?trailing d () =
+    let l =
+      list ?sep ?trailing d
+        ~close:(fun () -> peek_char () = Some ')')
+        ~sync:ignore element
+        (fun _ -> '!')
+        ()
+    in
+    ignore (char ')');
+    String.of_seq (List.to_seq l)
+  in
+  let run ?sep ?trailing input =
+    let unused = Diagnostics.create () in
+    let plain =
+      show_result Fun.id (parse input (parser ?sep ?trailing unused))
+    in
+    let d = Diagnostics.create () in
+    let collected =
+      show_result Fun.id (parse ~diagnostics:d input (parser ?sep ?trailing d))
+    in
+    (plain, collected, entries d)
+  in
+  let check name input ?sep ?trailing expected =
+    Alcotest.(check (triple string string errs))
+      name (expected, expected, []) (run ?sep ?trailing input)
+  in
+  check "no separator" "12)" "Ok 12";
+  check "no separator, empty" ")" "Ok ";
+  check "after a trailing separator" "1,2,)"
+    ~sep:(fun () -> ignore (char ','))
+    ~trailing:true "Ok 12"
 
 let test_no_collector_is_plain () =
   let rs = Random.State.make [| 2026; 11; 17 |] in
@@ -1555,8 +1600,7 @@ let test_iter_at_end () =
       in
       String.concat "," l ^ "|" ^ rest ()
     )
-    ~collector:
-      "f got 0; Error at 3: expected 'z', found end of input; entries []"
+    ~collector:"f got 0; Ok e|,; entries []"
     ~plain:"f got 0; Ok e|,; entries []"
 
 let test_iter_close () =
@@ -1636,12 +1680,7 @@ let test_commit_at_end () =
         "Ok ALT",
         "Ok NONE"
       );
-      ( "then fail",
-        (fun () -> fail "u"),
-        false,
-        "Error at 2: u",
-        "Error at 2: u"
-      );
+      ("then fail", (fun () -> fail "u"), false, "Ok ALT", "Ok NONE");
     ]
   in
   List.iter
@@ -1822,9 +1861,9 @@ let test_commit_in_first_at_closer () =
       ignore (char 'a');
       fail "u"
     )
-    ~collector:"f got 0; Ok |ab; entries [1:u]"
-    ~plain:"f got 0; Error at 1: u; entries []";
-  pin "known difference: cut inside a context, then fail"
+    ~collector:"f got 0; Ok |ab; entries []"
+    ~plain:"f got 0; Ok |ab; entries []";
+  pin "cut inside a context, then fail"
     (fun () ->
       context "c" (fun () ->
           ignore (char 'a');
@@ -1832,7 +1871,7 @@ let test_commit_in_first_at_closer () =
           fail "u"
       )
     )
-    ~collector:"f got 0; Ok |ab; entries [1:u]"
+    ~collector:"f got 0; Error at 1: u; entries []"
     ~plain:"f got 0; Error at 1: u; entries []"
 
 let () =
@@ -1870,6 +1909,8 @@ let () =
           test_case "trace: events and entries agree" `Quick test_trace_order;
           test_case "first element fails with fail" `Quick
             test_first_element_fail;
+          test_case "fail at the closer ends the list" `Quick
+            test_fail_at_close_ends_list;
           test_case "without the collector: the plain parser" `Quick
             test_no_collector_is_plain;
           test_case "iter: first element at the closer" `Quick

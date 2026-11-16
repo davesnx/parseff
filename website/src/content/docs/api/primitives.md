@@ -63,7 +63,7 @@ let pair () =
 
 ### `satisfy`
 
-`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages. Without it, the error says `expected at least 1 character`, as for `take_while ~at_least:1`.
+`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages. Without it, the error says `expected matching character`.
 
 ```ocaml
 val satisfy : ?label:string -> (char -> bool) -> char
@@ -166,7 +166,7 @@ let csv_value () =
 
 ### `match_regex`
 
-`Parseff.match_regex` matches a regular expression at the current position. Build the regex with `Parseff.regex`, which compiles an `Re.t` anchored at the position where the match starts, so a failed match examines only the bytes that the regex needs to fail, not the rest of the input. In streaming mode, `match_regex` still reads ahead up to half the backtrack window.
+`Parseff.match_regex` matches a regular expression at the current position. Build the regex with `Parseff.regex`, which compiles an `Re.t` anchored at the position where the match starts, so a failed match examines only the bytes that the regex needs to fail, not the rest of the input. In streaming mode, `match_regex` reads only when the buffered bytes cannot decide the match, and gives the same result as on a string.
 
 ```ocaml
 val regex : Re.t -> Parseff.regex
@@ -206,7 +206,7 @@ let number () =
 
 ### `fail`
 
-`Parseff.fail` aborts parsing with an error message.
+`Parseff.fail` fails with an error message. Like any other failure, it lets `Parseff.or_` and the repetition combinators try something else. Call `Parseff.cut` before it to make the failure final.
 
 ```ocaml
 val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a

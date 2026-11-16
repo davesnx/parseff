@@ -801,6 +801,23 @@ let test_satisfy_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
+let test_satisfy_default_label () =
+  let message input =
+    match
+      Parseff.parse input (fun () ->
+          Parseff.satisfy (fun c -> c >= '0' && c <= '9')
+      )
+    with
+    | Ok _ ->
+        Alcotest.fail "Expected failure"
+    | Error e ->
+        Parseff.error_message e
+  in
+  Alcotest.(check string)
+    "wrong character" "expected matching character, found 'x'" (message "x");
+  Alcotest.(check string)
+    "end of input" "expected matching character, found end of input" (message "")
+
 let test_satisfy_eof () =
   match
     Parseff.parse "" (fun () ->
@@ -865,13 +882,44 @@ let test_one_of_success () =
 let raises_invalid_argument f =
   match f () with _ -> false | exception Invalid_argument _ -> true
 
-let test_warn_into_other_collector_is_a_noop () =
+let test_warn_into_other_collector_raises () =
   let given = Parseff.Diagnostics.create () in
   let other = Parseff.Diagnostics.create () in
+  let raises label run =
+    match run () with
+    | exception Invalid_argument _ ->
+        ()
+    | _ ->
+        Alcotest.failf "%s: expected Invalid_argument" label
+  in
+  raises "other collector" (fun () ->
+      Parseff.parse ~diagnostics:given "" (fun () ->
+          Parseff.warn given "z";
+          Parseff.warn other "x"
+      )
+  );
+  raises "other collector with ~pos" (fun () ->
+      Parseff.parse ~diagnostics:given "" (fun () ->
+          Parseff.warn ~pos:3 other "y"
+      )
+  );
+  Alcotest.(check int) "other is empty" 0 (Parseff.Diagnostics.length other);
+  ( match
+      Parseff.parse "" (fun () ->
+          Parseff.warn other "x";
+          2
+      )
+    with
+  | Ok n ->
+      Alcotest.(check int) "no collector given: value" 2 n
+  | Error _ ->
+      Alcotest.fail "Expected success"
+  );
+  Alcotest.(check int)
+    "no collector given: nothing recorded" 0
+    (Parseff.Diagnostics.length other);
   ( match
       Parseff.parse ~diagnostics:given "" (fun () ->
-          Parseff.warn other "x";
-          Parseff.warn ~pos:3 other "y";
           Parseff.warn given "z";
           1
       )
@@ -881,22 +929,7 @@ let test_warn_into_other_collector_is_a_noop () =
   | Error _ ->
       Alcotest.fail "Expected success"
   );
-  Alcotest.(check int) "other is empty" 0 (Parseff.Diagnostics.length other);
-  Alcotest.(check int) "given has one" 1 (Parseff.Diagnostics.length given);
-  ( match
-      Parseff.parse "" (fun () ->
-          Parseff.warn other "x";
-          2
-      )
-    with
-  | Ok n ->
-      Alcotest.(check int) "plain parse value" 2 n
-  | Error _ ->
-      Alcotest.fail "Expected success"
-  );
-  Alcotest.(check int)
-    "still empty after a plain parse" 0
-    (Parseff.Diagnostics.length other)
+  Alcotest.(check int) "given has one" 1 (Parseff.Diagnostics.length given)
 
 let test_collector_is_reset_by_each_parse () =
   let diagnostics = Parseff.Diagnostics.create () in
@@ -1819,18 +1852,17 @@ let test_span_get () =
     )
     [ -1; 3; 4; max_int; min_int ]
 
-let check_location msg expected actual =
-  Alcotest.(check int)
-    (msg ^ " offset") expected.Parseff.offset actual.Parseff.offset;
-  Alcotest.(check int) (msg ^ " line") expected.Parseff.line actual.Parseff.line;
-  Alcotest.(check int) (msg ^ " col") expected.Parseff.col actual.Parseff.col
+let check_location msg (offset, line, col) (actual : Parseff.location) =
+  Alcotest.(check int) (msg ^ " offset") offset actual.offset;
+  Alcotest.(check int) (msg ^ " line") line actual.line;
+  Alcotest.(check int) (msg ^ " col") col actual.col
 
 let test_location_at_start () =
   match
     Parseff.parse ~consume:`Partial "hello" (fun () -> Parseff.location ())
   with
   | Ok loc ->
-      check_location "start" { offset = 0; line = 1; col = 1 } loc
+      check_location "start" (0, 1, 1) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1841,7 +1873,7 @@ let test_location_after_consume () =
   in
   match Parseff.parse ~consume:`Partial "hello world" parser with
   | Ok loc ->
-      check_location "after consume" { offset = 5; line = 1; col = 6 } loc
+      check_location "after consume" (5, 1, 6) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1853,7 +1885,7 @@ let test_location_multiline () =
   in
   match Parseff.parse ~consume:`Partial input parser with
   | Ok loc ->
-      check_location "multiline" { offset = 9; line = 3; col = 2 } loc
+      check_location "multiline" (9, 3, 2) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1865,7 +1897,7 @@ let test_location_column_resets () =
   in
   match Parseff.parse ~consume:`Partial input parser with
   | Ok loc ->
-      check_location "col reset" { offset = 5; line = 2; col = 2 } loc
+      check_location "col reset" (5, 2, 2) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1880,8 +1912,8 @@ let test_location_multiple_calls () =
   in
   match Parseff.parse ~consume:`Partial input parser with
   | Ok (loc1, loc2) ->
-      check_location "first" { offset = 2; line = 1; col = 3 } loc1;
-      check_location "second" { offset = 7; line = 3; col = 2 } loc2
+      check_location "first" (2, 1, 3) loc1;
+      check_location "second" (7, 3, 2) loc2
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1896,8 +1928,8 @@ let test_location_at_newline () =
   in
   match Parseff.parse ~consume:`Partial input parser with
   | Ok (loc1, loc2) ->
-      check_location "before newline" { offset = 2; line = 1; col = 3 } loc1;
-      check_location "after newline" { offset = 3; line = 2; col = 1 } loc2
+      check_location "before newline" (2, 1, 3) loc1;
+      check_location "after newline" (3, 2, 1) loc2
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1918,38 +1950,38 @@ let test_location_backtracking () =
   in
   match Parseff.parse ~consume:`Partial input parser with
   | Ok loc ->
-      check_location "after backtrack" { offset = 5; line = 2; col = 2 } loc
+      check_location "after backtrack" (5, 2, 2) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_location_empty_input () =
   match Parseff.parse "" (fun () -> Parseff.location ()) with
   | Ok loc ->
-      check_location "empty" { offset = 0; line = 1; col = 1 } loc
+      check_location "empty" (0, 1, 1) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
 let test_location_of_position_basic () =
   let input = "aaa\nbbb\nccc" in
   let loc = Parseff.location_of_position input 0 in
-  check_location "start" { offset = 0; line = 1; col = 1 } loc;
+  check_location "start" (0, 1, 1) loc;
   let loc = Parseff.location_of_position input 3 in
-  check_location "end of line 1" { offset = 3; line = 1; col = 4 } loc;
+  check_location "end of line 1" (3, 1, 4) loc;
   let loc = Parseff.location_of_position input 4 in
-  check_location "start of line 2" { offset = 4; line = 2; col = 1 } loc;
+  check_location "start of line 2" (4, 2, 1) loc;
   let loc = Parseff.location_of_position input 8 in
-  check_location "start of line 3" { offset = 8; line = 3; col = 1 } loc;
+  check_location "start of line 3" (8, 3, 1) loc;
   let loc = Parseff.location_of_position input 10 in
-  check_location "end of input" { offset = 10; line = 3; col = 3 } loc
+  check_location "end of input" (10, 3, 3) loc
 
 let test_location_of_position_empty () =
   let loc = Parseff.location_of_position "" 0 in
-  check_location "empty" { offset = 0; line = 1; col = 1 } loc
+  check_location "empty" (0, 1, 1) loc
 
 let test_location_of_position_single_line () =
   let input = "hello" in
   let loc = Parseff.location_of_position input 3 in
-  check_location "mid" { offset = 3; line = 1; col = 4 } loc
+  check_location "mid" (3, 1, 4) loc
 
 let test_location_with_position () =
   let input = "aa\nbb" in
@@ -1962,7 +1994,7 @@ let test_location_with_position () =
   match Parseff.parse ~consume:`Partial input parser with
   | Ok (pos, loc) ->
       Alcotest.(check int) "position matches" pos loc.offset;
-      check_location "loc" { offset = 4; line = 2; col = 2 } loc
+      check_location "loc" (4, 2, 2) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1978,6 +2010,7 @@ let () =
           test_case "char failure" `Quick test_char_failure;
           test_case "satisfy" `Quick test_satisfy;
           test_case "satisfy failure" `Quick test_satisfy_failure;
+          test_case "satisfy default label" `Quick test_satisfy_default_label;
           test_case "satisfy eof" `Quick test_satisfy_eof;
           test_case "digit" `Quick test_digit;
           test_case "letter success" `Quick test_letter_success;
@@ -2167,8 +2200,8 @@ let () =
           test_case "preserves end_of_input semantics" `Quick
             test_parse_consume_all_preserves_end_of_input_semantics;
           test_case "warn ~pos nonzero" `Quick test_warn_pos_nonzero;
-          test_case "warn into another collector is a no-op" `Quick
-            test_warn_into_other_collector_is_a_noop;
+          test_case "warn into another collector raises" `Quick
+            test_warn_into_other_collector_raises;
           test_case "collector reset by each parse" `Quick
             test_collector_is_reset_by_each_parse;
           test_case "collector in use by a nested parse" `Quick

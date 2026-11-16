@@ -400,20 +400,225 @@ let test_commit_forgets_earlier_alternative () =
   both_runners show_unit "ax" parser
     {|Error@1 Expected "expected \"z\", found 'x'"|}
 
-let test_fail_escapes_or_many_expect () =
+let show_ints l = String.concat "," (List.map string_of_int l)
+
+let show_int_option = function
+  | None ->
+      "None"
+  | Some n ->
+      "Some " ^ string_of_int n
+
+let test_fail_absorbed_by_or () =
+  both_runners string_of_int "x"
+    (fun () -> Parseff.or_ (fun () -> Parseff.fail "x") (fun () -> 1) ())
+    "Ok 1"
+
+let test_fail_stops_many () =
+  let small_digit () =
+    let d = Char.code (Parseff.digit ()) - Char.code '0' in
+    if d > 5 then
+      Parseff.fail "too big"
+    else
+      d
+  in
+  both_runners show_ints "129" (Parseff.many small_digit) "Ok 1,2"
+
+let test_fail_in_optional_is_none () =
+  both_runners show_int_option "x"
+    (Parseff.optional (fun () -> Parseff.fail "x"))
+    "Ok None"
+
+let test_fail_absorbed_by_one_of_labeled () =
+  both_runners
+    (fun s -> s)
+    "x"
+    (Parseff.one_of_labeled
+       [
+         ("a", fun () -> Parseff.fail "boom");
+         ("b", fun () -> Parseff.consume "x");
+       ]
+    )
+    "Ok x"
+
+let test_fail_reported_when_furthest () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.consume "ab");
+        Parseff.fail "deep"
+      )
+      (fun () -> Parseff.consume "q")
+      ()
+  in
+  both_runners (fun s -> s) "abc" parser {|Error@2 Failed "deep"|};
+  let parser () =
+    Parseff.or_
+      (fun () -> Parseff.fail "shallow")
+      (fun () ->
+        ignore (Parseff.consume "ab");
+        Parseff.fail "deep"
+      )
+      ()
+  in
+  both_runners (fun s -> s) "abc" parser {|Error@2 Failed "deep"|}
+
+let test_fail_behind_furthest_ignored () =
+  let parser () =
+    Parseff.or_
+      (fun () ->
+        ignore (Parseff.consume "abc");
+        "left"
+      )
+      (fun () -> Parseff.fail "shallow")
+      ()
+  in
+  both_runners
+    (fun s -> s)
+    "abq" parser {|Error@2 Expected "expected \"c\", found 'q'"|}
+
+let test_fail_ties () =
   let boom () = Parseff.fail "boom" in
-  both_runners show_unit "x"
-    (fun () -> Parseff.or_ boom (fun () -> ()) ())
+  both_runners show_unit "z"
+    (fun () -> Parseff.or_ boom (fun () -> ignore (Parseff.consume "q")) ())
     {|Error@0 Failed "boom"|};
-  both_runners show_unit "x"
-    (fun () -> ignore (Parseff.many boom ()))
+  both_runners show_unit "z"
+    (fun () -> Parseff.or_ (fun () -> ignore (Parseff.consume "q")) boom ())
     {|Error@0 Failed "boom"|};
+  both_runners show_unit "z"
+    (fun () -> Parseff.or_ boom (fun () -> Parseff.fail "second") ())
+    {|Error@0 Failed "boom"|};
+  both_runners show_unit "z"
+    (fun () -> Parseff.or_ boom (fun () -> Parseff.error Cause_e) ())
+    {|Error@0 Failed "boom"|};
+  both_runners show_unit "z"
+    (fun () -> Parseff.or_ (fun () -> Parseff.error Cause_e) boom ())
+    "Error@0 E"
+
+let test_expect_keeps_failure () =
+  let boom () = Parseff.fail "boom" in
   both_runners show_unit "x"
     (fun () -> Parseff.expect "thing" boom)
     {|Error@0 Failed "boom"|};
   both_runners show_unit "x"
+    (fun () ->
+      Parseff.expect "thing" (fun () ->
+          Parseff.or_ boom (fun () -> ignore (Parseff.consume "q")) ()
+      )
+    )
+    {|Error@0 Failed "boom"|};
+  both_runners show_unit "x"
     (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ] ()))
     {|Error@0 Failed "boom"|}
+
+let test_cut_fail_is_final () =
+  let final () =
+    ignore (Parseff.consume "a");
+    Parseff.cut ();
+    Parseff.fail "bad"
+  in
+  both_runners string_of_int "ab"
+    (fun () -> Parseff.or_ final (fun () -> 1) ())
+    {|Error@1 Failed "bad"|};
+  both_runners show_ints "aab" (Parseff.many final) {|Error@1 Failed "bad"|};
+  both_runners show_int_option "ab" (Parseff.optional final)
+    {|Error@1 Failed "bad"|};
+  let in_context () =
+    Parseff.context "item" (fun () ->
+        ignore (Parseff.consume "a");
+        Parseff.cut ();
+        Parseff.fail "bad"
+    )
+  in
+  both_runners string_of_int "ab"
+    (fun () -> Parseff.or_ in_context (fun () -> 1) ())
+    {|Error@1 Failed "bad"|};
+  both_runners show_ints "ab" (Parseff.many in_context) {|Error@1 Failed "bad"|};
+  both_runners show_int_option "ab"
+    (Parseff.optional in_context)
+    {|Error@1 Failed "bad"|}
+
+let test_cut_fail_keeps_contexts () =
+  match
+    Parseff.parse "[ab" (fun () ->
+        Parseff.or_
+          (fun () ->
+            Parseff.context ~delimited:true "list" (fun () ->
+                ignore (Parseff.consume "[");
+                Parseff.context "item" (fun () ->
+                    ignore (Parseff.consume "a");
+                    Parseff.cut ();
+                    Parseff.fail ~help:"use a digit" "bad item"
+                )
+            )
+          )
+          (fun () -> ())
+          ()
+    )
+  with
+  | Stdlib.Error { kind = Failed "bad item"; range; contexts; help; _ } ->
+      Alcotest.(check (pair int int)) "range" (2, 2) (range.start, range.stop);
+      Alcotest.(check (list string))
+        "contexts" [ "list"; "item" ]
+        (List.map (fun (c : Parseff.context) -> c.name) contexts);
+      Alcotest.(check (option string)) "help" (Some "use a digit") help
+  | _ ->
+      Alcotest.fail "expected the failure of the cut context"
+
+let test_cut_keeps_the_furthest_failure () =
+  let deeper_then_cut final () =
+    ignore (Parseff.optional (fun () -> Parseff.consume "abX") ());
+    ignore (Parseff.consume "a");
+    Parseff.cut ();
+    final ()
+  in
+  both_runners string_of_int "abc"
+    (fun () ->
+      Parseff.or_
+        (deeper_then_cut (fun () -> Parseff.fail "bad"))
+        (fun () -> 1)
+        ()
+    )
+    {|Error@2 Expected "expected \"X\", found 'c'"|};
+  both_runners string_of_int "abc"
+    (fun () ->
+      Parseff.or_
+        (deeper_then_cut (fun () -> Parseff.error Cause_e))
+        (fun () -> 1)
+        ()
+    )
+    {|Error@2 Expected "expected \"X\", found 'c'"|};
+  both_runners show_unit "abc"
+    (deeper_then_cut (fun () -> ignore (Parseff.consume "z")))
+    {|Error@2 Expected "expected \"X\", found 'c'"|}
+
+let test_cut_keeps_failures_at_position () =
+  both_runners show_unit "az"
+    (fun () ->
+      ignore (Parseff.consume "a");
+      ignore (Parseff.optional (fun () -> Parseff.char 'x') ());
+      Parseff.cut ();
+      ignore (Parseff.char 'y')
+    )
+    {|Error@1 Expected "expected 'x' or 'y', found 'z'"|};
+  both_runners show_unit "az"
+    (fun () ->
+      ignore (Parseff.consume "a");
+      ignore (Parseff.optional (fun () -> Parseff.char 'x') ());
+      Parseff.cut ();
+      Parseff.fail "bad"
+    )
+    {|Error@1 Failed "bad"|};
+  both_runners show_unit "x"
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.fail "first")
+        (fun () ->
+          Parseff.cut ();
+          Parseff.fail "second"
+        )
+        ()
+    )
+    {|Error@0 Failed "first"|}
 
 let test_custom_error_absorbed_by_or () =
   both_runners
@@ -2098,10 +2303,10 @@ let test_custom_errors_by_pattern () =
           Parseff.or_ number_checked (fun () -> Parseff.fail "second") ()
       )
     with
-  | Stdlib.Error { kind = Parseff.Failed "second"; _ } ->
+  | Stdlib.Error { kind = Parseff.Custom (Too_large 300); _ } ->
       ()
   | _ ->
-      Alcotest.fail "fail in the second branch must win"
+      Alcotest.fail "the furthest custom error wins over an earlier fail"
   );
   ( match
       Parseff.parse "300" (fun () ->
@@ -4338,8 +4543,25 @@ let () =
             test_one_of_labeled_relabels_at_start_only;
           test_case "commit forgets earlier alternative" `Quick
             test_commit_forgets_earlier_alternative;
-          test_case "fail escapes or_, many, expect" `Quick
-            test_fail_escapes_or_many_expect;
+          test_case "fail absorbed by or_" `Quick test_fail_absorbed_by_or;
+          test_case "fail stops many" `Quick test_fail_stops_many;
+          test_case "fail in optional is None" `Quick
+            test_fail_in_optional_is_none;
+          test_case "fail absorbed by one_of_labeled" `Quick
+            test_fail_absorbed_by_one_of_labeled;
+          test_case "fail reported when furthest" `Quick
+            test_fail_reported_when_furthest;
+          test_case "fail behind furthest ignored" `Quick
+            test_fail_behind_furthest_ignored;
+          test_case "fail ties" `Quick test_fail_ties;
+          test_case "expect keeps failure" `Quick test_expect_keeps_failure;
+          test_case "cut then fail is final" `Quick test_cut_fail_is_final;
+          test_case "cut then fail keeps contexts" `Quick
+            test_cut_fail_keeps_contexts;
+          test_case "cut keeps the furthest failure" `Quick
+            test_cut_keeps_the_furthest_failure;
+          test_case "cut keeps failures at position" `Quick
+            test_cut_keeps_failures_at_position;
           test_case "custom error absorbed by or_" `Quick
             test_custom_error_absorbed_by_or;
           test_case "custom error reported when furthest" `Quick

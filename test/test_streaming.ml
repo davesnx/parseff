@@ -700,11 +700,10 @@ let test_parse_source_consume_all_preserves_end_of_input_semantics () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-let check_location msg expected actual =
-  Alcotest.(check int)
-    (msg ^ " offset") expected.Parseff.offset actual.Parseff.offset;
-  Alcotest.(check int) (msg ^ " line") expected.Parseff.line actual.Parseff.line;
-  Alcotest.(check int) (msg ^ " col") expected.Parseff.col actual.Parseff.col
+let check_location msg (offset, line, col) (actual : Parseff.location) =
+  Alcotest.(check int) (msg ^ " offset") offset actual.offset;
+  Alcotest.(check int) (msg ^ " line") line actual.line;
+  Alcotest.(check int) (msg ^ " col") col actual.col
 
 let test_streaming_location_basic () =
   let input = "aaa\nbbb\nccc" in
@@ -715,7 +714,7 @@ let test_streaming_location_basic () =
   in
   match Parseff.parse_source ~consume:`Partial src parser with
   | Ok loc ->
-      check_location "streamed" { offset = 9; line = 3; col = 2 } loc
+      check_location "streamed" (9, 3, 2) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -729,7 +728,7 @@ let test_streaming_location_across_chunks () =
   in
   match Parseff.parse_source ~consume:`Partial src parser with
   | Ok loc ->
-      check_location "across chunks" { offset = 7; line = 3; col = 2 } loc
+      check_location "across chunks" (7, 3, 2) loc
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -745,8 +744,8 @@ let test_streaming_location_multiple_calls () =
   in
   match Parseff.parse_source ~consume:`Partial src parser with
   | Ok (loc1, loc2) ->
-      check_location "first" { offset = 2; line = 1; col = 3 } loc1;
-      check_location "second" { offset = 7; line = 3; col = 2 } loc2
+      check_location "first" (2, 1, 3) loc1;
+      check_location "second" (7, 3, 2) loc2
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1433,15 +1432,12 @@ let test_regex_optional_tail () =
 
 let test_regex_empty_match () =
   List.iter
-    (fun input ->
+    (fun (input, stream) ->
       check_window_or_parse "[0-9]*" input (fun () ->
           [ Parseff.match_regex regex_digits ]
       );
       Alcotest.(check (result (list string) (pair int string)))
-        ("large window " ^ input)
-        (norm
-           (Parseff.parse input (fun () -> [ Parseff.match_regex regex_digits ]))
-        )
+        ("1-byte reads " ^ input) stream
         (norm
            (Parseff.parse_source (chunked_source ~chunk_size:1 input) (fun () ->
                 [ Parseff.match_regex regex_digits ]
@@ -1449,7 +1445,11 @@ let test_regex_empty_match () =
            )
         )
     )
-    [ ""; "123"; "abc" ]
+    [
+      ("", Ok [ "" ]);
+      ("123", Ok [ "123" ]);
+      ("abc", Error (0, "Expected expected end of input, found 'a'"));
+    ]
 
 let test_regex_in_or_and_many () =
   let or_parser () =
