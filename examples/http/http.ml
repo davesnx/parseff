@@ -153,13 +153,13 @@ let folded_fields () =
         | Some '\r', _ ->
             crlf ();
             List.rev acc
+        | _ when n = max_headers ->
+            Parseff.error (Parseff.Limit_exceeded { limit = max_headers })
         | Some (' ' | '\t'), (name, value) :: rest ->
             Parseff.skip_while is_ows;
             let more = Parseff.take_while ~at_most:max_value is_field_char in
             crlf ();
-            loop n ((name, trim_ows (value ^ " " ^ more)) :: rest)
-        | _ when n = max_headers ->
-            Parseff.error (Parseff.Limit_exceeded { limit = max_headers })
+            loop (n + 1) ((name, trim_ows (value ^ " " ^ more)) :: rest)
         | _ ->
             loop (n + 1) (field () :: acc)
       in

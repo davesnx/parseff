@@ -234,6 +234,11 @@ request with an obs-fold is an error:
   $ printf 'GET / HTTP/1.1\r\nX-Long: a\r\n  b\r\n\r\n' | ./main.exe requests
   error 400 Bad Request at byte 27: expected field name or "\r\n", found ' '
 
+Each obs-fold line counts towards the limit of 100 header lines:
+
+  $ (printf 'HTTP/1.1 200 OK\r\nX-Long: a\r\n'; for i in $(seq 100); do printf ' b\r\n'; done; printf '\r\n') | ./main.exe response
+  error 431 Request Header Fields Too Large at byte 424: limit of 100 exceeded
+
 Leading zeros of a chunk size do not count towards its 15 digits:
 
   $ printf '000000000000000000005\r\nhello\r\n00\r\n\r\n' | ./main.exe chunked
