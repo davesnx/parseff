@@ -2286,10 +2286,10 @@ val within : int -> (unit -> 'a) -> 'a
     start is not, so on string input it is made at most twice per frame. Before
     the frame end is buffered, it reads as with no frame, up to the frame end,
     so a regex inside a frame behaves as on a stream with no frame, with the
-    limits that {!match_regex} states: with a window of a few bytes it can fail
-    with [Backtrack_window_exceeded] where a regex in a frame returned a value
-    before. On string input, {!take_span}, {!take_while_span} and
-    {!recognize_span} return copies, as they do with {!parse_source}.
+    limits that {!match_regex} states: a match that does not fit in the window
+    fails with [Backtrack_window_exceeded]. On string input, {!take_span},
+    {!take_while_span} and {!recognize_span} return copies, as they do with
+    {!parse_source}.
 
     Inside the frame the input ends at the frame end, so {!skip_to} raises
     [Invalid_argument] for a target past it, also for a position that
