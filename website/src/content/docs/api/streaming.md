@@ -34,6 +34,8 @@ val parse_source :
 ```
 Error positions are absolute offsets from the start of the stream, also after Parseff dropped old input to keep the buffer bounded. An error does not keep the dropped input alive: failures that are older than the buffered input still count for the position of the error, but the buffer does not grow for them.
 
+A stream error shows the bytes read so far. The position and the expected items are the same as `Parseff.parse` gives on the whole input, but the `found` text can be shorter: Parseff does not read more input only to show it. `Parseff.consume` compares the buffered bytes first and fails at the first byte that differs, so a peer that stops sending after a wrong byte gets an error at once, not a parser that waits for the rest of the literal.
+
 The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
 
 
@@ -202,6 +204,58 @@ val of_seq : string Seq.t -> Source.t
 
   let source = Parseff.Source.of_seq (chunk_seq ~chunk_size:2 "hello world")
 ```
+
+### `Source.of_bigstring_chunks`
+
+`Parseff.Source.of_bigstring_chunks` creates a source from a function that returns slices of bigstrings. A bigstring is the stdlib type `(char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t`, the same type as `Bigstringaf.t` and the buffer of a `Cstruct.t`. Return `Some (buf, off, len)` for `len` bytes of `buf` from `off`, or `None` to signal EOF. Slices with `len = 0` are skipped.
+
+```ocaml
+val of_bigstring_chunks :
+  (unit -> (Source.bigstring * int * int) option) -> Source.t
+```
+Use it when the I/O layer reads into a bigstring, as Eio flows and most network libraries do. Parseff parses bytes, so it copies each slice into its input, at most 2040 bytes at a time, as the parser needs them. The copy takes about 2 instructions per byte; parsing an HTTP request head takes about 40\. The bytes of a slice must not change until the function is called again, so the function can read the next chunk into the same buffer:
+
+```ocaml
+  (* Eio flow read into one Cstruct buffer *)
+  let buf = Cstruct.create 4096 in
+  let source = Parseff.Source.of_bigstring_chunks (fun () ->
+      match Eio.Flow.single_read flow buf with
+      | n -> Some (buf.buffer, buf.off, n)
+      | exception End_of_file -> None) in
+  Parseff.parse_source source my_parser
+```
+To parse a bigstring that you already hold, give it as one slice:
+
+```ocaml
+let parse_bigstring buf parser =
+  let sent = ref false in
+  let source =
+    Parseff.Source.of_bigstring_chunks (fun () ->
+        if !sent then None
+        else begin
+          sent := true;
+          Some (buf, 0, Bigarray.Array1.dim buf)
+        end)
+  in
+  Parseff.parse_source source parser
+
+let () =
+  let text = "key=value" in
+  let buf =
+    Bigarray.Array1.init Bigarray.char Bigarray.c_layout (String.length text)
+      (String.get text)
+  in
+  let pair () =
+    let key = Parseff.take_while (fun c -> c <> '=') in
+    let _ = Parseff.char '=' in
+    (key, Parseff.take_while (fun _ -> true))
+  in
+  match parse_bigstring buf pair with
+  | Ok pair -> assert (pair = ("key", "value"))
+  | Error e -> failwith (Parseff.render_error e)
+```
+With `Bigstringaf`, `Parseff.parse (Bigstringaf.substring buf ~off ~len) p` does the same with one copy.
+
 
 ### `Source.of_function`
 

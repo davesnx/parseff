@@ -2,7 +2,9 @@ let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
 
 let digits () = Parseff.many ~at_least:1 digit_val ()
 let accumulate_digits () =
-  List.fold_left (fun acc d -> (acc * 10) + d) 0 (digits ())
+  List.fold_left
+    (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
+    0 (digits ())
 
 let number_0_255_simple () =
   let n = accumulate_digits () in
@@ -87,7 +89,7 @@ and factor () =
     )
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
-      Num d
+      Num (Char.code d - Char.code '0')
     )
     ()
 
@@ -111,7 +113,7 @@ let keyword () =
 let literal () =
   Parseff.one_of_labeled
     [
-      ("number", fun () -> Num (Parseff.digit ()));
+      ("number", fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'));
       ( "boolean",
         fun () ->
           Parseff.or_

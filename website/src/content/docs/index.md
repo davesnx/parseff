@@ -82,7 +82,8 @@ type Parseff.custom_error += Out_of_range of int
 
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.error (Out_of_range n)
 
@@ -110,12 +111,12 @@ let () =
 
 | Section | Combinators |
 |---------|------------|
-| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
+| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `regex`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
 | [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `commit`, `cut`, `rec_`, `peek_with`, `skip_to`, `parse ~trace` |
 | [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right`, `expression`, `precedence` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace`, `integer`, `number`, `hex_integer`, `lexeme`, `keyword` |
 | [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `render_error` |
-| [Error recovery](/parseff/guides/error-recovery) | `capture`, `capture_with`, `recover`, `sep_by_recover`, `skip_nested` |
+| [Error recovery](/parseff/guides/error-recovery) | `capture`, `recover`, `sep_by_recover`, `skip_nested` |
 | [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics`, `Ref` |
-| [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `fused_sep_take`, `skip_while_then_char`, `take_span` |
-| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `parse_source`, `parse_source_each` |
+| [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `take_span`, `span_length`, `span_get` |
+| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `Source.of_bigstring_chunks`, `parse_source`, `parse_source_each` |

@@ -16,17 +16,18 @@ Convenience combinators provide ready-to-use parsers for common patterns like di
 
 ### `digit`
 
-`Parseff.digit` parses a decimal digit (0-9) and returns its integer value.
+`Parseff.digit` parses an ASCII decimal digit, `'0'` to `'9'`, and returns it as a `char`. For the value of a number, use `Parseff.integer`.
 
 ```ocaml
-val digit : unit -> int
+val digit : unit -> char
 ```
 ```ocaml
-(* Parse two-digit number *)
+(* Parse a two-digit number *)
 let two_digits () =
+  let value c = Char.code c - Char.code '0' in
   let a = Parseff.digit () in
   let b = Parseff.digit () in
-  a * 10 + b
+  (value a * 10) + value b
 
 (* Matches "42" -> 42 *)
 ```
@@ -202,9 +203,9 @@ let spaced_values () =
   let b = Parseff.digit () in
   (a, b)
 
-(* Matches "1 2" -> (1, 2) *)
-(* Matches "1    2" -> (1, 2) *)
-(* Matches "12" -> (1, 2) *)
+(* Matches "1 2" -> ('1', '2') *)
+(* Matches "1    2" -> ('1', '2') *)
+(* Matches "12" -> ('1', '2') *)
 ```
 
 ### `whitespace ~at_least:1`
@@ -244,7 +245,7 @@ let flexible_list () =
     Parseff.sep_by
       (fun () ->
         Parseff.skip_whitespace ();
-        let n = Parseff.digit () in
+        let n = Char.code (Parseff.digit ()) - Char.code '0' in
         Parseff.skip_whitespace ();
         n)
       (fun () -> Parseff.char ',')
@@ -297,8 +298,8 @@ let pair () =
   let b = token Parseff.digit in
   (a, b)
 
-(* Matches "1 , 2" -> (1, 2) *)
-(* Matches "1 # first\n, 2" -> (1, 2) *)
+(* Matches "1 , 2" -> ('1', '2') *)
+(* Matches "1 # first\n, 2" -> ('1', '2') *)
 ```
 
 ### `keyword`

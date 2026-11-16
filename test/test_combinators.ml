@@ -6,8 +6,8 @@ let show_error (e : Parseff.error) =
       "E"
   | Expected _ ->
       Printf.sprintf "Expected %S" (Parseff.error_message e)
-  | Failure s ->
-      Printf.sprintf "Failure %S" s
+  | Failed s ->
+      Printf.sprintf "Failed %S" s
   | _ ->
       "other"
 
@@ -17,14 +17,16 @@ let show show_v = function
   | Error e ->
       Printf.sprintf "Error@%d %s" e.Parseff.range.start (show_error e)
 
-let chunked_source input =
+let sized_source size input =
   let pos = ref 0 in
   Parseff.Source.of_function (fun buf off len ->
-      let n = min (min 1 len) (String.length input - !pos) in
+      let n = min (min size len) (String.length input - !pos) in
       Bytes.blit_string input !pos buf off n;
       pos := !pos + n;
       n
   )
+
+let chunked_source input = sized_source 1 input
 
 let both show_v input parser expected =
   let with_pos () =
@@ -108,7 +110,7 @@ let test_many_stops_after_consuming () =
         (fun () ->
           match Parseff.optional Parseff.digit () with
           | Some d ->
-              d
+              Char.code d - Char.code '0'
           | None ->
               -1
         )
@@ -152,7 +154,7 @@ let tree a b = "(" ^ a ^ "^" ^ b ^ ")"
 let digit_or_dash () =
   match Parseff.optional Parseff.digit () with
   | Some d ->
-      string_of_int d
+      String.make 1 d
   | None ->
       "-"
 
@@ -190,7 +192,7 @@ let test_fold_right_right_assoc () =
   both show_string "1^2^3"
     (fun () ->
       Parseff.fold_right
-        (fun () -> string_of_int (Parseff.digit ()))
+        (fun () -> String.make 1 (Parseff.digit ()))
         (fun () ->
           ignore (Parseff.char '^');
           tree
@@ -319,8 +321,146 @@ let test_consume_or_mismatch () =
     "parse" expected
     (show show_string (Parseff.parse "no" p));
   Alcotest.(check string)
-    "parse_source" expected
+    "parse_source, chunks of 2" expected
+    (show show_string (Parseff.parse_source (sized_source 2 "no") p));
+  Alcotest.(check string)
+    "parse_source, chunks of 1"
+    {|Error@0 Expected "expected \"false\" or \"true\", found 'n'"|}
     (show show_string (Parseff.parse_source (chunked_source "no") p))
+
+let test_consume_each_length_and_offset () =
+  for len = 1 to 10 do
+    let literal = String.init len (fun i -> Char.chr (Char.code 'a' + i)) in
+    let p () = Parseff.consume literal in
+    let results input =
+      [
+        show show_string (Parseff.parse ~consume:`Partial input p);
+        show show_string
+          (Parseff.parse_source ~consume:`Partial
+             (Parseff.Source.of_string input)
+             p
+          );
+        show show_string
+          (Parseff.parse_source ~consume:`Partial (sized_source 64 input) p);
+      ]
+    in
+    let one_byte_chunks input =
+      show show_string
+        (Parseff.parse_source ~consume:`Partial (chunked_source input) p)
+    in
+    let ok = show show_string (Ok literal) in
+    Alcotest.(check (list string))
+      (Printf.sprintf "match %S" literal)
+      [ ok; ok; ok ]
+      (results (literal ^ "!"));
+    Alcotest.(check string)
+      (Printf.sprintf "match %S, chunks of 1" literal)
+      ok
+      (one_byte_chunks (literal ^ "!"));
+    for k = 0 to len - 1 do
+      let input =
+        String.mapi
+          (fun i c ->
+            if i = k then
+              'X'
+            else
+              c
+          )
+          literal
+      in
+      let first = Parseff.parse ~consume:`Partial (input ^ "!") p in
+      let at = match first with Ok _ -> -1 | Error e -> e.range.start in
+      Alcotest.(check int)
+        (Printf.sprintf "%S on %S fails at the mismatch" literal input)
+        k at;
+      let rest = String.sub literal k (len - k) in
+      let message found =
+        Printf.sprintf {|Error@%d Expected "expected \"%s\", found '%s'"|} k
+          rest found
+      in
+      let expected = message ("X" ^ String.sub literal (k + 1) (len - k - 1)) in
+      Alcotest.(check (list string))
+        (Printf.sprintf "%S on %S" literal input)
+        [ expected; expected; expected ]
+        (results (input ^ "!"));
+      Alcotest.(check string)
+        (Printf.sprintf "%S on %S, chunks of 1" literal input)
+        (message "X")
+        (one_byte_chunks (input ^ "!"))
+    done
+  done
+
+exception Would_block
+
+let blocking_source chunks =
+  let reads = ref 0 in
+  let rest = ref chunks in
+  let source =
+    Parseff.Source.of_function (fun buf off len ->
+        incr reads;
+        match !rest with
+        | [] ->
+            raise Would_block
+        | chunk :: tail ->
+            let n = String.length chunk in
+            if n > len then Alcotest.fail "chunk larger than the read buffer";
+            Bytes.blit_string chunk 0 buf off n;
+            rest := tail;
+            n
+    )
+  in
+  (source, reads)
+
+let check_stream name chunks parser expected expected_reads =
+  let source, reads = blocking_source chunks in
+  let result =
+    match Parseff.parse_source ~consume:`Partial source parser with
+    | r ->
+        show show_string r
+    | exception Would_block ->
+        "Would_block"
+  in
+  Alcotest.(check string) name expected result;
+  Alcotest.(check int) (name ^ ": reads") expected_reads !reads
+
+let test_consume_stream_mismatch_reads_no_more () =
+  check_stream "HTTP/ on a request line without version" [ "GET / \r\n\r\n" ]
+    (fun () ->
+      ignore (Parseff.consume "GET / ");
+      Parseff.consume "HTTP/"
+    )
+    {|Error@6 Expected "expected \"HTTP/\", found '\\r'"|} 1;
+  check_stream "CRLF on a lone carriage return" [ "\rX" ]
+    (fun () -> Parseff.consume "\r\n")
+    {|Error@1 Expected "expected \"\\n\", found 'X'"|} 1;
+  check_stream "CRLF CRLF on a lone carriage return" [ "\rX" ]
+    (fun () -> Parseff.consume "\r\n\r\n")
+    {|Error@1 Expected "expected \"\\n\\r\\n\", found 'X'"|} 1
+
+let test_consume_stream_matching_prefix_reads () =
+  check_stream "prefix then the rest" [ "HT"; "TP/" ]
+    (fun () -> Parseff.consume "HTTP/")
+    {|Ok "HTTP/"|} 2;
+  check_stream "prefix then end of input" [ "HT"; "" ]
+    (fun () -> Parseff.consume "HTTP/")
+    {|Error@2 Expected "expected \"TP/\", found end of input"|} 2
+
+let test_consume_stream_or_ () =
+  let p () =
+    Parseff.or_
+      (fun () -> Parseff.consume "ab")
+      (fun () -> Parseff.consume "ac")
+      ()
+  in
+  List.iter
+    (fun (input, chunks) ->
+      let source, _ = blocking_source chunks in
+      Alcotest.(check string)
+        ("or_ on " ^ input)
+        (show show_string (Parseff.parse ~consume:`Partial input p))
+        (show show_string (Parseff.parse_source ~consume:`Partial source p))
+    )
+    [ ("ac", [ "a"; "c" ]); ("ad", [ "a"; "d" ]); ("x", [ "x" ]) ]
 
 let test_consume_streaming_slow_source () =
   let r =
@@ -329,6 +469,87 @@ let test_consume_streaming_slow_source () =
     )
   in
   Alcotest.(check string) "slow source" "Ok \"true\"" (show show_string r)
+
+let fold_digit () = Char.code (Parseff.digit ()) - Char.code '0'
+
+let folds =
+  [
+    ( "fold_left",
+      fun element op ->
+        Parseff.fold_left element (fun () -> op ()) ~otherwise:(-1) ()
+    );
+    ( "fold_right",
+      fun element op ->
+        Parseff.fold_right element (fun () -> op ()) ~otherwise:(-1) ()
+    );
+  ]
+
+let test_fold_otherwise_first_element () =
+  List.iter
+    (fun (_, fold) ->
+      let plus () =
+        ignore (Parseff.char '+');
+        ( + )
+      in
+      both string_of_int "x+1" (fun () -> fold fold_digit plus) "Ok (-1, 0)";
+      both string_of_int "" (fun () -> fold fold_digit plus) "Ok (-1, 0)";
+      both string_of_int "1+2+x" (fun () -> fold fold_digit plus) "Ok (3, 3)"
+    )
+    folds
+
+let test_fold_otherwise_commit () =
+  List.iter
+    (fun (_, fold) ->
+      let committed () =
+        ignore (Parseff.char '+');
+        Parseff.commit ();
+        ( + )
+      in
+      both string_of_int "1+2+x"
+        (fun () -> fold fold_digit committed)
+        "Error@4 Expected \"expected digit, found 'x'\"";
+      let cutting () =
+        ignore (Parseff.char '+');
+        Parseff.cut ();
+        ( + )
+      in
+      both string_of_int "1+2+x"
+        (fun () -> Parseff.context "sum" (fun () -> fold fold_digit cutting))
+        "Error@4 Expected \"expected digit, found 'x'\""
+    )
+    folds
+
+let test_fold_otherwise_releases_input () =
+  let input = "1" ^ String.concat "" (List.init 200 (fun _ -> "+1")) in
+  List.iter
+    (fun (name, fold) ->
+      let plus () =
+        ignore (Parseff.char '+');
+        Parseff.commit ();
+        ( + )
+      in
+      let r =
+        Parseff.parse_source ~backtrack_window:16 (chunked_source input)
+          (fun () -> fold fold_digit plus
+        )
+      in
+      Alcotest.(check string)
+        (name ^ ": a chain longer than the window")
+        "Ok 201" (show string_of_int r)
+    )
+    folds;
+  let plus () =
+    ignore (Parseff.char '+');
+    ( + )
+  in
+  let r =
+    Parseff.parse_source ~backtrack_window:16 (chunked_source input) (fun () ->
+        Parseff.fold_left fold_digit plus ~otherwise:(-1) ()
+    )
+  in
+  Alcotest.(check string)
+    "fold_left without commit: a chain longer than the window" "Ok 201"
+    (show string_of_int r)
 
 let () =
   let open Alcotest in
@@ -360,6 +581,14 @@ let () =
             test_fold_right_dropped_pair_rolled_back;
         ]
       );
+      ( "fold ~otherwise",
+        [
+          test_case "first element" `Quick test_fold_otherwise_first_element;
+          test_case "failure after commit or cut" `Quick
+            test_fold_otherwise_commit;
+          test_case "stream window" `Quick test_fold_otherwise_releases_input;
+        ]
+      );
       ( "take",
         [
           test_case "max_int" `Quick test_take_max_int;
@@ -371,6 +600,13 @@ let () =
         [
           test_case "prefix mismatch" `Quick test_consume_prefix_mismatch;
           test_case "or_ mismatch" `Quick test_consume_or_mismatch;
+          test_case "stream mismatch reads no more" `Quick
+            test_consume_stream_mismatch_reads_no_more;
+          test_case "stream matching prefix reads" `Quick
+            test_consume_stream_matching_prefix_reads;
+          test_case "stream or_" `Quick test_consume_stream_or_;
+          test_case "each length and offset" `Quick
+            test_consume_each_length_and_offset;
           test_case "slow source" `Quick test_consume_streaming_slow_source;
         ]
       );

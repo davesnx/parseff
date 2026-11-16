@@ -246,7 +246,7 @@ let test_location_after_compaction () =
   | _ ->
       Alcotest.fail "expected one error after 1000 values"
 
-let token = Re.compile (Re.seq [ Re.rg 'a' 'z'; Re.rep1 Re.digit ])
+let token = Parseff.regex (Re.seq [ Re.rg 'a' 'z'; Re.rep1 Re.digit ])
 
 let regex_value () =
   let v = Parseff.match_regex token in
@@ -343,12 +343,16 @@ let test_trace_across_values () =
   let trace (e : Parseff.trace_event) =
     let s =
       match e with
-      | Enter { name; pos } ->
+      | Parseff.Enter { name; pos } ->
           Printf.sprintf "enter %s %d" name pos
-      | Exit { name; start; stop } ->
+      | Parseff.Return { name; start; stop } ->
           Printf.sprintf "exit %s %d %d" name start stop
-      | Fail { name; start; pos } ->
+      | Parseff.Fail { name; start; pos } ->
           Printf.sprintf "fail %s %d %d" name start pos
+      | Parseff.Captured { start; error } ->
+          Printf.sprintf "captured %d %s" start (Parseff.error_message error)
+      | _ ->
+          "other event"
     in
     events := s :: !events
   in

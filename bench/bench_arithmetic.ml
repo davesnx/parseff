@@ -188,15 +188,16 @@ end
 module Parseff_Arith_Fused = struct
   let[@inline always] is_digit c = c >= '0' && c <= '9'
 
-  let[@inline] int_of_span (s : Parseff.span) =
+  let[@inline] int_of_span s =
+    let len = Parseff.span_length s in
     let rec go acc i =
-      if i >= s.off + s.len then
+      if i >= len then
         acc
       else
-        let d = Char.code (String.unsafe_get s.buf i) - Char.code '0' in
+        let d = Char.code (Parseff.span_get s i) - Char.code '0' in
         go ((acc * 10) + d) (i + 1)
     in
-    go 0 s.off
+    go 0 0
 
   let is_arith_op c = c = '+' || c = '-' || c = '*' || c = '/'
 
@@ -207,10 +208,10 @@ module Parseff_Arith_Fused = struct
     (* Collect all (op, number) pairs *)
     let rec collect_ops nums ops =
       let op_span = Parseff.take_while_span is_arith_op in
-      if op_span.len = 0 then
+      if Parseff.span_length op_span = 0 then
         (nums, ops)
       else
-        let op_char = String.unsafe_get op_span.buf op_span.off in
+        let op_char = Parseff.span_get op_span 0 in
         let num_span = Parseff.take_while_span is_digit in
         let num = int_of_span num_span in
         collect_ops (num :: nums) (op_char :: ops)

@@ -1,0 +1,12 @@
+(library
+ (name http)
+ (modules http)
+ (libraries parseff))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries http parseff))
+
+(cram
+ (deps main.exe))

@@ -1,9 +1,9 @@
 type declaration = { property : string; value : string }
 type rule = { selector : string; declarations : declaration list }
 
-let ws_re = Re.compile (Re.Posix.re "[ \t\n\r]*")
-let identifier_re = Re.compile (Re.Posix.re "[a-zA-Z_-][a-zA-Z0-9_-]*")
-let property_value_re = Re.compile (Re.Posix.re "[^;]+")
+let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
+let identifier_re = Parseff.regex (Re.Posix.re "[a-zA-Z_-][a-zA-Z0-9_-]*")
+let property_value_re = Parseff.regex (Re.Posix.re "[^;]+")
 let ws_may () = Parseff.match_regex ws_re
 let identifier () = Parseff.match_regex identifier_re
 let property_value () = Parseff.match_regex property_value_re

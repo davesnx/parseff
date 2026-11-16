@@ -85,12 +85,12 @@ let test_recognize_span_returns_consumed_text () =
     )
     "Ok bc=23"
 
-let test_recognize_span_is_zero_copy_in_parse () =
+let test_recognize_span_in_parse () =
   let input = "ab=12" in
   match Parseff.parse input (fun () -> Parseff.recognize_span key_value) with
   | Ok s ->
-      Alcotest.(check bool) "same buffer" true (s.buf == input);
-      Alcotest.(check (pair int int)) "off len" (0, 5) (s.off, s.len)
+      Alcotest.(check string) "text" input (Parseff.span_to_string s);
+      Alcotest.(check int) "length" 5 (Parseff.span_length s)
   | Error e ->
       Alcotest.fail (show_error e)
 
@@ -238,8 +238,7 @@ let () =
         [
           test_case "consumed text" `Quick test_recognize_returns_consumed_text;
           test_case "span text" `Quick test_recognize_span_returns_consumed_text;
-          test_case "span zero-copy in parse" `Quick
-            test_recognize_span_is_zero_copy_in_parse;
+          test_case "span in parse" `Quick test_recognize_span_in_parse;
         ]
       );
       ( "streaming",

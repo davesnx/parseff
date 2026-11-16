@@ -216,4 +216,4 @@ match Parseff.parse "port = 99999" typed_entry with
     Printf.printf "Parse error: %s\n" (Parseff.error_message e)
 ```
 
-`Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (reported as `Failure`). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.
+`Parseff.error` raises a typed error value. `Parseff.fail` raises a string message (reported as `Failed`). Use `error` when callers need to distinguish different failure modes; use `fail` for simple messages shown directly to users.

@@ -11,8 +11,8 @@ let kind (e : Parseff.error) =
   match e.kind with
   | Expected _ ->
       "Expected " ^ Parseff.error_message e
-  | Failure m ->
-      "Failure " ^ m
+  | Failed m ->
+      "Failed " ^ m
   | Custom _ ->
       "Custom"
   | Depth_limit_exceeded _ ->
@@ -83,7 +83,7 @@ let test_utf8_satisfy_split () =
       check_all "satisfy" show_code_points text
         (fun () ->
           Parseff.many
-            (fun () -> Parseff.Utf8.satisfy (fun _ -> true) ~label:"any")
+            (fun () -> Parseff.Utf8.satisfy ~label:"any" (fun _ -> true))
             ()
         )
         ("Ok " ^ expected_code_points text)
@@ -110,7 +110,7 @@ let test_utf8_take_while_span_split () =
     )
     texts
 
-let test_utf8_skip_while_then_char_split () =
+let test_utf8_skip_while_char_split () =
   let cases =
     [
       ("\xE2\x82\xAC", Uchar.of_int 0x20AC, "");
@@ -124,9 +124,8 @@ let test_utf8_skip_while_then_char_split () =
       let expected =
         match
           Parseff.parse ~consume:`Partial text (fun () ->
-              Parseff.Utf8.skip_while_then_char
-                (fun u -> not (Uchar.equal u target))
-                target;
+              Parseff.Utf8.skip_while (fun u -> not (Uchar.equal u target));
+              ignore (Parseff.Utf8.char target);
               Parseff.position ()
           )
         with
@@ -135,22 +134,22 @@ let test_utf8_skip_while_then_char_split () =
         | Error _ ->
             Alcotest.fail "memory parse failed"
       in
-      check_all "skip_while_then_char" string_of_int text
+      check_all "skip_while then char" string_of_int text
         (fun () ->
-          Parseff.Utf8.skip_while_then_char
-            (fun u -> not (Uchar.equal u target))
-            target;
+          Parseff.Utf8.skip_while (fun u -> not (Uchar.equal u target));
+          ignore (Parseff.Utf8.char target);
           Parseff.position ()
         )
         expected
     )
     cases;
-  check_all "skip_while_then_char positions" string_of_int
+  check_all "skip_while then char positions" string_of_int
     "a\xE2\x82\xACb\xF0\x9F\x98\x80"
     (fun () ->
-      Parseff.Utf8.skip_while_then_char
-        (fun u -> not (Uchar.equal u (Uchar.of_int 0x1F600)))
-        (Uchar.of_int 0x1F600);
+      Parseff.Utf8.skip_while (fun u ->
+          not (Uchar.equal u (Uchar.of_int 0x1F600))
+      );
+      ignore (Parseff.Utf8.char (Uchar.of_int 0x1F600));
       Parseff.position ()
     )
     "Ok 9"
@@ -353,8 +352,8 @@ let () =
           test_case "take_while split" `Quick test_utf8_take_while_split;
           test_case "take_while_span split" `Quick
             test_utf8_take_while_span_split;
-          test_case "skip_while_then_char split" `Quick
-            test_utf8_skip_while_then_char_split;
+          test_case "skip_while then char split" `Quick
+            test_utf8_skip_while_char_split;
           test_case "invalid after compaction skip_while" `Quick
             test_utf8_invalid_after_compaction_skip_while;
           test_case "invalid after compaction take_while" `Quick

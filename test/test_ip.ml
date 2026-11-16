@@ -1,6 +1,10 @@
 let number () =
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let n =
+    List.fold_left
+      (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
+      0 digits
+  in
   if n >= 0 && n <= 255 then
     n
   else
@@ -51,7 +55,7 @@ let test_invalid_out_of_range () =
   match Parseff.parse "1.2.3.256" ip_address with
   | Ok _ ->
       Alcotest.fail "Expected failure for out of range"
-  | Error ({ kind = Failure msg; _ } as e) ->
+  | Error ({ kind = Failed msg; _ } as e) ->
       let pos = e.range.start in
       Alcotest.(check int) "error position" 9 pos;
       Alcotest.(check string) "error message" "number out of range: 256" msg

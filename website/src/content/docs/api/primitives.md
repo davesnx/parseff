@@ -30,6 +30,8 @@ let parser () =
 ```
 When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input. A mismatch inside a multi-byte character is reported at the start of that character.
 
+On a stream, `consume` compares the buffered bytes first and reads more input only while they match the start of the literal, so a wrong byte fails at once. The error shows the bytes read so far: its `found` text can be shorter than on the whole input.
+
 **Performance:** `consume` is optimized for literal string matching. It's much faster than using regex for exact matches.
 
 
@@ -54,36 +56,30 @@ let pair () =
   let _ = right_paren () in
   (a, b)
 
-(* Matches "(1,2)" -> (1, 2) *)
+(* Matches "(1,2)" -> ('1', '2') *)
 ```
 **Tip:** Use `char` for single characters and `consume` for multi-character strings. They both match literals, but `char` makes the intent clear and avoids a string allocation for a single byte.
 
 
 ### `satisfy`
 
-`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages.
+`Parseff.satisfy` matches a character satisfying the given predicate. The `~label` parameter is used in error messages. Without it, the error says `expected matching character`.
 
 ```ocaml
-val satisfy : (char -> bool) -> label:string -> char
+val satisfy : ?label:string -> (char -> bool) -> char
 ```
 ```ocaml
 (* Match any vowel *)
 let vowel () =
-  Parseff.satisfy
-    (fun c -> String.contains "aeiouAEIOU" c)
-    ~label:"vowel"
+  Parseff.satisfy ~label:"vowel" (fun c -> String.contains "aeiouAEIOU" c)
 
 (* Match any digit *)
 let digit_char () =
-  Parseff.satisfy
-    (fun c -> c >= '0' && c <= '9')
-    ~label:"digit"
+  Parseff.satisfy ~label:"digit" (fun c -> c >= '0' && c <= '9')
 
 (* Match any uppercase letter *)
 let uppercase () =
-  Parseff.satisfy
-    (fun c -> c >= 'A' && c <= 'Z')
-    ~label:"uppercase letter"
+  Parseff.satisfy ~label:"uppercase letter" (fun c -> c >= 'A' && c <= 'Z')
 ```
 **Tip:** The label parameter is shown in error messages. Prefer descriptive labels.
 
@@ -107,9 +103,7 @@ let digits () = Parseff.take_while (fun c -> c >= '0' && c <= '9')
 (* Parse identifier *)
 let identifier () =
   let first =
-    Parseff.satisfy
-      (fun c -> c = '_' || (c >= 'a' && c <= 'z'))
-      ~label:"letter"
+    Parseff.satisfy ~label:"letter" (fun c -> c = '_' || (c >= 'a' && c <= 'z'))
   in
   let rest =
     Parseff.take_while (fun c ->
@@ -172,20 +166,21 @@ let csv_value () =
 
 ### `match_regex`
 
-`Parseff.match_regex` matches a compiled regular expression. The regex must be compiled with `Re.compile`.
+`Parseff.match_regex` matches a regular expression at the current position. Build the regex with `Parseff.regex`, which compiles an `Re.t` anchored at the position where the match starts, so a failed match examines only the bytes that the regex needs to fail, not the rest of the input. In streaming mode, `match_regex` reads only when the buffered bytes cannot decide the match, and gives the same result as on a string.
 
 ```ocaml
-val match_regex : ?label:string -> Re.re -> string
+val regex : Re.t -> Parseff.regex
+val match_regex : ?label:string -> Parseff.regex -> string
 ```
 ```ocaml
 (* Pre-compile at module level. Never inside a parser function *)
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number_from_re () = Parseff.match_regex number_re
 ```
 Without `~label`, a failed match expects `"text matching the pattern"`. With `~label`, it reports `expected <label>` and merges with what the other alternatives expected at the same position, like `satisfy` and `take_while ~label`:
 
 ```ocaml
-let identifier_re = Re.compile (Re.Posix.re "[a-z]+")
+let identifier_re = Parseff.regex (Re.Posix.re "[a-z]+")
 
 let value () =
   Parseff.or_
@@ -198,7 +193,7 @@ let value () =
 
 ```ocaml
 (* Regex. Use for complex patterns (alternation, grouping) *)
-let number_re = Re.compile (Re.Posix.re "[0-9]+")
+let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
 let number () = Parseff.match_regex number_re
 
 (* take_while. No regex overhead for simple predicates *)
@@ -211,7 +206,7 @@ let number () =
 
 ### `fail`
 
-`Parseff.fail` aborts parsing with an error message.
+`Parseff.fail` fails with an error message. Like any other failure, it lets `Parseff.or_` and the repetition combinators try something else. Call `Parseff.cut` before it to make the failure final.
 
 ```ocaml
 val fail : ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
@@ -289,7 +284,7 @@ let complete_number () =
   Parseff.end_of_input ();
   n
 
-(* Matches: "5" -> 5 *)
+(* Matches: "5" -> '5' *)
 (* Fails: "52" -> Error: expected end of input *)
 
 (* parse already requires all input by default. end_of_input is for
@@ -376,7 +371,8 @@ type expr =
 let number () =
   let loc = Parseff.location () in
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
-  let n = List.fold_left (fun acc d -> (acc * 10) + d) 0 digits in
+  let value d = Char.code d - Char.code '0' in
+  let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   Num (n, loc)
 
 (* Convert error positions after parsing *)

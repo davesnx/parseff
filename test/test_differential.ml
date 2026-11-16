@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 type value =
   | Unit
   | Chr of char
@@ -42,7 +44,7 @@ type g =
   | Warn of int
   | Set of int
   | Get
-  | Fail_hard
+  | Fail_msg
   | Raise
   | Try of g * g
   | Rec of g
@@ -149,8 +151,8 @@ let rec show_g = function
       Printf.sprintf "Set %d" k
   | Get ->
       "Get"
-  | Fail_hard ->
-      "Fail_hard"
+  | Fail_msg ->
+      "Fail_msg"
   | Raise ->
       "Raise"
   | Try (a, b) ->
@@ -312,8 +314,8 @@ let rec run cx g =
       Unit
   | Get ->
       Int (Parseff.Ref.get cx.cell)
-  | Fail_hard ->
-      Parseff.fail "hard"
+  | Fail_msg ->
+      Parseff.fail "message"
   | Raise ->
       raise Boom
   | Try (a, b) -> (
@@ -326,7 +328,7 @@ and combine cx o () =
   let v = run cx o in
   fun a b -> Bin (v, a, b)
 
-type cls = Success | Soft | Hard of int | Depth of int | Window | Escaped
+type cls = Success | Soft | Depth of int | Window | Escaped
 
 type outcome = {
   cls : cls;
@@ -339,14 +341,18 @@ type outcome = {
 let show_event = function
   | Parseff.Enter { name; pos } ->
       Printf.sprintf "enter %s@%d" name pos
-  | Exit { name; start; stop } ->
+  | Parseff.Return { name; start; stop } ->
       Printf.sprintf "exit %s@%d..%d" name start stop
-  | Fail { name; start; pos } ->
+  | Parseff.Fail { name; start; pos } ->
       Printf.sprintf "fail %s@%d from %d" name pos start
+  | Parseff.Captured { start; error } ->
+      Printf.sprintf "captured @%d: %s" start (show_error error)
+  | _ ->
+      "other event"
 
 let window_exceeded = "backtrack window exceeded"
 
-type feed = Function | Seq
+type feed = Function | Seq | Bigstring | Push
 
 let chunked feed input sizes =
   let pos = ref 0 in
@@ -376,8 +382,68 @@ let chunked feed input sizes =
           Seq.Cons (String.sub input p n, seq)
       in
       Parseff.Source.of_seq seq
+  | Push ->
+      invalid_arg "chunked: Push is not a source"
+  | Bigstring ->
+      let shift = 3 in
+      let len = String.length input in
+      let buf =
+        Bigarray.Array1.create Bigarray.char Bigarray.c_layout (len + 5)
+      in
+      Bigarray.Array1.fill buf '#';
+      String.iteri (fun i c -> buf.{shift + i} <- c) input;
+      Parseff.Source.of_bigstring_chunks (fun () ->
+          if !pos >= len then
+            None
+          else
+            let p, n = next max_int in
+            Some (buf, shift + p, n)
+      )
 
 type runner = Memory | Stream of feed * int list * int
+
+let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
+  let p () =
+    let v = p () in
+    if consume = `All then Parseff.end_of_input ();
+    v
+  in
+  let t =
+    Parseff.parse_partial ~max_depth ~backtrack_window ~diagnostics ?trace p
+  in
+  let len = String.length input in
+  let check fed = function
+    | Ok (v, leftover) ->
+        let stop =
+          match (consume, v) with
+          | `Partial, Pair (_, Int stop) ->
+              stop
+          | _ ->
+              len
+        in
+        if leftover <> String.sub input stop (fed - stop) then
+          failwith
+            (Printf.sprintf
+               "parse_partial: leftover %S after %d of %d fed bytes" leftover
+               stop fed
+            );
+        Ok v
+    | Error e ->
+        Error e
+  in
+  let rec go pos turn =
+    if pos >= len then
+      check pos (Parseff.finish t)
+    else
+      let size = List.nth sizes (turn mod List.length sizes) in
+      let n = min size (len - pos) in
+      match Parseff.feed t (String.sub input pos n) with
+      | Parseff.Await ->
+          go (pos + n) (turn + 1)
+      | Parseff.Done r ->
+          check (pos + n) r
+  in
+  go 0 0
 
 let run_real ?(traced = false) ~partial runner g input =
   let cx =
@@ -412,6 +478,9 @@ let run_real ?(traced = false) ~partial runner g input =
       match runner with
       | Memory ->
           Parseff.parse ~max_depth ~consume ~diagnostics:cx.diags ?trace input p
+      | Stream (Push, sizes, backtrack_window) ->
+          pushed ~backtrack_window ~consume ~diagnostics:cx.diags ?trace input
+            sizes p
       | Stream (feed, sizes, backtrack_window) ->
           Parseff.parse_source ~max_depth ~backtrack_window ~consume
             ~diagnostics:cx.diags ?trace (chunked feed input sizes) p
@@ -420,8 +489,6 @@ let run_real ?(traced = false) ~partial runner g input =
         (Success, Ok v)
     | Error { kind = Backtrack_window_exceeded _; _ } ->
         (Window, Error window_exceeded)
-    | Error ({ kind = Failure "hard"; _ } as e) ->
-        (Hard e.range.start, Error (show_error e))
     | Error ({ kind = Depth_limit_exceeded _; _ } as e) ->
         (Depth e.range.start, Error (show_error e))
     | Error e ->
@@ -455,7 +522,6 @@ type mst = { pos : int; diags : (int * int) list; cell : int }
 
 exception M_fail of mst
 exception M_boom of mst
-exception M_hard of int * mst
 exception M_depth of int * mst
 
 (* The first step of the right operand of an [infix_right] whose operator and
@@ -673,8 +739,7 @@ let rec ev m env g st =
       in
       (List l, st)
   | Fold_left (a, o, d) ->
-      let one env st =
-        let acc, st = ev m env a st in
+      let rest env acc st =
         let rec loop acc st =
           let f, env' = flag env st in
           match
@@ -693,10 +758,9 @@ let rec ev m env g st =
         in
         loop acc st
       in
-      otherwise env d one st
+      otherwise env d (fun env -> ev m env a) rest st
   | Fold_right (a, o, d) ->
-      let rec one env st =
-        let first, st = ev m env a st in
+      let rec rest env first st =
         choice env
           (fun env st ->
             let ov, st = ev m env o st in
@@ -705,8 +769,11 @@ let rec ev m env g st =
           )
           (fun _ st -> (first, st))
           st
+      and one env st =
+        let first, st = ev m env a st in
+        rest env first st
       in
-      otherwise env d one st
+      otherwise env d (fun env -> ev m env a) rest st
   | Count (n, a) ->
       let acc, st = required env (fun env -> ev m env a) [] n st in
       (List (List.rev acc), st)
@@ -718,8 +785,6 @@ let rec ev m env g st =
           raise (M_fail st)
       | exception M_boom _ ->
           raise (M_boom st)
-      | exception M_hard (p, _) ->
-          raise (M_hard (p, st))
       | exception M_depth (p, _) ->
           raise (M_depth (p, st))
     )
@@ -757,7 +822,7 @@ let rec ev m env g st =
       match ev m (push (Barrier st.pos) env) a st with
       | v, st ->
           (Cap_ok v, st)
-      | exception (M_fail _ | M_hard _) ->
+      | exception M_fail _ ->
           (Cap_err "", st)
     )
   | Capture_release a -> (
@@ -765,7 +830,7 @@ let rec ev m env g st =
       match ev m (push (Captured saved) env) a st with
       | v, st ->
           (Cap_ok v, st)
-      | exception (M_fail _ | M_hard _) ->
+      | exception M_fail _ ->
           (Cap_err "", !saved)
     )
   | Warn k ->
@@ -774,8 +839,8 @@ let rec ev m env g st =
       (Unit, { st with cell = k })
   | Get ->
       (Int st.cell, st)
-  | Fail_hard ->
-      raise (M_hard (st.pos, st))
+  | Fail_msg ->
+      raise (M_fail st)
   | Raise ->
       raise (M_boom st)
   | Try (a, b) -> (
@@ -788,11 +853,24 @@ and sep_then m a s env st =
   let _, st = ev m env s st in
   ev m env a st
 
-and otherwise env d one st =
+and otherwise env d first rest st =
   if d then
-    choice env one (fun _ st -> (Str "otherwise", st)) st
+    match
+      choice env
+        (fun env st ->
+          let v, st = first env st in
+          (Some v, st)
+        )
+        (fun _ st -> (None, st))
+        st
+    with
+    | Some v, st ->
+        rest env v st
+    | None, st ->
+        (Str "otherwise", st)
   else
-    one env st
+    let v, st = first env st in
+    rest env v st
 
 and expression m env atom table st =
   let prefixed =
@@ -900,7 +978,6 @@ and expression m env atom table st =
 type model_outcome =
   | M_success of value * mst
   | M_soft of mst
-  | M_hard_at of int * mst
   | M_depth_at of int * mst
   | M_escaped of mst
 
@@ -921,8 +998,6 @@ let run_model ~partial g input =
         end
     | exception M_fail st ->
         M_soft st
-    | exception M_hard (p, st) ->
-        M_hard_at (p, st)
     | exception M_depth (p, st) ->
         M_depth_at (p, st)
     | exception M_boom st ->
@@ -955,19 +1030,13 @@ let show_model = function
       "Ok " ^ show_value v
   | M_soft _ ->
       "a failure"
-  | M_hard_at (p, _) ->
-      Printf.sprintf "fail \"hard\" at %d" p
   | M_depth_at (p, _) ->
       Printf.sprintf "depth limit at %d" p
   | M_escaped _ ->
       "Boom escaped"
 
 let model_state = function
-  | M_success (_, st)
-  | M_soft st
-  | M_hard_at (_, st)
-  | M_depth_at (_, st)
-  | M_escaped st ->
+  | M_success (_, st) | M_soft st | M_depth_at (_, st) | M_escaped st ->
       st
 
 let agrees mo (o : outcome) =
@@ -980,7 +1049,7 @@ let agrees mo (o : outcome) =
       v = erase v'
   | M_soft _, Soft, _ | M_escaped _, Escaped, _ ->
       true
-  | M_hard_at (p, _), Hard p', _ | M_depth_at (p, _), Depth p', _ ->
+  | M_depth_at (p, _), Depth p', _ ->
       p = p'
   | _ ->
       false
@@ -1026,7 +1095,7 @@ let leaf rs =
   | 20 ->
       Get
   | _ -> (
-      match int rs 3 with 0 -> Fail_hard | 1 -> Raise | _ -> Get
+      match int rs 3 with 0 -> Fail_msg | 1 -> Raise | _ -> Get
     )
 
 let rec gen rs size =
@@ -1102,7 +1171,7 @@ and unseal = function
     | Warn _
     | Set _
     | Get
-    | Fail_hard
+    | Fail_msg
     | Raise ) as g ->
       g
   | Seq (a, b) ->
@@ -1201,11 +1270,24 @@ let streams =
   in
   List.map (fun (s, w) -> (Function, s, w)) sizes
   @ List.map (fun (s, w) -> (Seq, s, w)) sizes
+  @ List.map (fun (s, w) -> (Bigstring, s, w)) sizes
+  @ [ (Bigstring, [ 0; 2; 0; 0; 3 ], large_window) ]
   @ [ (Seq, [ 0; 2; 0; 0; 3 ], large_window); (Seq, [ 0; 1; 3 ], 3) ]
+  @ List.map (fun (s, w) -> (Push, s, w)) sizes
+  @ [ (Push, [ 0; 2; 0; 0; 3 ], large_window); (Push, [ 0; 1; 3 ], 3) ]
 
 let show_stream (feed, sizes, window) =
-  Printf.sprintf "parse_source, %s, chunks [%s], backtrack_window %d"
-    (match feed with Function -> "of_function" | Seq -> "of_seq")
+  Printf.sprintf "%s, chunks [%s], backtrack_window %d"
+    ( match feed with
+    | Function ->
+        "parse_source, of_function"
+    | Seq ->
+        "parse_source, of_seq"
+    | Bigstring ->
+        "parse_source, of_bigstring_chunks"
+    | Push ->
+        "parse_partial"
+    )
     (String.concat "; " (List.map string_of_int sizes))
     window
 
@@ -1307,7 +1389,8 @@ let () =
     [
       ( "random grammars",
         [
-          Alcotest.test_case "model, parse and parse_source agree" `Quick
+          Alcotest.test_case
+            "model, parse, parse_source and parse_partial agree" `Quick
             test_random_grammars;
         ]
       );

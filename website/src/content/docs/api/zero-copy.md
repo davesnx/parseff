@@ -14,16 +14,18 @@ The zero-copy API allows you to parse without allocating intermediate strings, s
 ## Span type
 
 ```ocaml
-type span = { buf : string; off : int; len : int }
+type span
 ```
-A `Parseff.span` is a zero-copy slice of the input string. It holds a reference to the original buffer with an offset and length, avoiding string allocation until you explicitly call `Parseff.span_to_string`.
+A `Parseff.span` is a zero-copy slice of the input string. It refers to the input instead of copying it, so no string is allocated until you call `Parseff.span_to_string`. The type is abstract: read a span with `Parseff.span_length` and `Parseff.span_get`.
 
 For parsers run with `Parseff.parse_source`, spans may be materialized into owned strings internally so the streaming runtime can reclaim older buffer prefixes. In-memory `Parseff.parse` still keeps the zero-copy behavior.
 
 ```ocaml
 val span_to_string : span -> string
+val span_length : span -> int
+val span_get : span -> int -> char
 ```
-`Parseff.span_to_string` raises `Invalid_argument` if the span is not a valid range of its buffer.
+`Parseff.span_get` counts the index from the start of the span. It raises `Invalid_argument` if the index is not in `0 .. span_length span - 1`.
 
 
 ## Span-based operations
@@ -46,11 +48,11 @@ Real-world usage:
 
 ```ocaml
 (* Parse integers efficiently *)
-let int_of_span (span : Parseff.span) =
+let int_of_span span =
   let rec loop i acc =
-    if i >= span.len then acc
+    if i >= Parseff.span_length span then acc
     else
-      let c = span.buf.[span.off + i] in
+      let c = Parseff.span_get span i in
       loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
   in
   loop 0 0
@@ -93,14 +95,14 @@ val recognize_span : (unit -> 'a) -> span
 `Parseff.sep_by_take_span` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.span`s. No `String.sub` allocations per element in the in-memory runner. Under `Parseff.parse_source`, spans may be copied so the runtime can discard older chunks safely.
 
 ```ocaml
-val sep_by_take_span : (char -> bool) -> char -> (char -> bool) -> span list
+val sep_by_take_span : ws:(char -> bool) -> sep:char -> (char -> bool) -> span list
 ```
 ```ocaml
-let int_of_span (span : Parseff.span) =
+let int_of_span span =
   let rec loop i acc =
-    if i >= span.len then acc
+    if i >= Parseff.span_length span then acc
     else
-      let c = span.buf.[span.off + i] in
+      let c = Parseff.span_get span i in
       loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
   in
   loop 0 0
@@ -108,7 +110,7 @@ let int_of_span (span : Parseff.span) =
 (* Parse CSV line with zero-copy *)
 let csv_line () =
   let spans =
-    Parseff.sep_by_take_span Parseff.is_whitespace ','
+    Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:','
       (fun c -> c <> ',' && c <> '\n')
   in
   (* Only allocate strings when needed *)
@@ -117,7 +119,7 @@ let csv_line () =
 (* or process spans directly, avoiding string allocation entirely *)
 let csv_to_ints () =
   let spans =
-    Parseff.sep_by_take_span Parseff.is_whitespace ','
+    Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:','
       (fun c -> c >= '0' && c <= '9')
   in
   List.map int_of_span spans
@@ -126,59 +128,19 @@ let csv_to_ints () =
 ## Fused operations
 
 
-### `fused_sep_take`
-
-`Parseff.fused_sep_take` performs: skip whitespace, match separator, skip whitespace, take\_while ~at\_least:1, all in a single fused parser step. Much more efficient than separate calls.
-
-```ocaml
-val fused_sep_take : (char -> bool) -> char -> (char -> bool) -> string
-```
-```ocaml
-(* multiple parser steps *)
-let parse_value_slow () =
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char ',' in
-  Parseff.skip_whitespace ();
-  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-
-(* single fused step *)
-let parse_value_fast () =
-  Parseff.fused_sep_take Parseff.is_whitespace ','
-    (fun c -> c >= '0' && c <= '9')
-```
-
-### `skip_while_then_char`
-
-`Parseff.skip_while_then_char` skips characters matching predicate, then matches a character. Fused operation for efficiency.
-
-```ocaml
-val skip_while_then_char : (char -> bool) -> char -> unit
-```
-```ocaml
-(* two parser steps *)
-let skip_ws_then_comma_slow () =
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char ',' in
-  ()
-
-(* single fused dispatch *)
-let skip_ws_then_comma_fast () =
-  Parseff.skip_while_then_char Parseff.is_whitespace ','
-```
-
 ### `sep_by_take`
 
-`Parseff.sep_by_take` parses zero or more separated values entirely in the same fused pass. Returns a list of matched strings with no intermediate parser round-trips.
+`Parseff.sep_by_take` parses zero or more separated values in one pass. `~ws` selects the characters to skip around each `~sep`; the last predicate selects the characters of each value. Returns a list of matched strings with no intermediate parser round-trips.
 
 ```ocaml
-val sep_by_take : (char -> bool) -> char -> (char -> bool) -> string list
+val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
 ```
 ```ocaml
 (* Parse array values efficiently *)
 let array_values () =
   let _ = Parseff.char '[' in
   let values =
-    Parseff.sep_by_take Parseff.is_whitespace ','
+    Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:','
       (fun c -> c >= '0' && c <= '9')
   in
   let _ = Parseff.char ']' in
@@ -207,35 +169,20 @@ let parse_numbers () =
 (* no allocations until conversion *)
 let parse_numbers_fast () =
   let spans =
-    Parseff.sep_by_take_span Parseff.is_whitespace ','
+    Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:','
       (fun c -> c >= '0' && c <= '9')
   in
   List.map int_of_span spans
-```
-Parser round-trips:
-
-```ocaml
-(* multiple parser steps *)
-let value () =
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char ',' in
-  Parseff.skip_whitespace ();
-  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-
-(* single fused step *)
-let value () =
-  Parseff.fused_sep_take Parseff.is_whitespace ','
-    (fun c -> c >= '0' && c <= '9')
 ```
 
 ## Complete example: high-performance JSON array
 
 ```ocaml
-let int_of_span (span : Parseff.span) =
+let int_of_span span =
   let rec loop i acc =
-    if i >= span.len then acc
+    if i >= Parseff.span_length span then acc
     else
-      let c = span.buf.[span.off + i] in
+      let c = Parseff.span_get span i in
       loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
   in
   loop 0 0
@@ -243,7 +190,7 @@ let int_of_span (span : Parseff.span) =
 let json_array () =
   let _ = Parseff.char '[' in
   let spans =
-    Parseff.sep_by_take_span Parseff.is_whitespace ','
+    Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:','
       (fun c -> c >= '0' && c <= '9')
   in
   let _ = Parseff.char ']' in
