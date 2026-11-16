@@ -2,6 +2,7 @@
 
 - **Add `charset`, `take_while_set` and `skip_while_set`.** `charset f` builds a 256-byte table once; `take_while_set` and `skip_while_set` scan with a table lookup in the loop, not a function call for each byte, with the same result, position and errors as `take_while` and `skip_while`. Without flambda, a scan of 2,846 bytes runs 56,957 instructions, down from 85,423 with `take_while` (#91).
 - **A parse given in several reads costs less.** When a read drops input, Parseff counts the characters of the cut line 8 ASCII bytes at a time. A read no longer writes the parse state into the domain slot: suspending the parse clears a flag, and resuming it writes the state only when another parse ran in between. A 462-byte head in 2 chunks runs 21,886 instructions with `Source.of_chunks`, down from 25,503, and 23,107 with `feed`, down from 26,687. A parse in one chunk runs about 1.4% more instructions (#92).
+- **A parse given in several reads defers the line index.** When a read drops input and the 3 bytes before the drop point are ASCII, Parseff keeps the dropped buffer and counts its lines and the characters of the cut line only when `location ()`, an error or a later drop needs them. It keeps at most 4 KB of dropped buffers per parse; past that, or when one of those 3 bytes is not ASCII, it counts at once as before. A 462-byte head in 2 chunks runs 17,973 instructions with `Source.of_chunks`, down from 20,589, and 19,556 with `feed`, down from 22,152; a parse in one chunk is unchanged (#92).
 
 ## 0.6.0
 

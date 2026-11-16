@@ -146,6 +146,8 @@ type line_index = {
   mutable cut_at : int;
   mutable cut_chars : int;
   mutable hint : int;
+  mutable deferred : (bytes * int * int * int) list;
+  mutable deferred_bytes : int;
 }
 
 let frame_choice = 0
@@ -997,6 +999,8 @@ let create_line_index () =
     cut_at = 0;
     cut_chars = 0;
     hint = 0;
+    deferred = [];
+    deferred_bytes = 0;
   }
 
 let find_newline s from limit =
@@ -1132,17 +1136,8 @@ let rec count_cut_chars idx s len i stop =
     end
   end
 
-let ensure_line_index_preserved_through st up_to =
+let preserve_line_index idx ~input ~base ~input_len up_to =
   if up_to > 0 then begin
-    let idx =
-      match st.line_index with
-      | Some idx ->
-          idx
-      | None ->
-          let idx = create_line_index () in
-          st.line_index <- Some idx;
-          idx
-    in
     if up_to <= idx.scanned_up_to then begin
       let line = find_line idx up_to in
       if line > 0 then begin
@@ -1151,9 +1146,7 @@ let ensure_line_index_preserved_through st up_to =
         idx.line_base <- idx.line_base + line
       end
     end else begin
-      let input = st.input in
-      let base = st.base in
-      let stop = imin (up_to - base) (st.input_len - base) in
+      let stop = imin (up_to - base) (input_len - base) in
       let start = imax 0 (idx.scanned_up_to - base) in
       let newlines = count_newlines input start stop in
       idx.line_base <- idx.line_base + idx.count - 1 + newlines;
@@ -1177,19 +1170,18 @@ let ensure_line_index_preserved_through st up_to =
         else
           line_start
       in
-      if from < st.base || from > up_to then begin
+      if from < base || from > up_to then begin
         idx.cut_line <- -1;
         up_to
       end else begin
-        let input = st.input in
-        let len = st.input_len - st.base in
-        let stop = imin (up_to - st.base) len in
+        let len = input_len - base in
+        let stop = imin (up_to - base) len in
         if not known then idx.cut_chars <- 0;
-        let i = count_cut_chars idx input len (from - st.base) stop in
+        let i = count_cut_chars idx input len (from - base) stop in
         idx.cut_line <- line_start;
-        idx.cut_at <- i + st.base;
+        idx.cut_at <- i + base;
         if i < stop then
-          i + st.base
+          i + base
         else
           up_to
       end
@@ -1197,16 +1189,60 @@ let ensure_line_index_preserved_through st up_to =
   end else
     up_to
 
+let line_index_of st =
+  match st.line_index with
+  | Some idx ->
+      idx
+  | None ->
+      let idx = create_line_index () in
+      st.line_index <- Some idx;
+      idx
+
+let flush_line_index st =
+  match st.line_index with
+  | Some ({ deferred = _ :: _; _ } as idx) ->
+      let pending = List.rev idx.deferred in
+      idx.deferred <- [];
+      idx.deferred_bytes <- 0;
+      List.iter
+        (fun (input, base, input_len, up_to) ->
+          ignore (preserve_line_index idx ~input ~base ~input_len up_to : int)
+        )
+        pending
+  | _ ->
+      ()
+
+let ensure_line_index_preserved_through st up_to =
+  flush_line_index st;
+  preserve_line_index (line_index_of st) ~input:st.input ~base:st.base
+    ~input_len:st.input_len up_to
+
+let max_deferred_bytes = 1 lsl 12
+
+let ascii_before input rel =
+  rel >= 3
+  && Char.code (Bytes.unsafe_get input (rel - 1)) < 0x80
+  && Char.code (Bytes.unsafe_get input (rel - 2)) < 0x80
+  && Char.code (Bytes.unsafe_get input (rel - 3)) < 0x80
+
+let drop_through st up_to =
+  let rel = up_to - st.base in
+  let idx = line_index_of st in
+  let size = Bytes.length st.input in
+  if
+    rel <= st.input_len - st.base
+    && ascii_before st.input rel
+    && idx.deferred_bytes + size <= max_deferred_bytes
+  then begin
+    idx.deferred <- (st.input, st.base, st.input_len, up_to) :: idx.deferred;
+    idx.deferred_bytes <- idx.deferred_bytes + size;
+    up_to
+  end else
+    ensure_line_index_preserved_through st up_to
+
 let[@inline never] handle_location st =
-  let idx =
-    match st.line_index with
-    | Some idx ->
-        idx
-    | None ->
-        let idx = create_line_index () in
-        st.line_index <- Some idx;
-        idx
-  in
+  flush_line_index st;
+  let idx = line_index_of st in
   let up_to = min st.pos st.input_len in
   if up_to > idx.scanned_up_to then
     extend_line_index idx ~base_offset:st.base st.input up_to;
@@ -1223,7 +1259,7 @@ let[@inline never] relocate st ~floor ~adopt n =
   let drop = imin (imax 0 (floor - st.base)) cur_len in
   let drop =
     if drop > 0 then
-      ensure_line_index_preserved_through st floor - st.base
+      drop_through st floor - st.base
     else
       drop
   in
@@ -6263,15 +6299,8 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
           };
       }
   | Some src ->
-      let idx =
-        match st.line_index with
-        | Some idx ->
-            idx
-        | None ->
-            let idx = create_line_index () in
-            st.line_index <- Some idx;
-            idx
-      in
+      flush_line_index st;
+      let idx = line_index_of st in
       if idx.hint > idx.scanned_up_to then
         extend_line_index idx ~base_offset:st.base st.input idx.hint;
       let shown =
