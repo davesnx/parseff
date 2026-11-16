@@ -232,8 +232,8 @@ let run_array input =
 {1 A list with a closing token}
 
 Inside {!val:Parseff.many}, [recover] would read the [}] of a block as a broken
-statement and skip it: a loop is a choice, and a recovery inside it takes the
-choice. Use {!val:Parseff.list} with [~close]. Where [close] is true, [list]
+statement and skip it, as {{!limits}Limits} explains. Use {!val:Parseff.list}
+with [~close]. Where [close] is true, [list]
 runs the statement without recovery, as [many] does, and stops when it fails,
 so the [}] goes to {!val:Parseff.require}. Make [sync] stop before that token
 too:
@@ -286,19 +286,70 @@ x = 1
 - : unit = ()
 ]}
 
-{1 Limits}
+{1:limits Limits}
 
-{b A branch that recovers and then fails runs again without recovery.} A
-[recover], [require] or [list] in a branch of [or_], [one_of] or [optional], in
-a step of a repetition or a fold, or in an operand of [precedence] or
-[expression], recovers there. When the branch then fails, the construct removes
-the errors recorded in it, runs it again without recovery, and goes on as
-without the collector: the next alternative runs, or the repetition ends. Input
-that another alternative accepts is thus not reported as an error. A [commit]
-or [cut] before the recovery still decides the construct. To keep the errors of
-a branch, recover after the token that selects it, then [commit], or around the
-whole choice. A loop is a choice too: use [list] with [~close]. Inside
-[look_ahead] and [peek_with], the recovery functions do not recover.
+{b A recovery does not take the place of an alternative.} When [recover],
+[sep_by_recover], [require] or [list] is about to record an error while another
+branch of an [or_] or [one_of], the [None] of [optional], the [~otherwise] of a
+fold, or another prefix operator or the plain operand of an [expression]
+operand can still run, the outermost such construct first runs again without
+recovery. If that run succeeds, the parse
+goes on with it and records nothing. Otherwise the construct runs once more,
+and the recovery happens there. Here the second branch reads ["ac"], so
+[recover] does not record an error:
+
+{@ocaml[
+# let errors = Parseff.Diagnostics.create () in
+  let pair a b () =
+    let _ = Parseff.char a in
+    let _ = Parseff.char b in
+    Printf.sprintf "%c%c" a b
+  in
+  let r =
+    Parseff.parse ~diagnostics:errors "ac"
+      (Parseff.or_
+         (fun () ->
+           Parseff.recover errors ~sync:(fun () -> ()) (pair 'a' 'b')
+             (fun _ -> "hole"))
+         (pair 'a' 'c'))
+  in
+  (r, Parseff.Diagnostics.length errors);;
+- : (string, Parseff.error) result * int = (Ok "ac", 0)
+]}
+
+A [commit] or [cut] before the recovery decides the construct, as without the
+collector, and so does a [cut] in a [context] around the recovery, and so does
+an earlier recovery in the same branch, also one that a loop body or a
+[capture] undid later (a case of the loop limit below). Thus
+[optional (fun () -> recover ...)] never recovers. To keep the errors of a
+branch, recover after the token that selects it, then [commit]. When the run
+without recovery reaches past the construct with a [commit] or [cut], or gives
+out a value of a [*_iter] function, the construct does not run once more: it
+fails as without the collector.
+
+A parser call inside [d] open choices around one error runs at most [2d + 1]
+times, or [3d + 1] times when the branch fails after its recovery and runs again
+without it. While a construct runs without recovery, [parse_source] keeps its input
+from the start of the construct, so recovery can need a larger
+[~backtrack_window]. With [~trace], a branch that runs again gives its events
+again. Do not wrap a recovery function in [try ... with _]: the decision
+travels as an exception, as a failure does.
+
+{b The end of a loop is not an alternative.} [many] stops where its element
+fails, and whether the input after the loop parses is not known there. Use
+[list] with [~close]. The same holds for a step of a fold after the first
+element, a recovery function in an operator parser, [capture], which returns
+[Error e] where the parse without the collector fails, and an operand after an
+infix operator: the other operators are not tried first. With [+] and [++] on
+one level, ["1++"] reads as [1 + hole] with the collector; make each operator
+token take the longest match.
+
+{b A branch that recovers and then fails runs again without recovery.} When a
+branch of [or_], [one_of] or [optional], a step of a repetition or a fold, or an
+operand of [precedence] or [expression] recovers and then fails, the construct
+removes the errors recorded in it, runs it again without recovery, and goes on
+as without the collector: the next alternative runs, or the repetition ends.
+Inside [look_ahead] and [peek_with], the recovery functions do not recover.
 
 {b [cut] and [commit] reach past a recovery.} A [cut] or [commit] inside
 [recover], [sep_by_recover] or [require] seals the enclosing frames as it does

@@ -163,8 +163,11 @@ let frame_recovery_bit = 128
 let frame_recovery = frame_barrier lor frame_recovery_bit
 let frame_recovered_bit = 256
 let frame_held_bit = 512
+let frame_step_bit = 1024
+let frame_alternative = frame_choice
+let frame_step = frame_choice lor frame_step_bit
 let frame_stride = 3
-let frame_trail_shift = 10
+let frame_trail_shift = 11
 
 type backtrack_window_error = { limit : int; oldest : int }
 
@@ -399,6 +402,8 @@ type state = {
   mutable frames : int array;
   mutable frames_top : int;
   mutable recovery_off : int;
+  mutable decided_at : int array;
+  mutable given : int;
   mutable replay_far : far array;
   mutable held_far : far array;
   mutable trail : trail;
@@ -524,6 +529,8 @@ module State = struct
       frames = [||];
       frames_top = 0;
       recovery_off = 0;
+      decided_at = [||];
+      given = 0;
       replay_far = [||];
       held_far = [||];
       trail = not_running;
@@ -782,9 +789,11 @@ module State = struct
     end else
       let slot = (i * frame_stride) + 1 in
       let flags = Array.unsafe_get t.frames slot in
-      if flags land frame_pin_bit <> 0 then
+      if flags land frame_pin_bit <> 0 then begin
+        if flags land frame_step_bit <> 0 then
+          Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
         commit_nearest_from t (i - 1) lowest
-      else if flags land frame_kind_mask <> frame_barrier then begin
+      end else if flags land frame_kind_mask <> frame_barrier then begin
         if flags land frame_recovered_bit = 0 then
           Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
         if lowest >= 0 then keep_before_advance t lowest;
@@ -856,6 +865,20 @@ module State = struct
       t.held_far.(frame)
     else
       far_none
+
+  let entry_far (t : t) target =
+    let rec go i =
+      if i >= t.frames_top then
+        t.far
+      else if
+        Array.unsafe_get t.frames ((i * frame_stride) + 1) land frame_held_bit
+        <> 0
+      then
+        t.held_far.(i)
+      else
+        go (i + 1)
+    in
+    go (target + 1)
 
   let release_far (t : t) frame =
     let slot = (frame * frame_stride) + 1 in
@@ -930,6 +953,7 @@ module State = struct
 end
 
 exception Not_in_parse_context
+exception Undecided of int * far
 
 let () =
   Printexc.register_printer (function
@@ -2878,6 +2902,94 @@ let[@inline never] without_recovery st p =
       st.recovery_off <- st.recovery_off - 1;
       raise exn
 
+let ctx_stride = 2
+let ctx_cut_bit = 1
+let ctx_delimited_bit = 2
+let ctx_start_shift = 2
+
+let undecided_frame st =
+  let target = ref (-1) in
+  let d = ref (st.ctx_top - 1) in
+  let sealing = ref false in
+  for i = st.frames_top - 1 downto 0 do
+    while !d >= 0 && Array.unsafe_get st.ctx (!d * ctx_stride) > i do
+      if Array.unsafe_get st.ctx ((!d * ctx_stride) + 1) land ctx_cut_bit <> 0
+      then
+        sealing := true;
+      decr d
+    done;
+    let flags = Array.unsafe_get st.frames ((i * frame_stride) + 1) in
+    if
+      flags land frame_kind_mask = frame_barrier
+      && flags land frame_recovery_bit = 0
+    then
+      sealing := false
+    else if
+      (not !sealing)
+      && flags
+         land (frame_kind_mask lor frame_committed_bit lor frame_step_bit
+             lor frame_recovered_bit
+              )
+         = frame_alternative
+      && (i >= Array.length st.decided_at
+         || st.decided_at.(i) <> Array.unsafe_get st.frames (i * frame_stride)
+         )
+    then
+      target := i
+  done;
+  !target
+
+let[@inline never] settle st frame far again =
+  st.far <- far_copy far;
+  restore_rewind_frame st frame;
+  let held = Array.sub st.held_far 0 (imin frame (Array.length st.held_far)) in
+  let slot = (frame * frame_stride) + 1 in
+  Array.unsafe_set st.frames slot
+    (Array.unsafe_get st.frames slot
+    land (frame_clamp_bit lor lnot ((1 lsl frame_trail_shift) - 1))
+    lor frame_last_branch lor frame_pin_bit lor frame_step_bit
+    );
+  let given = st.given in
+  let start = State.frame_pos st frame in
+  match without_recovery st again with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception Fail
+    when st.given = given
+         && Array.unsafe_get st.frames slot land frame_committed_bit = 0 -> (
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      Array.blit held 0 st.held_far 0 (Array.length held);
+      st.far <- far_copy far;
+      if frame >= Array.length st.decided_at then begin
+        let grown = Array.make (imax 8 (2 * (frame + 1))) (-1) in
+        Array.blit st.decided_at 0 grown 0 (Array.length st.decided_at);
+        st.decided_at <- grown
+      end;
+      let previous = st.decided_at.(frame) in
+      st.decided_at.(frame) <- start;
+      match again () with
+      | v ->
+          st.decided_at.(frame) <- previous;
+          v
+      | exception exn ->
+          st.decided_at.(frame) <- previous;
+          raise exn
+    )
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let[@inline never] settle_or_raise st frame exn again =
+  match exn with
+  | Undecided (i, far) when i = frame ->
+      settle st frame far again
+  | _ ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.pop_rewind_frame st frame;
+      Printexc.raise_with_backtrace exn bt
+
 let[@inline never] replay st frame p =
   restore_rewind_frame st frame;
   State.clear_recovered st frame;
@@ -2911,25 +3023,49 @@ let[@inline never] or_replay st frame left right =
       State.pop_rewind_frame st frame;
       raise exn
 
-let or_ left right () =
+let[@inline always] or_failed st frame left right =
+  if State.frame_settled st frame then
+    if State.frame_committed st frame then begin
+      State.pop_rewind_frame st frame;
+      raise_notrace Fail
+    end else
+      or_replay st frame left right
+  else
+    or_right st frame right
+
+let or_decided left right () =
   let st = get_state () in
-  let frame = State.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_step in
   match left () with
   | v ->
       State.pop_rewind_frame st frame;
       v
   | exception Fail ->
-      if State.frame_settled st frame then
-        if State.frame_committed st frame then begin
-          State.pop_rewind_frame st frame;
-          raise_notrace Fail
-        end else
-          or_replay st frame left right
-      else
-        or_right st frame right
+      or_failed st frame left right
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn
+
+let[@inline never] or_undecided st frame exn left right =
+  match exn with
+  | Undecided (i, far) when i = frame ->
+      settle st frame far (or_decided left right)
+  | _ ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.pop_rewind_frame st frame;
+      Printexc.raise_with_backtrace exn bt
+
+let or_ left right () =
+  let st = get_state () in
+  let frame = State.push_rewind_frame st frame_alternative in
+  match left () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception Fail ->
+      or_failed st frame left right
+  | exception exn ->
+      or_undecided st frame exn left right
 
 let[@inline never] far_merge st saved =
   let t = st.far in
@@ -2956,6 +3092,11 @@ let[@inline never] far_merge st saved =
     end;
     st.far <- saved
   end
+
+let allow_recovery st =
+  let target = undecided_frame st in
+  if target >= 0 then
+    raise_notrace (Undecided (target, State.entry_far st target))
 
 let mark_recovered st base =
   st.replay_far <- State.grown st.replay_far st.frames_top;
@@ -3010,11 +3151,6 @@ let skip_to target =
   if target < st.pos || target > st.input_len then
     invalid_arg "Parseff.skip_to: target is not in the input after the position";
   st.pos <- target
-
-let ctx_stride = 2
-let ctx_cut_bit = 1
-let ctx_delimited_bit = 2
-let ctx_start_shift = 2
 
 let[@inline never] ctx_grow st =
   let old = st.ctx in
@@ -3307,6 +3443,7 @@ let check_sealable st name =
       )
 
 let give st f v =
+  st.given <- st.given + 1;
   ignore (State.seal_frames ~force:true st ~captures:true ~floor:0 : bool);
   State.keep_effects_so_far st;
   trace_emit st f v
@@ -3473,7 +3610,7 @@ let[@inline never] no_first_element st frame otherwise =
 let rec fold_left_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
     'a =
   let st = get_state () in
-  let frame = State.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_alternative in
   match p () with
   | first ->
       State.pop_rewind_frame st frame;
@@ -3483,8 +3620,7 @@ let rec fold_left_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
   | exception Fail ->
       no_first_element st frame otherwise
   | exception exn ->
-      State.pop_rewind_frame st frame;
-      raise exn
+      settle_or_raise st frame exn (fun () -> fold_left_or p op otherwise)
 
 let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
@@ -3501,7 +3637,7 @@ let fold_right_limit =
 
 let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
     : 'a =
-  let frame = State.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_step in
   if frame >= fold_right_limit then begin
     State.pop_rewind_frame st frame;
     raise
@@ -3542,7 +3678,7 @@ let fold_right_one_or_more p op () =
 let rec fold_right_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
     'a =
   let st = get_state () in
-  let frame = State.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_alternative in
   match p () with
   | first ->
       State.pop_rewind_frame st frame;
@@ -3552,8 +3688,7 @@ let rec fold_right_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
   | exception Fail ->
       no_first_element st frame otherwise
   | exception exn ->
-      State.pop_rewind_frame st frame;
-      raise exn
+      settle_or_raise st frame exn (fun () -> fold_right_or p op otherwise)
 
 let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
     =
@@ -4105,7 +4240,7 @@ let rec expr_has_prefix = function
       expr_has_prefix_op ops || expr_has_prefix rest
 
 let rec expr_operand st t operand () =
-  let frame = State.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_alternative in
   match expr_prefix st t operand frame st.pos 0 t.levels with
   | build, value -> (
       State.pop_rewind_frame st frame;
@@ -4123,8 +4258,7 @@ let rec expr_operand st t operand () =
       restore_rewind_frame st frame;
       operand ()
   | exception exn ->
-      State.pop_rewind_frame st frame;
-      raise exn
+      settle_or_raise st frame exn (expr_operand st t operand)
 
 and expr_prefix st t operand frame start level = function
   | [] ->
@@ -4181,7 +4315,7 @@ let expression ~operand table () =
 
 let rec optional (p : unit -> 'a) () : 'a option =
   let st = get_state () in
-  let frame = State.push_rewind_frame st frame_choice in
+  let frame = State.push_rewind_frame st frame_alternative in
   match p () with
   | v ->
       State.pop_rewind_frame st frame;
@@ -4199,8 +4333,7 @@ let rec optional (p : unit -> 'a) () : 'a option =
         None
       end
   | exception exn ->
-      State.pop_rewind_frame st frame;
-      raise exn
+      settle_or_raise st frame exn (optional p)
 
 let count n (p : unit -> 'a) () : 'a list =
   let rec loop acc i =
@@ -4253,7 +4386,10 @@ let one_of_last st frame p =
       State.pop_rewind_frame st frame;
       raise exn
 
-let rec one_of_loop st frame p rest =
+let rec one_of_run st p rest =
+  one_of_loop st (State.push_rewind_frame st frame_alternative) p rest
+
+and one_of_loop st frame p rest =
   match p () with
   | v ->
       State.pop_rewind_frame st frame;
@@ -4279,8 +4415,7 @@ let rec one_of_loop st frame p rest =
           raise_notrace Fail
     )
   | exception exn ->
-      State.pop_rewind_frame st frame;
-      raise exn
+      settle_or_raise st frame exn (fun () -> one_of_run st p rest)
 
 let one_of parsers () =
   match parsers with
@@ -4290,9 +4425,7 @@ let one_of parsers () =
   | [ p ] ->
       p ()
   | p :: rest ->
-      let st = get_state () in
-      let frame = State.push_rewind_frame st frame_choice in
-      one_of_loop st frame p rest
+      one_of_run (get_state ()) p rest
 
 let one_of_labeled labeled_parsers () =
   one_of (List.map (fun (label, p) () -> expect label p) labeled_parsers) ()
@@ -6361,7 +6494,14 @@ let recovering_on st ~release ~outer ~record ~progress errors ~sync parser hole
     fill st ~keep_from:(State.frame_pos st frame) (pos + 1)
     || pos < st.input_len
   in
+  let leave exn =
+    State.pop_rewind_frame st frame;
+    far_merge st (State.held_of st frame);
+    raise exn
+  in
   let fill_hole e =
+    let target = undecided_frame st in
+    if target >= 0 then leave (Undecided (target, State.entry_far st target));
     let inner =
       match record with None -> [] | Some _ -> removed_entries st frame errors
     in
@@ -6388,11 +6528,6 @@ let recovering_on st ~release ~outer ~record ~progress errors ~sync parser hole
     mark_recovered st base;
     captured st back e;
     v
-  in
-  let leave exn =
-    State.pop_rewind_frame st frame;
-    far_merge st (State.held_of st frame);
-    raise exn
   in
   let caught exn pos error =
     match
@@ -6542,6 +6677,12 @@ let require errors parser missing =
         far_merge st (State.held_of st frame);
         v
     | exception Fail when failed_at st start ->
+        let target = undecided_frame st in
+        if target >= 0 then begin
+          let far = State.entry_far st target in
+          State.pop_rewind_frame st frame;
+          raise_notrace (Undecided (target, far))
+        end;
         let saved = State.held_of st frame in
         if saved.pos = start then begin
           let own = st.far in
@@ -6649,7 +6790,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
     let rec steps acc =
       let start = st.pos in
       if closed () then
-        let frame = State.push_rewind_frame st frame_choice in
+        let frame = State.push_rewind_frame st frame_step in
         match plain_step ~expected:false frame with
         | None ->
             List.rev acc
@@ -6664,7 +6805,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
             )
       else
         let recorded = st.diag_len in
-        let frame = State.push_rewind_frame st frame_choice in
+        let frame = State.push_rewind_frame st frame_step in
         match attempt frame item with
         | None ->
             List.rev acc
@@ -6678,6 +6819,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
               List.rev acc
             ) else begin
               State.pop_rewind_frame st frame;
+              allow_recovery st;
               sync ();
               if st.pos = start && have st 1 then skip_char st;
               mark_recovered st (far_copy st.far);
@@ -6686,7 +6828,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
     in
     let rec first s =
       if closed () then begin
-        let frame = State.push_rewind_frame st frame_choice in
+        let frame = State.push_rewind_frame st frame_step in
         match plain_step ~expected:true frame with
         | Some v ->
             State.pop_rewind_frame st frame;
@@ -6694,7 +6836,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
         | None ->
             []
       end else
-        let frame = State.push_rewind_frame st frame_choice in
+        let frame = State.push_rewind_frame st frame_step in
         match attempt frame item with
         | None ->
             []
@@ -6704,7 +6846,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
     and after s acc =
       let at = st.pos in
       let saved = far_from st at in
-      let frame = State.push_rewind_frame st frame_choice in
+      let frame = State.push_rewind_frame st frame_step in
       if st.far == far_none then State.hold_far st frame saved;
       match optional s () with
       | Some _ ->
@@ -6744,6 +6886,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
                   List.rev acc
                 ) else (
                   State.pop_rewind_frame st frame;
+                  allow_recovery st;
                   mark_recovered st (far_copy st.far);
                   List.rev (v :: acc)
                 )
@@ -6766,6 +6909,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
           far_back st saved;
           raise exn
     and missing_separator s acc at e =
+      allow_recovery st;
       let base = far_copy st.far in
       let at_start = ref false in
       let element () =

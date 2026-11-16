@@ -679,7 +679,7 @@ let test_list_in_or_branch () =
     Alcotest.(check (pair string errs)) input expected (run input)
   in
   check "[1, 2]" ("Ok 1,2", []);
-  check "[a]" ("Ok _", [ (1, "expected integer, found 'a'") ])
+  check "[a]" ("Ok letter", [])
 
 exception Loop
 
@@ -1794,9 +1794,9 @@ let test_commit_never_reaches_the_caller () =
           )
         in
         let ok r = String.length r > 13 && String.sub r 0 12 = "f got 0; Ok " in
+        let a = alone false in
         List.iter
           (fun collector ->
-            let a = alone collector in
             let expected =
               if ok a then
                 a
@@ -1932,7 +1932,7 @@ let () =
           test_case "require: the furthest failure decides" `Quick
             test_require_furthest_failure;
           test_case "recover inside an element" `Quick test_recover_in_element;
-          test_case "rule A not built: list in a branch of or_" `Quick
+          test_case "rule A: list in a branch of or_" `Quick
             test_list_in_or_branch;
           test_case "forward progress on random input" `Quick test_progress;
           test_case "forward progress: sync stops before an element" `Quick

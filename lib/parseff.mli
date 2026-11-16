@@ -36,9 +36,8 @@
     stanza to find the unstable parts that you use, and write
     [[@@@alert "-unstable"]] at the top of a file to silence it there. The
     standard library uses the same alert, for example on [Domain]. The
-    [~at_most] arguments of {!val:take_while} and {!val:many}, the
-    [Limit_exceeded] error and the [Captured] trace event are unstable too, but
-    have no alert.
+    [~at_most] arguments of {!val:take_while} and {!val:many} and the
+    [Limit_exceeded] error are unstable too, but have no alert.
 
     A 1.x release can add events to {!type:trace_event} and fields to some
     records; {!type:error_kind} says which types are final until 2.0.
@@ -348,8 +347,7 @@ type trace_event +=
             returns [Error error]. [recover] and [sep_by_recover] give it after
             [sync], [~record] and [hole] return, so the events of [sync] and
             [hole] come first. When one of them fails, the failure was not
-            recovered and no event is given. Unstable: this event can change in
-            a 1.x release. *)
+            recovered and no event is given. *)
 
 val print_trace : Format.formatter -> trace_event -> unit
 (** [print_trace ppf] is a [trace] callback that prints each event on its own
@@ -983,42 +981,89 @@ val recover :
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-[@@alert unstable "This value can change in a 1.x release."]
-(** Unstable: this function can change in a 1.x release.
-
-    [recover errors ~sync parser hole] runs [parser] with {!capture}. If
+(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
     [parser] fails with the error [e], [recover] records [e] in [errors], calls
     [sync ()] to skip to a point where parsing can continue, and returns
     [hole e].
 
-    A recovery does not decide the constructs around it. When [recover],
-    {!sep_by_recover}, {!require} or {!list} records an error and goes on, and a
-    branch of an enclosing {!or_}, {!one_of} or {!optional}, a step of a
-    repetition or a fold, or an operand of {!precedence} or {!expression} then
-    fails, that construct removes the errors recorded in the branch and runs the
-    branch again without recovery. It then goes on as without the collector: it
-    tries the next alternative, or ends the repetition, so input that another
-    alternative accepts is not reported as an error. The next alternative runs
-    with recovery. The rest of a repetition, a fold or an expression runs
-    without it. A {!commit} or {!cut} before the recovery still decides the
-    construct. One after the recovery does not, as the run without recovery may
-    not reach it. A branch that recovers and then fails thus runs twice. To keep
-    the errors of a branch, call recovery after the token that selects it, then
-    {!commit}, or around the whole {!or_} or {!one_of}. Inside {!look_ahead},
+    A recovery does not take the place of an alternative. When [recover],
+    {!sep_by_recover}, {!require} or {!list} is about to record an error while
+    an alternative can still run, the outermost construct that has one first
+    runs again from its start without recovery. These alternatives are the next
+    branches of {!or_} and {!one_of}, the [None] of {!optional}, the
+    [~otherwise] of {!fold_left} and {!fold_right} before the first element, and
+    the other prefix operators and the plain operand of an {!expression}
+    operand. If that run succeeds, the parse goes on with it and nothing is
+    recorded. If it fails, the construct runs once more with recovery, and the
+    error is recorded there. It does not run once more when the run without
+    recovery reached past the construct with a {!commit} or {!cut}, or gave out
+    a value of a [*_iter] function such as {!many_iter}: then the construct
+    fails as without the collector. A {!commit} or {!cut} that reached the
+    construct before the recovery decides it, as without the collector, and so
+    does a {!cut} in a {!context} that encloses the recovery but not the
+    construct, as the failing context would seal the construct. A choice in
+    which a recovery already happened is decided too: while that recovery is
+    still part of the parse, the parse without the collector fails in that
+    branch. A recovery that a loop body or a {!capture} undid still decides the
+    choice; this is a case of the loop limit below. Thus
+    [optional (fun () -> recover ...)] never recovers.
+
+    Each open choice around the recovery runs its branch once without recovery
+    and once more with it, so a parser call inside [d] such choices around one
+    error runs at most [2d + 1] times. When a branch then fails after its
+    recovery and runs again without it, as described below, the bound is
+    [3d + 1]. The whole parse does at most quadratic work in [d]. While a
+    construct runs without recovery, {!parse_source} keeps the input from the
+    start of the construct, so a recovery inside a long construct can need a
+    larger [~backtrack_window] than the parse without the collector. With
+    [~trace], a branch that runs again gives its events again, also on valid
+    input.
+
+    The decision travels as an exception through the parsers of the branch, as a
+    failure does. A [try ... with _] around a recovery function catches it and
+    breaks the parse: match only your own exceptions.
+
+    When a recovery happened and a branch of an enclosing {!or_}, {!one_of} or
+    {!optional}, a step of a repetition or a fold, or an operand of
+    {!precedence} or {!expression} then fails, that construct removes the errors
+    recorded in the branch and runs the branch again without recovery. It then
+    goes on as without the collector: it tries the next alternative, or ends the
+    repetition. The next alternative runs with recovery. The rest of a
+    repetition, a fold or an expression runs without it. A {!commit} or {!cut}
+    after the recovery does not decide the construct, as the run without
+    recovery may not reach it. To keep the errors of a branch, call recovery
+    after the token that selects it, then {!commit}. Inside {!look_ahead},
     {!peek_with} and an operator lookup of {!precedence}, the recovery functions
     do not recover: they run as without the collector.
 
-    A loop is a choice too: {!many} stops where its element fails. In
+    The end of a loop is not an alternative: {!many} stops where its element
+    fails, and whether the input after the loop parses is not known there. In
     [many (fun () -> recover errors ~sync statement hole)], [recover] also
     recovers at the token after the last statement, such as the [}] of a block,
     and [sync] or the forced progress skips it. Use {!list} with [~close] for a
-    loop, or make the loop stop at that token before [recover] runs.
+    loop, or make the loop stop at that token before [recover] runs. The same
+    holds for a step of a fold after the first element, a {!capture}, which
+    returns [Error e] where the parse without the collector fails, a recovery
+    function in an operator parser of {!precedence} or {!expression}, and an
+    operand after an infix operator: the other operators of the table are not
+    tried before the operand recovers. With [+] and [++] on one level,
+    {!expression} reads ["1++"] as [1 + hole] with the collector. Make an
+    operator token take the longest match, so that [+] fails before [++].
 
     A {!commit} or {!cut} in [parser] reaches the frames outside [recover], as
     without the collector, and [recover] still goes back to its start when it
     recovers. With these rules, a parse with the collector that returns [Ok v]
-    and records no error returns [Ok v] without the collector. Only a {!capture}
-    whose [Error e] is dropped without being recorded can hide a difference.
+    and records no error returns [Ok v] without the collector, except in three
+    cases: a {!capture} whose [Error e] is dropped without being recorded; a
+    step of {!fold_right}, {!precedence} or {!expression} that consumes nothing,
+    where an insertion of {!require}, or an empty hole of {!sep_by_recover} or
+    of {!list} with [~sep], in the step is dropped with the step; and a {!list}
+    whose separator calls {!commit} or {!cut}, since [list] reads the separator
+    as optional. The other way round, a parse without the collector that returns
+    [Ok v] returns [Ok v] and records no error with it, unless a recovery
+    function is in one of the places of the previous paragraph, or the parse
+    with the collector exceeds the [~backtrack_window] of {!parse_source}, as
+    said above.
 
     The errors that [parser] recorded in [errors] before it failed are removed,
     as with {!capture}: only [e] stays. To keep them, give [~record].
@@ -1094,10 +1139,7 @@ val sep_by_recover :
   (error -> 'a) ->
   unit ->
   'a list
-[@@alert unstable "This value can change in a 1.x release."]
-(** Unstable: this function can change in a 1.x release.
-
-    [sep_by_recover errors ~sync element separator hole] parses one or more
+(** [sep_by_recover errors ~sync element separator hole] parses one or more
     occurrences of [element] with [separator] between each pair, as {!sep_by}
     does, and recovers from each [element] that fails. For a failure [e], it
     records [e] in [errors], goes back to the start of the element, calls
@@ -1180,7 +1222,6 @@ val sep_by_recover :
     ]} *)
 
 val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
-[@@alert unstable "This value can change in a 1.x release."]
 (** [require errors parser missing] runs [parser]. If the furthest failure of
     [parser] is at the position where [require] started, [require] records the
     error [e] in [errors], goes back to that position and returns [missing e]:
@@ -1219,8 +1260,7 @@ val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
 
     [errors] must be the collector given to the runner as [~diagnostics];
     otherwise [require] calls [parser] directly. A traced parse gets a
-    [Captured] event for each insertion. Unstable: this function can change in a
-    1.x release.
+    [Captured] event for each insertion.
 
     Example:
     {@ocaml[
@@ -1275,7 +1315,6 @@ val list :
   (error -> 'a) ->
   unit ->
   'a list
-[@@alert unstable "This value can change in a 1.x release."]
 (** [list errors ~close ~sync element hole ()] parses [element] again and again,
     as {!many} does, and recovers from each [element] that fails, except where
     [close ()] is [true] or the input ends. It is one loop for a list of
@@ -1353,12 +1392,14 @@ val list :
     without [~sep], {!sep_by} [element] [sep] with it, and with [~trailing:true]
     also an optional separator after a list that is not empty. [close] is not
     used then. For valid input, when [close] is [true] where the plain parser
-    ends the list, [list] with the collector gives the same list as the plain
-    parser, and records nothing.
+    ends the list, and with [~sep] the separator consumes input and fails there,
+    [list] with the collector gives the same list as the plain parser, and
+    records nothing. A separator that can succeed on no input, or that reads the
+    closing token, lets [list] try an element where {!sep_by} ends.
 
     As with {!look_ahead} and {!or_}, [close] and an element that runs where
     [close] is [true] or at the end of the input can give trace events for work
-    that is undone. Unstable: this function can change in a 1.x release.
+    that is undone.
 
     Example:
     {@ocaml[
@@ -1411,10 +1452,7 @@ val list :
 
 val skip_nested :
   ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit -> unit
-[@@alert unstable "This value can change in a 1.x release."]
-(** Unstable: this function can change in a 1.x release.
-
-    [skip_nested pairs stop ()] skips input up to the end of a broken list
+(** [skip_nested pairs stop ()] skips input up to the end of a broken list
     element. It is made for the [~sync] of {!sep_by_recover} and {!recover}:
     [~sync:(skip_nested pairs stop)].
 
@@ -1675,7 +1713,8 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
     matches. Fails if [parser] doesn't succeed enough times.
 
     The loop also stops after an iteration that consumes no input, and that
-    iteration's result is dropped.
+    iteration's result is dropped. A recovery function in [parser] can recover
+    where [many] would stop: see {!recover} for this limit and for {!list}.
 
     When [~at_most] is specified, [many] returns at most that many results.
     After [at_most] results, it runs [parser] once more. When that run succeeds
