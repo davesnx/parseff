@@ -263,6 +263,49 @@ let test_replay_error () =
     (fun d () -> one_of [ hole_then_xyz d; (fun () -> consume "q") ] ())
     ~plain:err
 
+let test_missing_separator_error () =
+  let p d () =
+    let l =
+      list
+        ~sep:(fun () -> ignore (char ','))
+        d
+        ~close:(fun () -> peek_char () = Some ']')
+        ~sync:ignore
+        (fun () ->
+          let a = char 'a' in
+          let b = char 'b' in
+          Printf.sprintf "%c%c" a b
+        )
+        (fun _ -> "H")
+        ()
+    in
+    ignore (char ']');
+    String.concat ";" l
+  in
+  same "after one element" "aba" p
+    ~plain:"Error at 2: expected ',' or ']', found 'a'";
+  same "after two elements" "ab,aba" p
+    ~plain:"Error at 5: expected ',' or ']', found 'a'"
+
+let test_list_replay_without_recovery () =
+  same "list element with a nested require" "zx"
+    (fun d () ->
+      let l =
+        list d
+          ~close:(fun () -> false)
+          ~sync:ignore
+          (fun () ->
+            let h = require d (fun () -> consume "ab") (fun _ -> "M") in
+            let s = consume "zx" in
+            h ^ s ^ String.make 1 (char ';')
+          )
+          (fun _ -> "L")
+          ()
+      in
+      String.concat "," l ^ consume "zx"
+    )
+    ~plain:"Ok zx"
+
 let test_seal_after_recovery () =
   check "a later failure after a recovery" "axq"
     (fun d () ->
@@ -784,6 +827,20 @@ let rec has_list = function
 
 let error_fields e = (e.range, render_error e)
 
+let expected_items e =
+  match e.kind with Expected { items = x, xs; _ } -> x :: xs | _ -> []
+
+let list_drop (c : error) (p : error) =
+  match p.kind with
+  | Expected _ ->
+      c.range.start < p.range.start
+      || c.range.start = p.range.start
+         && List.for_all
+              (fun x -> List.mem x (expected_items p))
+              (expected_items c)
+  | _ ->
+      true
+
 let show_outcome = function
   | Ok v, n ->
       Printf.sprintf "Ok %S with %d diagnostics" v n
@@ -809,7 +866,8 @@ let sound g input =
       mismatch "Ok with no diagnostic on input the plain parser rejects" g input
         plain coll
   | (Error c, 0), (Error p, _)
-    when (not (has_list g)) && error_fields c <> error_fields p ->
+    when error_fields c <> error_fields p && not (has_list g && list_drop c p)
+    ->
       mismatch "Error with no diagnostic differs from the plain Error" g input
         plain coll
   | _ ->
@@ -830,6 +888,7 @@ let test_sound_cases () =
   List.iter
     (fun (g, input) -> sound g input)
     [
+      (List (Seq (Chr 'b', Chr 'a'), true, true, None), "bab");
       ( Seq
           ( List
               ( List
@@ -1092,6 +1151,10 @@ let () =
           Alcotest.test_case "a recovered branch that fails runs again" `Quick
             test_replay_without_recovery;
           Alcotest.test_case "the error of a re-run" `Quick test_replay_error;
+          Alcotest.test_case "the error after a missing separator" `Quick
+            test_missing_separator_error;
+          Alcotest.test_case "a list step runs again without recovery" `Quick
+            test_list_replay_without_recovery;
           Alcotest.test_case "a loop of statements with close" `Quick
             test_loop_with_close;
           Alcotest.test_case "list: an element cut short at the end" `Quick

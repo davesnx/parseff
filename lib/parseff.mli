@@ -1288,10 +1288,12 @@ val list :
     it were [true]. Where [close] is [true], [element] runs without recovery, as
     in {!many}: also the recovery functions inside it run as without the
     collector. A value that consumed input is kept and the list goes on. An
-    element that fails or consumes nothing ends the list. After a {!commit} or a
-    {!cut} in [element], or after {!many_iter} or another [*_iter] function in
-    it gave out a value, [list] does not go back: the failure is an error of the
-    whole parse, as in {!many}.
+    element that fails or consumes nothing ends the list. Unlike {!many}, the
+    error then names only what follows the list, such as the closing token, not
+    what [element] expected. After a {!commit} or a {!cut} in [element], or
+    after {!many_iter} or another [*_iter] function in it gave out a value,
+    [list] does not go back: the failure is an error of the whole parse, as in
+    {!many}.
 
     When [element] fails with the error [e], [list] records [e], calls [sync ()]
     and puts [hole e] in the list, as {!recover} does. [~release], [~outer] and
@@ -1333,10 +1335,11 @@ val list :
       reports the error. The element after a missing separator runs once, under
       recovery, as any element. A {!commit} or {!cut} in it stops at [list],
       since {!sep_by} would not run it. When it fails at the end of the input,
-      the list ends before it with no error, as {!sep_by} ends where its
-      separator fails. The error of the separator goes through [~record], with
-      no inner diagnostics. It is recorded, and its [Captured] event is given,
-      after those of that element, and only when that step succeeds.
+      the list ends before it with no error, and the error is the one of the
+      separator, as {!sep_by} ends where its separator fails. The error of the
+      separator goes through [~record], with no inner diagnostics. It is
+      recorded, and its [Captured] event is given, after those of that element,
+      and only when that step succeeds.
 
     To find the next element when a separator is missing, [element] and [sep]
     must skip the whitespace after them, not before.

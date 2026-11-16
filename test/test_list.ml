@@ -832,12 +832,14 @@ let test_failed_step_leaves_nothing () =
   let d = Diagnostics.create () in
   let r = parse ~trace ~diagnostics:d "[1 (2" (paren_list d) in
   Alcotest.(check string)
-    "value" "Error at 5: expected ')', found end of input"
+    "value" "Error at 3: expected end of input, found '('"
     (show_result (fun _ -> "") r);
   Alcotest.check errs "the list ends before the element, as sep_by does"
-    [ (3, "expected ']', found '('") ]
+    [ (3, "expected ',' or ']', found '('") ]
     (entries d);
-  Alcotest.check errs "one event" [ (3, "expected ']', found '('") ] !events;
+  Alcotest.check errs "one event"
+    [ (3, "expected ',' or ']', found '('") ]
+    !events;
   let d = Diagnostics.create () in
   let r =
     parse_source ~backtrack_window:3 ~diagnostics:d

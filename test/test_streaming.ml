@@ -1432,23 +1432,24 @@ let test_regex_optional_tail () =
 
 let test_regex_empty_match () =
   List.iter
-    (fun input ->
+    (fun (input, stream) ->
       check_window_or_parse "[0-9]*" input (fun () ->
           [ Parseff.match_regex regex_digits ]
       );
       Alcotest.(check (result (list string) (pair int string)))
-        ("large window " ^ input)
-        (norm_ignoring_found
-           (Parseff.parse input (fun () -> [ Parseff.match_regex regex_digits ]))
-        )
-        (norm_ignoring_found
+        ("1-byte reads " ^ input) stream
+        (norm
            (Parseff.parse_source (chunked_source ~chunk_size:1 input) (fun () ->
                 [ Parseff.match_regex regex_digits ]
             )
            )
         )
     )
-    [ ""; "123"; "abc" ]
+    [
+      ("", Ok [ "" ]);
+      ("123", Ok [ "123" ]);
+      ("abc", Error (0, "Expected expected end of input, found 'a'"));
+    ]
 
 let test_regex_in_or_and_many () =
   let or_parser () =
