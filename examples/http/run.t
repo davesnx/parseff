@@ -229,6 +229,10 @@ request with an obs-fold is an error:
   HTTP/1.1 200 OK
     X-Long: a b c
     Content-Length: 0
+  $ printf 'HTTP/1.1 200 OK\r\nContent-Length:\r\n 2\r\n\r\nhi' | ./main.exe response
+  HTTP/1.1 200 OK
+    Content-Length: 2
+    body: "hi"
   $ printf 'HTTP/1.1 200 OK\r\n b\r\n\r\n' | ./main.exe response
   error 400 Bad Request at byte 17: expected field name, found ' '
   $ printf 'GET / HTTP/1.1\r\nX-Long: a\r\n  b\r\n\r\n' | ./main.exe requests
