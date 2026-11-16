@@ -116,10 +116,10 @@ hexadecimal, a chunk size with too many digits, and a chunk cut short:
   $ printf '5\r\nhel' | ./main.exe chunked
   error 400 Bad Request at byte 3: expected 5 bytes, found only 3 (end of input)
 
-A status code that is not a number:
+A status code must have 3 digits, the first one not 0:
 
   $ printf 'HTTP/1.1 20x OK\r\n\r\n' | ./main.exe response
-  error 400 Bad Request at byte 11: expected digit, found 'x'
+  error 400 Bad Request at byte 11: invalid status code: "20"
 
 Chunk extensions must have the form ;name or ;name=value, with a token or a
 quoted string as the value. Other bytes before the CRLF, and a bare LF, are
@@ -199,3 +199,44 @@ of the request:
   HTTP/1.1 407 Proxy Authentication Required
     Content-Length: 2
     body: "no"
+
+One empty line before a request line is ignored, a second one is an error
+(RFC 9112 section 2.2):
+
+  $ printf '\r\nGET / HTTP/1.1\r\n\r\n' | ./main.exe requests
+  GET / HTTP/1.1
+  $ printf '\r\n\r\nGET / HTTP/1.1\r\n\r\n' | ./main.exe requests
+  error 400 Bad Request at byte 2: expected method, found '\r'
+
+Empty lines before a response are discarded. Only HTTP/1.x responses are
+accepted, and the status code has exactly 3 digits:
+
+  $ printf '\r\n\r\nHTTP/1.1 204 No Content\r\n\r\n' | ./main.exe response
+  HTTP/1.1 204 No Content
+  $ printf 'HTTP/2.0 200 OK\r\n\r\n' | ./main.exe response
+  error 400 Bad Request at byte 8: unsupported HTTP version: 2.0
+  $ printf 'HTTP/1.1 099 Early\r\n\r\n' | ./main.exe response
+  error 400 Bad Request at byte 12: invalid status code: "099"
+  $ printf 'HTTP/1.1 2000 OK\r\n\r\n' | ./main.exe response
+  error 400 Bad Request at byte 13: status code too long: "2000"
+  $ printf 'HTTP/1.1 200\r\n\r\n' | ./main.exe response
+  error 400 Bad Request at byte 12: expected ' ', found '\r'
+
+A response replaces each obs-fold with one space (RFC 9112 section 5.2). A
+request with an obs-fold is an error:
+
+  $ printf 'HTTP/1.1 200 OK\r\nX-Long: a\r\n  b\r\n\tc \r\nContent-Length: 0\r\n\r\n' | ./main.exe response
+  HTTP/1.1 200 OK
+    X-Long: a b c
+    Content-Length: 0
+  $ printf 'HTTP/1.1 200 OK\r\n b\r\n\r\n' | ./main.exe response
+  error 400 Bad Request at byte 17: expected field name, found ' '
+  $ printf 'GET / HTTP/1.1\r\nX-Long: a\r\n  b\r\n\r\n' | ./main.exe requests
+  error 400 Bad Request at byte 27: expected field name or "\r\n", found ' '
+
+Leading zeros of a chunk size do not count towards its 15 digits:
+
+  $ printf '000000000000000000005\r\nhello\r\n00\r\n\r\n' | ./main.exe chunked
+  body: "hello"
+  $ printf '0001234567890abcdef0\r\nx\r\n' | ./main.exe chunked
+  error 400 Bad Request at byte 3: limit of 15 exceeded

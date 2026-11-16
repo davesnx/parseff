@@ -1,7 +1,6 @@
 ## Unreleased
 
-- **Add `charset`, `take_while_set` and `skip_while_set`.** `charset f` builds a 256-byte table once; `take_while_set` and `skip_while_set` scan with a table lookup in the loop, not a function call for each byte, with the same result, position and errors as `take_while` and `skip_while`. Without flambda, a scan of 2,846 bytes runs 56,957 instructions, down from 85,423 with `take_while` (#91).
-- **A parse given in several reads costs less.** When a read drops input, Parseff counts the characters of the cut line 8 ASCII bytes at a time. A read no longer writes the parse state into the domain slot: suspending the parse clears a flag, and resuming it writes the state only when another parse ran in between. A 462-byte head in 2 chunks runs 21,886 instructions with `Source.of_chunks`, down from 25,503, and 23,107 with `feed`, down from 26,687. A parse in one chunk runs about 1.4% more instructions (#92).
+- **A parse given in several reads costs less.** When a read drops input, Parseff counts the characters of the cut line 8 ASCII bytes at a time. A read no longer writes the parse state into the domain slot: suspending the parse clears a flag, and resuming it writes the state only when another parse ran in between. A 462-byte head in 2 chunks runs 20,591 instructions with `Source.of_chunks`, down from 24,281, and 22,136 with `feed`, down from 25,741; in 32 chunks, 36,701 down from 46,516 and 49,623 down from 53,735 (OCaml 5.3.0 without flambda). The flag costs a check in each parser call that reads the state: a parse in one chunk runs 1.6 % more instructions, 16,520 for 16,264, and 2.2 % more with flambda, 12,166 for 11,900 (#92).
 
 ## 0.6.0
 

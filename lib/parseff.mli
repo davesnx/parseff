@@ -565,28 +565,6 @@ val skip_while : (char -> bool) -> unit
     let skip_spaces () = skip_while (fun c -> c = ' ')
     ]} *)
 
-type charset
-(** A set of bytes, for {!take_while_set} and {!skip_while_set}. *)
-
-val charset : (char -> bool) -> charset
-(** [charset f] is the set of the bytes for which [f] returns [true]. It calls
-    [f] once for each of the 256 bytes. Build a set once, outside the parser.
-
-    Example:
-    {@ocaml[
-    let decimal = charset (fun c -> c >= '0' && c <= '9')
-    let decimal_digits () = take_while_set ~at_least:1 decimal
-    ]} *)
-
-val take_while_set : ?at_least:int -> ?label:string -> charset -> string
-(** [take_while_set set] is {!take_while} for the bytes in [set], with the same
-    result, position and errors. It tests each byte with a table lookup in the
-    scan loop, not with a function call, so it is faster without flambda. *)
-
-val skip_while_set : charset -> unit
-(** [skip_while_set set] is {!skip_while} for the bytes in [set], without a
-    function call for each byte. *)
-
 val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
 (** [sep_by_take ~ws ~sep is_value_char] parses a list of values separated by
     [sep]. Characters where [ws] returns [true] are skipped around each
