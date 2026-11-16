@@ -542,17 +542,27 @@ module State = struct
 
   external dls_state : unit -> Obj.t array = "%dls_get"
 
-  type slot = { mutable dls : Obj.t array; mutable state : t; peer : slot }
+  type slot = {
+    mutable dls : Obj.t array;
+    mutable state : t;
+    mutable live : bool;
+    peer : slot;
+  }
 
   let key : slot Domain.DLS.key =
     Domain.DLS.new_key (fun () ->
-        let rec active = { dls = [| Obj.repr 0 |]; state = none; peer = idle }
-        and idle = { dls = [| Obj.repr 0 |]; state = none; peer = active } in
+        let rec active =
+          { dls = [| Obj.repr 0 |]; state = none; live = false; peer = idle }
+        and idle =
+          { dls = [| Obj.repr 0 |]; state = none; live = false; peer = active }
+        in
         active
     )
 
   let cache : slot ref =
-    let rec unset = { dls = [| Obj.repr 0 |]; state = none; peer = unset } in
+    let rec unset =
+      { dls = [| Obj.repr 0 |]; state = none; live = false; peer = unset }
+    in
     ref unset
 
   let[@inline never] refresh () =
@@ -571,16 +581,29 @@ module State = struct
       refresh ()
 
   let[@inline always] activate slot (t : t) =
-    slot.state <- t;
+    if slot.state != t then slot.state <- t;
+    slot.live <- true;
     if !cache != slot then cache := slot
 
   let deactivate slot =
     slot.state <- none;
+    slot.live <- false;
     cache := slot.peer
 
   let install (t : t) = activate (own_slot ()) t
-  let current () = (own_slot ()).state
-  let suspend () = deactivate (own_slot ())
+
+  let current () =
+    let slot = own_slot () in
+    if slot.live then
+      slot.state
+    else
+      none
+
+  let suspend () = (own_slot ()).live <- false
+
+  let release () =
+    let slot = own_slot () in
+    if not slot.live then slot.state <- none
   let resume (t : t) = install t
 
   let leave (t : t) (previous : t) =
@@ -595,7 +618,12 @@ module State = struct
 
   let enter (t : t) =
     let slot = own_slot () in
-    let previous = slot.state in
+    let previous =
+      if slot.live then
+        slot.state
+      else
+        none
+    in
     activate slot t;
     t.trail <- running_empty;
     previous
@@ -946,19 +974,19 @@ let () =
 let[@inline never] get_state_slow () =
   let slot = State.refresh () in
   let st = slot.state in
-  if st == State.none then raise Not_in_parse_context;
+  if st == State.none || not slot.live then raise Not_in_parse_context;
   State.cache := slot;
   st
 
 let[@inline always] get_state () =
   let slot = !State.cache in
-  if slot.dls != State.dls_state () then
+  if slot.dls != State.dls_state () || not slot.live then
     get_state_slow ()
   else
     slot.state
 
 let create_line_index () =
-  let starts = Array.make 64 0 in
+  let starts = Array.make 8 0 in
   starts.(0) <- 0;
   {
     starts;
@@ -1063,7 +1091,11 @@ let last_newline s from limit =
   !i
 
 let rec count_cut_chars idx s len i stop =
-  if i >= stop then
+  if i + 8 <= stop && Int64.logand (bytes_get64u s i) 0x8080808080808080L = 0L
+  then begin
+    idx.cut_chars <- idx.cut_chars + 8;
+    count_cut_chars idx s len (i + 8) stop
+  end else if i >= stop then
     i
   else begin
     let c = Char.code (Bytes.unsafe_get s i) in
@@ -1916,6 +1948,51 @@ let[@inline always] scan_while st ~keep_from start pred =
     | Some _ ->
         scan_while_refilling st ~keep_from (!i + base) pred
 
+type charset = string
+
+let charset pred =
+  String.init 256 (fun i ->
+      if pred (Char.unsafe_chr i) then
+        '\001'
+      else
+        '\000'
+  )
+
+let[@inline always] in_set set c = String.unsafe_get set (Char.code c) <> '\000'
+
+let[@inline never] scan_set_refilling st ~keep_from start set =
+  let p = ref start in
+  let continue_loop = ref true in
+  while !continue_loop do
+    let base = st.base in
+    let inp = st.input in
+    let len = st.input_len - base in
+    let i = ref (!p - base) in
+    while !i < len && in_set set (Bytes.unsafe_get inp !i) do
+      incr i
+    done;
+    p := !i + base;
+    if !i < len || not (refill_at st keep_from !p) then continue_loop := false
+  done;
+  !p
+
+let[@inline always] scan_set st ~keep_from start set =
+  let base = st.base in
+  let inp = st.input in
+  let len = st.input_len - base in
+  let i = ref (start - base) in
+  while !i < len && in_set set (Bytes.unsafe_get inp !i) do
+    incr i
+  done;
+  if !i < len then
+    !i + base
+  else
+    match st.source with
+    | None ->
+        !i + base
+    | Some _ ->
+        scan_set_refilling st ~keep_from (!i + base) set
+
 let[@inline always] handle_take_while_span st pred =
   let start = st.pos in
   let end_pos = scan_while st ~keep_from:start start pred in
@@ -2716,6 +2793,26 @@ let[@inline] take_while ?(at_least = 0) ?at_most ?label pred =
 let[@inline] skip_while pred =
   let st = get_state () in
   handle_skip_while st pred
+
+let take_while_set ?(at_least = 0) ?label set =
+  let st = get_state () in
+  let start = st.pos in
+  let end_pos = scan_set st ~keep_from:start start set in
+  st.pos <- end_pos;
+  let n = end_pos - start in
+  if n < at_least then
+    begin match label with
+    | Some l ->
+        fail_str_cold st end_pos tag_label l
+    | None ->
+        fail_at_least st at_least
+  end
+  else
+    slice st start n
+
+let skip_while_set set =
+  let st = get_state () in
+  st.pos <- scan_set st ~keep_from:no_keep st.pos set
 
 let[@inline] take_while_span pred =
   let st = get_state () in
@@ -6987,8 +7084,10 @@ let parse_partial ?(max_depth = 128)
     | None ->
         if t.closed then
           None
-        else
+        else begin
+          State.release ();
           Effect.perform Need
+        end
   in
   let c = { next; pending = ""; pending_pos = 0 } in
   let src = Source.make ~initial:"" ~eof:false (Chunks c) in
