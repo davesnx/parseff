@@ -1984,51 +1984,6 @@ let[@inline always] scan_while st ~keep_from start pred =
     | Some _ ->
         scan_while_refilling st ~keep_from (!i + base) pred
 
-type charset = string
-
-let charset pred =
-  String.init 256 (fun i ->
-      if pred (Char.unsafe_chr i) then
-        '\001'
-      else
-        '\000'
-  )
-
-let[@inline always] in_set set c = String.unsafe_get set (Char.code c) <> '\000'
-
-let[@inline never] scan_set_refilling st ~keep_from start set =
-  let p = ref start in
-  let continue_loop = ref true in
-  while !continue_loop do
-    let base = st.base in
-    let inp = st.input in
-    let len = st.input_len - base in
-    let i = ref (!p - base) in
-    while !i < len && in_set set (Bytes.unsafe_get inp !i) do
-      incr i
-    done;
-    p := !i + base;
-    if !i < len || not (refill_at st keep_from !p) then continue_loop := false
-  done;
-  !p
-
-let[@inline always] scan_set st ~keep_from start set =
-  let base = st.base in
-  let inp = st.input in
-  let len = st.input_len - base in
-  let i = ref (start - base) in
-  while !i < len && in_set set (Bytes.unsafe_get inp !i) do
-    incr i
-  done;
-  if !i < len then
-    !i + base
-  else
-    match st.source with
-    | None ->
-        !i + base
-    | Some _ ->
-        scan_set_refilling st ~keep_from (!i + base) set
-
 let[@inline always] handle_take_while_span st pred =
   let start = st.pos in
   let end_pos = scan_while st ~keep_from:start start pred in
@@ -2829,26 +2784,6 @@ let[@inline] take_while ?(at_least = 0) ?at_most ?label pred =
 let[@inline] skip_while pred =
   let st = get_state () in
   handle_skip_while st pred
-
-let take_while_set ?(at_least = 0) ?label set =
-  let st = get_state () in
-  let start = st.pos in
-  let end_pos = scan_set st ~keep_from:start start set in
-  st.pos <- end_pos;
-  let n = end_pos - start in
-  if n < at_least then
-    begin match label with
-    | Some l ->
-        fail_str_cold st end_pos tag_label l
-    | None ->
-        fail_at_least st at_least
-  end
-  else
-    slice st start n
-
-let skip_while_set set =
-  let st = get_state () in
-  st.pos <- scan_set st ~keep_from:no_keep st.pos set
 
 let[@inline] take_while_span pred =
   let st = get_state () in

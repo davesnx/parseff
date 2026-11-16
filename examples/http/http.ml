@@ -72,6 +72,7 @@ let is_hex = function
   | _ ->
       false
 
+let is_zero c = c = '0'
 let crlf () = ignore (Parseff.consume "\r\n")
 
 let trim_ows s =
@@ -113,6 +114,7 @@ let fields name () =
   )
 
 let request_head () =
+  if Parseff.peek_char () = Some '\r' then crlf ();
   let meth =
     Parseff.context "method" (fun () ->
         Parseff.take_while ~at_least:1 ~at_most:max_method ~label:"method"
@@ -132,17 +134,58 @@ let request_head () =
   let headers = fields "header section" () in
   { meth; target; version; headers }
 
+let status () =
+  let code = Parseff.take_while is_digit in
+  match String.length code with
+  | 0 ->
+      Parseff.fail "status code empty"
+  | 3 when code.[0] <> '0' ->
+      int_of_string code
+  | 1 | 2 | 3 ->
+      Parseff.fail (Printf.sprintf "invalid status code: %S" code)
+  | _ ->
+      Parseff.fail (Printf.sprintf "status code too long: %S" code)
+
+let folded_fields () =
+  Parseff.context "header section" (fun () ->
+      let rec loop n acc =
+        match (Parseff.peek_char (), acc) with
+        | Some '\r', _ ->
+            crlf ();
+            List.rev acc
+        | Some (' ' | '\t'), (name, value) :: rest ->
+            Parseff.skip_while is_ows;
+            let more = Parseff.take_while ~at_most:max_value is_field_char in
+            crlf ();
+            loop n ((name, trim_ows (value ^ " " ^ more)) :: rest)
+        | _ when n = max_headers ->
+            Parseff.error (Parseff.Limit_exceeded { limit = max_headers })
+        | _ ->
+            loop (n + 1) (field () :: acc)
+      in
+      loop 0 []
+  )
+
+let rec skip_empty_lines () =
+  if Parseff.peek_char () = Some '\r' then begin
+    crlf ();
+    skip_empty_lines ()
+  end
+
 let response_head () =
+  skip_empty_lines ();
   let version = version () in
+  if fst version <> 1 then
+    Parseff.fail
+      (Printf.sprintf "unsupported HTTP version: %d.%d" (fst version)
+         (snd version)
+      );
   let _ = Parseff.char ' ' in
-  let status = Parseff.count 3 Parseff.digit () in
-  let status =
-    List.fold_left (fun n d -> (n * 10) + Char.code d - 48) 0 status
-  in
+  let status = status () in
   let _ = Parseff.char ' ' in
   let reason = Parseff.take_while ~at_most:max_value is_field_char in
   crlf ();
-  let headers = fields "header section" () in
+  let headers = folded_fields () in
   { version; status; reason; headers }
 
 let find name headers =
@@ -172,11 +215,17 @@ let list_elements values =
 
 let chunk_size () =
   Parseff.context "chunk size" (fun () ->
+      let start = Parseff.position () in
+      Parseff.skip_while is_zero;
       let digits =
-        Parseff.take_while ~at_least:1 ~at_most:max_chunk_digits
-          ~label:"chunk size" is_hex
+        Parseff.take_while ~at_most:max_chunk_digits ~label:"chunk size" is_hex
       in
-      int_of_string ("0x" ^ digits)
+      if Parseff.position () = start then
+        ignore (Parseff.take_while ~at_least:1 ~label:"chunk size" is_hex);
+      if digits = "" then
+        0
+      else
+        int_of_string ("0x" ^ digits)
   )
 
 let token label =
@@ -217,12 +266,16 @@ let chunk_extension () =
        ()
     )
 
+let chunk_line () =
+  let size = chunk_size () in
+  ignore (Parseff.many ~at_most:max_chunk_extensions chunk_extension ());
+  crlf ();
+  size
+
 let chunked_body () =
   let buf = Buffer.create 256 in
   let rec chunks () =
-    let size = chunk_size () in
-    ignore (Parseff.many ~at_most:max_chunk_extensions chunk_extension ());
-    crlf ();
+    let size = chunk_line () in
     if size > 0 then begin
       Buffer.add_string buf (Parseff.take size);
       crlf ();
