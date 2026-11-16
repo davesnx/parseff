@@ -1913,7 +1913,376 @@ let test_undecided_steps () =
         )
         ()
     )
-    ~plain:"Ok []" ~collector:("Ok []", 1)
+    ~plain:"Ok []" ~collector:("Ok []", 1);
+  let ctx_cut ~loop d () =
+    fold_right
+      (fun () ->
+        commit ();
+        "C"
+      )
+      (fun () ->
+        let t =
+          context "c" (fun () ->
+              cut ();
+              require d
+                (fun () ->
+                  if loop then
+                    ignore
+                      ( many
+                          (fun () ->
+                            recover d
+                              ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
+                              (fun () -> char 'a')
+                              (fun _ -> 'H')
+                          )
+                          ()
+                        : char list
+                        );
+                  s1 (any_char ())
+                )
+                (fun _ -> "M")
+          )
+        in
+        fun x y -> "{" ^ x ^ t ^ y ^ "}"
+      )
+      ()
+  in
+  partial_check "a step decided by a cut in a context around the recovery" "bb"
+    (ctx_cut ~loop:false)
+    ~plain:"Error at 2: expected any character, found end of input"
+    ~collector:("Ok {Cb{Cb{CMC}}}", 1);
+  partial_check "the same, with a loop inside the context" "bb"
+    (ctx_cut ~loop:true)
+    ~plain:"Error at 2: expected any character or 'a', found end of input"
+    ~collector:
+      ("Error at 2: expected any character or 'a', found end of input", 0);
+  let cat a b = a ^ "+" ^ b in
+  let y d () = require d (fun () -> s1 (char 'y')) (fun _ -> "N") in
+  let fails = "Error at 2: expected 'y', found end of input" in
+  let fr ?(op = fun () -> cat) element () = fold_right element op () in
+  List.iter
+    (fun (name, plain, collector, p) ->
+      partial_check name "yy" p ~plain ~collector
+    )
+    [
+      ( "sealed: cut, then require, in a context",
+        fails,
+        ("Ok y+y+N", 1),
+        fun d ->
+          fr (fun () ->
+              context "c" (fun () ->
+                  cut ();
+                  y d ()
+              )
+          )
+      );
+      ( "sealed: cut in an outer context, require in an inner one",
+        fails,
+        ("Ok y+y+N", 1),
+        fun d ->
+          fr (fun () ->
+              context "o" (fun () ->
+                  cut ();
+                  context "i" (y d)
+              )
+          )
+      );
+      ( "sealed: precedence",
+        fails,
+        ("Ok y+y+N", 1),
+        fun d () ->
+          precedence
+            ~operand:(fun () ->
+              context "c" (fun () ->
+                  cut ();
+                  y d ()
+              )
+            )
+            ~operator:(fun () -> Some (1, infix_left (fun () -> cat)))
+            ()
+      );
+      ( "sealed: expression",
+        fails,
+        ("Ok y+y+N", 1),
+        fun d ->
+          expression
+            ~operand:(fun () ->
+              context "c" (fun () ->
+                  cut ();
+                  y d ()
+              )
+            )
+            [ [ infix_left (fun () -> cat) ] ]
+      );
+      ( "not sealed: a capture between the require and the context",
+        "Ok y+y",
+        ("Ok y+y", 0),
+        fun d ->
+          fr (fun () ->
+              context "c" (fun () ->
+                  cut ();
+                  match capture (y d) with Ok v -> v | Error _ -> ""
+              )
+          )
+      );
+      ( "not sealed: a first recovery outside the context",
+        "Ok y",
+        ("Ok y+y", 1),
+        fun d ->
+          fr
+            ~op:(fun () ->
+              ignore (require d (fun () -> ignore (char ',')) ignore);
+              cat
+            )
+            (fun () ->
+              context "c" (fun () ->
+                  cut ();
+                  y d ()
+              )
+            )
+      );
+      ( "not sealed: a recovery before the cut",
+        "Error at 0: expected ',', found 'yy'",
+        ("Ok y+y", 2),
+        fun d ->
+          fr (fun () ->
+              context "c" (fun () ->
+                  ignore (require d (fun () -> ignore (char ',')) ignore);
+                  cut ();
+                  y d ()
+              )
+          )
+      );
+    ];
+  let w = Result.get_error (parse "" (fun () -> (fail "note" : unit))) in
+  let outer t =
+    fold_right
+      (fun () -> "s")
+      (fun () ->
+        let v = t () in
+        fun a b -> a ^ "[" ^ v ^ "]" ^ b
+      )
+      ()
+  in
+  partial_check "not sealed: a loop between the recovery and the context" "x"
+    (fun d () ->
+      outer (fun () ->
+          context "c" (fun () ->
+              cut ();
+              fold_left
+                (fun () -> "e")
+                (fun () ->
+                  ignore (require d (fun () -> ignore (char 'c')) ignore);
+                  fun a b -> a ^ b
+                )
+                ()
+          )
+      )
+    )
+    ~plain:"Ok s" ~collector:("Ok s", 0);
+  partial_check "not sealed: a list element that only warns" "x"
+    (fun d () ->
+      outer (fun () ->
+          context "c" (fun () ->
+              cut ();
+              String.concat ","
+                (list
+                   ~sep:(fun () -> ())
+                   d
+                   ~close:(fun () -> peek_char () = Some ')')
+                   ~sync:ignore
+                   (fun () ->
+                     warn d w;
+                     "w"
+                   )
+                   (fun _ -> "H")
+                   ()
+                )
+          )
+      )
+    )
+    ~plain:"Ok s" ~collector:("Ok s", 0);
+  let words d () =
+    let word () = take_while (fun c -> c >= 'a' && c <= 'z') in
+    "<"
+    ^ String.concat ","
+        (list
+           ~sep:(fun () -> ignore (char ','))
+           d
+           ~close:(fun () -> peek_char () = Some ')')
+           ~sync:ignore word
+           (fun _ -> "H")
+           ()
+        )
+    ^ ">"
+  in
+  partial_check
+    "not sealed: a missing separator of list in a context with a cut" "!"
+    (fun d () ->
+      fold_right
+        (fun () -> "e")
+        (fun () ->
+          let t =
+            context "c" (fun () ->
+                cut ();
+                words d ()
+            )
+          in
+          fun a b -> a ^ t ^ b
+        )
+        ()
+    )
+    ~plain:"Ok e" ~collector:("Ok e", 0);
+  let inner d () =
+    expression
+      ~operand:(fun () ->
+        "<"
+        ^ String.concat ","
+            (sep_by_recover d
+               ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
+               (fun () -> s1 (char 'a'))
+               (fun () -> char 'b')
+               (fun _ -> "H")
+               ()
+            )
+        ^ ">"
+      )
+      [
+        [
+          infix_left (fun () ->
+              let t =
+                context "c" (fun () ->
+                    cut ();
+                    require d (fun () -> s1 (char 'a')) (fun _ -> "M")
+                )
+              in
+              fun x y -> "(" ^ x ^ t ^ y ^ ")"
+          );
+        ];
+        [
+          infix_right (fun () ->
+              cut ();
+              ignore (char 'a');
+              fun x y -> "(" ^ x ^ "R" ^ y ^ ")"
+          );
+        ];
+      ]
+      ()
+  in
+  partial_check "limit: decided per step, a recovery before the step" "bcabb"
+    (fun d () ->
+      fold_right
+        (fun () -> "e")
+        (fun () ->
+          let t = inner d () in
+          fun x y -> "{" ^ x ^ t ^ y ^ "}"
+        )
+        ()
+    )
+    ~plain:"Ok e"
+    ~collector:("Ok {e(<H,H,H>M<H>)e}", 5);
+  let short e =
+    let m = error_message e in
+    match String.index_opt m ',' with Some i -> String.sub m 0 i | None -> m
+  in
+  partial_check "limit: a capture around a decided step" "ab"
+    (fun d () ->
+      let body () =
+        expression
+          ~operand:(fun () ->
+            cut ();
+            "!"
+          )
+          [
+            [
+              infix_left (fun () ->
+                  let t =
+                    context "c" (fun () ->
+                        cut ();
+                        "!<"
+                        ^ String.concat ","
+                            (sep_by_recover ~release:true d
+                               ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
+                               (fun () -> s1 (char 'a'))
+                               (fun () -> char 'b')
+                               (fun _ -> "H")
+                               ()
+                            )
+                        ^ ">"
+                    )
+                  in
+                  fun x y -> "(" ^ x ^ "L" ^ t ^ y ^ ")"
+              );
+            ];
+            [
+              prefix (fun () ->
+                  let t = s1 (char 'a') in
+                  fun x -> "(P" ^ t ^ x ^ ")"
+              );
+              infix_right (fun () ->
+                  let t =
+                    recover d ~sync:ignore
+                      (fun () -> s1 (char 'a'))
+                      (fun _ -> "H")
+                  in
+                  fun x y -> "(" ^ x ^ "R" ^ t ^ y ^ ")"
+              );
+            ];
+            [ postfix (fun () -> fun x -> "(" ^ x ^ "Q)") ];
+          ]
+          ()
+      in
+      match capture body with
+      | Ok v ->
+          "ok" ^ v
+      | Error e ->
+          "err(" ^ short e ^ ")"
+    )
+    ~plain:"Ok err(expected 'a')" ~collector:("Ok ok((Pa!)L!<H>!)", 1);
+  List.iter
+    (fun by_commit ->
+      let items d () =
+        let y () = require d (fun () -> s1 (char 'y')) (fun _ -> "N") in
+        let cat a b = a ^ "+" ^ b in
+        if by_commit then
+          fold_right y
+            (fun () ->
+              commit ();
+              cat
+            )
+            ()
+        else
+          fold_right
+            (fun () ->
+              context "item" (fun () ->
+                  cut ();
+                  y ()
+              )
+            )
+            (fun () -> cat)
+            ()
+      in
+      let statement reported d () =
+        match capture (items d) with
+        | Ok v ->
+            v
+        | Error e ->
+            reported := error_message e :: !reported;
+            "<failed>"
+      in
+      let reported = ref [] in
+      let d = Diagnostics.create () in
+      let r =
+        show (parse ~consume:`Partial ~diagnostics:d "yy" (statement reported d))
+      in
+      Alcotest.(check (triple string int int))
+        (Printf.sprintf "the error is kept under a capture, by commit %b"
+           by_commit
+        )
+        ("Ok y+y+N", 1, 0)
+        (r, Diagnostics.length d, List.length !reported)
+    )
+    [ true; false ]
 
 type sync = Nothing | Skip_to of char
 

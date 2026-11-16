@@ -388,9 +388,9 @@ type mark =
   | No_mark
   | Mark : 'd diagnostics * 'd diagnostic_entry list * int -> mark
 
-type replay = { far : far; mark : mark }
+type replay = { far : far; mark : mark; sealed : bool }
 
-let no_replay = { far = far_none; mark = No_mark }
+let no_replay = { far = far_none; mark = No_mark; sealed = false }
 
 type state = {
   mutable input : bytes;
@@ -914,10 +914,10 @@ module State = struct
 
   let kept_step (t : t) frame =
     let flags = Array.unsafe_get t.frames ((frame * frame_stride) + 1) in
-    flags land (frame_recovered_bit lor frame_committed_bit)
-    = frame_recovered_bit lor frame_committed_bit
+    flags land frame_recovered_bit <> 0
     && t.diag_len > Array.unsafe_get t.frames ((frame * frame_stride) + 2)
     && frame < Array.length t.replay_far
+    && (flags land frame_committed_bit <> 0 || t.replay_far.(frame).sealed)
     && mark_present t t.replay_far.(frame).mark
 
   let[@inline always] frame_settled (t : t) frame =
@@ -3120,7 +3120,7 @@ let allow_recovery st =
   if target >= 0 then
     raise_notrace (Undecided (target, State.entry_far st target))
 
-let mark_recovered st base =
+let mark_recovered ?(sealable = true) st base =
   if Array.length st.replay_far < st.frames_top then begin
     let grown = Array.make (imax 8 (2 * st.frames_top)) no_replay in
     Array.blit st.replay_far 0 grown 0 (Array.length st.replay_far);
@@ -3134,14 +3134,38 @@ let mark_recovered st base =
         No_mark
   in
   let acc = ref base in
+  let d = ref (st.ctx_top - 1) in
+  let sealing = ref false in
+  let caught = ref (not sealable) in
   for i = st.frames_top - 1 downto 0 do
+    while !d >= 0 && Array.unsafe_get st.ctx (!d * ctx_stride) > i do
+      if
+        Array.unsafe_get st.ctx ((!d * ctx_stride) + 1) land ctx_cut_bit <> 0
+        && not !caught
+      then
+        sealing := true;
+      decr d
+    done;
     let slot = (i * frame_stride) + 1 in
     let flags = Array.unsafe_get st.frames slot in
+    let kind = flags land frame_kind_mask in
+    if kind = frame_barrier && flags land frame_recovery_bit = 0 then begin
+      sealing := false;
+      caught := true
+    end else if
+          (not !sealing)
+          && flags land frame_committed_bit = 0
+          && (kind = frame_repeat
+             || (kind = frame_choice && flags land frame_step_bit <> 0)
+             )
+        then
+      caught := true;
+    let sealed = !sealing in
     if flags land frame_recovered_bit = 0 then begin
       Array.unsafe_set st.frames slot (flags lor frame_recovered_bit);
-      st.replay_far.(i) <- { far = !acc; mark }
+      st.replay_far.(i) <- { far = !acc; mark; sealed }
     end else if not (State.mark_present st st.replay_far.(i).mark) then
-      st.replay_far.(i) <- { (st.replay_far.(i)) with mark };
+      st.replay_far.(i) <- { (st.replay_far.(i)) with mark; sealed };
     if flags land frame_held_bit <> 0 then acc := far_copy st.held_far.(i)
   done
 
@@ -6863,7 +6887,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
     in
     let inserted base at e =
       record_error errors st record e [];
-      mark_recovered st base;
+      mark_recovered ~sealable:false st base;
       captured st at e
     in
     let rec steps acc =
@@ -6901,7 +6925,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
               allow_recovery st;
               sync ();
               if st.pos = start && have st 1 then skip_char st;
-              mark_recovered st (far_copy st.far);
+              mark_recovered ~sealable:false st (far_copy st.far);
               steps (v :: acc)
             end
     in
@@ -6962,7 +6986,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
                 ) else (
                   State.pop_rewind_frame st frame;
                   allow_recovery st;
-                  mark_recovered st (far_copy st.far);
+                  mark_recovered ~sealable:false st (far_copy st.far);
                   List.rev (v :: acc)
                 )
           else
@@ -6988,7 +7012,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
                 ) else (
                   State.pop_rewind_frame st frame;
                   allow_recovery st;
-                  mark_recovered st (far_copy st.far);
+                  mark_recovered ~sealable:false st (far_copy st.far);
                   List.rev (v :: acc)
                 )
             end
