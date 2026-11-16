@@ -384,6 +384,14 @@ let rec running_empty =
    refill of a frame refills the source around it. On memory input the
    frame has ended from the start, so every primitive takes its bounded
    path. *)
+type mark =
+  | No_mark
+  | Mark : 'd diagnostics * 'd diagnostic_entry list * int -> mark
+
+type replay = { far : far; mark : mark }
+
+let no_replay = { far = far_none; mark = No_mark }
+
 type state = {
   mutable input : bytes;
   mutable pos : int;
@@ -404,7 +412,7 @@ type state = {
   mutable recovery_off : int;
   mutable decided_at : int array;
   mutable given : int;
-  mutable replay_far : far array;
+  mutable replay_far : replay array;
   mutable held_far : far array;
   mutable trail : trail;
   trace : (trace_event -> unit) option;
@@ -890,13 +898,27 @@ module State = struct
     let flags = Array.unsafe_get t.frames slot in
     if flags land frame_recovered_bit <> 0 then begin
       Array.unsafe_set t.frames slot (flags land lnot frame_recovered_bit);
-      t.far <- far_copy t.replay_far.(frame)
+      t.far <- far_copy t.replay_far.(frame).far
     end
 
   let[@inline always] frame_recovered (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 1)
     land frame_recovered_bit
     <> 0
+
+  let mark_present (t : t) = function
+    | No_mark ->
+        false
+    | Mark (c, cell, len) ->
+        t.diag_len >= len && drop_entries c.rev (t.diag_len - len) == cell
+
+  let kept_step (t : t) frame =
+    let flags = Array.unsafe_get t.frames ((frame * frame_stride) + 1) in
+    flags land (frame_recovered_bit lor frame_committed_bit)
+    = frame_recovered_bit lor frame_committed_bit
+    && t.diag_len > Array.unsafe_get t.frames ((frame * frame_stride) + 2)
+    && frame < Array.length t.replay_far
+    && mark_present t t.replay_far.(frame).mark
 
   let[@inline always] frame_settled (t : t) frame =
     Array.unsafe_get t.frames ((frame * frame_stride) + 1)
@@ -3099,15 +3121,27 @@ let allow_recovery st =
     raise_notrace (Undecided (target, State.entry_far st target))
 
 let mark_recovered st base =
-  st.replay_far <- State.grown st.replay_far st.frames_top;
+  if Array.length st.replay_far < st.frames_top then begin
+    let grown = Array.make (imax 8 (2 * st.frames_top)) no_replay in
+    Array.blit st.replay_far 0 grown 0 (Array.length st.replay_far);
+    st.replay_far <- grown
+  end;
+  let mark =
+    match st.diag with
+    | Sink c ->
+        Mark (c, c.rev, st.diag_len)
+    | No_sink ->
+        No_mark
+  in
   let acc = ref base in
   for i = st.frames_top - 1 downto 0 do
     let slot = (i * frame_stride) + 1 in
     let flags = Array.unsafe_get st.frames slot in
     if flags land frame_recovered_bit = 0 then begin
       Array.unsafe_set st.frames slot (flags lor frame_recovered_bit);
-      st.replay_far.(i) <- !acc
-    end;
+      st.replay_far.(i) <- { far = !acc; mark }
+    end else if not (State.mark_present st st.replay_far.(i).mark) then
+      st.replay_far.(i) <- { (st.replay_far.(i)) with mark };
     if flags land frame_held_bit <> 0 then acc := far_copy st.held_far.(i)
   done
 
@@ -3648,10 +3682,14 @@ let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
     let start = st.pos in
     let f = op () in
     let rhs = p () in
-    if st.pos = start then begin
-      restore_rewind_frame st frame;
-      first
-    end else
+    if st.pos = start then
+      if State.kept_step st frame then
+        f first rhs
+      else begin
+        restore_rewind_frame st frame;
+        first
+      end
+    else
       f first (fold_right_from st p op rhs)
   with
   | v ->
@@ -3762,16 +3800,16 @@ let prec_reduce top prec =
   | _ ->
       top
 
-let prec_shift st operand start top min build =
+let prec_shift st frame operand start top min build =
   let value = operand () in
-  if st.pos = start then
+  if st.pos = start && not (State.kept_step st frame) then
     top
   else
     Prec_node { min; value; build; below = top }
 
-let prec_tightest st operand start top build =
+let prec_tightest st frame operand start top build =
   let value = operand () in
-  if st.pos = start then
+  if st.pos = start && not (State.kept_step st frame) then
     top
   else
     match build (prec_value top) value with
@@ -3780,8 +3818,8 @@ let prec_tightest st operand start top build =
     | exception Fail ->
         raise_notrace Prec_build
 
-let prec_postfix st start top build =
-  if st.pos = start then
+let prec_postfix st frame start top build =
+  if st.pos = start && not (State.kept_step st frame) then
     top
   else
     match build (prec_value top) with
@@ -3790,16 +3828,16 @@ let prec_postfix st start top build =
     | exception Fail ->
         raise_notrace Prec_build
 
-let prec_accept st operand start top prec = function
+let prec_accept st frame operand start top prec = function
   | Infix_left f ->
       if prec = max_int then
-        prec_tightest st operand start top (f ())
+        prec_tightest st frame operand start top (f ())
       else
-        prec_shift st operand start top (prec + 1) (f ())
+        prec_shift st frame operand start top (prec + 1) (f ())
   | Infix_right f ->
-      prec_shift st operand start top prec (f ())
+      prec_shift st frame operand start top prec (f ())
   | Postfix f ->
-      prec_postfix st start top (f ())
+      prec_postfix st frame start top (f ())
   | Prefix _ ->
       top
 
@@ -3858,6 +3896,18 @@ let prec_stop st frame top =
           raise exn
     )
 
+let[@inline never] prec_kept st frame top =
+  match prec_fold top with
+  | value ->
+      State.pop_rewind_frame st frame;
+      value
+  | exception Fail ->
+      State.pop_rewind_frame st frame;
+      raise_notrace Prec_build
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
 let prec_fail st frame top =
   if State.frame_committed st frame then begin
     State.pop_rewind_frame st frame;
@@ -3901,10 +3951,12 @@ and prec_below st operand operator frame start top prec op =
         prec_stop st frame top
 
 and prec_try st operand operator frame start top prec op =
-  match prec_accept st operand start top prec op with
+  match prec_accept st frame operand start top prec op with
   | next ->
       if next == top then
         prec_stop st frame top
+      else if st.pos = start then
+        prec_kept st frame next
       else begin
         State.reset_frame st frame frame_barrier;
         prec_look st operand operator frame next
@@ -4078,10 +4130,14 @@ and expr_step st operand t base top value zeros hi op =
   let start = State.frame_pos st frame in
   match op with
   | Postfix _ ->
-      if st.pos = start then begin
-        restore_rewind_frame st frame;
-        expr_end st operand t base top value zeros
-      end else
+      if st.pos = start then
+        if State.kept_step st frame then
+          expr_kept_postfix st t base top value
+        else begin
+          restore_rewind_frame st frame;
+          expr_end st operand t base top value zeros
+        end
+      else
         begin match t.unary value with
         | value ->
             expr_moved st operand t base top value zeros
@@ -4118,11 +4174,15 @@ and expr_step st operand t base top value zeros hi op =
                   below;
                 }
             in
-            if st.pos = start then begin
-              ignore (State.push_rewind_frame st frame_repeat);
-              expr_look st operand t base node rhs
-                ({ node; right; zero = true } :: zeros)
-            end else
+            if st.pos = start then
+              if State.kept_step st frame then
+                expr_finish st base node rhs
+              else begin
+                ignore (State.push_rewind_frame st frame_repeat);
+                expr_look st operand t base node rhs
+                  ({ node; right; zero = true } :: zeros)
+              end
+            else
               expr_moved st operand t base node rhs zeros
         | exception Fail ->
             if State.frame_settled st frame then
@@ -4141,6 +4201,25 @@ and expr_step st operand t base top value zeros hi op =
     )
   | Prefix _ ->
       expr_end st operand t base top value zeros
+
+and[@inline never] expr_kept_postfix st t base top value =
+  match t.unary value with
+  | value ->
+      expr_finish st base top value
+  | exception Fail ->
+      expr_unwind st base;
+      raise_notrace Prec_build
+  | exception exn ->
+      expr_unwind st base;
+      raise exn
+
+and[@inline never] expr_finish st base top value =
+  expr_unwind st base;
+  match prec_fold (expr_with top value) with
+  | v ->
+      v
+  | exception Fail ->
+      raise_notrace Prec_build
 
 and expr_rerun st operand t base top value zeros hi =
   restore_rewind_frame st (st.frames_top - 1);
@@ -6783,8 +6862,8 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
           raise exn
     in
     let inserted base at e =
-      mark_recovered st base;
       record_error errors st record e [];
+      mark_recovered st base;
       captured st at e
     in
     let rec steps acc =
@@ -6843,12 +6922,27 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
         | Some v ->
             State.pop_rewind_frame st frame;
             after s [ v ]
+    and separator s frame run =
+      match run () with
+      | () when State.frame_replayable st frame ->
+          restore_rewind_frame st frame;
+          State.clear_recovered st frame;
+          separator s frame (fun () -> without_recovery st s)
+      | () ->
+          Some ()
+      | exception Fail when State.frame_replayable st frame ->
+          restore_rewind_frame st frame;
+          State.clear_recovered st frame;
+          separator s frame (fun () -> without_recovery st s)
+      | exception Fail when not (State.frame_committed st frame) ->
+          restore_rewind_frame st frame;
+          None
     and after s acc =
       let at = st.pos in
       let saved = far_from st at in
       let frame = State.push_rewind_frame st frame_step in
       if st.far == far_none then State.hold_far st frame saved;
-      match optional s () with
+      match separator s frame s with
       | Some _ ->
           far_back st (State.held_of st frame);
           State.release_far st frame;
@@ -6861,10 +6955,15 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
                 if st.pos <> at then (
                   State.pop_rewind_frame st frame;
                   after s (v :: acc)
-                ) else (
+                ) else if not (State.kept_step st frame) then (
                   restore_rewind_frame st frame;
                   State.pop_rewind_frame st frame;
                   List.rev acc
+                ) else (
+                  State.pop_rewind_frame st frame;
+                  allow_recovery st;
+                  mark_recovered st (far_copy st.far);
+                  List.rev (v :: acc)
                 )
           else
             let recorded = st.diag_len in
@@ -6880,7 +6979,9 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
                 if st.pos <> at then (
                   State.pop_rewind_frame st frame;
                   after s (v :: acc)
-                ) else if st.diag_len = recorded then (
+                ) else if
+                    st.diag_len <= recorded && not (State.kept_step st frame)
+                  then (
                   restore_rewind_frame st frame;
                   State.pop_rewind_frame st frame;
                   List.rev acc

@@ -1563,6 +1563,358 @@ let test_round2_bound () =
       ("the branch fails after the recovery", false, fun d -> (3 * d) + 1);
     ]
 
+let not_silent name input p =
+  let plain =
+    show (parse ~consume:`Partial input (p (Diagnostics.create ())))
+  in
+  let d = Diagnostics.create () in
+  let coll = show (parse ~consume:`Partial ~diagnostics:d input (p d)) in
+  if Diagnostics.length d = 0 && coll <> plain then
+    Alcotest.failf "%s on %S: %s with no error, %s without the collector" name
+      input coll plain
+
+let partial_check name input p ~plain ~collector =
+  let d = Diagnostics.create () in
+  Alcotest.(check string)
+    (name ^ ", without the collector")
+    plain
+    (show (parse ~consume:`Partial input (p d)));
+  let d = Diagnostics.create () in
+  let r = show (parse ~consume:`Partial ~diagnostics:d input (p d)) in
+  Alcotest.check outcome
+    (name ^ ", with the collector")
+    collector
+    (r, Diagnostics.length d)
+
+let test_zero_width_steps () =
+  let a d () = require d (fun () -> String.make 1 (char 'a')) (fun _ -> "?") in
+  partial_check "require in fold_right after a commit" "aac"
+    (fun d () ->
+      fold_right (a d)
+        (fun () ->
+          commit ();
+          fun x y -> x ^ y
+        )
+        ()
+    )
+    ~plain:"Error at 2: expected 'a', found 'c'" ~collector:("Ok aa?", 1);
+  partial_check "require with a cut in precedence" "abc"
+    (fun d () ->
+      precedence
+        ~operand:(fun () ->
+          require d
+            (fun () ->
+              cut ();
+              consume "ab"
+            )
+            (fun _ -> "?")
+        )
+        ~operator:(fun () -> Some (1, infix_left (fun () x y -> x ^ y)))
+        ()
+    )
+    ~plain:"Error at 2: expected \"ab\", found 'c'" ~collector:("Ok ab?", 1);
+  let s1 c = String.make 1 c in
+  let items d () =
+    String.concat ","
+      (sep_by_recover d ~sync:ignore
+         (fun () -> s1 (char 'c'))
+         (fun () -> consume "ab")
+         (fun _ -> "H")
+         ()
+      )
+  in
+  partial_check "sep_by_recover in a step of fold_right, the operator cuts"
+    "cbca"
+    (fun d () ->
+      fold_right (items d)
+        (fun () ->
+          cut ();
+          fun x y -> x ^ "+" ^ y
+        )
+        ()
+    )
+    ~plain:"Error at 1: expected 'c' or \"ab\", found 'bca'"
+    ~collector:("Ok c+H", 1);
+  partial_check
+    "limit: a recovery in an operator parser, in a step that is not decided"
+    "ba"
+    (fun d ->
+      expression
+        ~operand:(fun () -> take_while (fun c -> c = 'x'))
+        [
+          [
+            infix_right (fun () ->
+                let l =
+                  sep_by_recover d ~sync:ignore
+                    (fun () -> s1 (char 'a'))
+                    (fun () -> char 'a')
+                    (fun _ -> "H")
+                    ()
+                in
+                fun x y -> "(" ^ x ^ String.concat "" l ^ y ^ ")"
+            );
+          ];
+          [
+            postfix (fun () ->
+                let c = any_char () in
+                fun x -> "(" ^ x ^ s1 c ^ ")"
+            );
+          ];
+        ]
+    )
+    ~plain:"Ok ((b)a)" ~collector:("Ok ", 0);
+  not_silent "list ~sep in an infix operator of expression" "bb" (fun d ->
+      expression
+        ~operand:(fun () -> take_while (fun c -> c = 'x'))
+        [
+          [
+            infix_left (fun () ->
+                let l =
+                  list
+                    ~sep:(fun () -> ignore (char ','))
+                    d
+                    ~close:(fun () -> peek_char () = Some ')')
+                    ~sync:ignore
+                    (fun () ->
+                      cut ();
+                      s1 (char 'a')
+                    )
+                    (fun _ -> "H")
+                    ()
+                in
+                fun x y -> "(" ^ x ^ String.concat "" l ^ y ^ ")"
+            );
+          ];
+        ]
+  );
+  let listed d sep () =
+    String.concat ";"
+      (list ~sep d
+         ~close:(fun () -> peek_char () = Some ')')
+         ~sync:ignore
+         (fun () -> s1 (char 'a'))
+         (fun _ -> "H")
+         ()
+      )
+  in
+  partial_check "list, the separator commits, end of input" "a,"
+    (fun d ->
+      listed d (fun () ->
+          ignore (char ',');
+          commit ()
+      )
+    )
+    ~plain:"Error at 2: expected 'a', found end of input"
+    ~collector:("Error at 2: expected 'a', found end of input", 0);
+  partial_check "list, the separator commits, close token" "a,)"
+    (fun d ->
+      listed d (fun () ->
+          ignore (char ',');
+          commit ()
+      )
+    )
+    ~plain:"Error at 2: expected 'a', found ')'" ~collector:("Ok a;H", 1);
+  not_silent
+    "list, an insertion in the separator of a step that consumes nothing" ""
+    (fun d () ->
+      String.concat ";"
+        (list
+           ~sep:(fun () ->
+             require d
+               (fun () ->
+                 commit ();
+                 ignore (any_char ())
+               )
+               ignore
+           )
+           d
+           ~close:(fun () -> false)
+           ~sync:ignore
+           (fun () -> "")
+           (fun _ -> "H")
+           ()
+        )
+  );
+  let operand d () =
+    String.concat ""
+      (many
+         (fun () ->
+           within 1 (fun () ->
+               require d (fun () -> s1 (any_char ())) (fun _ -> "?")
+           )
+         )
+         ()
+      )
+  in
+  same "an insertion that within undid does not keep a step" "abcaa"
+    (fun d ->
+      expression ~operand:(operand d)
+        [ [ infix_right (fun () -> fun x y -> x ^ "R" ^ y) ] ]
+    )
+    ~plain:"Ok abcaa";
+  let close () = peek_char () = Some 'c' in
+  let sync () = skip_while (fun c -> c <> 'b') in
+  partial_check "list, a separator that recovers, cuts, then fails" "ca"
+    (fun d () ->
+      let sep () =
+        ignore (char 'c');
+        ignore
+          ( list ~release:true d ~close ~sync
+              (fun () -> fail "u")
+              (fun _ -> "H")
+              ()
+            : string list
+            );
+        cut ();
+        fail "u"
+      in
+      String.concat ","
+        (list ~release:true ~sep d ~close ~sync (fun () -> "") (fun _ -> "H") ())
+    )
+    ~plain:"Error at 1: u" ~collector:("Error at 1: u", 0);
+  same ~consume:`Partial "list, a separator that recovers, then a step again"
+    "ac"
+    (fun d () ->
+      let sep () =
+        ignore
+          ( list d ~close ~sync (fun () -> s1 (char 'b')) (fun _ -> "H") ()
+            : string list
+            )
+      in
+      String.concat ","
+        (list ~release:true ~sep d ~close ~sync
+           (fun () -> "L" ^ look_ahead (fun () -> s1 (char 'a')))
+           (fun _ -> "H")
+           ()
+        )
+    )
+    ~plain:"Ok La"
+
+let test_undecided_steps () =
+  let s1 c = String.make 1 c in
+  let atom d () = require d (fun () -> s1 (letter ())) (fun _ -> "?") in
+  let app a b = "(" ^ a ^ " " ^ b ^ ")" in
+  List.iter
+    (fun input ->
+      same ~consume:`Partial "expression, an empty operator" input
+        (fun d ->
+          expression ~operand:(atom d) [ [ infix_left (fun () -> app) ] ]
+        )
+        ~plain:"Ok (f x)";
+      same ~consume:`Partial "precedence, an empty operator" input
+        (fun d () ->
+          precedence ~operand:(atom d)
+            ~operator:(fun () -> Some (1, infix_left (fun () -> app)))
+            ()
+        )
+        ~plain:"Ok (f x)";
+      same ~consume:`Partial "fold_right, an empty operator" input
+        (fun d () -> fold_right (atom d) (fun () -> app) ())
+        ~plain:"Ok (f x)"
+    )
+    [ "fx"; "fx)" ];
+  let a () = s1 (char 'a') in
+  let close () = peek_char () = Some ')' in
+  let listed sep d () =
+    let l = list ~sep:(sep d) d ~close ~sync:ignore a (fun _ -> "H") () in
+    String.concat ";" l ^ "@" ^ string_of_int (position ())
+  in
+  let comma () = ignore (char ',') in
+  let req_comma d () = require d comma ignore in
+  List.iter
+    (fun (input, plain) ->
+      same ~consume:`Partial "list, the separator is a require" input
+        (listed req_comma) ~plain
+    )
+    [ ("a)", "Ok a@1"); ("a,a)", "Ok a;a@3") ];
+  let as_plain_comma = Diagnostics.create () in
+  let expected =
+    show
+      (parse ~consume:`Partial ~diagnostics:as_plain_comma "a a)"
+         (listed (fun _ -> comma) as_plain_comma)
+      )
+  in
+  let d = Diagnostics.create () in
+  Alcotest.check outcome "list, the separator is a require, a missing separator"
+    (expected, Diagnostics.length as_plain_comma)
+    (let r =
+       show (parse ~consume:`Partial ~diagnostics:d "a a)" (listed req_comma d))
+     in
+     (r, Diagnostics.length d)
+    );
+  let w = Result.get_error (parse "" (fun () -> (fail "note" : unit))) in
+  List.iter
+    (fun with_recover ->
+      let d = Diagnostics.create () in
+      let element () =
+        let item () =
+          let v =
+            if with_recover then
+              recover d ~sync:ignore (fun () -> s1 (char 'x')) (fun _ -> "?")
+            else
+              s1 (char 'x')
+          in
+          ignore (char ';');
+          v
+        in
+        let l = many item () in
+        warn d w;
+        "[" ^ String.concat "" l ^ "]"
+      in
+      let r =
+        show
+          (parse ~consume:`Partial ~diagnostics:d "a" (fun () ->
+               fold_right element
+                 (fun () ->
+                   commit ();
+                   fun a b -> a ^ "+" ^ b
+                 )
+                 ()
+           )
+          )
+      in
+      Alcotest.check outcome
+        (Printf.sprintf "a decided step with a warning, recover %b" with_recover)
+        ("Ok []", 1)
+        (r, Diagnostics.length d)
+    )
+    [ false; true ];
+  partial_check
+    "a decided step, a missing separator of list undone by many, then a warning"
+    "b b?"
+    (fun d () ->
+      fold_right
+        (fun () ->
+          let item () =
+            let l =
+              list
+                ~sep:(fun () -> ignore (char ','))
+                d
+                ~close:(fun () -> peek_char () = Some ')')
+                ~sync:ignore
+                (fun () ->
+                  let v = s1 (char 'b') in
+                  skip_while (fun c -> c = ' ');
+                  v
+                )
+                (fun _ -> "H")
+                ()
+            in
+            ignore (char ';');
+            String.concat "" l
+          in
+          let l = many item () in
+          warn d w;
+          "[" ^ String.concat "" l ^ "]"
+        )
+        (fun () ->
+          commit ();
+          fun a b -> a ^ "+" ^ b
+        )
+        ()
+    )
+    ~plain:"Ok []" ~collector:("Ok []", 1)
+
 type sync = Nothing | Skip_to of char
 
 type g =
@@ -2332,6 +2684,14 @@ let () =
             test_round2_cut_past;
           Alcotest.test_case "round 2: the bound on runs" `Quick
             test_round2_bound;
+        ]
+      );
+      ( "zero-width steps",
+        [
+          Alcotest.test_case "an undecided step is dropped" `Quick
+            test_undecided_steps;
+          Alcotest.test_case "a step that recovered is kept" `Quick
+            test_zero_width_steps;
         ]
       );
       ( "random grammars",

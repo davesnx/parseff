@@ -1054,16 +1054,18 @@ val recover :
     without the collector, and [recover] still goes back to its start when it
     recovers. With these rules, a parse with the collector that returns [Ok v]
     and records no error returns [Ok v] without the collector, except in three
-    cases: a {!capture} whose [Error e] is dropped without being recorded; a
-    step of {!fold_right}, {!precedence} or {!expression} that consumes nothing,
-    where an insertion of {!require}, or an empty hole of {!sep_by_recover} or
-    of {!list} with [~sep], in the step is dropped with the step; and a {!list}
-    whose separator calls {!commit} or {!cut}, since [list] reads the separator
-    as optional. The other way round, a parse without the collector that returns
-    [Ok v] returns [Ok v] and records no error with it, unless a recovery
-    function is in one of the places of the previous paragraph, or the parse
-    with the collector exceeds the [~backtrack_window] of {!parse_source}, as
-    said above.
+    cases: a {!capture} that drops its [Error e] without recording it; a step of
+    {!fold_right}, {!precedence} or {!expression} that consumes nothing and that
+    no {!commit} or {!cut} decided, which drops a recovery inside it, as the
+    parse without the collector stops there; and a recovery function in an
+    operator parser of {!precedence} or {!expression}, whose recovery a later
+    step can undo. A step that consumes nothing, that a {!commit} or {!cut}
+    decided before the recovery, and that still holds the error of that
+    recovery, is kept and ends the loop. The other way round, a parse without
+    the collector that returns [Ok v] returns [Ok v] and records no error with
+    it, unless a recovery function is in one of the places of the previous
+    paragraph, or the parse with the collector exceeds the [~backtrack_window]
+    of {!parse_source}, as said above.
 
     The errors that [parser] recorded in [errors] before it failed are removed,
     as with {!capture}: only [e] stays. To keep them, give [~record].
@@ -1366,6 +1368,15 @@ val list :
       a separator after an element can come before the closing token, with no
       error and no element after it. A separator with no element before it, as
       in [{,}], is still an error.
+    - A {!commit} or {!cut} in the separator reaches the step of [list], as in
+      {!sep_by}: when the element after it fails without recovery, at the end of
+      the input or, with [~trailing:true], where [close] is [true], [list]
+      fails. Elsewhere that element recovers as any element. A separator that
+      recovers runs again without recovery, unless a {!commit} or {!cut} decided
+      the step before, so the separator reads as in {!sep_by}. A separator and
+      element that together consume nothing end the list, unless the element
+      recorded a diagnostic, as above, or a decided recovery in them recorded an
+      error that is still recorded.
     - When the separator is missing and an element follows, as in [f(1 2)],
       [list] records the error of the separator and goes on with the element.
       When no element follows, as in [f(1 ?)], [list] calls [sync ()]. If [sync]
@@ -1904,7 +1915,9 @@ val fold_right :
     [or_ (fun () -> fold_right element op ()) (fun () -> otherwise) ()].
 
     The loop stops after an [op] and [element] that together consume no input,
-    and that pair is not applied. *)
+    and that pair is not applied, unless a {!commit} or {!cut} decided the pair
+    and a recovery function then recorded an error in it that is still recorded:
+    then the pair is applied and the loop ends there. *)
 
 type ('a, +'kind) operator
 (** An operator for {!expression} and {!precedence}. Each constructor takes a
@@ -2006,9 +2019,12 @@ val expression :
 
     A step whose operator and right operand together consume no input ends its
     group: [expression] goes back before that operator and moves out to the
-    lower groups. The right operand includes the operators that bind to it: with
-    an operand that can be empty, an infix operator [""] below a postfix [^]
-    reads [2^] as [""] applied to [2] and to the empty operand with [^].
+    lower groups. When a {!commit} or {!cut} decided such a step and a recovery
+    function then recorded an error in it that is still recorded, [expression]
+    keeps the step and ends there, as {!precedence} does. The right operand
+    includes the operators that bind to it: with an operand that can be empty,
+    an infix operator [""] below a postfix [^] reads [2^] as [""] applied to [2]
+    and to the empty operand with [^].
 
     Where an operand starts, [expression] tries the {!prefix} operators in table
     order, then [operand]. The operand of a prefix operator uses one depth level
@@ -2100,6 +2116,9 @@ val precedence :
     of [op] or the operand after it fails, the expression stops before that
     operator, unless the token parser called {!commit}; then [precedence] fails.
     The loop stops after an operator and operand that together consume no input.
+    When a {!commit} or {!cut} decided that step and a recovery function then
+    recorded an error in it that is still recorded, [precedence] keeps it and
+    stops there.
 
     A build function runs when the operator after its right operand is known,
     with {!position} at the end of that operand. A postfix build function, and
