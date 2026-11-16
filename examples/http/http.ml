@@ -159,7 +159,13 @@ let folded_fields () =
             Parseff.skip_while is_ows;
             let more = Parseff.take_while ~at_most:max_value is_field_char in
             crlf ();
-            loop (n + 1) ((name, trim_ows (value ^ " " ^ more)) :: rest)
+            let value =
+              if value = "" then
+                more
+              else
+                value ^ " " ^ more
+            in
+            loop (n + 1) ((name, trim_ows value) :: rest)
         | _ ->
             loop (n + 1) (field () :: acc)
       in
