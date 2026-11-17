@@ -1073,10 +1073,12 @@ val recover :
     entries recorded after the last {!commit}, {!cut} or value given out by a
     [*_iter] function, such as {!many_iter}, that reached [recover], since the
     entries before it stay as in {!capture}. [keep] must be a pure function: no
-    side effects and no parsing. It can run more than once for the same error,
-    as a construct that runs again calls it again. If [keep] raises, the
-    exception leaves the parse, as an exception from a build function does. For
-    example, to keep the errors of [parser], and [e] only when there are none:
+    side effects and no parsing. It can run more than once for the same error: a
+    loop such as {!many} runs its element again at the same position and then
+    drops that step, so [many (fun () -> list ~keep ...)] on ["a,x"] calls
+    [keep] twice for the error at [x]. If [keep] raises, the exception leaves
+    the parse, as an exception from a build function does. For example, to keep
+    the errors of [parser], and [e] only when there are none:
     {@ocaml[
     let keep entry inner =
       if inner = [] then
@@ -1282,8 +1284,11 @@ val list :
       choice there, as {!recover} says, so a recovery function in the separator
       recovers only after a {!commit} or {!cut} in it. A {!commit} or {!cut} in
       the separator does not reach the step of [list]. A separator and element
-      that together consume nothing end the list, unless the element recorded a
-      diagnostic, as above.
+      that together consume nothing end the list, and that step is dropped. When
+      the element recorded a diagnostic, such as an insertion of {!require},
+      [list] keeps its value as the last element, with the diagnostic, and ends
+      there. After an element that consumed nothing, the next bullet applies
+      first.
     - After an element that consumed nothing, a missing separator ends the list,
       and so does a separator that consumes nothing. The element then does not
       run again, so an element with side effects, such as {!warn} or a value of

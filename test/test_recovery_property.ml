@@ -1665,6 +1665,38 @@ let test_zero_width_steps () =
     )
     ~plain:"Error at 2: expected \"ab\", found 'c'" ~collector:("Ok ab", 0);
   let s1 c = String.make 1 c in
+  partial_check
+    "limit: a recovery in an operator parser, in a step that is not decided"
+    "ba"
+    (fun d ->
+      expression
+        ~operand:(fun () -> take_while (fun c -> c = 'x'))
+        [
+          [
+            infix_right (fun () ->
+                let l =
+                  list
+                    ~sep:(fun () -> ignore (char 'a'))
+                    d
+                    ~close:(fun () -> false)
+                    ~sync:ignore
+                    (fun () -> s1 (char 'a'))
+                    (fun _ -> "H")
+                    ()
+                in
+                if l = [] then fail "empty";
+                fun x y -> "(" ^ x ^ String.concat "" l ^ y ^ ")"
+            );
+          ];
+          [
+            postfix (fun () ->
+                let c = any_char () in
+                fun x -> "(" ^ x ^ s1 c ^ ")"
+            );
+          ];
+        ]
+    )
+    ~plain:"Ok ((b)a)" ~collector:("Ok ", 0);
   partial_check "known: list ~sep in an infix operator of expression" "bb"
     (fun d ->
       expression

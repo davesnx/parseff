@@ -1173,29 +1173,78 @@ module C2 = struct
   let counter = count
 end
 
+type outcome = Parsed | Invalid_argument_raised
+
 let runs counter run input k ~collector =
   let d = Diagnostics.create () in
   counter := 0;
-  ( try
+  let outcome =
+    match
       if collector then
-        ignore
-          (parse ~consume:`Partial ~diagnostics:d (input k) (fun () -> run d k))
+        parse ~consume:`Partial ~diagnostics:d (input k) (fun () -> run d k)
       else
-        ignore (parse ~consume:`Partial (input k) (fun () -> run d k))
-    with Invalid_argument _ -> ()
-  );
-  !counter
+        parse ~consume:`Partial (input k) (fun () -> run d k)
+    with
+    | _ ->
+        Parsed
+    | exception Invalid_argument _ ->
+        Invalid_argument_raised
+  in
+  (!counter, outcome)
 
-let check (name, counter, run, input, main) =
-  List.iter
+let faults (name, counter, run, input, raises, main) =
+  List.concat_map
     (fun (k, m) ->
-      let plain = runs counter run input k ~collector:false in
-      let collector = runs counter run input k ~collector:true in
-      if collector > 2 * (plain + m) then
-        Alcotest.failf "%s, k = %d: %d runs, plain %d, 9801882 %d" name k
-          collector plain m
+      let plain, plain_outcome = runs counter run input k ~collector:false in
+      let collector, outcome = runs counter run input k ~collector:true in
+      let expected =
+        if raises k then
+          Invalid_argument_raised
+        else
+          Parsed
+      in
+      List.concat
+        [
+          ( if plain_outcome <> Parsed then
+              [
+                Printf.sprintf
+                  "%s, k = %d: Invalid_argument without the collector" name k;
+              ]
+            else
+              []
+          );
+          ( if outcome <> expected then
+              [
+                Printf.sprintf
+                  "%s, k = %d: Invalid_argument %b with the collector, \
+                   expected %b"
+                  name k
+                  (outcome = Invalid_argument_raised)
+                  (raises k);
+              ]
+            else
+              []
+          );
+          ( if collector > 2 * (plain + m) then
+              [
+                Printf.sprintf "%s, k = %d: %d runs, plain %d, 9801882 %d" name
+                  k collector plain m;
+              ]
+            else
+              []
+          );
+        ]
     )
     main
+
+let check shapes =
+  match List.concat_map faults shapes with
+  | [] ->
+      ()
+  | l ->
+      Alcotest.fail (String.concat "\n" l)
+
+let never _ = false
 
 let shapes =
   [
@@ -1203,6 +1252,7 @@ let shapes =
       S1.counter,
       (fun d k -> ignore (S1.x1 d k ())),
       (fun _ -> "z"),
+      never,
       [
         (1, 2);
         (2, 3);
@@ -1219,168 +1269,196 @@ let shapes =
       S2.counter,
       (fun d k -> ignore (S2.family ((fun _ -> S2.by_fold_right) d) d k ())),
       (fun _ -> "z"),
+      never,
       [ (1, 3); (2, 5); (4, 9); (8, 17); (16, 33); (20, 41) ]
     );
     ( "s2 capture",
       S2.counter,
       (fun d k -> ignore (S2.family ((fun _ -> S2.by_capture) d) d k ())),
       (fun _ -> "z"),
+      never,
       [ (1, 2); (2, 3); (4, 5); (8, 9); (16, 17); (20, 21) ]
     );
     ( "s2 many",
       S2.counter,
       (fun d k -> ignore (S2.family ((fun _ -> S2.by_many) d) d k ())),
       (fun _ -> "z"),
+      never,
       [ (1, 3); (2, 5); (4, 9); (8, 17); (16, 33); (20, 41) ]
     );
     ( "s2 list",
       S2.counter,
       (fun d k -> ignore (S2.family (S2.by_list d) d k ())),
       (fun _ -> "z"),
+      never,
       [ (1, 1); (2, 1); (4, 1); (8, 1); (16, 1); (20, 1) ]
     );
     ( "s3",
       S3.counter,
       (fun d _ -> ignore (S3.grammar d ())),
       (fun k -> String.make k '(' ^ "z"),
+      never,
       [ (1, 5); (2, 11); (4, 29); (8, 89); (12, 181); (16, 305) ]
     );
     ( "s4",
       S4.counter,
       (fun d k -> ignore (S4.family d k ())),
       (fun _ -> "ab"),
+      never,
       [ (1, 3); (2, 2); (4, 2); (8, 2); (12, 2); (16, 2); (20, 2) ]
     );
     ( "s9",
       S9.counter,
       (fun d k -> ignore (S9.family d k ())),
       (fun _ -> "ab"),
+      never,
       [ (1, 4); (2, 10); (4, 46); (8, 766) ]
     );
     ( "u1",
       U1.counter,
       (fun d k -> ignore (U1.family d k ())),
       (fun _ -> "baabc"),
+      never,
       [ (1, 5); (2, 13); (4, 13); (6, 13); (8, 13); (10, 13); (12, 13) ]
     );
     ( "u2",
       U2.counter,
       (fun d k -> ignore (U2.family d k ())),
       (fun _ -> "aacaba"),
+      never,
       [ (1, 10); (2, 10); (4, 10); (6, 10); (8, 10); (10, 10); (12, 10) ]
     );
     ( "t1",
       T1.counter,
       (fun d k -> ignore (T1.family d k ())),
       (fun _ -> "bc"),
+      never,
       [ (1, 2); (2, 2); (4, 2); (6, 2); (8, 2); (10, 2); (12, 2) ]
     );
     ( "t2",
       T2.counter,
       (fun d k -> ignore (T2.family d k ())),
       (fun _ -> "a"),
+      (fun k -> k >= 2),
       [ (1, 1); (2, 3); (3, 3); (4, 3); (5, 3); (6, 3); (7, 3); (8, 3) ]
     );
     ( "z1",
       Z1.counter,
       (fun d k -> ignore (Z1.family d k ())),
       (fun _ -> Z1.input),
+      never,
       [ (1, 15); (2, 70); (3, 74); (4, 350); (5, 345); (6, 1600) ]
     );
     ( "z2",
       Z2.counter,
       (fun d k -> ignore (Z2.family d k ())),
       (fun _ -> Z2.input),
+      never,
       [ (1, 31); (2, 115); (3, 703); (4, 4819) ]
     );
     ( "x1",
       X1.counter,
       (fun d k -> ignore (X1.family d k ())),
       (fun _ -> "baaaa"),
+      never,
       [ (1, 6); (2, 14); (4, 62); (8, 1022) ]
     );
     ( "c2",
       C2.counter,
       (fun d k -> ignore (C2.family d k ())),
       (fun _ -> C2.input),
+      never,
       [ (1, 2); (2, 4); (3, 8); (4, 16); (5, 32); (6, 64); (8, 256) ]
     );
     ( "v1",
       V1.counter,
       (fun d k -> ignore (V1.family d k ())),
       (fun _ -> V1.input),
+      never,
       [ (1, 5); (2, 7); (3, 9); (4, 11); (5, 13); (6, 15); (8, 19) ]
     );
     ( "v2",
       V2.counter,
       (fun d k -> ignore (V2.family d k ())),
       (fun _ -> V2.input),
+      never,
       [ (1, 6); (2, 6); (3, 6); (4, 6); (5, 6); (6, 6); (8, 6) ]
     );
     ( "s11 t1",
       S11.counter,
       (fun d k -> ignore (S11.t1 k d ())),
       (fun _ -> ""),
+      never,
       [ (1, 1); (2, 2); (4, 8); (8, 128); (12, 2048) ]
     );
     ( "s11 t1b",
       S11.counter,
       (fun d k -> ignore (S11.t1b k d ())),
       (fun _ -> ""),
+      never,
       [ (1, 1); (2, 2); (4, 8); (8, 128); (12, 2048) ]
     );
     ( "s11 t2",
       S11.counter,
       (fun d k -> ignore (S11.t2 k d ())),
       (fun _ -> ""),
+      never,
       [ (1, 2); (2, 4); (4, 16); (8, 256); (12, 4096) ]
     );
     ( "s12 context true",
       S12.counter,
       (fun d k -> ignore (S12.t ~ctx:true k d ())),
       (fun _ -> "a"),
+      never,
       [ (1, 4); (2, 24); (3, 108); (4, 448); (5, 1812); (6, 7272); (8, 116496) ]
     );
     ( "s12 context false",
       S12.counter,
       (fun d k -> ignore (S12.t ~ctx:false k d ())),
       (fun _ -> "a"),
+      never,
       [ (1, 4); (2, 24); (3, 108); (4, 448); (5, 1812); (6, 7272); (8, 116496) ]
     );
     ( "s13 A",
       S13.counter,
       (fun d k -> ignore (S13.ta k d ())),
       (fun _ -> "k"),
+      never,
       [ (2, 3); (4, 5); (8, 9); (12, 13); (16, 17) ]
     );
     ( "s13 B",
       S13.counter,
       (fun d k -> ignore (S13.tb k d ())),
       (fun _ -> "z"),
+      never,
       [ (2, 4); (4, 4); (8, 4); (12, 4); (16, 4) ]
     );
     ( "s14 postfix",
       S14.counter,
       (fun d k -> ignore (S14.te ~post:true k d ())),
       (fun _ -> "z"),
+      never,
       [ (1, 4); (2, 4); (4, 4); (8, 4); (12, 4); (14, 4) ]
     );
     ( "s14 no postfix",
       S14.counter,
       (fun d k -> ignore (S14.te ~post:false k d ())),
       (fun _ -> "z"),
+      never,
       [ (1, 2); (2, 8); (4, 128); (8, 32768) ]
     );
     ( "nested or_ around one error, closed",
       Nested_or.counter,
       (fun d k -> ignore (Nested_or.value k 0 d ())),
       (fun k -> String.make k '(' ^ "x" ^ String.make k ')'),
+      never,
       [ (1, 1); (2, 1); (5, 1); (20, 1); (60, 1) ]
     );
     ( "nested or_ around one error, not closed",
       Nested_or.counter,
       (fun d k -> ignore (Nested_or.value k 0 d ())),
       (fun k -> String.make k '(' ^ "x"),
+      never,
       [ (1, 2); (2, 3); (5, 6); (20, 21); (60, 61) ]
     );
   ]
@@ -1391,6 +1469,7 @@ let gated_shapes =
       C1.counter,
       (fun d k -> ignore (C1.family d k ())),
       (fun _ -> C1.input),
+      never,
       [
         (1, 1); (2, 6); (3, 12); (4, 24); (5, 48); (6, 96); (8, 384); (10, 1536);
       ]
@@ -1399,12 +1478,14 @@ let gated_shapes =
       S13.counter,
       (fun d k -> ignore (S13.tc k d ())),
       (fun _ -> "aab"),
+      never,
       [ (2, 5); (4, 17); (8, 257); (12, 4097) ]
     );
     ( "s13 D",
       S13.counter,
       (fun d k -> ignore (S13.td k d ())),
       (fun _ -> "aab"),
+      never,
       [ (2, 2); (4, 8); (8, 128); (12, 2048) ]
     );
   ]
@@ -1415,12 +1496,39 @@ let () =
       ( "runs",
         [
           Alcotest.test_case "no more than twice the plain runs plus 9801882"
-            `Quick (fun () -> List.iter check shapes
+            `Quick (fun () -> check shapes
           );
           Alcotest.test_case
             "no more than twice the plain runs plus 9801882 with the gated \
              recovery replaced by its parser"
-            `Quick (fun () -> List.iter check gated_shapes
+            `Quick (fun () -> check gated_shapes
+          );
+          Alcotest.test_case "an undeclared exception is a fault" `Quick
+            (fun () ->
+              let calls = ref 0 and phase = ref 0 in
+              let raising exn _ _ =
+                incr phase;
+                if !phase mod 2 = 0 then raise exn
+              in
+              let shape exn raises =
+                ("probe", calls, raising exn, (fun _ -> ""), raises, [ (1, 1) ])
+              in
+              Alcotest.(check int)
+                "an undeclared Invalid_argument" 1
+                (List.length (faults (shape (Invalid_argument "probe") never)));
+              Alcotest.(check int)
+                "a declared Invalid_argument" 0
+                (List.length
+                   (faults (shape (Invalid_argument "probe") (fun _ -> true)))
+                );
+              Alcotest.(check bool)
+                "another exception leaves the check" true
+                ( match faults (shape Exit (fun _ -> true)) with
+                | _ ->
+                    false
+                | exception Exit ->
+                    true
+                )
           );
         ]
       );

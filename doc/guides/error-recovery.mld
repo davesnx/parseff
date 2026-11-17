@@ -401,7 +401,8 @@ then makes the statement fail. To keep them, pass [~keep:(fun entry inner -> ...
 entries that [keep] returns are recorded. For example,
 [~keep:(fun entry inner -> if inner = [] then [ entry ] else inner)] keeps the
 inner errors, and the error only when there are none. [keep] must be pure: it
-can run more than once. [list] takes the same [~keep].
+can run more than once for one error, as a loop runs its element again at the
+same position and then drops that step. [list] takes the same [~keep].
 
 {b A recovered error keeps the contexts around [recover].} Inside a
 [context ~delimited:true], {!val:Parseff.render_error} shows the whole

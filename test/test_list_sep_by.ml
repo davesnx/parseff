@@ -671,6 +671,59 @@ let test_record_not_called () =
     ("Error at 4: expected integer, found end of input", 0)
     (run "[1, ")
 
+let skip_only ?atom input =
+  match
+    parse ~consume:`Partial input (fun () ->
+        skip_nested ?atom
+          [ ('(', ')'); ('[', ']'); ('{', '}') ]
+          (fun c -> c = ',')
+          ();
+        position ()
+    )
+  with
+  | Ok p ->
+      p
+  | Error _ ->
+      -1
+
+let test_skip_nested () =
+  let check name input expected =
+    Alcotest.(check int) name expected (skip_only input)
+  in
+  check "separator" "ab, c" 2;
+  check "end of input" "abc" 3;
+  check "outer closer" "ab) c" 2;
+  check "separator inside brackets" "f(a, b) x, c" 9;
+  check "each kind has its own count" "[a ), b" 3;
+  check "one counter would stop at 6" "([a) b, c], d" 6;
+  check "closer of an outer kind closes the inner ones" "( [ { ) , x" 8;
+  check "open bracket to the end" "(a, b" 5;
+  check "multi-byte text" "h\xC3\xA9(\xE2\x82\xAC,), x" 9;
+  Alcotest.(check int)
+    "atom hides brackets and separators" 14
+    (skip_only
+       ~atom:(fun () -> ignore (string_literal ()))
+       "a \"),(\" (\"]\") , b"
+    );
+  Alcotest.(check int)
+    "atom that consumes nothing" 1
+    (skip_only ~atom:(fun () -> ()) "a, b")
+
+let test_atom_failure_forgotten () =
+  let r =
+    parse "ab," (fun () ->
+        skip_nested
+          ~atom:(fun () -> ignore (consume "abc"))
+          []
+          (fun c -> c = ',')
+          ();
+        char ';'
+    )
+  in
+  Alcotest.(check string)
+    "error" "Error at 2: expected ';', found ','"
+    (match r with Ok _ -> "Ok" | Error e -> show_result (Error e))
+
 let () =
   let open Alcotest in
   run "List_sep_by"
@@ -699,6 +752,12 @@ let () =
           test_case "contexts:`Inner" `Quick test_outer_false;
           test_case "trailing separator" `Quick test_trailing_separator;
           test_case "keep: not called" `Quick test_record_not_called;
+        ]
+      );
+      ( "skip_nested",
+        [
+          test_case "stop points" `Quick test_skip_nested;
+          test_case "atom failure forgotten" `Quick test_atom_failure_forgotten;
         ]
       );
     ]
