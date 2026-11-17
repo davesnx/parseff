@@ -115,6 +115,8 @@ export default defineConfig({
 				{ label: 'Diagnostics', slug: 'api/diagnostics' },
 				{ label: 'Zero-copy and fused operations', slug: 'api/zero-copy' },
 				{ label: 'Streaming', slug: 'api/streaming' },
+				{ label: 'Binary parsing', slug: 'api/binary' },
+				{ label: 'UTF-8 parsing', slug: 'api/utf8' },
 				{
 					label: 'Guides',
 					items: [

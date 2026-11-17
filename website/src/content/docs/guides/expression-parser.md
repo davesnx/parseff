@@ -260,6 +260,10 @@ Error: The value negate has type
        The second variant type does not allow tag(s) `Prefix
 ```
 
+## Error recovery
+
+To report every error of an expression, not only the first, see [An expression that recovers](./error-recovery.md#an-expression-that-recovers) in the error recovery guide. It shows why a `Parseff.prefix` operator calls `Parseff.commit` in its token parser, and why each operator token must take the longest match.
+
 ## Printing the AST
 
 For debugging, a simple `to_string` function:

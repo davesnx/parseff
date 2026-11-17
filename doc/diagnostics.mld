@@ -117,6 +117,10 @@ Diagnostics are transactional with parser control flow:
   back
 - {!val:Parseff.look_ahead} and {!val:Parseff.peek_with}: diagnostics are
   rolled back
+- {!val:Parseff.capture} and {!val:Parseff.recover}: when the parser inside
+  fails, the diagnostics that it recorded are rolled back. [recover] records
+  the error of the parser in their place. To keep them, pass [~keep] to
+  [recover]; see the {{!page-"error-recovery"}error recovery guide}
 
 This prevents diagnostics from leaking out of speculative branches.
 
