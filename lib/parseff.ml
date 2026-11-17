@@ -146,6 +146,8 @@ type line_index = {
   mutable cut_at : int;
   mutable cut_chars : int;
   mutable hint : int;
+  mutable deferred : (bytes * int * int * int) list;
+  mutable deferred_bytes : int;
 }
 
 let frame_choice = 0
@@ -545,17 +547,27 @@ module State = struct
 
   external dls_state : unit -> Obj.t array = "%dls_get"
 
-  type slot = { mutable dls : Obj.t array; mutable state : t; peer : slot }
+  type slot = {
+    mutable dls : Obj.t array;
+    mutable state : t;
+    mutable live : bool;
+    peer : slot;
+  }
 
   let key : slot Domain.DLS.key =
     Domain.DLS.new_key (fun () ->
-        let rec active = { dls = [| Obj.repr 0 |]; state = none; peer = idle }
-        and idle = { dls = [| Obj.repr 0 |]; state = none; peer = active } in
+        let rec active =
+          { dls = [| Obj.repr 0 |]; state = none; live = false; peer = idle }
+        and idle =
+          { dls = [| Obj.repr 0 |]; state = none; live = false; peer = active }
+        in
         active
     )
 
   let cache : slot ref =
-    let rec unset = { dls = [| Obj.repr 0 |]; state = none; peer = unset } in
+    let rec unset =
+      { dls = [| Obj.repr 0 |]; state = none; live = false; peer = unset }
+    in
     ref unset
 
   let[@inline never] refresh () =
@@ -574,16 +586,29 @@ module State = struct
       refresh ()
 
   let[@inline always] activate slot (t : t) =
-    slot.state <- t;
+    if slot.state != t then slot.state <- t;
+    slot.live <- true;
     if !cache != slot then cache := slot
 
   let deactivate slot =
     slot.state <- none;
+    slot.live <- false;
     cache := slot.peer
 
   let install (t : t) = activate (own_slot ()) t
-  let current () = (own_slot ()).state
-  let suspend () = deactivate (own_slot ())
+
+  let current () =
+    let slot = own_slot () in
+    if slot.live then
+      slot.state
+    else
+      none
+
+  let suspend () = (own_slot ()).live <- false
+
+  let release () =
+    let slot = own_slot () in
+    if not slot.live then slot.state <- none
   let resume (t : t) = install t
 
   let leave (t : t) (previous : t) =
@@ -598,7 +623,12 @@ module State = struct
 
   let enter (t : t) =
     let slot = own_slot () in
-    let previous = slot.state in
+    let previous =
+      if slot.live then
+        slot.state
+      else
+        none
+    in
     activate slot t;
     t.trail <- running_empty;
     previous
@@ -949,19 +979,19 @@ let () =
 let[@inline never] get_state_slow () =
   let slot = State.refresh () in
   let st = slot.state in
-  if st == State.none then raise Not_in_parse_context;
+  if st == State.none || not slot.live then raise Not_in_parse_context;
   State.cache := slot;
   st
 
 let[@inline always] get_state () =
   let slot = !State.cache in
-  if slot.dls != State.dls_state () then
+  if slot.dls != State.dls_state () || not slot.live then
     get_state_slow ()
   else
     slot.state
 
 let create_line_index () =
-  let starts = Array.make 64 0 in
+  let starts = Array.make 8 0 in
   starts.(0) <- 0;
   {
     starts;
@@ -972,6 +1002,8 @@ let create_line_index () =
     cut_at = 0;
     cut_chars = 0;
     hint = 0;
+    deferred = [];
+    deferred_bytes = 0;
   }
 
 let find_newline s from limit =
@@ -1066,7 +1098,11 @@ let last_newline s from limit =
   !i
 
 let rec count_cut_chars idx s len i stop =
-  if i >= stop then
+  if i + 8 <= stop && Int64.logand (bytes_get64u s i) 0x8080808080808080L = 0L
+  then begin
+    idx.cut_chars <- idx.cut_chars + 8;
+    count_cut_chars idx s len (i + 8) stop
+  end else if i >= stop then
     i
   else begin
     let c = Char.code (Bytes.unsafe_get s i) in
@@ -1103,17 +1139,8 @@ let rec count_cut_chars idx s len i stop =
     end
   end
 
-let ensure_line_index_preserved_through st up_to =
+let preserve_line_index idx ~input ~base ~input_len up_to =
   if up_to > 0 then begin
-    let idx =
-      match st.line_index with
-      | Some idx ->
-          idx
-      | None ->
-          let idx = create_line_index () in
-          st.line_index <- Some idx;
-          idx
-    in
     if up_to <= idx.scanned_up_to then begin
       let line = find_line idx up_to in
       if line > 0 then begin
@@ -1122,9 +1149,7 @@ let ensure_line_index_preserved_through st up_to =
         idx.line_base <- idx.line_base + line
       end
     end else begin
-      let input = st.input in
-      let base = st.base in
-      let stop = imin (up_to - base) (st.input_len - base) in
+      let stop = imin (up_to - base) (input_len - base) in
       let start = imax 0 (idx.scanned_up_to - base) in
       let newlines = count_newlines input start stop in
       idx.line_base <- idx.line_base + idx.count - 1 + newlines;
@@ -1148,19 +1173,18 @@ let ensure_line_index_preserved_through st up_to =
         else
           line_start
       in
-      if from < st.base || from > up_to then begin
+      if from < base || from > up_to then begin
         idx.cut_line <- -1;
         up_to
       end else begin
-        let input = st.input in
-        let len = st.input_len - st.base in
-        let stop = imin (up_to - st.base) len in
+        let len = input_len - base in
+        let stop = imin (up_to - base) len in
         if not known then idx.cut_chars <- 0;
-        let i = count_cut_chars idx input len (from - st.base) stop in
+        let i = count_cut_chars idx input len (from - base) stop in
         idx.cut_line <- line_start;
-        idx.cut_at <- i + st.base;
+        idx.cut_at <- i + base;
         if i < stop then
-          i + st.base
+          i + base
         else
           up_to
       end
@@ -1168,16 +1192,60 @@ let ensure_line_index_preserved_through st up_to =
   end else
     up_to
 
+let line_index_of st =
+  match st.line_index with
+  | Some idx ->
+      idx
+  | None ->
+      let idx = create_line_index () in
+      st.line_index <- Some idx;
+      idx
+
+let flush_line_index st =
+  match st.line_index with
+  | Some ({ deferred = _ :: _; _ } as idx) ->
+      let pending = List.rev idx.deferred in
+      idx.deferred <- [];
+      idx.deferred_bytes <- 0;
+      List.iter
+        (fun (input, base, input_len, up_to) ->
+          ignore (preserve_line_index idx ~input ~base ~input_len up_to : int)
+        )
+        pending
+  | _ ->
+      ()
+
+let ensure_line_index_preserved_through st up_to =
+  flush_line_index st;
+  preserve_line_index (line_index_of st) ~input:st.input ~base:st.base
+    ~input_len:st.input_len up_to
+
+let max_deferred_bytes = 1 lsl 12
+
+let ascii_before input rel =
+  rel >= 3
+  && Char.code (Bytes.unsafe_get input (rel - 1)) < 0x80
+  && Char.code (Bytes.unsafe_get input (rel - 2)) < 0x80
+  && Char.code (Bytes.unsafe_get input (rel - 3)) < 0x80
+
+let drop_through st up_to =
+  let rel = up_to - st.base in
+  let idx = line_index_of st in
+  let size = Bytes.length st.input in
+  if
+    rel <= st.input_len - st.base
+    && ascii_before st.input rel
+    && idx.deferred_bytes + size <= max_deferred_bytes
+  then begin
+    idx.deferred <- (st.input, st.base, st.input_len, up_to) :: idx.deferred;
+    idx.deferred_bytes <- idx.deferred_bytes + size;
+    up_to
+  end else
+    ensure_line_index_preserved_through st up_to
+
 let[@inline never] handle_location st =
-  let idx =
-    match st.line_index with
-    | Some idx ->
-        idx
-    | None ->
-        let idx = create_line_index () in
-        st.line_index <- Some idx;
-        idx
-  in
+  flush_line_index st;
+  let idx = line_index_of st in
   let up_to = min st.pos st.input_len in
   if up_to > idx.scanned_up_to then
     extend_line_index idx ~base_offset:st.base st.input up_to;
@@ -1194,7 +1262,7 @@ let[@inline never] relocate st ~floor ~adopt n =
   let drop = imin (imax 0 (floor - st.base)) cur_len in
   let drop =
     if drop > 0 then
-      ensure_line_index_preserved_through st floor - st.base
+      drop_through st floor - st.base
     else
       drop
   in
@@ -6199,15 +6267,8 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
           };
       }
   | Some src ->
-      let idx =
-        match st.line_index with
-        | Some idx ->
-            idx
-        | None ->
-            let idx = create_line_index () in
-            st.line_index <- Some idx;
-            idx
-      in
+      flush_line_index st;
+      let idx = line_index_of st in
       if idx.hint > idx.scanned_up_to then
         extend_line_index idx ~base_offset:st.base st.input idx.hint;
       let shown =
@@ -7043,8 +7104,10 @@ let parse_partial ?(max_depth = 128)
     | None ->
         if t.closed then
           None
-        else
+        else begin
+          State.release ();
           Effect.perform Need
+        end
   in
   let c = { next; pending = ""; pending_pos = 0 } in
   let src = Source.make ~initial:"" ~eof:false (Chunks c) in
