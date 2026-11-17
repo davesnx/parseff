@@ -8,3 +8,11 @@ A JSON array from a generated source, with each element given to a function
 
   $ ./main.exe 20000
   elements=20000 sum_of_ids=199990000
+
+A malformed number is a parse error
+
+  $ ./main.exe -e '[1,-2,3e1]'
+  elements=3 sum_of_ids=29
+
+  $ ./main.exe -e '[1-2]'
+  error at 2: expected ',' or ']', found '-'

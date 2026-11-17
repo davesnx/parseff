@@ -2074,14 +2074,26 @@ val integer : unit -> int
     ]} *)
 
 val number : unit -> float
-(** [number ()] parses a number with the JSON grammar: an optional [-], digits,
-    an optional fraction and an optional exponent. ["-0.5"] and ["2.5e-3"]
-    match.
+(** [number ()] parses a decimal number: an optional [-], digits, an optional
+    fraction and an optional exponent. ["-0.5"], ["2.5e-3"] and ["007"] match.
 
-    An [e] or [E] after the number always starts an exponent, so ["2em"] fails.
-    For other formats, such as a unit after the number, a leading [+], [.5],
-    digit separators or [inf], write your own parser with {!take_while},
-    {!recognize} and [float_of_string].
+    It reads the longest number at the position and stops there. It reads a
+    fraction only when a digit follows the [.], and an exponent only when a
+    digit, or a [+] or [-] then a digit, follows the [e] or [E]. So on ["2em"]
+    it returns [2.] and stops at [e], and on ["1."] it returns [1.] and stops at
+    [.]. It fails without a digit, and with [expected number in float range]
+    when the value is too large for a [float]. A value with more digits than a
+    [float] holds is rounded: ["9007199254740993"] gives [9007199254740992.].
+    ["-0"] gives [-0.], where {!integer} gives [0].
+
+    A JSON parser built on [number] rejects ["1."] and ["2e"] on the byte after
+    the number, as JSON allows only a comma, a closing bracket or brace,
+    whitespace or the end of input there. It must check leading zeros, such as
+    ["01"], itself.
+
+    For other formats, such as a leading [+], [.5], digit separators or [inf],
+    write your own parser with {!take_while}, {!recognize} and
+    [float_of_string].
 
     Example:
     {@ocaml[

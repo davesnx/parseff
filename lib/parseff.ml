@@ -4272,6 +4272,7 @@ let integer () =
   handle_integer st
 
 let label_number = "number"
+let label_float_range = "number in float range"
 
 let scan_digits st ~keep_from p =
   let p = ref p in
@@ -4298,24 +4299,35 @@ let[@inline never] handle_number st =
     fail_str st start tag_label label_number;
   let p = require_digits st ~keep_from first in
   let p =
-    if byte_at st ~keep_from p = Char.code '.' then
-      require_digits st ~keep_from (p + 1)
+    if
+      byte_at st ~keep_from p = Char.code '.'
+      && decimal_value (byte_at st ~keep_from (p + 1)) >= 0
+    then
+      scan_digits st ~keep_from (p + 2)
     else
       p
   in
   let p =
     if byte_at st ~keep_from p lor 0x20 = Char.code 'e' then
       let b = byte_at st ~keep_from (p + 1) in
-      if b = Char.code '+' || b = Char.code '-' then
-        require_digits st ~keep_from (p + 2)
+      let d =
+        if b = Char.code '+' || b = Char.code '-' then
+          p + 2
+        else
+          p + 1
+      in
+      if decimal_value (byte_at st ~keep_from d) >= 0 then
+        scan_digits st ~keep_from (d + 1)
       else
-        require_digits st ~keep_from (p + 1)
+        p
     else
       p
   in
-  let text = slice st start (p - start) in
+  let x = float_of_string (slice st start (p - start)) in
+  if Float.abs x = Float.infinity then
+    fail_str st start tag_label label_float_range;
   st.pos <- p;
-  float_of_string text
+  x
 
 let number () =
   let st = get_state () in

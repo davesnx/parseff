@@ -1,3 +1,5 @@
+[@@@alert "-unstable"]
+
 let chunked_source ~chunk_size input =
   let pos = ref 0 in
   Parseff.Source.of_function (fun buf off len ->
@@ -176,12 +178,90 @@ let test_number_values () =
   check show_float "2.5E-3" Parseff.number "Ok 0.0025000000000000001";
   check show_float "1e+2" Parseff.number "Ok 100";
   check show_float "123456.789e-3" Parseff.number "Ok 123.456789";
-  check show_float "1e400" Parseff.number "Ok inf";
-  check show_float "-1e400" Parseff.number "Ok -inf";
+  check show_float "1e+5" Parseff.number "Ok 100000";
+  check show_float "1e-5" Parseff.number "Ok 1.0000000000000001e-05";
+  check show_float "1e308" Parseff.number "Ok 1e+308";
   check show_float "1e-400" Parseff.number "Ok 0";
+  check show_float "007" Parseff.number "Ok 7";
   check show_number_rest "1.5x" number_rest {|Ok 1.5 "x"|};
   check show_number_rest "1_0" number_rest {|Ok 1 "_0"|};
   check show_number_rest "2,3" number_rest {|Ok 2 ",3"|}
+
+let test_number_prefix () =
+  check show_number_rest "2em" number_rest {|Ok 2 "em"|};
+  check show_number_rest "1." number_rest {|Ok 1 "."|};
+  check show_number_rest "1.x" number_rest {|Ok 1 ".x"|};
+  check show_number_rest "1..2" number_rest {|Ok 1 "..2"|};
+  check show_number_rest "1.e5" number_rest {|Ok 1 ".e5"|};
+  check show_number_rest "1e" number_rest {|Ok 1 "e"|};
+  check show_number_rest "1e+" number_rest {|Ok 1 "e+"|};
+  check show_number_rest "1e-x" number_rest {|Ok 1 "e-x"|};
+  check show_number_rest "1ex" number_rest {|Ok 1 "ex"|};
+  check show_number_rest "1.5e" number_rest {|Ok 1.5 "e"|};
+  check show_number_rest "1.5E+" number_rest {|Ok 1.5 "E+"|};
+  check show_number_rest "-0" number_rest {|Ok -0 ""|};
+  check show_integer_rest "-0" integer_rest {|Ok 0 ""|}
+
+let test_number_range () =
+  check show_float "1e400" Parseff.number
+    "Error@0 Expected expected number in float range, found '1e400'";
+  check show_float "-1e400" Parseff.number
+    "Error@0 Expected expected number in float range, found '-'";
+  check show_number_rest "[1e400]"
+    (fun () ->
+      let _ = Parseff.char '[' in
+      number_rest ()
+    )
+    "Error@1 Expected expected number in float range, found '1e400'";
+  check show_float "9007199254740993" Parseff.number "Ok 9007199254740992"
+
+let chunks_source chunks =
+  let rest = ref chunks in
+  Parseff.Source.of_chunks (fun () ->
+      match !rest with
+      | [] ->
+          None
+      | c :: tl ->
+          rest := tl;
+          Some c
+  )
+
+let feed_chunks parser chunks =
+  let t = Parseff.parse_partial parser in
+  let rec go = function
+    | [] ->
+        Parseff.finish t
+    | chunk :: rest -> (
+        match Parseff.feed t chunk with Parseff.Await -> go rest | Done r -> r
+      )
+  in
+  go chunks
+
+let test_number_split () =
+  List.iter
+    (fun (chunks, expected) ->
+      let name = String.concat "|" chunks in
+      Alcotest.(check string)
+        (name ^ " source") expected
+        (show_result show_number_rest
+           (Parseff.parse_source (chunks_source chunks) number_rest)
+        );
+      Alcotest.(check string)
+        (name ^ " feed") expected
+        (show_result show_number_rest (feed_chunks Parseff.number chunks))
+    )
+    [
+      ([ "1."; "5" ], {|Ok 1.5 ""|});
+      ([ "1."; "x" ], {|Ok 1 ".x"|});
+      ([ "1." ], {|Ok 1 "."|});
+      ([ "1e"; "+5" ], {|Ok 100000 ""|});
+      ([ "1e"; "+"; "5" ], {|Ok 100000 ""|});
+      ([ "1e+"; "x" ], {|Ok 1 "e+x"|});
+      ([ "1e"; "+" ], {|Ok 1 "e+"|});
+      ( [ "1"; "e"; "4"; "00" ],
+        "Error@0 Expected expected number in float range, found '1e400'"
+      );
+    ]
 
 let test_number_failures () =
   check show_float "x" Parseff.number
@@ -196,16 +276,10 @@ let test_number_failures () =
     "Error@0 Expected expected number, found 'inf'";
   check show_float "-" Parseff.number
     "Error@1 Expected expected digit, found end of input";
+  check show_float "-x" Parseff.number
+    "Error@1 Expected expected digit, found 'x'";
   check show_float "1." Parseff.number
-    "Error@2 Expected expected digit, found end of input";
-  check ~chunk_sizes:[] show_float "1.e5" Parseff.number
-    "Error@2 Expected expected digit, found 'e5'";
-  check show_float "1e" Parseff.number
-    "Error@2 Expected expected digit, found end of input";
-  check show_float "1e+" Parseff.number
-    "Error@3 Expected expected digit, found end of input";
-  check show_float "1ex" Parseff.number
-    "Error@2 Expected expected digit, found 'x'"
+    "Error@1 Expected expected end of input, found '.'"
 
 let float_or_null () =
   Parseff.or_
@@ -411,6 +485,9 @@ let () =
         [
           Alcotest.test_case "values" `Quick test_number_values;
           Alcotest.test_case "failures" `Quick test_number_failures;
+          Alcotest.test_case "longest prefix" `Quick test_number_prefix;
+          Alcotest.test_case "float range" `Quick test_number_range;
+          Alcotest.test_case "split input" `Quick test_number_split;
           Alcotest.test_case "composition" `Quick test_number_composition;
         ]
       );
