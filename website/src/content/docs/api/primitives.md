@@ -161,6 +161,30 @@ let csv_value () =
 **Tip:** If you don't need the matched string, prefer `skip_while` over `take_while` to avoid allocating.
 
 
+### `take_until` and `skip_until`
+
+`Parseff.take_until` reads up to the first occurrence of a terminator string and returns the bytes before it. Like `take_while`, it stops before the input that ends the run: it does not consume the terminator. `Parseff.skip_until` does the same without building the string.
+
+```ocaml
+val take_until : ?at_most:int -> ?label:string -> string -> string
+```
+```ocaml
+val skip_until : ?at_most:int -> ?label:string -> string -> unit
+```
+```ocaml
+(* Read a block comment *)
+let block_comment () =
+  Parseff.literal "/*";
+  let body = Parseff.take_until "*/" in
+  Parseff.literal "*/";
+  body
+
+(* "/* a * b */" -> " a * b "
+   "/* a *"      -> Error at 6: expected "*/", found end of input *)
+```
+When the input ends before the terminator, the parse fails at the end of the input with `expected "<terminator>"`, or `expected <label>` with `~label`. `~at_most` limits the length of the result as in `take_while`. On a stream, `skip_until` keeps only the last `String.length terminator - 1` bytes it scanned, so it can skip a comment longer than the backtrack window; `take_until` keeps its whole result in the window.
+
+
 ## Control flow
 
 

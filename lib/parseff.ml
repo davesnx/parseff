@@ -2560,6 +2560,53 @@ let[@inline never] take_while_at_most st at_least at_most pred =
     fail_limit st ~from:start ~upto:end_pos at_most;
   end_pos
 
+let[@inline never] find_terminator st ~name ~keep_from ~at_most ?label t =
+  let m = String.length t in
+  if m = 0 then invalid_arg (name ^ ": empty terminator");
+  if at_most < 0 then invalid_arg (name ^ ": at_most must be at least 0");
+  let start = st.pos in
+  let stop =
+    if at_most >= max_int - start then
+      max_int
+    else
+      start + at_most + 1
+  in
+  let c0 = String.unsafe_get t 0 in
+  let p = ref start in
+  let found = ref (-1) in
+  let scanning = ref true in
+  while !scanning do
+    let base = st.base in
+    let inp = st.input in
+    let len = st.input_len - base in
+    let lim = imin (len - m + 1) (stop - base) in
+    let i = ref (!p - base) in
+    while
+      !i < lim
+      && not (Bytes.unsafe_get inp !i = c0 && literal_at_offset inp !i t m)
+    do
+      incr i
+    done;
+    p := !i + base;
+    if !i < lim then begin
+      found := !p;
+      scanning := false
+    end else if !p >= stop then
+      scanning := false
+    else if not (refill_at st keep_from !p) then
+      scanning := false
+  done;
+  if !found >= 0 then
+    !found
+  else if !p >= stop then
+    fail_limit st ~from:start ~upto:stop at_most
+  else
+    match label with
+    | Some l ->
+        fail_str_cold st st.input_len tag_label l
+    | None ->
+        fail_str_cold st st.input_len tag_literal t
+
 let[@inline never] end_of_input_slow st =
   ignore (have st 1);
   if st.pos <> st.input_len then fail_int st st.pos tag_end_of_input
@@ -2597,6 +2644,22 @@ let[@inline] skip_while pred =
 let[@inline] take_while_span pred =
   let st = get_state () in
   handle_take_while_span st pred
+
+let take_until ?(at_most = max_int) ?label t =
+  let st = get_state () in
+  let start = st.pos in
+  let end_pos =
+    find_terminator st ~name:"Parseff.take_until" ~keep_from:start ~at_most
+      ?label t
+  in
+  st.pos <- end_pos;
+  slice st start (end_pos - start)
+
+let skip_until ?(at_most = max_int) ?label t =
+  let st = get_state () in
+  st.pos <-
+    find_terminator st ~name:"Parseff.skip_until" ~keep_from:no_keep ~at_most
+      ?label t
 
 let[@inline] sep_by_take ~ws:ws_pred ~sep:sep_char take_pred =
   let st = get_state () in
