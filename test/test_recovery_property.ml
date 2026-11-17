@@ -93,23 +93,6 @@ let test_seal_reaches_outer_frames () =
             (fun () -> consume "a")
             ()
         )
-        ~plain:"Error at 1: expected 'b', found end of input";
-      same
-        ("sep_by_recover at the end, " ^ what)
-        "a"
-        (fun d () ->
-          or_
-            (fun () ->
-              String.concat ","
-                (sep_by_recover d ~sync:ignore (ab_commit seal)
-                   (fun () -> char ',')
-                   (fun _ -> "hole")
-                   ()
-                )
-            )
-            (fun () -> consume "a")
-            ()
-        )
         ~plain:"Error at 1: expected 'b', found end of input"
     )
     [ ("commit", commit); ("cut", cut) ];
@@ -653,20 +636,6 @@ let test_rule_a_functions () =
         ()
     )
     ~plain:"Ok abR";
-  same "sep_by_recover" "ac"
-    (fun d ->
-      or_
-        (fun () ->
-          String.concat ","
-            (sep_by_recover d ~sync:skip_rest ab
-               (fun () -> char ',')
-               (fun _ -> "hole")
-               ()
-            )
-        )
-        ac
-    )
-    ~plain:"Ok ac";
   same "list ~sep ~trailing" "a,a,]"
     (fun d ->
       or_
@@ -756,12 +725,13 @@ let test_rule_a_decided () =
     (fun d -> or_ (fun () -> or_ (recover_ab d) ac ()) (fun () -> consume "x"))
     ~plain:"Error at 1: expected 'b' or 'c', found 'd'"
 
-let test_sep_by_recover_empty_separator () =
+let test_list_empty_separator () =
   let word () = take_while (fun c -> c >= 'a' && c <= 'z') in
   let sync () = skip_while (fun c -> c <> ',') in
   let g sep d () =
     "<"
-    ^ String.concat "|" (sep_by_recover d ~sync word sep (fun _ -> "H") ())
+    ^ String.concat "|"
+        (list ~sep d ~close:(fun () -> false) ~sync word (fun _ -> "H") ())
     ^ ">"
   in
   let comma () = ignore (optional (fun () -> char ',') ()) in
@@ -770,7 +740,7 @@ let test_sep_by_recover_empty_separator () =
       List.iter
         (fun (input, plain) ->
           same ~consume:`Partial
-            (Printf.sprintf "sep_by_recover, %s, %S" name input)
+            (Printf.sprintf "list ~sep, %s, %S" name input)
             input (g sep) ~plain
         )
         cases
@@ -1695,55 +1665,6 @@ let test_zero_width_steps () =
     )
     ~plain:"Error at 2: expected \"ab\", found 'c'" ~collector:("Ok ab", 0);
   let s1 c = String.make 1 c in
-  let items d () =
-    String.concat ","
-      (sep_by_recover d ~sync:ignore
-         (fun () -> s1 (char 'c'))
-         (fun () -> consume "ab")
-         (fun _ -> "H")
-         ()
-      )
-  in
-  partial_check
-    "known: sep_by_recover in a step of fold_right, the operator cuts" "cbca"
-    (fun d () ->
-      fold_right (items d)
-        (fun () ->
-          cut ();
-          fun x y -> x ^ "+" ^ y
-        )
-        ()
-    )
-    ~plain:"Error at 1: expected 'c' or \"ab\", found 'bca'"
-    ~collector:("Ok c", 0);
-  partial_check
-    "limit: a recovery in an operator parser, in a step that is not decided"
-    "ba"
-    (fun d ->
-      expression
-        ~operand:(fun () -> take_while (fun c -> c = 'x'))
-        [
-          [
-            infix_right (fun () ->
-                let l =
-                  sep_by_recover d ~sync:ignore
-                    (fun () -> s1 (char 'a'))
-                    (fun () -> char 'a')
-                    (fun _ -> "H")
-                    ()
-                in
-                fun x y -> "(" ^ x ^ String.concat "" l ^ y ^ ")"
-            );
-          ];
-          [
-            postfix (fun () ->
-                let c = any_char () in
-                fun x -> "(" ^ x ^ s1 c ^ ")"
-            );
-          ];
-        ]
-    )
-    ~plain:"Ok ((b)a)" ~collector:("Ok ", 0);
   partial_check "known: list ~sep in an infix operator of expression" "bb"
     (fun d ->
       expression
@@ -2219,53 +2140,6 @@ let test_undecided_steps () =
         ()
     )
     ~plain:"Ok e" ~collector:("Ok e", 0);
-  let inner d () =
-    expression
-      ~operand:(fun () ->
-        "<"
-        ^ String.concat ","
-            (sep_by_recover d
-               ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
-               (fun () -> s1 (char 'a'))
-               (fun () -> char 'b')
-               (fun _ -> "H")
-               ()
-            )
-        ^ ">"
-      )
-      [
-        [
-          infix_left (fun () ->
-              let t =
-                context "c" (fun () ->
-                    cut ();
-                    require d (fun () -> s1 (char 'a')) (fun _ -> "M")
-                )
-              in
-              fun x y -> "(" ^ x ^ t ^ y ^ ")"
-          );
-        ];
-        [
-          infix_right (fun () ->
-              cut ();
-              ignore (char 'a');
-              fun x y -> "(" ^ x ^ "R" ^ y ^ ")"
-          );
-        ];
-      ]
-      ()
-  in
-  partial_check "decided per step, a recovery before the step" "bcabb"
-    (fun d () ->
-      fold_right
-        (fun () -> "e")
-        (fun () ->
-          let t = inner d () in
-          fun x y -> "{" ^ x ^ t ^ y ^ "}"
-        )
-        ()
-    )
-    ~plain:"Ok e" ~collector:("Ok e", 0);
   let short e =
     let m = error_message e in
     match String.index_opt m ',' with Some i -> String.sub m 0 i | None -> m
@@ -2286,10 +2160,12 @@ let test_undecided_steps () =
                         cut ();
                         "!<"
                         ^ String.concat ","
-                            (sep_by_recover ~release:true d
+                            (list ~release:true
+                               ~sep:(fun () -> ignore (char 'b'))
+                               d
+                               ~close:(fun () -> false)
                                ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
                                (fun () -> s1 (char 'a'))
-                               (fun () -> char 'b')
                                (fun _ -> "H")
                                ()
                             )
@@ -2323,8 +2199,7 @@ let test_undecided_steps () =
       | Error e ->
           "err(" ^ short e ^ ")"
     )
-    ~plain:"Ok err(expected 'a')"
-    ~collector:("Ok err(expected 'a')", 0);
+    ~plain:"Ok ok(Pa!)" ~collector:("Ok ok(Pa!)", 0);
   List.iter
     (fun by_commit ->
       let items d () =
@@ -2388,7 +2263,6 @@ type g =
   | Recover of bool * g * sync
   | Require of g
   | List of g * bool * bool * char option
-  | Sep_rec of g
 
 let rec show_g = function
   | Eps ->
@@ -2449,8 +2323,6 @@ let rec show_g = function
         )
         (match close with Some c -> Printf.sprintf "~close:%C" c | None -> "")
         (show_g a)
-  | Sep_rec a ->
-      Printf.sprintf "sep_by_recover(%s)" (show_g a)
 
 let sync_of = function
   | Nothing ->
@@ -2527,16 +2399,6 @@ let rec eval d g =
              ()
           )
       ^ "]"
-  | Sep_rec a ->
-      "["
-      ^ String.concat ";"
-          (sep_by_recover d ~sync:list_sync
-             (fun () -> eval d a)
-             (fun () -> char ',')
-             (fun _ -> "H")
-             ()
-          )
-      ^ "]"
 
 let int rs n = Random.State.int rs n
 let pick rs a = a.(int rs (Array.length a))
@@ -2602,10 +2464,10 @@ let rec gen rs size =
               None
           )
     | _ ->
-        Sep_rec (gen rs n)
+        List (gen rs n, true, false, None)
 
 let rec recovery_free = function
-  | Recover _ | Require _ | List _ | Sep_rec _ ->
+  | Recover _ | Require _ | List _ ->
       false
   | Eps | Chr _ | Any | Commit | Cut ->
       true
@@ -2693,7 +2555,6 @@ let rec has_list = function
   | Guard a
   | Capture a
   | Require a
-  | Sep_rec a
   | Recover (_, a, _) ->
       has_list a
   | Seq (a, b) | Or (a, b) ->
@@ -2782,15 +2643,26 @@ let test_sound_cases () =
       ( Recover
           ( true,
             Require
-              (Sep_rec
-                 (Opt (Seq (List (Chr 'a', false, false, None), Seq (Any, Cut))))
+              (List
+                 ( Opt (Seq (List (Chr 'a', false, false, None), Seq (Any, Cut))),
+                   true,
+                   false,
+                   None
+                 )
               ),
             Nothing
           ),
         ","
       );
       ( Many
-          (Many (Many (Require (Seq (Sep_rec (Guard Cut), Seq (Chr 'b', Cut)))))),
+          (Many
+             (Many
+                (Require
+                   (Seq (List (Guard Cut, true, false, None), Seq (Chr 'b', Cut))
+                   )
+                )
+             )
+          ),
         ",b"
       );
       ( Many
@@ -2858,7 +2730,7 @@ let test_sound_cases () =
       ( List
           ( Seq
               ( Many (Look (Recover (true, Commit, Nothing))),
-                List (Sep_rec (Seq (Any, Any)), true, true, None)
+                List (List (Seq (Any, Any), true, false, None), true, true, None)
               ),
             false,
             true,
@@ -2894,21 +2766,26 @@ let test_sound_cases () =
           ),
         ",[b,a]"
       );
-      ( Sep_rec
-          (Ctx
-             (Opt
-                (Guard
-                   (Many
-                      (Capture
-                         (Require
-                            (Or
-                               (Look (Chr '['), Recover (true, Chr 'a', Nothing))
-                            )
-                         )
-                      )
-                   )
-                )
-             )
+      ( List
+          ( Ctx
+              (Opt
+                 (Guard
+                    (Many
+                       (Capture
+                          (Require
+                             (Or
+                                ( Look (Chr '['),
+                                  Recover (true, Chr 'a', Nothing)
+                                )
+                             )
+                          )
+                       )
+                    )
+                 )
+              ),
+            true,
+            false,
+            None
           ),
         "]b]]a[]"
       );
@@ -2921,7 +2798,7 @@ let test_sound_cases () =
                         Ctx
                           (Or
                              ( Seq (Chr 'b', Chr 'b'),
-                               Sep_rec (Seq (Cut, Chr 'a'))
+                               List (Seq (Cut, Chr 'a'), true, false, None)
                              )
                           ),
                         Nothing
@@ -2966,11 +2843,6 @@ let rec sentence rs b = function
         sentence rs b x
       done;
       if sep && trailing && n > 0 && int rs 2 = 0 then Buffer.add_char b ','
-  | Sep_rec x ->
-      for i = 1 to 1 + int rs 2 do
-        if i > 1 then Buffer.add_char b ',';
-        sentence rs b x
-      done
 
 let spine_input rs g =
   let b = Buffer.create 16 in
@@ -3018,7 +2890,7 @@ let rec in_scope ~loop = function
       true
   | Recover (_, a, _) | Require a ->
       (not loop) && in_scope ~loop a
-  | List _ | Sep_rec _ ->
+  | List _ ->
       false
   | Seq (a, b) | Or (a, b) ->
       in_scope ~loop a && in_scope ~loop b
@@ -3122,8 +2994,8 @@ let () =
             test_rule_a_loop_limit;
           Alcotest.test_case "a commit inside an operand" `Quick
             test_rule_a_commit_in_operand;
-          Alcotest.test_case "sep_by_recover after an empty element" `Quick
-            test_sep_by_recover_empty_separator;
+          Alcotest.test_case "list ~sep after an empty element" `Quick
+            test_list_empty_separator;
         ]
       );
       ( "review 06",

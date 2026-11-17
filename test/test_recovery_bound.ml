@@ -231,10 +231,12 @@ module S9 = struct
         expression
           ~operand:(fun () ->
             String.concat ","
-              (sep_by_recover ~release:true errors
+              (list ~release:true
+                 ~sep:(fun () -> ignore ((fun () -> char 'b') ()))
+                 errors
+                 ~close:(fun () -> false)
                  ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
                  (fun () -> s1 (char 'a'))
-                 (fun () -> char 'b')
                  (fun _ -> "H")
                  ()
               )
@@ -535,9 +537,14 @@ module S14 = struct
                 postfix (fun () ->
                     let t =
                       String.concat ","
-                        (sep_by_recover d ~sync
+                        (list
+                           ~sep:(fun () ->
+                             ignore ((fun () -> ignore (char 'b')) ())
+                           )
+                           d
+                           ~close:(fun () -> false)
+                           ~sync
                            (fun () -> s1 (char 'a'))
-                           (fun () -> ignore (char 'b'))
                            (fun _ -> "H")
                            ()
                         )
@@ -753,7 +760,15 @@ module Z1 = struct
       in
       expression
         ~operand:(fun () ->
-          ignore (sep_by_recover errors ~sync inner inner (fun _ -> ()) ())
+          ignore
+            (list
+               ~sep:(fun () -> ignore (inner ()))
+               errors
+               ~close:(fun () -> false)
+               ~sync inner
+               (fun _ -> ())
+               ()
+            )
         )
         [
           [
@@ -802,7 +817,15 @@ module Z2 = struct
       in
       fold_left
         (fun () ->
-          ignore (sep_by_recover errors ~sync inner inner (fun _ -> ()) ())
+          ignore
+            (list
+               ~sep:(fun () -> ignore (inner ()))
+               errors
+               ~close:(fun () -> false)
+               ~sync inner
+               (fun _ -> ())
+               ()
+            )
         )
         (fun () ->
           expression ~operand:inner
@@ -859,9 +882,14 @@ module X1 = struct
       expression
         ~operand:(fun () ->
           ignore
-            (sep_by_recover errors ~sync
+            (list
+               ~sep:(fun () ->
+                 ignore ((fun () -> warn ~pos:(position ()) errors warning) ())
+               )
+               errors
+               ~close:(fun () -> false)
+               ~sync
                (fun () -> ignore (char 'a'))
-               (fun () -> warn ~pos:(position ()) errors warning)
                (fun _ -> ())
                ()
             )
@@ -921,21 +949,29 @@ module V1 = struct
         )
       in
       ignore
-        (sep_by_recover ~release:true errors ~sync inner
-           (fun () ->
+        (list ~release:true
+           ~sep:(fun () ->
              ignore
-               (optional
-                  (fun () ->
-                    list errors
-                      ~close:(fun () -> peek_char () = Some 'c')
-                      ~sync
-                      (fun () -> ignore (char 'z'))
-                      (fun _ -> ())
-                      ()
-                  )
+               ((fun () ->
+                  ignore
+                    (optional
+                       (fun () ->
+                         list errors
+                           ~close:(fun () -> peek_char () = Some 'c')
+                           ~sync
+                           (fun () -> ignore (char 'z'))
+                           (fun _ -> ())
+                           ()
+                       )
+                       ()
+                    )
+                )
                   ()
                )
            )
+           errors
+           ~close:(fun () -> false)
+           ~sync inner
            (fun _ -> ())
            ()
         );
@@ -1122,7 +1158,15 @@ module C2 = struct
           ()
       in
       ignore
-        (sep_by_recover errors ~sync (fun () -> fail "u") e1 (fun _ -> ()) ())
+        (list
+           ~sep:(fun () -> ignore (e1 ()))
+           errors
+           ~close:(fun () -> false)
+           ~sync
+           (fun () -> fail "u")
+           (fun _ -> ())
+           ()
+        )
     in
     level 0
   let input = "ba"
@@ -1211,7 +1255,7 @@ let shapes =
       S9.counter,
       (fun d k -> ignore (S9.family d k ())),
       (fun _ -> "ab"),
-      [ (1, 2); (2, 1); (4, 1); (8, 1); (12, 1); (16, 1); (20, 1) ]
+      [ (1, 4); (2, 10); (4, 46); (8, 766) ]
     );
     ( "u1",
       U1.counter,
@@ -1241,19 +1285,25 @@ let shapes =
       Z1.counter,
       (fun d k -> ignore (Z1.family d k ())),
       (fun _ -> Z1.input),
-      [ (1, 12); (2, 18); (3, 24); (4, 30); (5, 36); (6, 42); (8, 54) ]
+      [ (1, 15); (2, 70); (3, 74); (4, 350); (5, 345); (6, 1600) ]
     );
     ( "z2",
       Z2.counter,
       (fun d k -> ignore (Z2.family d k ())),
       (fun _ -> Z2.input),
-      [ (1, 17); (2, 19); (3, 21); (4, 23); (5, 25); (6, 27); (8, 31) ]
+      [ (1, 31); (2, 115); (3, 703); (4, 4819) ]
     );
     ( "x1",
       X1.counter,
       (fun d k -> ignore (X1.family d k ())),
       (fun _ -> "baaaa"),
-      [ (1, 4); (2, 6); (4, 10); (8, 18); (12, 26); (16, 34) ]
+      [ (1, 6); (2, 14); (4, 62); (8, 1022) ]
+    );
+    ( "c2",
+      C2.counter,
+      (fun d k -> ignore (C2.family d k ())),
+      (fun _ -> C2.input),
+      [ (1, 2); (2, 4); (3, 8); (4, 16); (5, 32); (6, 64); (8, 256) ]
     );
     ( "v1",
       V1.counter,
@@ -1344,12 +1394,6 @@ let gated_shapes =
       [
         (1, 1); (2, 6); (3, 12); (4, 24); (5, 48); (6, 96); (8, 384); (10, 1536);
       ]
-    );
-    ( "c2",
-      C2.counter,
-      (fun d k -> ignore (C2.family d k ())),
-      (fun _ -> C2.input),
-      [ (1, 5); (2, 25); (3, 125); (4, 625); (5, 3125); (6, 15625) ]
     );
     ( "s13 C",
       S13.counter,

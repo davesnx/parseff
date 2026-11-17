@@ -1815,15 +1815,6 @@ let test_guard_read_raises () =
               recover d ~sync:ignore two_then_fail (fun _ -> ())
           )
       );
-      ( "sep_by_recover",
-        fun d ->
-          in_capture (fun () ->
-              sep_by_recover d ~sync:ignore two_then_fail
-                (fun () -> char ',')
-                (fun _ -> ())
-                ()
-          )
-      );
     ]
   in
   List.iter
@@ -2073,11 +2064,14 @@ let test_release_keeps_inner_rewinds () =
          recover ~release:true d ~sync:ignore (empty_steps d cell) (fun _ -> "H")
      )
     );
-  Alcotest.check release_outcome "sep_by_recover ~release:true" plain
+  Alcotest.check release_outcome "list ~sep ~release:true" plain
     (release_state (fun d cell ->
          String.concat ","
-           (sep_by_recover ~release:true d ~sync:ignore (empty_steps d cell)
-              (fun () -> char ',')
+           (list ~release:true
+              ~sep:(fun () -> ignore (char ','))
+              d
+              ~close:(fun () -> false)
+              ~sync:ignore (empty_steps d cell)
               (fun _ -> "H")
               ()
            )

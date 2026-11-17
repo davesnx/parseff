@@ -148,7 +148,7 @@ x = 1; <hole>; z = 3; <hole>
 
 `sync` decides where parsing continues. A good sync point is a token that ends the broken construct. For a statement it is the `;`, and `skip_statement` consumes it.
 
-In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. Use `Parseff.sep_by_recover` here, not `recover`: a hole can be empty, as in `[1, , 3]`, and `recover` always consumes input. `Parseff.skip_nested` skips up to the next `,` or to the `]` that closes the list, and counts the brackets of nested lists. A failing first element gives a hole, so check for `]` first.
+In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. Use `Parseff.list` with `~sep` here, not `recover`: a hole can be empty, as in `[1, , 3]`, and `recover` always consumes input. `Parseff.skip_nested` skips up to the next `,` or to the `]` that closes the list, and counts the brackets of nested lists. `~close` tells where the list can end, so `[]` is an empty list.
 
 ```ocaml
 let array errors () =
@@ -156,17 +156,17 @@ let array errors () =
       let _ = Parseff.char '[' in
       ws ();
       let xs =
-        if Parseff.peek_char () = Some ']' then []
-        else
-          Parseff.sep_by_recover errors
-            ~sync:(Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
-            (fun () -> Some (integer ()))
-            (fun () ->
-              ws ();
-              let _ = Parseff.char ',' in
-              ws ())
-            (fun _ -> None)
-            ()
+        Parseff.list
+          ~sep:(fun () ->
+            ws ();
+            let _ = Parseff.char ',' in
+            ws ())
+          errors
+          ~close:(fun () -> Parseff.peek_char () = Some ']')
+          ~sync:(Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
+          (fun () -> Some (integer ()))
+          (fun _ -> None)
+          ()
       in
       ws ();
       let _ = Parseff.char ']' in
@@ -276,7 +276,7 @@ x = 1
 
 ## Limits
 
-**A recovery does not take the place of an alternative.** `recover`, `sep_by_recover`, `skip_nested`, `require` and `list` recover only where no open choice is around them. An open choice is another branch of an `or_` or `one_of`, the `None` of `optional`, the `~otherwise` of a fold before the first element, another prefix operator or the plain operand of an `expression` operand, or the end of a `list` while its separator runs. Inside an open choice, a recovery function fails as without the collector, and the choice goes on. Here the second branch reads `"ac"`, so `recover` does not record an error:
+**A recovery does not take the place of an alternative.** `recover`, `require` and `list` recover only where no open choice is around them. An open choice is another branch of an `or_` or `one_of`, the `None` of `optional`, the `~otherwise` of a fold before the first element, another prefix operator or the plain operand of an `expression` operand, or the end of a `list` while its separator runs. Inside an open choice, a recovery function fails as without the collector, and the choice goes on. Here the second branch reads `"ac"`, so `recover` does not record an error:
 
 ```ocaml
 # let errors = Parseff.Diagnostics.create () in
@@ -303,7 +303,7 @@ A `commit` or `cut` that reached the choice decides it, as without the collector
 
 **A branch that recovers and then fails runs again without recovery.** When a branch of `or_`, `one_of` or `optional`, a step of a repetition or a fold, or an operand of `precedence` or `expression` recovers and then fails, the construct removes the errors recorded in it, runs it once more without recovery, and goes on as without the collector: the next alternative runs, or the repetition ends. That run cannot recover, so it starts no further runs. When a `commit` or `cut` reached the construct, it fails instead. With `~trace`, the branch gives its events again. Inside `look_ahead` and `peek_with`, the recovery functions do not recover.
 
-**`cut` and `commit` reach past a recovery.** A `cut` or `commit` inside `recover`, `sep_by_recover` or `require` seals the enclosing frames as it does without the collector. Thus a parse with the collector that returns `Ok v` and records no error returns `Ok v` without it, except where an error can be lost: a step of `fold_right`, `precedence`, `expression` or `list` that consumes nothing is dropped with its errors, also when a `commit` or `cut` decided it, and so is a recovery in an operator parser. The `recover` documentation lists these cases.
+**`cut` and `commit` reach past a recovery.** A `cut` or `commit` inside `recover`, `require` or `list` seals the enclosing frames as it does without the collector. Thus a parse with the collector that returns `Ok v` and records no error returns `Ok v` without it, except where an error can be lost: a step of `fold_right`, `precedence`, `expression` or `list` that consumes nothing is dropped with its errors, also when a `commit` or `cut` decided it, and so is a recovery in an operator parser. The `recover` documentation lists these cases.
 
 **`recover` always consumes input.** Here `sync` does nothing, and `recover` skips the `;` where the second statement failed. To continue without consuming input, use `capture`.
 
@@ -316,7 +316,7 @@ A `commit` or `cut` that reached the choice decides it, as without the collector
 - : (string list, Parseff.error) result = Ok ["x = 1"; "<hole>"; "z = 3"]
 ```
 
-**A failure at the end of the input is not recovered.** The parse fails as it would without `recover`, with one error. Recorded, the failure would give a second error where the enclosing construct expects more input. A failure is at the end when its error range starts there too, so a `fail ~from` an earlier position is recovered. `sep_by_recover` and `list` follow the same rule: the element fails as in `sep_by` and `many`, so the list ends before it. `capture` returns such a failure as any other:
+**A failure at the end of the input is not recovered.** The parse fails as it would without `recover`, with one error. Recorded, the failure would give a second error where the enclosing construct expects more input. A failure is at the end when its error range starts there too, so a `fail ~from` an earlier position is recovered. `list` follows the same rule: the element fails as in `sep_by` and `many`, so the list ends before it. `capture` returns such a failure as any other:
 
 ```ocaml
 # let errors = Parseff.Diagnostics.create () in
@@ -333,11 +333,11 @@ A `commit` or `cut` that reached the choice decides it, as without the collector
 (Error "expected integer, found end of input", 0)
 ```
 
-**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~record:(fun e inner -> ...)`: it replaces the recording of `e`, and `inner` holds the removed errors. `sep_by_recover` takes the same `~record`.
+**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~record:(fun e inner -> ...)`: it replaces the recording of `e`, and `inner` holds the removed errors. `list` takes the same `~record`.
 
 **A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error. Pass `~outer:false` to keep only the contexts that the parser opened.
 
-**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover` and `sep_by_recover` call the parser directly, and `warn` records nothing when the runner got no collector. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
+**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover`, `require` and `list` run as the plain parser, and `warn` records nothing when the runner got no collector. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
 
 ```ocaml
 # Parseff.parse input (statements (Parseff.Diagnostics.create ()))
@@ -345,7 +345,7 @@ A `commit` or `cut` that reached the choice decides it, as without the collector
 - : (stmt list, string) result = Error "expected integer, found ';'"
 ```
 
-**A trace shows each recovered failure.** With `~trace`, each failure that `capture`, `recover` or `sep_by_recover` catches gives a `Captured` event, and `Parseff.print_trace` prints it as a `captured` line:
+**A trace shows each recovered failure.** With `~trace`, each failure that `capture`, `recover`, `require` or `list` catches gives a `Captured` event, and `Parseff.print_trace` prints it as a `captured` line:
 
 ```ocaml
 # let errors = Parseff.Diagnostics.create () in

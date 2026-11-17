@@ -3335,8 +3335,8 @@ let check_sealable st name =
       ("Parseff." ^ name
      ^ ": called inside look_ahead, peek_with, an operator lookup of \
         precedence, capture without ~release:true, require that can recover, \
-        or recover, sep_by_recover or list without ~release:true that can \
-        recover, which can rewind before a value that it gives out"
+        or recover or list without ~release:true that can recover, which can \
+        rewind before a value that it gives out"
       )
 
 let give st f v =
@@ -6541,38 +6541,6 @@ let skip_nested ?atom pairs stop () =
       far_merge st saved;
       raise exn
 
-let sep_by_recover ?(release = false) ?(outer = true) ?record errors ~sync elem
-    sep hole () =
-  let st = get_state () in
-  if st.diag != errors.self || st.recovery_off > 0 || open_choice st then
-    sep_by ~at_least:1 elem sep ()
-  else
-    let item () =
-      if not (have st 1) then
-        elem ()
-      else
-        recovering st ~release ~outer ~record ~progress:false errors ~sync elem
-          hole
-    in
-    let start = st.pos in
-    let first = item () in
-    let empty = ref (st.pos = start) in
-    let last = ref first in
-    let sep_then_item () =
-      let at = st.pos in
-      let _ = sep () in
-      if !empty && st.pos = at then
-        !last
-      else begin
-        let at = st.pos in
-        let v = item () in
-        empty := st.pos = at;
-        last := v;
-        v
-      end
-    in
-    first :: many sep_then_item ()
-
 let far_from st start =
   let saved = st.far in
   if saved != far_none && saved.pos <> start then st.far <- far_none;
@@ -6774,7 +6742,11 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
           let el = st.pos in
           far_back st (State.held_of st frame);
           State.release_far st frame;
-          if trailing && guarded frame closed then
+          if empty && el = at then begin
+            restore_rewind_frame st frame;
+            State.pop_rewind_frame st frame;
+            List.rev acc
+          end else if trailing && guarded frame closed then
             match plain_step ~expected:false frame with
             | None ->
                 ignore (optional s ());

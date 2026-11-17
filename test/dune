@@ -22,7 +22,6 @@
   test_ref_model
   test_source_each
   test_numbers
-  test_sep_by_recover
   test_list
   test_list_sep_by
   test_peek
