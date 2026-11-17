@@ -666,7 +666,7 @@ let test_list_in_or_branch () =
     or_
       (fun () -> String.concat "," (List.map show_item (items d ())))
       (fun () ->
-        ignore (consume "[a]");
+        literal "[a]";
         "letter"
       )
       ()
@@ -1270,7 +1270,7 @@ let test_require_furthest_failure () =
     let r =
       parse ~diagnostics:d "ax" (fun () ->
           require d p ignore;
-          ignore (consume "ax")
+          literal "ax"
       )
     in
     (show_result (fun () -> "") r |> String.trim, entries d)

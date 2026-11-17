@@ -80,7 +80,10 @@ let test_seal_reaches_outer_frames () =
         (fun d () ->
           or_
             (fun () -> require d (ab_commit seal) (fun _ -> "missing"))
-            (fun () -> consume "ax")
+            (fun () ->
+              literal "ax";
+              "ax"
+            )
             ()
         )
         ~plain:err;
@@ -90,7 +93,10 @@ let test_seal_reaches_outer_frames () =
         (fun d () ->
           or_
             (fun () -> recover d ~sync:ignore (ab_commit seal) (fun _ -> "hole"))
-            (fun () -> consume "a")
+            (fun () ->
+              literal "a";
+              "a"
+            )
             ()
         )
         ~plain:"Error at 1: expected 'b', found end of input"
@@ -108,7 +114,10 @@ let test_seal_reaches_outer_frames () =
                ()
             )
         )
-        (fun () -> consume "a")
+        (fun () ->
+          literal "a";
+          "a"
+        )
         ()
     )
     ~plain:"Error at 1: expected 'b', found end of input";
@@ -124,7 +133,10 @@ let test_seal_reaches_outer_frames () =
                ()
             )
         )
-        (fun () -> consume "a")
+        (fun () ->
+          literal "a";
+          "a"
+        )
         ()
     )
     ~plain:"Ok a"
@@ -132,13 +144,24 @@ let test_seal_reaches_outer_frames () =
 let holes_then_ax d () =
   let l =
     many
-      (fun () -> recover d ~sync:ignore (fun () -> consume "ab") (fun _ -> "H"))
+      (fun () ->
+        recover d ~sync:ignore
+          (fun () ->
+            literal "ab";
+            "ab"
+          )
+          (fun _ -> "H")
+      )
       ()
   in
-  String.concat "" l ^ consume "ax"
+  String.concat "" l
+  ^
+  ( literal "ax";
+    "ax"
+  )
 
 let alt () =
-  ignore (consume "ax");
+  literal "ax";
   "ALT"
 
 let test_replay_without_recovery () =
@@ -151,7 +174,16 @@ let test_replay_without_recovery () =
           s ^ String.make 1 (char 'q')
         )
         (fun () ->
-          require d (fun () -> consume "b") (fun _ -> "M") ^ consume "ax"
+          require d
+            (fun () ->
+              literal "b";
+              "b"
+            )
+            (fun _ -> "M")
+          ^
+          ( literal "ax";
+            "ax"
+          )
         )
         ()
     )
@@ -166,7 +198,12 @@ let test_replay_without_recovery () =
     (fun d () -> one_of [ holes_then_ax d; holes_then_ax d; alt ] ())
     ~plain:"Ok ax";
   let y_or_holes d () =
-    match peek_char () with Some 'y' -> consume "y" | _ -> holes_then_ax d ()
+    match peek_char () with
+    | Some 'y' ->
+        literal "y";
+        "y"
+    | _ ->
+        holes_then_ax d ()
   in
   same "many" "yax"
     (fun d () -> String.concat "," (many (y_or_holes d) ()))
@@ -207,7 +244,18 @@ let test_replay_without_recovery () =
         String.make 1 (digit ())
   in
   let rest () =
-    match optional (fun () -> consume "+ax") () with Some s -> s | None -> ""
+    match
+      optional
+        (fun () ->
+          literal "+ax";
+          "+ax"
+        )
+        ()
+    with
+    | Some s ->
+        s
+    | None ->
+        ""
   in
   let plus () a b = a ^ "+" ^ b in
   same "precedence" "1+ax"
@@ -260,23 +308,52 @@ let test_replay_without_recovery () =
     ~plain:"Ok -ax"
 
 let hole_then_xyz d () =
-  let h = recover d ~sync:ignore (fun () -> consume "ab") (fun _ -> "H") in
-  let s = consume "xyz" in
+  let h =
+    recover d ~sync:ignore
+      (fun () ->
+        literal "ab";
+        "ab"
+      )
+      (fun _ -> "H")
+  in
+  literal "xyz";
+  let s = "xyz" in
   h ^ s ^ String.make 1 (char ';')
 
 let test_replay_error () =
   let err = "Error at 0: expected \"ab\" or \"q\", found 'zxyzw'" in
   same "or_" "zxyzw"
-    (fun d () -> or_ (hole_then_xyz d) (fun () -> consume "q") ())
+    (fun d () ->
+      or_ (hole_then_xyz d)
+        (fun () ->
+          literal "q";
+          "q"
+        )
+        ()
+    )
     ~plain:err;
   same "many" "zxyzw"
     (fun d () ->
       let l = many (hole_then_xyz d) () in
-      String.concat "" l ^ consume "q"
+      String.concat "" l
+      ^
+      ( literal "q";
+        "q"
+      )
     )
     ~plain:err;
   same "one_of" "zxyzw"
-    (fun d () -> one_of [ hole_then_xyz d; (fun () -> consume "q") ] ())
+    (fun d () ->
+      one_of
+        [
+          hole_then_xyz d;
+          (fun () ->
+            literal "q";
+            "q"
+          );
+        ]
+        ()
+    )
     ~plain:err
 
 let test_missing_separator_error () =
@@ -311,14 +388,26 @@ let test_list_replay_without_recovery () =
           ~close:(fun () -> false)
           ~sync:ignore
           (fun () ->
-            let h = require d (fun () -> consume "ab") (fun _ -> "M") in
-            let s = consume "zx" in
+            let h =
+              require d
+                (fun () ->
+                  literal "ab";
+                  "ab"
+                )
+                (fun _ -> "M")
+            in
+            literal "zx";
+            let s = "zx" in
             h ^ s ^ String.make 1 (char ';')
           )
           (fun _ -> "L")
           ()
       in
-      String.concat "," l ^ consume "zx"
+      String.concat "," l
+      ^
+      ( literal "zx";
+        "zx"
+      )
     )
     ~plain:"Ok zx"
 
@@ -331,7 +420,10 @@ let test_seal_after_recovery () =
           ignore (char 'z');
           v
         )
-        (fun () -> consume "axq")
+        (fun () ->
+          literal "axq";
+          "axq"
+        )
         ()
     )
     ~plain:"Error at 1: expected 'b', found 'xq'"
@@ -381,7 +473,15 @@ let test_list_end_of_input () =
   same "an element cut short, then an optional token" "a;b"
     (fun d () ->
       let s = no_sep d () in
-      s ^ Option.value ~default:"" (optional (fun () -> consume "b") ())
+      s
+      ^ Option.value ~default:""
+          (optional
+             (fun () ->
+               literal "b";
+               "b"
+             )
+             ()
+          )
     )
     ~plain:"Ok ab";
   let digits d () =
@@ -396,7 +496,15 @@ let test_list_end_of_input () =
         ()
     in
     let s = String.concat "," l in
-    s ^ Option.value ~default:"" (optional (fun () -> consume ",") ())
+    s
+    ^ Option.value ~default:""
+        (optional
+           (fun () ->
+             literal ",";
+             ","
+           )
+           ()
+        )
   in
   same "a separator at the end, then an optional separator" "1,2," digits
     ~plain:"Ok 1,2,";
@@ -416,7 +524,11 @@ let test_list_end_of_input () =
           (fun _ -> "?")
           ()
       in
-      String.concat "," l ^ consume "1"
+      String.concat "," l
+      ^
+      ( literal "1";
+        "1"
+      )
     )
     ~plain:"Ok 1"
 
@@ -536,10 +648,30 @@ let then_ac p () =
 
 let test_rule_a_one_of () =
   same "first of three" "ac"
-    (fun d -> one_of [ recover_ab d; (fun () -> consume "x"); ac ])
+    (fun d ->
+      one_of
+        [
+          recover_ab d;
+          (fun () ->
+            literal "x";
+            "x"
+          );
+          ac;
+        ]
+    )
     ~plain:"Ok ac";
   same "second of three" "ac"
-    (fun d -> one_of [ (fun () -> consume "x"); recover_ab d; ac ])
+    (fun d ->
+      one_of
+        [
+          (fun () ->
+            literal "x";
+            "x"
+          );
+          recover_ab d;
+          ac;
+        ]
+    )
     ~plain:"Ok ac";
   same "no alternative matches" "ad"
     (fun d -> one_of [ recover_ab d; ac ])
@@ -584,7 +716,8 @@ let test_rule_a_optional () =
 let atom d () =
   match peek_char () with
   | Some '-' ->
-      consume "-x"
+      literal "-x";
+      "-x"
   | _ ->
       recover d ~sync:ignore (fun () -> String.make 1 (digit ())) (fun _ -> "H")
 
@@ -610,7 +743,7 @@ let test_rule_a_expression () =
             fun a b -> "(" ^ a ^ "+" ^ b ^ ")"
         );
         postfix (fun () ->
-            ignore (consume "++");
+            literal "++";
             fun a -> "(" ^ a ^ "++)"
         );
       ];
@@ -630,9 +763,17 @@ let test_rule_a_functions () =
       or_
         (fun () ->
           require d (fun () -> ignore (char 'x')) ignore;
-          consume "ab" ^ "L"
+          ( literal "ab";
+            "ab"
+          )
+          ^ "L"
         )
-        (fun () -> consume "ab" ^ "R")
+        (fun () ->
+          ( literal "ab";
+            "ab"
+          )
+          ^ "R"
+        )
         ()
     )
     ~plain:"Ok abR";
@@ -650,9 +791,16 @@ let test_rule_a_functions () =
               (fun _ -> "H")
               ()
           in
-          String.concat ";" l ^ consume "]"
+          String.concat ";" l
+          ^
+          ( literal "]";
+            "]"
+          )
         )
-        (fun () -> consume "a,a,]")
+        (fun () ->
+          literal "a,a,]";
+          "a,a,]"
+        )
     )
     ~plain:"Ok a,a,]";
   same "recover inside a build function" "1+2"
@@ -668,7 +816,10 @@ let test_rule_a_functions () =
                     fun a b ->
                       a
                       ^ recover d ~sync:ignore
-                          (fun () -> consume "q")
+                          (fun () ->
+                            literal "q";
+                            "q"
+                          )
                           (fun _ -> "H")
                       ^ b
                 );
@@ -676,7 +827,10 @@ let test_rule_a_functions () =
             ]
             ()
         )
-        (fun () -> consume "1+2")
+        (fun () ->
+          literal "1+2";
+          "1+2"
+        )
     )
     ~plain:"Ok 1+2"
 
@@ -691,7 +845,10 @@ let test_rule_a_decided () =
               (fun () -> fail "bad")
               (fun _ -> "H")
           )
-          (fun () -> consume "q")
+          (fun () ->
+            literal "q";
+            "q"
+          )
           ()
       in
       v ^ String.make 1 (char 'a')
@@ -707,7 +864,10 @@ let test_rule_a_decided () =
               "x" ^ recover_ab d ()
           )
         )
-        (fun () -> consume "xac")
+        (fun () ->
+          literal "xac";
+          "xac"
+        )
     )
     ~plain:"Error at 2: expected 'b', found 'c'" ~collector:("Ok xhole", 1);
   check "a commit before the recovery" "xac"
@@ -718,11 +878,21 @@ let test_rule_a_decided () =
           commit ();
           "x" ^ recover_ab d ()
         )
-        (fun () -> consume "xac")
+        (fun () ->
+          literal "xac";
+          "xac"
+        )
     )
     ~plain:"Error at 2: expected 'b', found 'c'" ~collector:("Ok xhole", 1);
   same "nested choices" "ad"
-    (fun d -> or_ (fun () -> or_ (recover_ab d) ac ()) (fun () -> consume "x"))
+    (fun d ->
+      or_
+        (fun () -> or_ (recover_ab d) ac ())
+        (fun () ->
+          literal "x";
+          "x"
+        )
+    )
     ~plain:"Error at 1: expected 'b' or 'c', found 'd'"
 
 let test_list_empty_separator () =
@@ -926,9 +1096,16 @@ let test_rule_a_traps () =
             Option.value ~default:"-" (optional (fun () -> body use d ab) ())
           in
           many_iter (fun () -> char 'a') (Buffer.add_char given) ();
-          v ^ consume "ab"
+          v
+          ^
+          ( literal "ab";
+            "ab"
+          )
         )
-        (fun () -> consume "aab")
+        (fun () ->
+          literal "aab";
+          "aab"
+        )
         ()
       ^ Buffer.contents given
   );
@@ -941,9 +1118,16 @@ let test_rule_a_traps () =
             Option.value ~default:"-" (optional (fun () -> body use d ab) ())
           in
           many_iter (fun () -> char 'a') (Buffer.add_char given) ();
-          v ^ consume "b"
+          v
+          ^
+          ( literal "b";
+            "b"
+          )
         )
-        (fun () -> consume "aac")
+        (fun () ->
+          literal "aac";
+          "aac"
+        )
         ()
       ^ Buffer.contents given
   )
@@ -1072,15 +1256,15 @@ let test_rule_a_far () =
     [
       ( "a failure after the start",
         fun () ->
-          ignore (or_ (fun () -> consume "abc") (fun () -> consume "a") ())
+          ignore (or_ (fun () -> literal "abc") (fun () -> literal "a") ())
       );
       ( "a failure at the start",
         fun () ->
-          ignore (or_ (fun () -> consume "ax") (fun () -> consume "a") ())
+          ignore (or_ (fun () -> literal "ax") (fun () -> literal "a") ())
       );
     ];
   let pre () =
-    ignore (or_ (fun () -> consume "abc") (fun () -> consume "a") ())
+    ignore (or_ (fun () -> literal "abc") (fun () -> literal "a") ())
   in
   let plain =
     partial "abd" (fun _ () ->
@@ -1221,7 +1405,11 @@ let test_review_stream_equal () =
             (fun () -> String.make 1 (char 'x'))
             (fun _ -> "H")
         in
-        h ^ consume "bc"
+        h
+        ^
+        ( literal "bc";
+          "bc"
+        )
       )
       (fun () ->
         ignore (char 'a');
@@ -1236,7 +1424,7 @@ let test_review_stream_equal () =
     (on_all_sources "a recovery in an open branch" "abc" p);
   let cut_past d wrap () =
     let body () =
-      ignore (consume "aaaa");
+      literal "aaaa";
       let v =
         or_
           (fun () ->
@@ -1337,7 +1525,7 @@ let test_review_rollback () =
             fun a b -> "(" ^ a ^ "+" ^ b ^ ")"
         );
         postfix (fun () ->
-            ignore (consume "++");
+            literal "++";
             Ref.set n (Ref.get n + 1);
             fun a -> a ^ "++"
         );
@@ -1399,7 +1587,10 @@ let test_review_cost () =
             (fun () -> String.make 1 (digit ()))
             (fun _ -> "?")
         );
-        (fun () -> consume "nil");
+        (fun () ->
+          literal "nil";
+          "nil"
+        );
       ]
       ()
   in
@@ -1445,7 +1636,7 @@ let test_review_limits () =
         [
           [
             postfix (fun () ->
-                ignore (consume "+!");
+                literal "+!";
                 fun a -> "(" ^ a ^ "+!)"
             );
           ];
@@ -1558,7 +1749,7 @@ let test_round2_cut_past () =
     or_
       (fun () ->
         let head () =
-          ignore (consume "let ");
+          literal "let ";
           cut ();
           recover d ~sync:to_semi name (fun _ -> "?")
         in
@@ -1656,7 +1847,8 @@ let test_zero_width_steps () =
           require d
             (fun () ->
               cut ();
-              consume "ab"
+              literal "ab";
+              "ab"
             )
             (fun _ -> "?")
         )

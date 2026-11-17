@@ -712,11 +712,7 @@ let test_skip_nested () =
 let test_atom_failure_forgotten () =
   let r =
     parse "ab," (fun () ->
-        skip_nested
-          ~atom:(fun () -> ignore (consume "abc"))
-          []
-          (fun c -> c = ',')
-          ();
+        skip_nested ~atom:(fun () -> literal "abc") [] (fun c -> c = ',') ();
         char ';'
     )
   in

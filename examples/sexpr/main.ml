@@ -7,7 +7,7 @@ let is_atom_char c =
 let atom () = Parseff.take_while ~at_least:1 is_atom_char ~label:"atom"
 
 let simple_list () =
-  let _ = Parseff.consume "(" in
+  Parseff.literal "(";
   Parseff.skip_whitespace ();
   let atoms =
     Parseff.sep_by
@@ -19,7 +19,7 @@ let simple_list () =
       ()
   in
   Parseff.skip_whitespace ();
-  let _ = Parseff.consume ")" in
+  Parseff.literal ")";
   atoms
 
 let parse_atom () =

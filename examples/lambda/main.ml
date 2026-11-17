@@ -22,17 +22,17 @@ let atom () =
 
 let abstr parse_body () =
   let open Parseff in
-  let _ = consume "(" in
+  literal "(";
   let _ = ws () in
-  let _ = consume "fun" in
+  literal "fun";
   let _ = ws () in
   let l = atom () in
   let _ = ws () in
-  let _ = consume "." in
+  literal ".";
   let _ = ws () in
   let r = parse_body () in
   let _ = ws () in
-  let _ = consume ")" in
+  literal ")";
   Abs (l, r)
 
 (* naive parser, without sugar *)
@@ -41,13 +41,13 @@ let rec parse_lambda () =
   one_of
     [
       (fun () ->
-        let _ = consume "(" in
+        literal "(";
         let _ = ws () in
         let l = parse_lambda () in
         let _ = ws () in
         let r = parse_lambda () in
         let _ = ws () in
-        let _ = consume ")" in
+        literal ")";
         App (l, r)
       );
       abstr parse_lambda;
@@ -63,11 +63,11 @@ let parse_lambda_sugared () =
       (one_of
          [
            (fun () ->
-             let _ = consume "(" in
+             literal "(";
              let _ = ws () in
              let l = longapp () in
              let _ = ws () in
-             let _ = consume ")" in
+             literal ")";
              l
            );
            (fun () -> abstr longapp ());

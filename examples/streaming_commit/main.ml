@@ -28,14 +28,14 @@ let path () =
 let request_line () : request =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "GET " in
+      Parseff.literal "GET ";
       Parseff.commit ();
       let p = path () in
       Parseff.end_of_input ();
       (`GET, p)
     )
     (fun () ->
-      let _ = Parseff.consume "POST " in
+      Parseff.literal "POST ";
       Parseff.commit ();
       let p = path () in
       Parseff.end_of_input ();

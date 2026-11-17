@@ -350,7 +350,7 @@ let test_take_iter_pieces () =
       (body_source ~prefix:"len:" ~len:body_len ~suffix:"!") (fun () ->
         Parseff.or_
           (fun () ->
-            let _ = Parseff.consume "len:" in
+            Parseff.literal "len:";
             Parseff.take_iter body_len (fun piece ->
                 largest := max !largest (Parseff.span_length piece);
                 Buffer.add_string out (Parseff.span_to_string piece)
@@ -371,7 +371,7 @@ let test_take_fails_in_small_window () =
   let r =
     Parseff.parse_source ~backtrack_window:64
       (body_source ~prefix:"len:" ~len:body_len ~suffix:"!") (fun () ->
-        let _ = Parseff.consume "len:" in
+        Parseff.literal "len:";
         ignore (Parseff.take body_len)
     )
   in
@@ -434,7 +434,7 @@ let test_inside_or_seals () =
          )
          (fun () ->
            right := true;
-           ignore (Parseff.consume "[1,2,x")
+           Parseff.literal "[1,2,x"
          )
       )
   in

@@ -150,8 +150,8 @@ type config_value =
 
 let bool_value () =
   Parseff.or_
-    (fun () -> let _ = Parseff.consume "true" in Bool true)
-    (fun () -> let _ = Parseff.consume "false" in Bool false)
+    (fun () -> Parseff.literal "true"; Bool true)
+    (fun () -> Parseff.literal "false"; Bool false)
     ()
 
 let int_value () =
@@ -177,7 +177,7 @@ let typed_value () =
     ()
 ```
 
-`consume` matches a literal string (for multi-character matches like `"true"`). `or_` is shorthand when you have exactly two alternatives; `one_of` takes a list for three or more. Order matters: `bool_value` must come before `tag_list`, otherwise `"true"` would match as `Tags ["true"]`.
+`literal` matches a literal string (for multi-character matches like `"true"`). `or_` is shorthand when you have exactly two alternatives; `one_of` takes a list for three or more. Order matters: `bool_value` must come before `tag_list`, otherwise `"true"` would match as `Tags ["true"]`.
 
 Now swap `raw_value` for `typed_value` in the entry parser:
 

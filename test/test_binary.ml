@@ -478,7 +478,7 @@ let test_tlv_header () =
   (* TLV: magic "TL", version u8, count u16-be, one field: tag u8, len u16-be, payload *)
   let input = "TL\x01\x00\x01\x0A\x00\x03foo" in
   let parser () =
-    let _ = Parseff.consume "TL" in
+    Parseff.literal "TL";
     let version = Parseff.any_uint8 () in
     let count = Parseff.BE.any_uint16 () in
     let fields =
@@ -582,7 +582,7 @@ let test_streaming_composition () =
   let input = "TL\x01\x00\x01\x0A\x00\x03foo" in
   let src = byte_at_a_time input in
   let parser () =
-    let _ = Parseff.consume "TL" in
+    Parseff.literal "TL";
     let version = Parseff.any_uint8 () in
     let count = Parseff.BE.any_uint16 () in
     let fields =

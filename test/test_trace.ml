@@ -86,7 +86,7 @@ let test_or_abandons_failed_context () =
 let test_fail_pos_ignores_earlier_failures () =
   check_events "abd"
     (Parseff.or_
-       (fun () -> ignore (Parseff.consume "abc"))
+       (fun () -> Parseff.literal "abc")
        (fun () -> Parseff.context "z" (fun () -> ignore (Parseff.char 'z')))
     )
     "error"
@@ -94,20 +94,25 @@ let test_fail_pos_ignores_earlier_failures () =
 
 let test_fail_pos_is_parser_position () =
   check_events "ax"
-    (fun () -> Parseff.context "kw" (fun () -> Parseff.consume "ab"))
+    (fun () ->
+      Parseff.context "kw" (fun () ->
+          Parseff.literal "ab";
+          "ab"
+      )
+    )
     "error"
     [ "enter kw 0"; "fail kw 0 0" ];
   check_events "ax"
     (Parseff.or_
-       (fun () -> ignore (Parseff.consume "ab"))
-       (fun () -> Parseff.context "kw" (fun () -> ignore (Parseff.consume "ab")))
+       (fun () -> Parseff.literal "ab")
+       (fun () -> Parseff.context "kw" (fun () -> Parseff.literal "ab"))
     )
     "error"
     [ "enter kw 0"; "fail kw 0 0" ];
   check_events "ab;"
     (fun () ->
       Parseff.context "stmt" (fun () ->
-          ignore (Parseff.consume "ab");
+          Parseff.literal "ab";
           ignore (Parseff.char '.')
       )
     )
@@ -193,7 +198,7 @@ let test_callback_exception_propagates () =
 let test_callback_cannot_run_parsers () =
   let seen = ref [] in
   let meddling _ =
-    match Parseff.consume "a" with
+    match Parseff.literal "a" with
     | _ ->
         seen := "consumed" :: !seen
     | exception exn ->
@@ -262,7 +267,7 @@ let test_captured () =
              Parseff.char 'c'
          )
         );
-      ignore (Parseff.consume "b")
+      Parseff.literal "b"
     )
     (true, 0)
     [ "captured 1 2 expected 'c', found end of input" ];
@@ -357,7 +362,7 @@ let test_captured_only_when_continued () =
         )
         (fun () -> ignore (Parseff.char 'a'))
         ignore;
-      ignore (Parseff.consume "x;")
+      Parseff.literal "x;"
     )
     (true, 1)
     [ "enter skip 0"; "exit skip 0 1"; "captured 0 0 expected 'a', found '?'" ]
@@ -428,7 +433,7 @@ let test_trace_keeps_the_error () =
         ignore (Parseff.char '[');
         Parseff.or_
           (fun () ->
-            ignore (Parseff.consume "ab");
+            Parseff.literal "ab";
             Parseff.commit ();
             ignore (Parseff.char ']')
           )
@@ -443,7 +448,12 @@ let test_trace_keeps_the_error () =
     Parseff.many
       (fun () ->
         Parseff.or_
-          (fun () -> Parseff.context "kw" (fun () -> Parseff.consume "ab"))
+          (fun () ->
+            Parseff.context "kw" (fun () ->
+                Parseff.literal "ab";
+                "ab"
+            )
+          )
           (fun () ->
             item ();
             ""
@@ -469,8 +479,14 @@ let test_backtrack_window_through_context () =
   let parser () =
     Parseff.context "w" (fun () ->
         Parseff.or_
-          (fun () -> Parseff.consume "abcdef")
-          (fun () -> Parseff.consume "x")
+          (fun () ->
+            Parseff.literal "abcdef";
+            "abcdef"
+          )
+          (fun () ->
+            Parseff.literal "x";
+            "x"
+          )
           ()
     )
   in

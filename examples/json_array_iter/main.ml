@@ -68,13 +68,13 @@ let rec value () =
         | Some '"' ->
             String (string_lit ())
         | Some 't' ->
-            let _ = Parseff.consume "true" in
+            Parseff.literal "true";
             Bool true
         | Some 'f' ->
-            let _ = Parseff.consume "false" in
+            Parseff.literal "false";
             Bool false
         | Some 'n' ->
-            let _ = Parseff.consume "null" in
+            Parseff.literal "null";
             Null
         | _ ->
             Number (number ())

@@ -16,10 +16,10 @@ cursor) and tries the right parser.
 let bool_parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "true" in
+      Parseff.literal "true";
       true)
     (fun () ->
-      let _ = Parseff.consume "false" in
+      Parseff.literal "false";
       false)
     ()
 (* "true"  -> Ok true  *)
@@ -46,20 +46,20 @@ when a later alternative succeeds.
 {@ocaml[
 let keyword_with_or () =
   Parseff.or_
-    (fun () -> Parseff.consume "let")
+    (fun () -> Parseff.literal "let")
     (fun () ->
       Parseff.or_
-        (fun () -> Parseff.consume "const")
-        (fun () -> Parseff.consume "var")
+        (fun () -> Parseff.literal "const")
+        (fun () -> Parseff.literal "var")
         ())
     ()
 
 let keyword_with_one_of () =
   Parseff.one_of
     [
-      (fun () -> Parseff.consume "let");
-      (fun () -> Parseff.consume "const");
-      (fun () -> Parseff.consume "var");
+      (fun () -> Parseff.literal "let");
+      (fun () -> Parseff.literal "const");
+      (fun () -> Parseff.literal "var");
     ]
     ()
 ]}
@@ -99,7 +99,7 @@ a label. On failure, the error message reports all labels, sorted:
 {@ocaml skip[val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a]}
 
 {@ocaml skip[
-let literal () =
+let scalar () =
   Parseff.one_of_labeled
     [
       ("number", fun () -> Number (Char.code (Parseff.digit ()) - Char.code '0'));
@@ -210,7 +210,7 @@ Without [expect], a failed [char '.'] reports [expected '.']. With [expect], it
 reports [expected a dot separator].
 
 [expect] relabels only failures at the position where the parser started. In
-[expect "key" (fun () -> consume "id:"; digit ())], the input ["foo"] reports
+[expect "key" (fun () -> literal "id:"; digit ())], the input ["foo"] reports
 [expected key], but ["id:x"] reports [expected digit] at offset 3, because the
 parser got past ["id:"] and the digit message is more precise.
 
@@ -272,7 +272,7 @@ let statement () =
   Parseff.context "statement" (fun () ->
       Parseff.or_
         (fun () ->
-          let _ = Parseff.consume "let" in
+          Parseff.literal "let";
           Parseff.cut ();
           Parseff.skip_whitespace ();
           let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
@@ -358,9 +358,9 @@ let rec json () =
   )
 
 and array_parser () =
-  let _ = Parseff.consume "[" in
+  Parseff.literal "[";
   (* ... calls json () recursively ... *)
-  let _ = Parseff.consume "]" in
+  Parseff.literal "]";
   Array elements
 ]}
 

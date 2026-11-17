@@ -13,7 +13,7 @@ with a grapheme segmentation library like
 {1 Mixing with byte-level primitives}
 
 UTF-8 and byte-level primitives can be freely mixed in the same parser. Use
-byte-level {!val:Parseff.consume} or {!val:Parseff.satisfy} for ASCII structural
+byte-level {!val:Parseff.literal} or {!val:Parseff.satisfy} for ASCII structural
 tokens, and {!module:Parseff.Utf8} for multilingual text content:
 
 {@ocaml skip[
@@ -22,7 +22,7 @@ let field () =
     (fun c -> c >= 'a' && c <= 'z')
     ~label:"key"
   in
-  let _ = Parseff.consume ":" in
+  Parseff.literal ":";
   Parseff.Utf8.skip_whitespace ();
   let value = Parseff.Utf8.take_while ~at_least:1
     ~label:"value"

@@ -1,27 +1,27 @@
 type route = Home | About | Terms | Blog_home | Blog_article of string
 
 let home () =
-  let _ = Parseff.consume "/" in
+  Parseff.literal "/";
   Parseff.end_of_input ();
   Home
 
 let about () =
-  let _ = Parseff.consume "/about" in
+  Parseff.literal "/about";
   Parseff.end_of_input ();
   About
 
 let terms () =
-  let _ = Parseff.consume "/legal/terms" in
+  Parseff.literal "/legal/terms";
   Parseff.end_of_input ();
   Terms
 
 let blog_home () =
-  let _ = Parseff.consume "/blog" in
+  Parseff.literal "/blog";
   Parseff.end_of_input ();
   Blog_home
 
 let blog_article () =
-  let _ = Parseff.consume "/blog/" in
+  Parseff.literal "/blog/";
   let slug = Parseff.take_while ~at_least:1 ~label:"slug" (fun _ -> true) in
   Parseff.end_of_input ();
   Blog_article slug

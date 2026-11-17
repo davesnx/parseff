@@ -44,16 +44,16 @@ Each JSON primitive type gets its own parser. These are the leaf nodes. They don
 
 ```ocaml
 let null_parser () =
-  let _ = Parseff.consume "null" in
+  Parseff.literal "null";
   Null
 
 let bool_parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "true" in
+      Parseff.literal "true";
       Bool true)
     (fun () ->
-      let _ = Parseff.consume "false" in
+      Parseff.literal "false";
       Bool false)
     ()
 ```

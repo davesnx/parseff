@@ -59,8 +59,18 @@ let test_skip_to_same_position () =
 let test_failure_inside_or () =
   check_all "failing peek, next branch runs" Fun.id "y" "Ok y" (fun () ->
       or_
-        (fun () -> fst (peek_with (fun () -> consume "x")))
-        (fun () -> consume "y")
+        (fun () ->
+          fst
+            (peek_with (fun () ->
+                 literal "x";
+                 "x"
+             )
+            )
+        )
+        (fun () ->
+          literal "y";
+          "y"
+        )
         ()
   )
 
@@ -69,31 +79,55 @@ let test_failure_is_reported () =
     "Error at 1: expected \"x\" or \"y\", found 'b'" (fun () ->
       ignore (char 'a');
       or_
-        (fun () -> fst (peek_with (fun () -> consume "x")))
-        (fun () -> consume "y")
+        (fun () ->
+          fst
+            (peek_with (fun () ->
+                 literal "x";
+                 "x"
+             )
+            )
+        )
+        (fun () ->
+          literal "y";
+          "y"
+        )
         ()
   )
 
 let test_probe_failures_forgotten () =
-  let probe () = or_ (fun () -> consume "abc") (fun () -> consume "a") () in
+  let probe () =
+    or_
+      (fun () ->
+        literal "abc";
+        "abc"
+      )
+      (fun () ->
+        literal "a";
+        "a"
+      )
+      ()
+  in
   check_all "peek_with" Fun.id "abx" "Error at 0: expected \"z\", found 'abx'"
     (fun () ->
       ignore (peek_with probe);
-      consume "z"
+      literal "z";
+      "z"
   );
   check_all "same as look_ahead" Fun.id "abx"
     "Error at 0: expected \"z\", found 'abx'" (fun () ->
       ignore (look_ahead probe);
-      consume "z"
+      literal "z";
+      "z"
   )
 
 let test_earlier_failure_kept () =
   check_all "failure before the peek stays" Fun.id "ab"
     "Error at 1: expected \"c\" or \"x\", found 'b'" (fun () ->
       ignore (char 'a');
-      ignore (optional (fun () -> consume "x") ());
+      ignore (optional (fun () -> literal "x") ());
       ignore (peek_with (fun () -> char 'b'));
-      consume "c"
+      literal "c";
+      "c"
   )
 
 let entries d =
@@ -162,14 +196,19 @@ let test_commit_stops () =
         (fun () ->
           ignore
             (peek_with (fun () ->
-                 let s = consume "a" in
+                 literal "a";
+                 let s = "a" in
                  commit ();
                  s
              )
             );
-          consume "b"
+          literal "b";
+          "b"
         )
-        (fun () -> consume "a")
+        (fun () ->
+          literal "a";
+          "a"
+        )
         ()
   )
 
@@ -179,14 +218,19 @@ let test_cut_stops () =
         (fun () ->
           ignore
             (peek_with (fun () ->
-                 let s = consume "a" in
+                 literal "a";
+                 let s = "a" in
                  cut ();
                  s
              )
             );
-          consume "b"
+          literal "b";
+          "b"
         )
-        (fun () -> consume "a")
+        (fun () ->
+          literal "a";
+          "a"
+        )
         ()
   )
 
@@ -194,8 +238,14 @@ let test_nested () =
   check_all "nested" Fun.id "abc" "Ok a1 ab2 0" (fun () ->
       let (inner, inner_stop, outer), outer_stop =
         peek_with (fun () ->
-            let inner, inner_stop = peek_with (fun () -> consume "a") in
-            let outer = consume "ab" in
+            let inner, inner_stop =
+              peek_with (fun () ->
+                  literal "a";
+                  "a"
+              )
+            in
+            literal "ab";
+            let outer = "ab" in
             (inner, inner_stop, outer)
         )
       in
@@ -221,7 +271,7 @@ let test_exception_passes () =
               with Exit -> seen := position ()
             );
             let n = Ref.get cell in
-            ignore (or_ (fun () -> consume "x") (fun () -> consume "ab") ());
+            ignore (or_ (fun () -> literal "x") (fun () -> literal "ab") ());
             n
         )
       in
@@ -279,7 +329,7 @@ let test_failure_inside_capture () =
                   peek_with (fun () ->
                       warn d "inside";
                       Ref.set cell 1;
-                      consume "x"
+                      literal "x"
                   )
               )
             in
@@ -303,8 +353,8 @@ let test_failure_inside_capture () =
 let test_stop_after_backtrack () =
   check_all "stop stays valid after a failed branch" string_of_int "abc" "Ok 2"
     (fun () ->
-      let _, stop = peek_with (fun () -> consume "ab") in
-      ignore (optional (fun () -> consume "abx") ());
+      let _, stop = peek_with (fun () -> literal "ab") in
+      ignore (optional (fun () -> literal "abx") ());
       skip_to stop;
       position ()
   )
@@ -357,11 +407,15 @@ let test_failure_after_consuming () =
           fst
             (peek_with (fun () ->
                  ignore (char 'a');
-                 consume "x"
+                 literal "x";
+                 "x"
              )
             )
         )
-        (fun () -> consume "abc")
+        (fun () ->
+          literal "abc";
+          "abc"
+        )
         ()
   )
 
@@ -403,7 +457,8 @@ let test_rule_in_token_loop () =
                      w
                  )
                 );
-              consume "?"
+              literal "?";
+              "?"
             )
             (fun () -> fst (peek_with word))
             ()
@@ -418,7 +473,8 @@ let test_rule_in_token_loop () =
                      w
                  )
                 );
-              consume "?"
+              literal "?";
+              "?"
             )
             (fun () -> fst (peek_with word))
             ()
@@ -429,7 +485,8 @@ let test_rule_in_token_loop () =
               fst
                 (peek_with (fun () ->
                      ignore (word ());
-                     consume "?"
+                     literal "?";
+                     "?"
                  )
                 )
             )
@@ -526,7 +583,7 @@ let test_skip_to_rejects () =
     (fun (mode_name, mode) ->
       let result =
         run mode "abc" (fun () ->
-            ignore (consume "ab");
+            literal "ab";
             invalid ("backwards, " ^ mode_name) (fun () -> skip_to 1);
             invalid ("past the end, " ^ mode_name) (fun () -> skip_to 4);
             invalid ("negative, " ^ mode_name) (fun () -> skip_to (-1));
@@ -544,7 +601,7 @@ let test_skip_to_unread_stream () =
     parse_source ~consume:`Partial (chunked ~chunk_size:1 "abc") (fun () ->
         ignore (char 'a');
         invalid "not read yet" (fun () -> skip_to 3);
-        let _, stop = peek_with (fun () -> consume "bc") in
+        let _, stop = peek_with (fun () -> literal "bc") in
         skip_to stop;
         position ()
     )

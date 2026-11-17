@@ -209,14 +209,14 @@ To report every error of a parse instead of the first, see the [Error recovery](
 When a parse fails, Parseff reports the *furthest* failure: the failure of any primitive, `fail` or `error` that happened at the highest input position, also inside branches that `or_`, `many`, `sep_by`, `optional` or `fold_left` abandoned. Everything that was expected at that position is merged into one message, sorted and without duplicates:
 
 ```ocaml
-(* "x" with one_of [consume "if"; consume "else"; consume "while"] *)
+(* "x" with one_of [literal "if"; literal "else"; literal "while"] *)
 (* expected "else", "if", or "while", found 'x' *)
 ```
-This also explains errors after a loop. With `sep_by (fun () -> consume "ab") (fun () -> char ',')` followed by `end_of_input`, the input `"ab,ab,ax"` reports `expected "b"` at offset 7\. The loop stopped because `"ax"` is not `"ab"`, and that is further than the `end_of_input` failure at offset 5\.
+This also explains errors after a loop. With `sep_by (fun () -> literal "ab") (fun () -> char ',')` followed by `end_of_input`, the input `"ab,ab,ax"` reports `expected "b"` at offset 7\. The loop stopped because `"ax"` is not `"ab"`, and that is further than the `end_of_input` failure at offset 5\.
 
 A failure at the end of the input keeps what was expected. On `"[1, 2"` the error says `expected ',' or ']', found end of input`.
 
-`consume` fails at the first byte that differs from the literal and expects the rest of it. `Parseff.commit` forgets the failures at or beyond its position, so a committed branch reports only what it expected itself.
+`literal` fails at the first byte that differs from the literal and expects the rest of it. `Parseff.commit` forgets the failures at or beyond its position, so a committed branch reports only what it expected itself.
 
 
 ## The error value

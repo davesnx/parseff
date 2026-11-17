@@ -6,11 +6,11 @@
 let parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "abx" in
+      Parseff.literal "abx";
       "left"
     )
     (fun () ->
-      let _ = Parseff.consume "abcd" in
+      Parseff.literal "abcd";
       "right"
     )
     ()

@@ -12,11 +12,11 @@ let number () =
 
 let ip_address () =
   let a = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let b = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let c = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let d = number () in
   Parseff.end_of_input ();
   (a, b, c, d)

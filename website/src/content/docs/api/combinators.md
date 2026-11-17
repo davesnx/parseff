@@ -25,10 +25,10 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
 let bool_parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "true" in
+      Parseff.literal "true";
       true)
     (fun () ->
-      let _ = Parseff.consume "false" in
+      Parseff.literal "false";
       false)
     ()
 (* "true"  -> Ok true  *)
@@ -46,20 +46,20 @@ A failure is recorded when it happens, not when the parse gives up. A branch tha
 ```ocaml
 let keyword_with_or () =
   Parseff.or_
-    (fun () -> Parseff.consume "let")
+    (fun () -> Parseff.literal "let")
     (fun () ->
       Parseff.or_
-        (fun () -> Parseff.consume "const")
-        (fun () -> Parseff.consume "var")
+        (fun () -> Parseff.literal "const")
+        (fun () -> Parseff.literal "var")
         ())
     ()
 
 let keyword_with_one_of () =
   Parseff.one_of
     [
-      (fun () -> Parseff.consume "let");
-      (fun () -> Parseff.consume "const");
-      (fun () -> Parseff.consume "var");
+      (fun () -> Parseff.literal "let");
+      (fun () -> Parseff.literal "const");
+      (fun () -> Parseff.literal "var");
     ]
     ()
 ```
@@ -95,7 +95,7 @@ Error composition follows the same rules as `or_`: if all parsers fail at the sa
 val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
 ```
 ```ocaml
-let literal () =
+let scalar () =
   Parseff.one_of_labeled
     [
       ("number", fun () -> Number (Char.code (Parseff.digit ()) - Char.code '0'));
@@ -198,7 +198,7 @@ let ip_address () =
 ```
 Without `expect`, a failed `char '.'` reports `expected '.'`. With `expect`, it reports `expected a dot separator`.
 
-`expect` relabels only failures at the position where the parser started. In `expect "key" (fun () -> consume "id:"; digit ())`, the input `"foo"` reports `expected key`, but `"id:x"` reports `expected digit` at offset 3, because the parser got past `"id:"` and the digit message is more precise.
+`expect` relabels only failures at the position where the parser started. In `expect "key" (fun () -> literal "id:"; digit ())`, the input `"foo"` reports `expected key`, but `"id:x"` reports `expected digit` at offset 3, because the parser got past `"id:"` and the digit message is more precise.
 
 
 ## Naming constructs
@@ -247,7 +247,7 @@ let statement () =
   Parseff.context "statement" (fun () ->
       Parseff.or_
         (fun () ->
-          let _ = Parseff.consume "let" in
+          Parseff.literal "let";
           Parseff.cut ();
           Parseff.skip_whitespace ();
           let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
@@ -326,9 +326,9 @@ let rec json () =
   )
 
 and array_parser () =
-  let _ = Parseff.consume "[" in
+  Parseff.literal "[";
   (* ... calls json () recursively ... *)
-  let _ = Parseff.consume "]" in
+  Parseff.literal "]";
   Array elements
 ```
 The `~max_depth` parameter on `Parseff.parse` controls the limit (default: 128\):

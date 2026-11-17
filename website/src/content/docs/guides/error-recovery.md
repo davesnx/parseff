@@ -29,7 +29,7 @@ let integer () =
 
 let statement () =
   Parseff.context "statement" (fun () ->
-      let _ = Parseff.consume "let" in
+      Parseff.literal "let";
       Parseff.cut ();
       ws ();
       let name = ident () in

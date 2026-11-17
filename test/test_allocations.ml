@@ -62,7 +62,7 @@ let request_line () =
   ignore (Parseff.char ' ');
   ignore (Parseff.take_while ~at_least:1 (fun c -> c <> ' '));
   ignore (Parseff.char ' ');
-  ignore (Parseff.consume "HTTP/");
+  Parseff.literal "HTTP/";
   Parseff.digit ()
 
 let test_dropped_failures () =
@@ -108,23 +108,23 @@ let test_stopping_failures () =
       Parseff.or_ (fun () -> Parseff.char 'x') (fun () -> 'y') ()
   )
 
-let test_consume_success () =
+let test_literal_success () =
   List.iter
-    (fun literal ->
+    (fun text ->
       let input =
         String.concat ""
-          (List.init (warmup_iterations + iterations) (fun _ -> literal))
+          (List.init (warmup_iterations + iterations) (fun _ -> text))
       in
       match
         Parseff.parse ~consume:`Partial input (fun () ->
-            words_per_call (fun () -> Parseff.consume literal)
+            words_per_call (fun () -> Parseff.literal text)
         )
       with
       | Ok actual ->
           if actual > 0. then
             Alcotest.failf
-              "consume %S allocated %.6f minor words per call, expected 0"
-              literal actual
+              "literal %S allocated %.6f minor words per call, expected 0" text
+              actual
       | Error error ->
           Alcotest.fail (Parseff.render_error error)
     )
@@ -181,7 +181,7 @@ let head =
 
 let rec head_lines count =
   let line = Parseff.take_while (fun c -> c <> '\r') in
-  ignore (Parseff.consume "\r\n");
+  Parseff.literal "\r\n";
   if line = "" then
     count
   else
@@ -481,7 +481,7 @@ let () =
         ]
       );
       ( "success paths",
-        [ Alcotest.test_case "consume" `Quick test_consume_success ]
+        [ Alcotest.test_case "literal" `Quick test_literal_success ]
       );
       ( "operators",
         [ Alcotest.test_case "expression and precedence" `Quick test_operators ]

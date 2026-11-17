@@ -26,13 +26,13 @@ let path () =
 let request_line_without_commit () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "GET " in
+      Parseff.literal "GET ";
       let p = path () in
       Parseff.end_of_input ();
       (`GET, p)
     )
     (fun () ->
-      let _ = Parseff.consume "POST " in
+      Parseff.literal "POST ";
       let p = path () in
       Parseff.end_of_input ();
       (`POST, p)

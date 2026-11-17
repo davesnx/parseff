@@ -111,7 +111,7 @@ let () =
 
 | Section | Combinators |
 |---------|------------|
-| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
+| [Core](/parseff/api/primitives) | `literal`, `char`, `satisfy`, `take_while`, `skip_while`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
 | [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `commit`, `cut`, `rec_`, `peek_with`, `skip_to`, `parse ~trace` |
 | [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right`, `expression`, `precedence` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace`, `integer`, `number`, `hex_integer`, `lexeme`, `keyword` |
