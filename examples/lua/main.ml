@@ -93,7 +93,13 @@ let analyse path ~on_statement ~on_errors =
       (fun r ->
         let errors =
           List.map
-            (fun (d : _ Parseff.Diagnostics.entry) -> d.value)
+            (fun (d : Parseff.Diagnostics.entry) ->
+              match d.value.kind with
+              | Custom (Parser.Reported e) ->
+                  e
+              | _ ->
+                  d.value
+            )
             (Parseff.Diagnostics.to_list Parser.errors)
         in
         let errors =

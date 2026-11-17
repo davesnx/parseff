@@ -884,7 +884,12 @@ module X1 = struct
           ignore
             (list
                ~sep:(fun () ->
-                 ignore ((fun () -> warn ~pos:(position ()) errors warning) ())
+                 ignore
+                   ((fun () ->
+                      warn ~from:(position ()) (Warning.Recorded warning)
+                    )
+                      ()
+                   )
                )
                errors
                ~close:(fun () -> false)

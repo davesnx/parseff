@@ -16,30 +16,40 @@ To collect parse errors and continue after them, see the [Error recovery](https:
 ## Types
 
 ```ocaml
+type severity = [ `Error | `Warning ]
+
 module Diagnostics : sig
-  type 'd entry = { pos : int; value : 'd }
-  type 'd t
-  val create : unit -> 'd t
-  val to_list : 'd t -> 'd entry list
-  val length : 'd t -> int
-  val is_empty : 'd t -> bool
-  val clear : 'd t -> unit
+  type entry = { pos : int; value : error }
+  type t
+  val create : unit -> t
+  val to_list : t -> entry list
+  val length : t -> int
+  val is_empty : t -> bool
+  val clear : t -> unit
 end
 ```
-A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Its type parameter is the type of the values given to `Parseff.warn`, and `Parseff.Diagnostics.to_list` returns the same type. The two cannot differ.
+A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Each entry holds an `Parseff.error` and its start position. The `severity` field of the error tells a warning from an error:
 
+- `` `Warning ``: a diagnostic from `Parseff.warn`.
+- `` `Error ``: an error that `Parseff.recover`, `Parseff.require` or `Parseff.list` recorded before the parse continued. A failed parse returns an `` `Error `` too.
 
 ## Emitting diagnostics
 
 ```ocaml
-val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
+val warn :
+  ?from:int ->
+  ?upto:int ->
+  ?notes:note list ->
+  ?help:string ->
+  custom_error ->
+  unit
 ```
-`Parseff.warn` records a non-fatal diagnostic at the current parser position, or at the byte offset `~pos` when it is given.
+`Parseff.warn` works as `Parseff.error`, but records the error and continues parsing. Declare the cases of `Parseff.custom_error` for your warnings. The warning covers the current position, or the bytes from `~from` to `~upto`, with the same rules as `Parseff.fail`. `~notes` and `~help` are kept in the error, and `Parseff.render_error` prints them.
 
 
 ## Collecting diagnostics
 
-Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. The parser must warn into the same collector. When the runner got no collector, `warn` records nothing. When it got one, `warn` into another collector raises `Invalid_argument`. `recover`, `require` and `list` with a collector that the runner did not get do not recover.
+Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. `Parseff.warn` records into that collector. When the runner got no collector, `warn` records nothing. `recover`, `require` and `list` take the collector as an argument, and recover only with the collector that the runner got.
 
 The result of the parse is the usual `Parseff.error` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
 
@@ -47,7 +57,7 @@ The result of the parse is the usual `Parseff.error` result. Read the diagnostic
 val parse :
   ?max_depth:int ->
   ?consume:[ `All | `Partial ] ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   string ->
   (unit -> 'a) ->
@@ -62,45 +72,67 @@ By default the parse requires that all input is consumed. It is the same as call
 ## Example
 
 ```ocaml
-type validation = [ `Octet_out_of_range of int ]
+type Parseff.custom_error += Octet_out_of_range of int
 
-let number_lenient diagnostics () =
+let number_lenient () =
   let start = Parseff.position () in
   let digits = Parseff.many ~at_least:1 Parseff.digit () in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
-  if n > 255 then
-    Parseff.warn ~pos:start diagnostics (`Octet_out_of_range n);
+  if n > 255 then Parseff.warn ~from:start (Octet_out_of_range n);
   n
 
-let ip_address_lenient diagnostics () =
-  let a = number_lenient diagnostics () in
+let ip_address_lenient () =
+  let a = number_lenient () in
   let _ = Parseff.char '.' in
-  let b = number_lenient diagnostics () in
+  let b = number_lenient () in
   let _ = Parseff.char '.' in
-  let c = number_lenient diagnostics () in
+  let c = number_lenient () in
   let _ = Parseff.char '.' in
-  let d = number_lenient diagnostics () in
+  let d = number_lenient () in
   (a, b, c, d)
 
-let () =
-  let diagnostics : validation Parseff.Diagnostics.t =
-    Parseff.Diagnostics.create ()
-  in
-  let outcome =
-    Parseff.parse ~diagnostics "999.2.3.256"
-      (ip_address_lenient diagnostics)
-  in
+let custom = function
+  | Octet_out_of_range n -> Printf.sprintf "octet %d out of range (0-255)" n
+  | _ -> "unknown"
+
+let report input =
+  let diagnostics = Parseff.Diagnostics.create () in
+  let outcome = Parseff.parse ~diagnostics input ip_address_lenient in
   (match outcome with
   | Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error error ->
       Printf.printf "Parse error at %d: %s\n" error.range.start
         (Parseff.error_message error));
   List.iter
-    (fun ({ pos; value } : validation Parseff.Diagnostics.entry) ->
+    (fun ({ value; _ } : Parseff.Diagnostics.entry) ->
+      print_endline
+        (Parseff.render_error ~name:"ip" ~source:input ~custom value))
+    (Parseff.Diagnostics.to_list diagnostics)
+```
+The parse succeeds, and each octet out of range gives a warning:
+
+```ocaml
+# report "999.2.3.256";;
+Parsed: 999.2.3.256
+ip:1:1: [warning] octet 999 out of range (0-255)
+1 | 999.2.3.256
+  | ^^^
+ip:1:9: [warning] octet 256 out of range (0-255)
+1 | 999.2.3.256
+  |         ^^^
+- : unit = ()
+```
+To react to one warning, match the `kind` and the `severity` of the entry:
+
+```ocaml
+let octets_out_of_range diagnostics =
+  List.filter_map
+    (fun ({ value; _ } : Parseff.Diagnostics.entry) ->
       match value with
-      | `Octet_out_of_range n ->
-          Printf.printf "  at %d: octet %d out of range (0-255)\n" pos n)
+      | { severity = `Warning; kind = Custom (Octet_out_of_range n); _ } ->
+          Some n
+      | _ -> None)
     (Parseff.Diagnostics.to_list diagnostics)
 ```
 
@@ -111,7 +143,7 @@ Diagnostics are transactional with parser control flow:
 - `Parseff.or_`: diagnostics from failed branches are rolled back
 - `Parseff.many`: diagnostics from the final failing attempt are rolled back
 - `Parseff.look_ahead` and `Parseff.peek_with`: diagnostics are rolled back
-- `Parseff.capture` and `Parseff.recover`: when the parser inside fails, the diagnostics that it recorded are rolled back. `recover` records the error of the parser in their place. To keep them, pass `~keep` to `recover`; see the [error recovery guide](./error-recovery.md)
+- `Parseff.capture` and `Parseff.recover`: when the parser inside fails, the warnings and errors that it recorded are rolled back. `recover` records the error of the parser in their place. To keep them, pass `~keep` to `recover`; see the [error recovery guide](./error-recovery.md)
 This prevents diagnostics from leaking out of speculative branches.
 
 

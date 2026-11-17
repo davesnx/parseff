@@ -29,7 +29,7 @@ let show_result = function
 
 let errors d =
   List.map
-    (fun { Diagnostics.value = e; _ } -> (e.range.start, error_message e))
+    (fun { Diagnostics.value = e; _ } -> (e.range.start, Warning.text e))
     (Diagnostics.to_list d)
 
 let errs = Alcotest.(list (pair int string))
@@ -297,13 +297,6 @@ let test_rollback () =
     "the alternative runs as without a collector" "Ok _" (show_result r);
   Alcotest.check errs "the recorded errors are rolled back" [] (errors d)
 
-let note ?from msg =
-  match capture (fun () -> (fail ?from msg : unit)) with
-  | Error e ->
-      e
-  | Ok () ->
-      Alcotest.fail "expected a failure"
-
 let issue_60_list ?keep ?(source = false) input =
   let d = Diagnostics.create () in
   let element () =
@@ -314,7 +307,7 @@ let issue_60_list ?keep ?(source = false) input =
     | Some '"' ->
         ()
     | _ ->
-        warn ~pos:start d (note ~from:start "unfinished string")
+        warn ~from:start (Warning.W "unfinished string")
     );
     ignore (char '"');
     ws ();
@@ -371,9 +364,9 @@ let test_record_arguments () =
   let seen = ref [] in
   let element () =
     ignore (char 'a');
-    warn d (note "first");
+    warn (Warning.W "first");
     ignore (char 'b');
-    warn ~pos:0 d (note "second");
+    warn ~from:0 (Warning.W "second");
     ignore (char '!');
     Hole
   in
@@ -386,7 +379,7 @@ let test_record_arguments () =
           ~keep:(fun e inner ->
             seen :=
               List.map
-                (fun (x : _ Diagnostics.entry) -> (x.pos, error_message x.value))
+                (fun (x : Diagnostics.entry) -> (x.pos, Warning.text x.value))
                 (e :: inner);
             []
           )
@@ -411,10 +404,10 @@ let test_release () =
   let seen = ref [] in
   let element () =
     ignore (char 'a');
-    warn d (note "before");
+    warn (Warning.W "before");
     commit ();
     ignore (char 'b');
-    warn d (note "after");
+    warn (Warning.W "after");
     ignore (char '!');
     Int 1
   in
@@ -463,7 +456,7 @@ let test_release () =
   ignore
     (run ~release:true
        ~keep:(fun _ l ->
-         inner := List.map (fun x -> error_message x.Diagnostics.value) l;
+         inner := List.map (fun x -> Warning.text x.Diagnostics.value) l;
          []
        )
        ()

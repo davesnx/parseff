@@ -485,7 +485,7 @@ let test_require_and_list () =
   let show_diags () =
     String.concat "; "
       (List.map
-         (fun (d : Parseff.error Parseff.Diagnostics.entry) ->
+         (fun (d : Parseff.Diagnostics.entry) ->
            Printf.sprintf "%d %s" d.pos (Parseff.error_message d.value)
          )
          (Parseff.Diagnostics.to_list errors)
@@ -908,7 +908,7 @@ let test_dropped_feed () =
   let diagnostics = Parseff.Diagnostics.create () in
   let cell = Parseff.Ref.create 0 in
   let p () =
-    Parseff.warn diagnostics 1;
+    Parseff.warn (Warning.W "1");
     Parseff.Ref.set cell 1;
     Parseff.literal "abc";
     "abc"
@@ -957,7 +957,7 @@ let test_options () =
   let events = ref 0 in
   let p () =
     Parseff.context "x" (fun () ->
-        Parseff.warn diagnostics 7;
+        Parseff.warn (Warning.W "7");
         Parseff.rec_ (fun () ->
             Parseff.rec_ (fun () ->
                 Parseff.literal "ab";

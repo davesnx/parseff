@@ -324,7 +324,7 @@ let test_infix_right_no_progress_undo () =
   let notes = Parseff.Diagnostics.create () in
   let count = Parseff.Ref.create 0 in
   let empty () =
-    Parseff.warn notes "empty";
+    Parseff.warn (Warning.W "empty");
     Parseff.Ref.set count (Parseff.Ref.get count + 1);
     fun a b -> "(" ^ a ^ "." ^ b ^ ")"
   in
@@ -415,7 +415,7 @@ let test_build_effects_on_retry () =
       tok s ();
       fun a b ->
         incr calls;
-        Parseff.warn notes (a ^ s ^ b);
+        Parseff.warn (Warning.W (a ^ s ^ b));
         "(" ^ a ^ s ^ b ^ ")"
     in
     let table =
@@ -435,7 +435,7 @@ let test_build_effects_on_retry () =
     Printf.sprintf "%s, notes [%s], %d calls" (show r)
       (String.concat "; "
          (List.map
-            (fun (e : string Parseff.Diagnostics.entry) -> e.value)
+            (fun (e : Parseff.Diagnostics.entry) -> Warning.text e.value)
             (Parseff.Diagnostics.to_list notes)
          )
       )
@@ -634,7 +634,7 @@ let test_token_runs_once () =
     [
       ("no effect", (fun _ _ -> ()), "Ok ((1!=2)!=3), 3 calls, 0 notes, ref 0");
       ( "warn",
-        (fun d _ -> Parseff.warn d "seen"),
+        (fun _ _ -> Parseff.warn (Warning.W "seen")),
         "Ok ((1!=2)!=3), 3 calls, 2 notes, ref 0"
       );
       ( "Ref.set",
@@ -1137,7 +1137,7 @@ module Precedence = struct
       (run (fun _ _ -> ()));
     Alcotest.(check string)
       "diagnostic" "Ok ((1*2)+3), 4 lookups"
-      (run (fun d _ -> Parseff.warn d "lookup"));
+      (run (fun _ _ -> Parseff.warn (Warning.W "lookup")));
     Alcotest.(check string)
       "Ref.set" "Ok ((1*2)+3), 4 lookups"
       (run (fun _ cell -> Parseff.Ref.set cell 1))
@@ -1156,7 +1156,7 @@ module Precedence = struct
             for _ = 1 to 7 do
               ignore (Parseff.char '<')
             done;
-            if noisy then Parseff.warn d "seen";
+            if noisy then Parseff.warn (Warning.W "seen");
             match mode with
             | `Low ->
                 Some (1, Parseff.infix_left less)
@@ -1321,7 +1321,7 @@ module Precedence = struct
       )
       [
         ("no effect", fun _ _ -> ());
-        ("warn", fun d _ -> Parseff.warn d "seen");
+        ("warn", fun _ _ -> Parseff.warn (Warning.W "seen"));
         ("Ref.set", fun _ cell -> Parseff.Ref.set cell 2);
         ("commit", fun _ _ -> Parseff.commit ());
         ("cut", fun _ _ -> Parseff.cut ());
@@ -1449,14 +1449,14 @@ module Precedence = struct
       let noted s () =
         Parseff.literal s;
         fun a b ->
-          Parseff.warn d (Printf.sprintf "%s%s%s" a s b);
+          Parseff.warn (Warning.W (Printf.sprintf "%s%s%s" a s b));
           "(" ^ a ^ s ^ b ^ ")"
       in
       let operator () =
         ws ();
         match Parseff.peek_char () with
         | Some '+' ->
-            if noisy then Parseff.warn d "lookup +";
+            if noisy then Parseff.warn (Warning.W "lookup +");
             Some (1, Parseff.infix_left (noted "+"))
         | Some '*' ->
             Some (2, Parseff.infix_left (noted "*"))
@@ -1477,8 +1477,8 @@ module Precedence = struct
       in
       show r
       :: List.map
-           (fun (e : string Parseff.Diagnostics.entry) ->
-             Printf.sprintf "%d:%s" e.pos e.value
+           (fun (e : Parseff.Diagnostics.entry) ->
+             Printf.sprintf "%d:%s" e.pos (Warning.text e.value)
            )
            (Parseff.Diagnostics.to_list d)
       |> String.concat " "

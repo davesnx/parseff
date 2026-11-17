@@ -95,7 +95,7 @@ Ok "expected integer, found ';', back at 0"
 
 ```ocaml
 val recover :
-  error Diagnostics.t ->
+  Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
@@ -846,13 +846,15 @@ x = 1; <hole>
 - : unit = ()
 ```
 
-**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover`, `require` and `list` run as the plain parser, and `warn` records nothing when the runner got no collector. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
+**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover`, `require` and `list` run as the plain parser, and `warn` records nothing. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
 
 ```ocaml
 # Parseff.parse input (statements (Parseff.Diagnostics.create ()))
   |> Result.map_error Parseff.error_message;;
 - : (stmt list, string) result = Error "expected integer, found ';'"
 ```
+
+**Warnings go to the same collector.** A parser that recovers can also call `Parseff.warn`. The warning is an entry of the collector that the runner got, next to the recovered errors. Its `value.severity` is `` `Warning ``, and the `severity` of a recovered error is `` `Error ``. `Parseff.render_error` prints `[warning]` or `[error]` in the header. See [Diagnostics](./diagnostics.md).
 
 **A trace shows each recovered failure.** With `~trace`, each failure that `capture`, `recover`, `require` or `list` catches gives a `Captured` event, and `Parseff.print_trace` prints it as a `captured` line:
 

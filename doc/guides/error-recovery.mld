@@ -94,7 +94,7 @@ Ok "expected integer, found ';', back at 0"
 {1 [recover]}
 
 {@ocaml skip[val recover :
-  error Diagnostics.t ->
+  Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
@@ -959,7 +959,7 @@ x = 1; <hole>
 
 {b Without the collector, [recover] does not recover.} When the runner did not
 get the collector, [recover], [require] and [list] run as the plain parser, and
-[warn] records nothing when the runner got no collector. The parse stops at the
+[warn] records nothing. The parse stops at the
 first error, as without recovery, so one parser can check an input or report
 all of its errors:
 
@@ -968,6 +968,12 @@ all of its errors:
   |> Result.map_error Parseff.error_message;;
 - : (stmt list, string) result = Error "expected integer, found ';'"
 ]}
+
+{b Warnings go to the same collector.} A parser that recovers can also call
+{!val:Parseff.warn}. The warning is an entry of the collector that the runner
+got, next to the recovered errors. Its [value.severity] is [`Warning], and the
+[severity] of a recovered error is [`Error]. {!val:Parseff.render_error} prints
+[[warning]] or [[error]] in the header. See {{!page-diagnostics}Diagnostics}.
 
 {b A trace shows each recovered failure.} With [~trace], each failure that
 [capture], [recover], [require] or [list] catches gives a [Captured] event, and

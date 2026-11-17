@@ -132,7 +132,7 @@ let test_earlier_failure_kept () =
 
 let entries d =
   List.map
-    (fun { Diagnostics.pos; value } -> (pos, value))
+    (fun { Diagnostics.pos; value } -> (pos, Warning.text value))
     (Diagnostics.to_list d)
 
 let test_diagnostics_removed () =
@@ -141,15 +141,15 @@ let test_diagnostics_removed () =
       let d = Diagnostics.create () in
       let result =
         run ~diagnostics:d mode "ab" (fun () ->
-            warn d "before";
+            warn (Warning.W "before");
             let c, stop =
               peek_with (fun () ->
-                  warn d "inside";
+                  warn (Warning.W "inside");
                   char 'a'
               )
             in
             skip_to stop;
-            warn d "after";
+            warn (Warning.W "after");
             c
         )
       in
@@ -295,12 +295,12 @@ let test_nested_rollback () =
                   Ref.set cell 1;
                   let _, inner_stop =
                     peek_with (fun () ->
-                        warn d "inner";
+                        warn (Warning.W "inner");
                         Ref.set cell 2;
                         char 'b'
                     )
                   in
-                  warn d "outer";
+                  warn (Warning.W "outer");
                   (Ref.get cell, inner_stop)
               )
             in
@@ -327,7 +327,7 @@ let test_failure_inside_capture () =
             let failed =
               capture (fun () ->
                   peek_with (fun () ->
-                      warn d "inside";
+                      warn (Warning.W "inside");
                       Ref.set cell 1;
                       literal "x"
                   )
@@ -426,15 +426,15 @@ let test_rule_in_token_loop () =
     skip_while (fun c -> c = ' ');
     take_while is_alpha
   in
-  let p d () =
+  let p () =
     let cell = Ref.create 0 in
     let raised_at = ref [] in
     let rec go n =
       let start = position () in
-      warn d "outside";
+      warn (Warning.W "outside");
       ignore
         (peek_with (fun () ->
-             warn d "inside";
+             warn (Warning.W "inside");
              word ()
          )
         );
@@ -527,13 +527,13 @@ let test_rule_in_token_loop () =
     Alcotest.(check bool) (name ^ ", diagnostics") true outside
   in
   let d = Diagnostics.create () in
-  check "string" (parse ~diagnostics:d ~consume:`Partial input (p d)) d;
+  check "string" (parse ~diagnostics:d ~consume:`Partial input p) d;
   List.iter
     (fun chunk_size ->
       let d = Diagnostics.create () in
       check
         (Printf.sprintf "chunk %d" chunk_size)
-        (run ~diagnostics:d ~backtrack_window:16 (Some chunk_size) input (p d))
+        (run ~diagnostics:d ~backtrack_window:16 (Some chunk_size) input p)
         d
     )
     [ 1; 3; 64 ]

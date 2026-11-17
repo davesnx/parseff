@@ -209,7 +209,7 @@ let test_fold_right_dropped_pair_rolled_back () =
         let v =
           Parseff.fold_right (bounded digit_or_dash)
             (fun () ->
-              Parseff.warn d "op";
+              Parseff.warn (Warning.W "op");
               Parseff.Ref.set cell (Parseff.Ref.get cell + 1);
               tree
             )
