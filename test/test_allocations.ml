@@ -130,6 +130,26 @@ let test_literal_success () =
     )
     [ "\r\n"; "let"; "HTTP/"; "Content-Length" ]
 
+let test_skip_until_success () =
+  let input =
+    String.concat ""
+      (List.init (warmup_iterations + iterations) (fun _ -> " a * b **/"))
+  in
+  match
+    Parseff.parse ~consume:`Partial input (fun () ->
+        words_per_call (fun () ->
+            Parseff.skip_until "*/";
+            Parseff.literal "*/"
+        )
+    )
+  with
+  | Ok actual ->
+      if actual > 0. then
+        Alcotest.failf
+          "skip_until allocated %.6f minor words per call, expected 0" actual
+  | Error error ->
+      Alcotest.fail (Parseff.render_error error)
+
 let reads = 100_000
 
 let one_byte_source () =
@@ -481,7 +501,10 @@ let () =
         ]
       );
       ( "success paths",
-        [ Alcotest.test_case "literal" `Quick test_literal_success ]
+        [
+          Alcotest.test_case "literal" `Quick test_literal_success;
+          Alcotest.test_case "skip_until" `Quick test_skip_until_success;
+        ]
       );
       ( "operators",
         [ Alcotest.test_case "expression and precedence" `Quick test_operators ]

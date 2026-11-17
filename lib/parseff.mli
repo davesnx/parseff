@@ -512,6 +512,57 @@ val skip_while : (char -> bool) -> unit
     let skip_spaces () = skip_while (fun c -> c = ' ')
     ]} *)
 
+val take_until : ?at_most:int -> ?label:string -> string -> string
+(** [take_until terminator] reads up to the first occurrence of [terminator] and
+    returns the bytes before it. It does not consume [terminator]: like
+    {!take_while}, it stops before the input that ends the run, and the caller
+    decides whether to match the terminator. Returns [""] when the input starts
+    with [terminator].
+
+    When the input ends before [terminator], the parse fails at the end of the
+    input with [expected "<terminator>"], or with [expected <label>] when
+    [~label] is given. Wrap the call in {!val:context} to point back to where
+    the construct started.
+
+    When [~at_most] is specified, the result may have at most that many bytes.
+    When [terminator] does not start within the first [at_most + 1] bytes, the
+    parse fails with [Custom (Limit_exceeded { limit = at_most })], and the
+    error range covers those [at_most + 1] bytes. [take_until] then reads at
+    most [at_most + String.length terminator] bytes. When the input ends before
+    that, the parse fails as an unterminated input instead. The limit failure is
+    recovered from and reported as described in {!take_while}.
+
+    On a stream, the result must fit in the backtrack window, as with
+    {!take_while}; when it does not, the parse fails with
+    [Backtrack_window_exceeded].
+
+    Raises [Invalid_argument] when [terminator] is empty or [at_most] is
+    negative. Unstable: [~at_most] can change in a 1.x release.
+
+    Example:
+    {@ocaml[
+    let block_comment () =
+      literal "/*";
+      let body = take_until "*/" in
+      literal "*/";
+      body
+    ]} *)
+
+val skip_until : ?at_most:int -> ?label:string -> string -> unit
+(** [skip_until terminator] is [take_until terminator] without the string. It
+    stops before [terminator], fails the same way, and does not allocate. On a
+    stream, it keeps only the last [String.length terminator - 1] bytes it
+    scanned, so it can skip input much longer than the backtrack window. An
+    enclosing {!or_} or other frame still keeps the input from its start.
+
+    Example:
+    {@ocaml[
+    let block_comment () =
+      literal "/*";
+      skip_until "*/";
+      literal "*/"
+    ]} *)
+
 val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
 (** [sep_by_take ~ws ~sep is_value_char] parses a list of values separated by
     [sep]. Characters where [ws] returns [true] are skipped around each
