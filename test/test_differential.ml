@@ -176,11 +176,17 @@ let show_error (e : Parseff.error) =
   in
   let message = Parseff.error_message e in
   let message =
-    match Re.exec_opt (Re.compile (Re.str ", found ")) message with
-    | Some g ->
-        String.sub message 0 (Re.Group.start g 0)
-    | None ->
+    let sep = ", found " in
+    let n = String.length sep in
+    let rec cut i =
+      if i + n > String.length message then
         message
+      else if String.sub message i n = sep then
+        String.sub message 0 i
+      else
+        cut (i + 1)
+    in
+    cut 0
   in
   Printf.sprintf "%d %s [%s]" e.range.start message (String.concat ", " contexts)
 

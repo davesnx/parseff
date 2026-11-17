@@ -73,7 +73,7 @@ evaluator is ~2.2x faster than Angstrom's optimized parser.
 {2 Why Parseff is faster}
 
 {b Direct character scanning.} {!val:Parseff.take_while} runs a tight [while]
-loop with character predicates. No regex compilation, no automaton overhead.
+loop with character predicates.
 
 {b Fewer allocations.} Span-based APIs return slices of the input string without
 calling [String.sub]. Angstrom's [take_while1] allocates a

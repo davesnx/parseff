@@ -38,10 +38,6 @@ let ip_address () =
   Parseff.end_of_input ();
   (a, b, c, d)
 
-let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
-let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
-
 type json =
   | Null
   | Bool of bool
@@ -50,7 +46,7 @@ type json =
   | Array of json list
   | Object of (string * json) list
 
-let ws () = Parseff.match_regex ws_re
+let ws () = Parseff.whitespace ()
 
 let rec json () =
   Parseff.rec_ (fun () ->
@@ -83,13 +79,11 @@ and bool_parser () =
     )
     ()
 
-and number_parser () =
-  let s = Parseff.match_regex number_re in
-  Number (float_of_string s)
+and number_parser () = Number (Parseff.number ())
 
 and string_parser () =
   let _ = Parseff.consume "\"" in
-  let s = Parseff.match_regex string_content_re in
+  let s = Parseff.take_while (fun c -> c <> '"') in
   let _ = Parseff.consume "\"" in
   String s
 
@@ -145,7 +139,7 @@ and object_parser () =
 
 and key_value () =
   let _ = Parseff.consume "\"" in
-  let key = Parseff.match_regex string_content_re in
+  let key = Parseff.take_while (fun c -> c <> '"') in
   let _ = Parseff.consume "\"" in
   let _ = ws () in
   let _ = Parseff.consume ":" in
@@ -268,15 +262,6 @@ let test_of_string_end_of_input () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_of_string_regex () =
-  let re = Parseff.regex (Re.Posix.re "[a-z]+") in
-  let src = Parseff.Source.of_string "hello" in
-  match Parseff.parse_source src (fun () -> Parseff.match_regex re) with
-  | Ok s ->
-      Alcotest.(check string) "matched" "hello" s
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
 let test_of_string_sep_by () =
   let src = Parseff.Source.of_string "1,2,3" in
   match
@@ -381,23 +366,6 @@ let test_chunked_alternation () =
   match Parseff.parse_source src parser with
   | Ok s ->
       Alcotest.(check string) "matched" "foobaz" s
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_chunked_regex () =
-  let re = Parseff.regex (Re.Posix.re "[a-z]+") in
-  let src = chunked_source ~chunk_size:2 "hello world" in
-  match
-    Parseff.parse_source src (fun () ->
-        let a = Parseff.match_regex re in
-        Parseff.skip_whitespace ();
-        let b = Parseff.match_regex re in
-        (a, b)
-    )
-  with
-  | Ok (a, b) ->
-      Alcotest.(check string) "a" "hello" a;
-      Alcotest.(check string) "b" "world" b
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -563,22 +531,6 @@ let test_many_across_chunks () =
   match Parseff.parse_source src (Parseff.many Parseff.digit) with
   | Ok lst ->
       Alcotest.(check (list char)) "digits" [ '1'; '2'; '3'; '4'; '5' ] lst
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_regex_across_chunks () =
-  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
-  let src = chunked_source ~chunk_size:2 "12345abc" in
-  match
-    Parseff.parse_source src (fun () ->
-        let n = Parseff.match_regex re in
-        let rest = Parseff.take_while (fun c -> c >= 'a' && c <= 'z') in
-        (n, rest)
-    )
-  with
-  | Ok (n, rest) ->
-      Alcotest.(check string) "number" "12345" n;
-      Alcotest.(check string) "rest" "abc" rest
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -1074,7 +1026,7 @@ let test_buf_size_sets_read_lengths () =
     )
     [ 1; 7; 512; 4096; 8192 ]
 
-let regex_read_lengths ?backtrack_window ~initial_buffer_size input =
+let scan_read_lengths ?backtrack_window ~initial_buffer_size input =
   let pos = ref 0 in
   let lens = ref [] in
   let src =
@@ -1086,24 +1038,23 @@ let regex_read_lengths ?backtrack_window ~initial_buffer_size input =
         n
     )
   in
-  let letters = Parseff.regex (Re.rep1 (Re.rg 'a' 'z')) in
   Alcotest.(check (result string reject))
     (Printf.sprintf "initial_buffer_size %d" initial_buffer_size)
     (Ok input)
     (Parseff.parse_source ?backtrack_window src (fun () ->
-         Parseff.match_regex letters
+         Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z')
      )
     );
   List.rev !lens
 
-let test_regex_read_lengths () =
+let test_scan_read_lengths () =
   let input =
     String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
   in
   List.iter
     (fun initial_buffer_size ->
       let name = Printf.sprintf "initial_buffer_size %d" initial_buffer_size in
-      match regex_read_lengths ~initial_buffer_size input with
+      match scan_read_lengths ~initial_buffer_size input with
       | first :: rest ->
           Alcotest.(check int) (name ^ ": first read") initial_buffer_size first;
           Alcotest.(check (list int))
@@ -1116,7 +1067,7 @@ let test_regex_read_lengths () =
     [ 1; 7; 512; 4096; 8192 ];
   Alcotest.(check (list int))
     "backtrack_window 1000" [ 512; 488; 300 ]
-    (regex_read_lengths ~backtrack_window:1000 ~initial_buffer_size:512
+    (scan_read_lengths ~backtrack_window:1000 ~initial_buffer_size:512
        (String.sub input 0 700)
     )
 
@@ -1235,92 +1186,32 @@ let check_matches_parse ?(chunk_sizes = [ 1; 3; 4096 ]) name input parser =
     )
     chunk_sizes
 
-let lookbehind_parser re () =
-  ignore (Parseff.consume "xy");
-  ignore (Parseff.peek_char ());
-  Parseff.match_regex re
+let is_digit c = c >= '0' && c <= '9'
+let digit_run () = Parseff.take_while is_digit
 
-let test_regex_lookbehind_after_peek () =
-  let input = "xyab" in
-  let cases =
-    [
-      ( "bol",
-        Parseff.regex Re.(seq [ bol; str "ab" ]),
-        Error (2, "Expected expected text matching the pattern, found 'ab'")
-      );
-      ( "bow",
-        Parseff.regex Re.(seq [ bow; str "ab" ]),
-        Error (2, "Expected expected text matching the pattern, found 'ab'")
-      );
-      ( "bos",
-        Parseff.regex Re.(seq [ bos; str "ab" ]),
-        Error (2, "Expected expected text matching the pattern, found 'ab'")
-      );
-      ( "not_boundary",
-        Parseff.regex Re.(seq [ not_boundary; str "ab" ]),
-        Ok "ab"
-      );
-    ]
-  in
-  List.iter
-    (fun (name, re, expected) ->
-      let parser = lookbehind_parser re in
-      Alcotest.(check (result string (pair int string)))
-        (name ^ " parse") expected
-        (norm (Parseff.parse input parser));
-      check_matches_parse name input parser
-    )
-    cases
+let token () =
+  Parseff.recognize (fun () ->
+      ignore (Parseff.satisfy (fun c -> c >= 'a' && c <= 'z'));
+      ignore (Parseff.take_while ~at_least:1 is_digit)
+  )
 
-let test_regex_lookbehind_window_accounting () =
-  let input = "xyab" ^ String.make 100 'z' in
-  let parser () =
-    ignore (Parseff.consume "xy");
-    ignore (Parseff.peek_char ());
-    Parseff.match_regex (Parseff.regex Re.(str "ab"))
-  in
-  match
-    Parseff.parse_source ~consume:`Partial ~backtrack_window:8
-      (chunked_source ~chunk_size:1 input)
-      parser
-  with
-  | Ok s ->
-      Alcotest.(check string) "match" "ab" s
-  | Error _ ->
-      Alcotest.fail "unexpected error"
+let runs () =
+  Parseff.or_
+    (fun () -> Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'c'))
+    (fun () -> Parseff.take_while ~at_least:1 is_digit)
+    ()
 
-let test_regex_readahead_half_window () =
-  let total = ref 0 in
-  let src =
-    Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
-      (fun buf off len ->
-        let remaining = 5000 - !total in
-        let n = min (min 10 len) remaining in
-        Bytes.fill buf off n 'a';
-        total := !total + n;
-        n
-    )
-  in
-  let seen = ref (-1) in
-  let _ =
-    Parseff.parse_source ~backtrack_window:1000 src (fun () ->
-        ignore (Parseff.match_regex (Parseff.regex Re.(str "aa")));
-        seen := !total
-    )
-  in
-  if !seen < 0 then Alcotest.fail "match_regex did not succeed";
-  if !seen > 510 then
-    Alcotest.failf "read %d bytes ahead, expected about 500" !seen
+let opt_tail () =
+  Parseff.recognize (fun () ->
+      ignore (Parseff.char 'a');
+      ignore (Parseff.optional (fun () -> Parseff.consume "bc") ())
+  )
 
-let regex_token = Parseff.regex Re.(seq [ rg 'a' 'z'; rep1 digit ])
-let regex_digits = Parseff.regex Re.(rep digit)
-let regex_runs = Parseff.regex Re.(alt [ rep1 (rg 'a' 'c'); rep1 digit ])
-let regex_opt_tail = Parseff.regex Re.(seq [ char 'a'; opt (str "bc") ])
-let regex_windows = List.init 19 (fun i -> i + 2)
-let regex_chunks input = [ 1; 2; 3; max 1 (String.length input) ]
+let windows = List.init 19 (fun i -> i + 2)
+let chunks input = [ 1; 2; 3; max 1 (String.length input) ]
 
-let regex_then_semi re () =
-  let s = Parseff.match_regex re in
+let then_semi p () =
+  let s = p () in
   ignore (Parseff.char ';');
   s
 
@@ -1336,59 +1227,59 @@ let window_outcome : (_, Parseff.error) Result.t -> _ = function
 let window_case ~window ~chunk input =
   Printf.sprintf "%S window %d chunk %d" input window chunk
 
-let test_regex_match_at_buffer_end () =
+let run_window ~window ~chunk input parser =
+  window_outcome
+    (Parseff.parse_source ~backtrack_window:window
+       (chunked_source ~chunk_size:chunk input)
+       parser
+    )
+
+let test_token_at_buffer_end () =
   List.iter
     (fun window ->
-      Alcotest.(check (result string (pair int string)))
-        (window_case ~window ~chunk:1 "b22;")
-        (Ok "b22")
-        (norm
-           (Parseff.parse_source ~backtrack_window:window
-              (chunked_source ~chunk_size:1 "b22;")
-              (regex_then_semi regex_token)
-           )
+      List.iter
+        (fun chunk ->
+          Alcotest.(check (result string (triple int int int)))
+            (window_case ~window ~chunk "b22;")
+            (Ok "b22")
+            (run_window ~window ~chunk "b22;" (then_semi token))
         )
+        (chunks "b22;")
     )
     [ 4; 5; 8; 16 ]
 
-let test_regex_token_window_boundary () =
+let test_token_window_boundary () =
   for digits = 1 to 20 do
-    let token = "b" ^ String.make digits '2' in
+    let token_text = "b" ^ String.make digits '2' in
     List.iter
       (fun (input, parser) ->
         List.iter
           (fun window ->
             let expected =
-              if String.length token < window then
-                Ok token
+              if String.length token_text < window then
+                Ok token_text
               else
-                Error (2, window, 2)
+                Error (3, window, 2)
             in
             List.iter
               (fun chunk ->
                 Alcotest.(check (result string (triple int int int)))
                   (window_case ~window ~chunk input)
                   expected
-                  (window_outcome
-                     (Parseff.parse_source ~backtrack_window:window
-                        (chunked_source ~chunk_size:chunk input) (fun () ->
-                          ignore (Parseff.consume "x;");
-                          parser ()
-                      )
-                     )
+                  (run_window ~window ~chunk input (fun () ->
+                       ignore (Parseff.consume "x;");
+                       parser ()
+                   )
                   )
               )
-              (regex_chunks input)
+              (chunks input)
           )
-          regex_windows
+          windows
       )
-      [
-        ("x;" ^ token ^ ";", regex_then_semi regex_token);
-        ("x;" ^ token, fun () -> Parseff.match_regex regex_token);
-      ]
+      [ ("x;" ^ token_text ^ ";", then_semi token); ("x;" ^ token_text, token) ]
   done
 
-let check_window_or_parse ?(windows = regex_windows) name input parser =
+let check_window_or_parse ?(windows = windows) name input parser =
   let expected = norm_ignoring_found (Parseff.parse input parser) in
   List.iter
     (fun window ->
@@ -1408,17 +1299,20 @@ let check_window_or_parse ?(windows = regex_windows) name input parser =
                 expected
                 (norm_ignoring_found actual)
         )
-        (regex_chunks input)
+        (chunks input)
     )
     windows
 
-let test_regex_optional_tail () =
+let test_optional_tail () =
   List.iter
     (fun (input, expected) ->
-      let parser () = [ regex_then_semi regex_opt_tail () ] in
-      Alcotest.(check (result (list string) (pair int string)))
+      let parser () = [ then_semi opt_tail () ] in
+      Alcotest.(check (result (list string) int))
         ("parse " ^ input) expected
-        (norm (Parseff.parse input parser));
+        (Result.map_error
+           (fun (e : Parseff.error) -> e.range.start)
+           (Parseff.parse input parser)
+        );
       check_window_or_parse
         ~windows:(List.init 15 (fun i -> i + 6))
         "a(bc)?" input parser
@@ -1426,24 +1320,18 @@ let test_regex_optional_tail () =
     [
       ("abc;", Ok [ "abc" ]);
       ("a;", Ok [ "a" ]);
-      ("ab;", Error (1, "Expected expected ';', found 'b'"));
-      ("abd;", Error (1, "Expected expected ';', found 'bd'"));
+      ("ab;", Error 2);
+      ("abd;", Error 2);
     ]
 
-let test_regex_empty_match () =
+let test_empty_match () =
   List.iter
-    (fun (input, stream) ->
-      check_window_or_parse "[0-9]*" input (fun () ->
-          [ Parseff.match_regex regex_digits ]
-      );
+    (fun (input, expected) ->
+      let parser () = [ digit_run () ] in
+      check_window_or_parse "[0-9]*" input parser;
       Alcotest.(check (result (list string) (pair int string)))
-        ("1-byte reads " ^ input) stream
-        (norm
-           (Parseff.parse_source (chunked_source ~chunk_size:1 input) (fun () ->
-                [ Parseff.match_regex regex_digits ]
-            )
-           )
-        )
+        ("1-byte reads " ^ input) expected
+        (norm (Parseff.parse_source (chunked_source ~chunk_size:1 input) parser))
     )
     [
       ("", Ok [ "" ]);
@@ -1451,55 +1339,47 @@ let test_regex_empty_match () =
       ("abc", Error (0, "Expected expected end of input, found 'a'"));
     ]
 
-let test_regex_in_or_and_many () =
+let test_token_in_or_and_many () =
   let or_parser () =
     [
       Parseff.or_
-        (regex_then_semi (Parseff.regex Re.(rep1 digit)))
-        (regex_then_semi regex_token)
-        ();
+        (then_semi (fun () -> Parseff.take_while ~at_least:1 is_digit))
+        (then_semi token) ();
     ]
   in
-  let many_parser () = Parseff.many (regex_then_semi regex_token) () in
+  let many_parser () = Parseff.many (then_semi token) () in
   List.iter
     (fun window ->
       List.iter
         (fun chunk ->
-          let run input parser =
-            window_outcome
-              (Parseff.parse_source ~backtrack_window:window
-                 (chunked_source ~chunk_size:chunk input)
-                 parser
-              )
-          in
           Alcotest.(check (result (list string) (triple int int int)))
             ("or_ " ^ window_case ~window ~chunk "b22;")
             ( if window >= 4 then
                 Ok [ "b22" ]
               else
-                Error (0, window, 0)
+                Error (1, window, 0)
             )
-            (run "b22;" or_parser);
+            (run_window ~window ~chunk "b22;" or_parser);
           let input = "a1;b22;c333;" in
           Alcotest.(check (result (list string) (triple int int int)))
             ("many " ^ window_case ~window ~chunk input)
             ( match window with
             | 2 ->
-                Error (0, 2, 0)
+                Error (1, 2, 0)
             | 3 ->
-                Error (3, 3, 3)
+                Error (4, 3, 3)
             | 4 ->
-                Error (7, 4, 7)
+                Error (8, 4, 7)
             | _ ->
                 Ok [ "a1"; "b22"; "c333" ]
             )
-            (run input many_parser)
+            (run_window ~window ~chunk input many_parser)
         )
         [ 1; 2; 3; 12 ]
     )
-    regex_windows
+    windows
 
-let test_regex_differential () =
+let test_window_differential () =
   let rng = Random.State.make [| 42 |] in
   let alphabet = "abc12;" in
   let random_input () =
@@ -1507,13 +1387,13 @@ let test_regex_differential () =
         alphabet.[Random.State.int rng (String.length alphabet)]
     )
   in
-  let parsers re =
+  let parsers p =
     [
-      (fun () -> Parseff.many (regex_then_semi re) ());
+      (fun () -> Parseff.many (then_semi p) ());
       (fun () ->
         Parseff.many
           (fun () ->
-            Parseff.or_ (regex_then_semi re)
+            Parseff.or_ (then_semi p)
               (fun () -> String.make 1 (Parseff.any_char ()))
               ()
           )
@@ -1524,15 +1404,26 @@ let test_regex_differential () =
   for _ = 1 to 300 do
     let input = random_input () in
     List.iter
-      (fun (name, re) ->
-        List.iter (check_window_or_parse name input) (parsers re)
-      )
-      [
-        ("[a-z][0-9]+", regex_token);
-        ("[0-9]*", regex_digits);
-        ("[a-c]+|[0-9]+", regex_runs);
-      ]
+      (fun (name, p) -> List.iter (check_window_or_parse name input) (parsers p))
+      [ ("token", token); ("digit run", digit_run); ("runs", runs) ]
   done
+
+let test_peek_window_accounting () =
+  let input = "xyab" ^ String.make 100 'z' in
+  let parser () =
+    ignore (Parseff.consume "xy");
+    ignore (Parseff.peek_char ());
+    Parseff.consume "ab"
+  in
+  match
+    Parseff.parse_source ~consume:`Partial ~backtrack_window:8
+      (chunked_source ~chunk_size:1 input)
+      parser
+  with
+  | Ok s ->
+      Alcotest.(check string) "match" "ab" s
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
 
 let test_location_after_backtrack () =
   let input = "a\n\nb" in
@@ -1714,14 +1605,6 @@ let test_streaming_matches_parse () =
           Parseff.skip_while is_space;
           Parseff.take_while ~at_least:1 is_lower
       );
-      ( "regex",
-        "123abc",
-        fun () -> Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
-      );
-      ( "regex failure",
-        "abc",
-        fun () -> Parseff.match_regex (Parseff.regex (Re.Posix.re "[0-9]+"))
-      );
       ( "binary",
         "\x01\x02\x03\x04\x05\x06\x07\x08\x09",
         fun () ->
@@ -1755,31 +1638,6 @@ let test_streaming_matches_parse () =
   List.iter
     (fun (name, input, parser) -> check_matches_parse name input parser)
     cases
-
-let re_str s = Parseff.match_regex (Parseff.regex s)
-
-let test_regex_needs_more_input () =
-  check_matches_parse "str" "abcd" (fun () -> re_str (Re.str "abcd"));
-  check_matches_parse "longest alt" "abcd" (fun () ->
-      re_str (Re.longest (Re.alt [ Re.str "ab"; Re.str "abcd" ]))
-  );
-  check_matches_parse "opt" "abcd" (fun () ->
-      re_str (Re.seq [ Re.str "ab"; Re.opt (Re.str "cd") ])
-  )
-
-let test_regex_lookbehind () =
-  let after_consume prefix re input =
-    check_matches_parse ("lookbehind " ^ input) input (fun () ->
-        let _ = Parseff.consume prefix in
-        re_str re
-    )
-  in
-  let bol_ab = Re.seq [ Re.bol; Re.str "ab" ] in
-  after_consume "x\n" bol_ab "x\nab";
-  after_consume "x" bol_ab "xab";
-  after_consume "x " (Re.seq [ Re.bow; Re.str "ab" ]) "x ab";
-  after_consume "x" (Re.seq [ Re.bow; Re.str "ab" ]) "xab";
-  after_consume "x" (Re.seq [ Re.not_boundary; Re.str "ab" ]) "xab"
 
 let test_take_beyond_end_of_input () =
   check_matches_parse "take 100000" "abc" (fun () -> Parseff.take 100000);
@@ -2234,9 +2092,11 @@ let test_chunk_function_suspends () =
   | exception _ ->
       ()
 
-let test_regex_reads_ahead_across_chunks () =
+let test_take_while_reads_across_chunks () =
   let parser () =
-    let n = Parseff.match_regex number_re in
+    let n =
+      Parseff.take_while ~at_least:1 (fun c -> (c >= '0' && c <= '9') || c = '.')
+    in
     n ^ "|" ^ all_chars ()
   in
   Alcotest.(check (result string reject))
@@ -2287,18 +2147,18 @@ let test_each_across_chunk_borders () =
 
 exception Read_failed
 
-let digits_re = Parseff.regex Re.(rep1 (rg '0' '9'))
+let digits () = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
 
-let read_after_failed_regex src =
+let read_after_failed_scan src =
   Parseff.parse_source src (fun () ->
-      (try ignore (Parseff.match_regex digits_re) with Read_failed -> ());
+      (try ignore (digits ()) with Read_failed -> ());
       Parseff.take_while (fun _ -> true)
   )
 
 let check_read_ahead_kept src =
   Alcotest.(check (result string reject))
     "rest" (Ok "1234 x")
-    (read_after_failed_regex src)
+    (read_after_failed_scan src)
 
 let test_read_ahead_raise_of_function () =
   let calls = ref 0 in
@@ -2378,7 +2238,7 @@ let test_read_ahead_discontinue () =
     )
   in
   let result =
-    Effect.Deep.match_with read_after_failed_regex src
+    Effect.Deep.match_with read_after_failed_scan src
       {
         retc = Fun.id;
         exnc = raise;
@@ -2429,7 +2289,6 @@ let () =
           test_case "skip_while" `Quick test_of_string_skip_while;
           test_case "look_ahead" `Quick test_of_string_look_ahead;
           test_case "end_of_input" `Quick test_of_string_end_of_input;
-          test_case "regex" `Quick test_of_string_regex;
           test_case "sep_by" `Quick test_of_string_sep_by;
         ]
       );
@@ -2443,7 +2302,6 @@ let () =
           test_case "json nested 3-byte" `Quick test_chunked_json_nested;
           test_case "take_while 2-byte" `Quick test_chunked_take_while;
           test_case "alternation 2-byte" `Quick test_chunked_alternation;
-          test_case "regex 2-byte" `Quick test_chunked_regex;
           test_case "skip_while then char 2-byte" `Quick
             test_chunked_skip_while_char;
         ]
@@ -2459,8 +2317,6 @@ let () =
           test_case "utf8 truncated at eof" `Quick test_utf8_truncated_at_eof;
           test_case "utf8 scan after ascii" `Quick test_utf8_scan_after_ascii;
           test_case "matches parse" `Quick test_streaming_matches_parse;
-          test_case "regex needs more input" `Quick test_regex_needs_more_input;
-          test_case "regex lookbehind" `Quick test_regex_lookbehind;
           test_case "take beyond end of input" `Quick
             test_take_beyond_end_of_input;
           test_case "take beyond window" `Quick test_take_beyond_window;
@@ -2476,7 +2332,6 @@ let () =
           test_case "look_ahead across chunk" `Quick
             test_look_ahead_across_chunk;
           test_case "many across chunks" `Quick test_many_across_chunks;
-          test_case "regex across chunks" `Quick test_regex_across_chunks;
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
           test_case "consume failure" `Quick test_consume_failure_streaming;
           test_case "take_while_span" `Quick test_take_while_span_streaming;
@@ -2497,22 +2352,17 @@ let () =
             test_streaming_location_multiple_calls;
         ]
       );
-      ( "regex and location regressions",
+      ( "window and location regressions",
         [
-          test_case "regex lookbehind after peek_char" `Quick
-            test_regex_lookbehind_after_peek;
-          test_case "regex lookbehind window accounting" `Quick
-            test_regex_lookbehind_window_accounting;
-          test_case "regex read-ahead stops at half window" `Quick
-            test_regex_readahead_half_window;
-          test_case "regex match at buffer end" `Quick
-            test_regex_match_at_buffer_end;
-          test_case "regex token window boundary" `Quick
-            test_regex_token_window_boundary;
-          test_case "regex optional tail" `Quick test_regex_optional_tail;
-          test_case "regex empty match" `Quick test_regex_empty_match;
-          test_case "regex in or_ and many" `Quick test_regex_in_or_and_many;
-          test_case "regex differential" `Quick test_regex_differential;
+          test_case "peek_char window accounting" `Quick
+            test_peek_window_accounting;
+          test_case "token at the buffer end" `Quick test_token_at_buffer_end;
+          test_case "token at the window boundary" `Quick
+            test_token_window_boundary;
+          test_case "optional tail" `Quick test_optional_tail;
+          test_case "empty match" `Quick test_empty_match;
+          test_case "token in or_ and many" `Quick test_token_in_or_and_many;
+          test_case "window differential" `Quick test_window_differential;
           test_case "location after backtrack" `Quick
             test_location_after_backtrack;
         ]
@@ -2566,8 +2416,8 @@ let () =
             test_parser_catches_chunk_exception;
           test_case "chunk function suspends" `Quick
             test_chunk_function_suspends;
-          test_case "regex reads ahead across chunks" `Quick
-            test_regex_reads_ahead_across_chunks;
+          test_case "take_while reads across chunks" `Quick
+            test_take_while_reads_across_chunks;
           test_case "backtrack across chunk borders" `Quick
             test_backtrack_across_chunk_borders;
           test_case "parse_source_each across chunk borders" `Quick
@@ -2602,8 +2452,8 @@ let () =
         [
           test_case "sets the read lengths" `Quick
             test_buf_size_sets_read_lengths;
-          test_case "sets the read lengths of match_regex" `Quick
-            test_regex_read_lengths;
+          test_case "sets the read lengths of take_while" `Quick
+            test_scan_read_lengths;
           test_case "below 1 is rejected" `Quick test_buf_size_rejected;
         ]
       );

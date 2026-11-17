@@ -1,12 +1,19 @@
 type declaration = { property : string; value : string }
 type rule = { selector : string; declarations : declaration list }
 
-let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
-let identifier_re = Parseff.regex (Re.Posix.re "[a-zA-Z_-][a-zA-Z0-9_-]*")
-let property_value_re = Parseff.regex (Re.Posix.re "[^;]+")
-let ws_may () = Parseff.match_regex ws_re
-let identifier () = Parseff.match_regex identifier_re
-let property_value () = Parseff.match_regex property_value_re
+let is_ident_start c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_' || c = '-'
+
+let is_ident_char c = is_ident_start c || (c >= '0' && c <= '9')
+let ws_may () = Parseff.whitespace ()
+
+let identifier () =
+  Parseff.recognize (fun () ->
+      ignore (Parseff.satisfy is_ident_start);
+      Parseff.skip_while is_ident_char
+  )
+
+let property_value () = Parseff.take_while ~at_least:1 (fun c -> c <> ';')
 
 let declaration () =
   let _ = ws_may () in

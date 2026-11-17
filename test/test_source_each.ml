@@ -246,10 +246,13 @@ let test_location_after_compaction () =
   | _ ->
       Alcotest.fail "expected one error after 1000 values"
 
-let token = Parseff.regex (Re.seq [ Re.rg 'a' 'z'; Re.rep1 Re.digit ])
-
-let regex_value () =
-  let v = Parseff.match_regex token in
+let token_value () =
+  let v =
+    Parseff.recognize (fun () ->
+        ignore (Parseff.satisfy (fun c -> c >= 'a' && c <= 'z'));
+        ignore (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
+    )
+  in
   ignore (Parseff.char ';');
   v
 
@@ -262,7 +265,7 @@ let test_read_ahead_kept () =
         [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
         (collect
            (Parseff.parse_source_each ~backtrack_window:window
-              (bytes_src ~chunk input) regex_value
+              (bytes_src ~chunk input) token_value
            )
         )
     )
@@ -279,17 +282,17 @@ let test_read_ahead_kept () =
     ];
   Alcotest.(check (list string))
     "window 4"
-    [ "ok a1"; "ok b22"; "error 7 backtrack window of 4 bytes exceeded" ]
+    [ "ok a1"; "ok b22"; "error 8 backtrack window of 4 bytes exceeded" ]
     (collect
        (Parseff.parse_source_each ~backtrack_window:4 (bytes_src ~chunk:1 input)
-          regex_value
+          token_value
        )
     );
   Alcotest.(check (list string))
     "of_string"
     [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
     (collect
-       (Parseff.parse_source_each (Parseff.Source.of_string input) regex_value)
+       (Parseff.parse_source_each (Parseff.Source.of_string input) token_value)
     )
 
 let test_diagnostics_per_value () =
@@ -545,8 +548,8 @@ let check_stopped seq =
   | exception e ->
       Alcotest.(check bool)
         "outside a parse" true
-        (Re.execp
-           (Re.compile (Re.str "outside of a parse context"))
+        (String.starts_with
+           ~prefix:"Parseff: parser called outside of a parse context."
            (Printexc.to_string e)
         )
   );

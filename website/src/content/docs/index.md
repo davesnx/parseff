@@ -13,7 +13,7 @@ Parseff is a direct-style parser combinator library for OCaml 5 where parsers ar
 - API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
 - [**Typed domain errors and source excerpts**](/parseff/api/errors/): every error says what was expected at the furthest failure, with a caret under the source
 - **Automatic backtracking** with [`Parseff.or_`](/parseff/api/combinators/#or_)
-- **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
+- **Minimal dependency footprint** only `uucp` for Unicode support
 - [**Streaming support**](/parseff/api/streaming/)
 - **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
 - [**Zero-copy span APIs**](/parseff/api/zero-copy/) for low-allocation parsing
@@ -111,7 +111,7 @@ let () =
 
 | Section | Combinators |
 |---------|------------|
-| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `match_regex`, `regex`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
+| [Core](/parseff/api/primitives) | `consume`, `char`, `satisfy`, `take_while`, `skip_while`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
 | [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `expect`, `commit`, `cut`, `rec_`, `peek_with`, `skip_to`, `parse ~trace` |
 | [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right`, `expression`, `precedence` |
 | [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace`, `integer`, `number`, `hex_integer`, `lexeme`, `keyword` |

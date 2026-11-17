@@ -410,13 +410,6 @@ The buffer no longer grows forever, but a parser can still exceed the configured
   ) |> Domain.join
 ```
 
-### Regex at chunk boundaries
-
-`Parseff.match_regex` reads more input when a match reaches the end of the buffered input, because more input could change the result. A match and the byte after it must fit in the `~backtrack_window`, unless the source ends after the match. Otherwise the parse fails with `Backtrack_window_exceeded`.
-
-A regex that needs later bytes to choose a longer match can return the shorter one when the window is small: `a(bc)?` on `"abc;"` can return `"a"` with a window below `6`.
-
-
 ### One parse returns one result
 
 `Parseff.parse_source` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.parse_source_each`.

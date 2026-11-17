@@ -14,7 +14,6 @@
   angstrom
   bigstringaf
   mparser
-  re
   benchmark
   bench_support)
  (ocamlopt_flags
