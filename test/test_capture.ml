@@ -1874,11 +1874,8 @@ let test_jump_read_raises () =
   let r =
     parse_source ~diagnostics:d ~consume:`Partial (byte_reads ~fail_at:10 input)
       (fun () ->
-        match capture (fun () -> try body d () with Io -> -1) with
-        | Ok p ->
-            (p, position ())
-        | Error _ ->
-            (-2, position ())
+        let p = try body d () with Io -> -1 in
+        (p, position ())
     )
   in
   Alcotest.(check (result (pair int int) string))
@@ -2368,17 +2365,6 @@ let test_release_construct_rewinds () =
                ()
             )
       );
-      ( "require",
-        fun d _ effects ->
-          ignore
-            (require d
-               (fun () ->
-                 effects ~warns:true ();
-                 ignore (char 'q')
-               )
-               ignore
-            )
-      );
       ( "list",
         fun d _ effects ->
           ignore
@@ -2433,7 +2419,22 @@ let test_release_construct_rewinds () =
       | exception Invalid_argument _ ->
           ()
     )
-    constructs
+    constructs;
+  Alcotest.check release_outcome "require: under a capture, the parser alone"
+    (after_failure ~release:true (fun _ _ effects ->
+         effects ~warns:true ();
+         ignore (char 'q')
+     )
+    )
+    (after_failure ~release:true (fun d _ effects ->
+         require d
+           (fun () ->
+             effects ~warns:true ();
+             ignore (char 'q')
+           )
+           ignore
+     )
+    )
 
 let () =
   let open Alcotest in

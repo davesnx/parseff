@@ -102,7 +102,7 @@ val recover :
   'a
 ```
 
-`recover errors ~sync parser hole` runs `parser` with `capture`. On a failure `e`, it records `e` in `errors`, calls `sync ()` to skip to where parsing can continue, and returns `hole e`. Pass the same collector to the runner with `~diagnostics`:
+`recover errors ~sync parser hole` runs `parser` with `capture`. On a failure `e`, it records `e` in `errors`, calls `sync ()` to skip to where parsing can continue, and returns `hole e`. Unlike `capture`, it lets the recovery functions inside `parser` recover. Pass the same collector to the runner with `~diagnostics`:
 
 ```ocaml
 let skip_statement () =
@@ -276,7 +276,7 @@ x = 1
 
 ## Limits
 
-**A recovery does not take the place of an alternative.** When `recover`, `sep_by_recover`, `require` or `list` is about to record an error while another branch of an `or_` or `one_of`, the `None` of `optional`, the `~otherwise` of a fold, or another prefix operator or the plain operand of an `expression` operand can still run, the outermost such construct first runs again without recovery. If that run succeeds, the parse goes on with it and records nothing. Otherwise the construct runs once more, and the recovery happens there. Here the second branch reads `"ac"`, so `recover` does not record an error:
+**A recovery does not take the place of an alternative.** `recover`, `sep_by_recover`, `skip_nested`, `require` and `list` recover only where no open choice is around them. An open choice is another branch of an `or_` or `one_of`, the `None` of `optional`, the `~otherwise` of a fold before the first element, another prefix operator or the plain operand of an `expression` operand, or the end of a `list` while its separator runs. Inside an open choice, a recovery function fails as without the collector, and the choice goes on. Here the second branch reads `"ac"`, so `recover` does not record an error:
 
 ```ocaml
 # let errors = Parseff.Diagnostics.create () in
@@ -297,15 +297,13 @@ x = 1
 - : (string, Parseff.error) result * int = (Ok "ac", 0)
 ```
 
-A `commit` or `cut` before the recovery decides the construct, as without the collector, and so does a `cut` in a `context` around the recovery, and so does an earlier recovery in the same branch, also one that a loop body or a `capture` undid later (a case of the loop limit below). Thus `optional (fun () -> recover ...)` never recovers. To keep the errors of a branch, recover after the token that selects it, then `commit`. When the run without recovery reaches past the construct with a `commit` or `cut`, or gives out a value of a `*_iter` function, the construct does not run once more: it fails as without the collector.
+A `commit` or `cut` that reached the choice decides it, as without the collector, and so does a `cut` in a `context` that encloses the recovery but not the choice, while that context runs. When the context returns, the choice is open again, so a recovery after a `context` around `keyword; cut` in the same branch does not recover. A decided choice is not open. Thus `optional (fun () -> recover ...)` recovers only after a `commit` or `cut` in it. To recover inside a branch, read the token that selects it, call `commit`, then recover. A prefix operator of `expression` is an open choice for its whole operand, so write `prefix (fun () -> ignore (char '-'); commit (); neg)` for the recovery functions in its operand to recover. `capture` turns a failure into `Error e`, as a choice does, so with the collector its parser runs without recovery. Do not wrap a recovery function in `try ... with _`: a failure travels as an exception.
 
-A parser call inside `d` open choices around one error runs at most `2d + 1` times, or `3d + 1` times when the branch fails after its recovery and runs again without it. While a construct runs without recovery, `parse_source` keeps its input from the start of the construct, so recovery can need a larger `~backtrack_window`. With `~trace`, a branch that runs again gives its events again. Do not wrap a recovery function in `try ... with _`: the decision travels as an exception, as a failure does.
+**The end of a loop is not an alternative.** `many` stops where its element fails, and whether the input after the loop parses is not known there. Use `list` with `~close`. The same holds for a step of a fold after the first element, a recovery function in an operator parser, and an operand after an infix operator: the other operators are not tried first. With `+` and `++` on one level, `"1++"` reads as `1 + hole` with the collector; make each operator token take the longest match.
 
-**The end of a loop is not an alternative.** `many` stops where its element fails, and whether the input after the loop parses is not known there. Use `list` with `~close`. The same holds for a step of a fold after the first element, a recovery function in an operator parser, `capture`, which returns `Error e` where the parse without the collector fails, and an operand after an infix operator: the other operators are not tried first. With `+` and `++` on one level, `"1++"` reads as `1 + hole` with the collector; make each operator token take the longest match.
+**A branch that recovers and then fails runs again without recovery.** When a branch of `or_`, `one_of` or `optional`, a step of a repetition or a fold, or an operand of `precedence` or `expression` recovers and then fails, the construct removes the errors recorded in it, runs it once more without recovery, and goes on as without the collector: the next alternative runs, or the repetition ends. That run cannot recover, so it starts no further runs. When a `commit` or `cut` reached the construct, it fails instead. With `~trace`, the branch gives its events again. Inside `look_ahead` and `peek_with`, the recovery functions do not recover.
 
-**A branch that recovers and then fails runs again without recovery.** When a branch of `or_`, `one_of` or `optional`, a step of a repetition or a fold, or an operand of `precedence` or `expression` recovers and then fails, the construct removes the errors recorded in it, runs it again without recovery, and goes on as without the collector: the next alternative runs, or the repetition ends. Inside `look_ahead` and `peek_with`, the recovery functions do not recover.
-
-**`cut` and `commit` reach past a recovery.** A `cut` or `commit` inside `recover`, `sep_by_recover` or `require` seals the enclosing frames as it does without the collector. Thus a parse with the collector that returns `Ok v` and records no error returns `Ok v` without it.
+**`cut` and `commit` reach past a recovery.** A `cut` or `commit` inside `recover`, `sep_by_recover` or `require` seals the enclosing frames as it does without the collector. Thus a parse with the collector that returns `Ok v` and records no error returns `Ok v` without it, except where an error can be lost: a step of `fold_right`, `precedence`, `expression` or `list` that consumes nothing is dropped with its errors, also when a `commit` or `cut` decided it, and so is a recovery in an operator parser. The `recover` documentation lists these cases.
 
 **`recover` always consumes input.** Here `sync` does nothing, and `recover` skips the `;` where the second statement failed. To continue without consuming input, use `capture`.
 
@@ -363,4 +361,4 @@ statement failed @9 (from @9)
 - : bool = true
 ```
 
-**In streaming, `capture` keeps its input.** A construct longer than `~backtrack_window` fails with `Backtrack_window_exceeded`.
+**In streaming, `capture` keeps its input.** A construct longer than `~backtrack_window` fails with `Backtrack_window_exceeded`. With the collector, a recovery function keeps its input too, so a parse can need a larger window with the collector than without it.

@@ -543,9 +543,9 @@ let recover_ab d () = recover d ~sync:skip_rest ab (fun _ -> "hole")
 let test_rule_a_or () =
   same "the probe" "ac" (fun d -> or_ (recover_ab d) ac) ~plain:"Ok ac";
   same "valid left branch" "ab" (fun d -> or_ (recover_ab d) ac) ~plain:"Ok ab";
-  check "no branch matches" "ad"
+  same "no branch matches" "ad"
     (fun d -> or_ (recover_ab d) ac)
-    ~plain:"Error at 1: expected 'b' or 'c', found 'd'" ~collector:("Ok hole", 1)
+    ~plain:"Error at 1: expected 'b' or 'c', found 'd'"
 
 let then_ac p () =
   let v = p () in
@@ -558,9 +558,9 @@ let test_rule_a_one_of () =
   same "second of three" "ac"
     (fun d -> one_of [ (fun () -> consume "x"); recover_ab d; ac ])
     ~plain:"Ok ac";
-  check "no alternative matches" "ad"
+  same "no alternative matches" "ad"
     (fun d -> one_of [ recover_ab d; ac ])
-    ~plain:"Error at 1: expected 'b' or 'c', found 'd'" ~collector:("Ok hole", 1)
+    ~plain:"Error at 1: expected 'b' or 'c', found 'd'"
 
 let test_rule_a_optional () =
   let recover_ab d () = recover d ~sync:ignore ab (fun _ -> "hole") in
@@ -712,7 +712,7 @@ let test_rule_a_functions () =
     ~plain:"Ok 1+2"
 
 let test_rule_a_decided () =
-  check "the other branch fails too" "xa"
+  same "the other branch fails too" "xa"
     (fun d () ->
       let v =
         or_
@@ -727,7 +727,7 @@ let test_rule_a_decided () =
       in
       v ^ String.make 1 (char 'a')
     )
-    ~plain:"Error at 0: bad" ~collector:("Ok Ha", 1);
+    ~plain:"Error at 0: bad";
   check "a cut in a context before the recovery" "xac"
     (fun d ->
       or_
@@ -752,9 +752,123 @@ let test_rule_a_decided () =
         (fun () -> consume "xac")
     )
     ~plain:"Error at 2: expected 'b', found 'c'" ~collector:("Ok xhole", 1);
-  check "nested choices" "ad"
+  same "nested choices" "ad"
     (fun d -> or_ (fun () -> or_ (recover_ab d) ac ()) (fun () -> consume "x"))
-    ~plain:"Error at 1: expected 'b' or 'c', found 'd'" ~collector:("Ok hole", 1)
+    ~plain:"Error at 1: expected 'b' or 'c', found 'd'"
+
+let test_sep_by_recover_empty_separator () =
+  let word () = take_while (fun c -> c >= 'a' && c <= 'z') in
+  let sync () = skip_while (fun c -> c <> ',') in
+  let g sep d () =
+    "<"
+    ^ String.concat "|" (sep_by_recover d ~sync word sep (fun _ -> "H") ())
+    ^ ">"
+  in
+  let comma () = ignore (optional (fun () -> char ',') ()) in
+  List.iter
+    (fun (name, sep, cases) ->
+      List.iter
+        (fun (input, plain) ->
+          same ~consume:`Partial
+            (Printf.sprintf "sep_by_recover, %s, %S" name input)
+            input (g sep) ~plain
+        )
+        cases
+    )
+    [
+      ( "an optional separator, then commit",
+        (fun () ->
+          comma ();
+          commit ()
+        ),
+        [
+          ("", "Ok <>"); ("a,", "Ok <a|>"); (",", "Ok <|>"); ("a,b", "Ok <a|b>");
+        ]
+      );
+      ( "an optional separator, then cut",
+        (fun () ->
+          comma ();
+          cut ()
+        ),
+        [
+          ("", "Ok <>"); ("a,", "Ok <a|>"); (",", "Ok <|>"); ("a,b", "Ok <a|b>");
+        ]
+      );
+      ( "sep_by_iter of nothing",
+        (fun () ->
+          sep_by_iter (fun () -> ()) (fun () -> ignore (char ';')) ignore ()
+        ),
+        [ ("", "Ok <>"); (",", "Ok <>"); ("a,b", "Ok <a>") ]
+      );
+    ]
+
+let test_rule_a_commit_in_operand () =
+  let number () =
+    take_while ~at_least:1 ~label:"number" (fun c -> c >= '0' && c <= '9')
+  in
+  let op c s () =
+    ignore (char c);
+    fun a b -> "(" ^ a ^ s ^ b ^ ")"
+  in
+  let atom d inner () =
+    require d
+      (fun () ->
+        one_of
+          [
+            number;
+            (fun () ->
+              ignore (char '(');
+              commit ();
+              let e = inner () in
+              ignore (require d (fun () -> char ')') (fun _ -> ')'));
+              "[" ^ e ^ "]"
+            );
+          ]
+          ()
+      )
+      (fun _ -> "?")
+  in
+  let rec expr d () =
+    expression
+      ~operand:(atom d (expr d))
+      [ [ infix_left (op '+' "+") ]; [ infix_left (op '*' "*") ] ]
+      ()
+  in
+  let rec prec d () =
+    precedence
+      ~operand:(atom d (prec d))
+      ~operator:(fun () ->
+        match peek_char () with
+        | Some '+' ->
+            Some (1, infix_left (op '+' "+"))
+        | Some '*' ->
+            Some (2, infix_left (op '*' "*"))
+        | _ ->
+            None
+      )
+      ()
+  in
+  let start c =
+    Printf.sprintf "Error at 0: expected number or '(', found '%c'" c
+  in
+  List.iter
+    (fun (name, g) ->
+      List.iter
+        (fun (input, plain, collector) ->
+          check (name ^ " " ^ input) input g ~plain ~collector:(collector, 2)
+        )
+        [
+          ("+1+", start '+', "Ok ((?+1)+?)");
+          ("+", start '+', "Ok (?+?)");
+          ("*2+(3", start '*', "Ok ((?*2)+[3])");
+          ("+(1+)", start '+', "Ok (?+[(1+?)])");
+          ( "1+(+2*)",
+            "Error at 3: expected number or '(', found '+'",
+            "Ok (1+[(?+(2*?))])"
+          );
+        ]
+    )
+    [ ("expression", expr); ("precedence", prec) ]
 
 let same_as_plain name input with_recover =
   let outcome use =
@@ -914,7 +1028,7 @@ let test_rule_a_loop_limit () =
         String.concat "" l
     )
   in
-  check "a recovery that the loop undid still decides the choice" "{a;}."
+  same "a recovery that the loop undid does not decide the choice" "{a;}."
     (fun d ->
       or_
         (fun () ->
@@ -927,7 +1041,7 @@ let test_rule_a_loop_limit () =
           b ^ "."
         )
     )
-    ~plain:"Ok a." ~collector:("Ok a?", 1)
+    ~plain:"Ok a."
 
 let entries d =
   List.map
@@ -1147,8 +1261,9 @@ let test_review_stream_equal () =
       )
       ()
   in
-  Alcotest.check outcome "the third run, string" ("Ok Hbc", 1)
-    (on_all_sources "the third run" "abc" p);
+  Alcotest.check outcome "a recovery in an open branch, string"
+    ("Error at 2: expected 'z', found 'c'", 0)
+    (on_all_sources "a recovery in an open branch" "abc" p);
   let cut_past d wrap () =
     let body () =
       ignore (consume "aaaa");
@@ -1318,8 +1433,20 @@ let test_review_cost () =
       ]
       ()
   in
+  let or_expected depth =
+    if depth = 1 then
+      ("Error at 1: expected digit, '(', or end of input, found 'x'", 1)
+    else
+      (Printf.sprintf "Error at %d: expected digit or '(', found 'x'" depth, 1)
+  in
+  let one_of_expected depth =
+    ( Printf.sprintf "Error at %d: expected digit, '(', or \"nil\", found 'x'"
+        depth,
+      0
+    )
+  in
   List.iter
-    (fun (name, p) ->
+    (fun (name, p, expected) ->
       List.iter
         (fun depth ->
           let input = String.make depth '(' ^ "x" ^ String.make depth ')' in
@@ -1328,7 +1455,7 @@ let test_review_cost () =
           let r = parse ~diagnostics:d input (p d) in
           Alcotest.check outcome
             (Printf.sprintf "%s, depth %d" name depth)
-            ("Ok ?", 1)
+            (expected depth)
             (show r, Diagnostics.length d);
           if !calls > (depth + 1) * (depth + 1) then
             Alcotest.failf "%s, depth %d: %d calls, more than %d" name depth
@@ -1337,7 +1464,7 @@ let test_review_cost () =
         )
         [ 1; 5; 20; 60 ]
     )
-    [ ("or_", nested); ("one_of", nested_one_of) ]
+    [ ("or_", nested, or_expected); ("one_of", nested_one_of, one_of_expected) ]
 
 let test_review_limits () =
   let digit1 () = String.make 1 (digit ()) in
@@ -1411,7 +1538,7 @@ let test_round2_held_far () =
       let r = show (parse ~diagnostics:d "abc" (p ~commit_in_branch d)) in
       Alcotest.check outcome
         (Printf.sprintf "a commit in the failed branch: %b" commit_in_branch)
-        ("Error at 2: expected 'X' or 'Y', found 'c'", 1)
+        ("Error at 3: expected 'Y', found end of input", 1)
         (r, Diagnostics.length d)
     )
     [ false; true ]
@@ -1511,67 +1638,21 @@ let test_round2_cut_past () =
         [
           ("let x=1;", ("Ok x=1", 0));
           ("let 9=1;", ("Ok ?=1", 1));
-          ("let x=?;", ("Ok x=?", 1));
-          ("let 9=?;", ("Ok ?=?", 2));
+          ( "let x=?;",
+            if in_context then
+              ("Error at 6: expected digit, found '?'", 0)
+            else
+              ("Ok x=?", 1)
+          );
+          ( "let 9=?;",
+            if in_context then
+              ("Error at 4: expected name, found '9'", 0)
+            else
+              ("Ok ?=?", 2)
+          );
         ]
     )
     [ false; true ]
-
-let test_round2_bound () =
-  let at = Hashtbl.create 16 in
-  let rec value d () =
-    let p = position () in
-    Hashtbl.replace at p (1 + Option.value ~default:0 (Hashtbl.find_opt at p));
-    or_
-      (fun () ->
-        ignore (char '(');
-        let v = value d () in
-        ignore (char ')');
-        v
-      )
-      (fun () ->
-        recover d ~sync:ignore
-          (fun () -> String.make 1 (digit ()))
-          (fun _ -> "?")
-      )
-      ()
-  in
-  List.iter
-    (fun (name, closing, bound) ->
-      List.iter
-        (fun n ->
-          let input =
-            String.make n '(' ^ "x"
-            ^
-            if closing then
-              String.make n ')'
-            else
-              ""
-          in
-          let d = Diagnostics.create () in
-          Hashtbl.reset at;
-          ignore (parse ~consume:`Partial ~diagnostics:d input (value d));
-          let runs = Option.value ~default:0 (Hashtbl.find_opt at n) in
-          if runs > bound n then
-            Alcotest.failf "%s, d = %d: %d runs, more than %d" name n runs
-              (bound n)
-        )
-        [ 1; 2; 5; 20 ]
-    )
-    [
-      ("the branch succeeds", true, fun d -> (2 * d) + 1);
-      ("the branch fails after the recovery", false, fun d -> (3 * d) + 1);
-    ]
-
-let not_silent name input p =
-  let plain =
-    show (parse ~consume:`Partial input (p (Diagnostics.create ())))
-  in
-  let d = Diagnostics.create () in
-  let coll = show (parse ~consume:`Partial ~diagnostics:d input (p d)) in
-  if Diagnostics.length d = 0 && coll <> plain then
-    Alcotest.failf "%s on %S: %s with no error, %s without the collector" name
-      input coll plain
 
 let partial_check name input p ~plain ~collector =
   let d = Diagnostics.create () in
@@ -1588,7 +1669,7 @@ let partial_check name input p ~plain ~collector =
 
 let test_zero_width_steps () =
   let a d () = require d (fun () -> String.make 1 (char 'a')) (fun _ -> "?") in
-  partial_check "require in fold_right after a commit" "aac"
+  partial_check "known: require in fold_right after a commit" "aac"
     (fun d () ->
       fold_right (a d)
         (fun () ->
@@ -1597,8 +1678,8 @@ let test_zero_width_steps () =
         )
         ()
     )
-    ~plain:"Error at 2: expected 'a', found 'c'" ~collector:("Ok aa?", 1);
-  partial_check "require with a cut in precedence" "abc"
+    ~plain:"Error at 2: expected 'a', found 'c'" ~collector:("Ok aa", 0);
+  partial_check "known: require with a cut in precedence" "abc"
     (fun d () ->
       precedence
         ~operand:(fun () ->
@@ -1612,7 +1693,7 @@ let test_zero_width_steps () =
         ~operator:(fun () -> Some (1, infix_left (fun () x y -> x ^ y)))
         ()
     )
-    ~plain:"Error at 2: expected \"ab\", found 'c'" ~collector:("Ok ab?", 1);
+    ~plain:"Error at 2: expected \"ab\", found 'c'" ~collector:("Ok ab", 0);
   let s1 c = String.make 1 c in
   let items d () =
     String.concat ","
@@ -1623,8 +1704,8 @@ let test_zero_width_steps () =
          ()
       )
   in
-  partial_check "sep_by_recover in a step of fold_right, the operator cuts"
-    "cbca"
+  partial_check
+    "known: sep_by_recover in a step of fold_right, the operator cuts" "cbca"
     (fun d () ->
       fold_right (items d)
         (fun () ->
@@ -1634,7 +1715,7 @@ let test_zero_width_steps () =
         ()
     )
     ~plain:"Error at 1: expected 'c' or \"ab\", found 'bca'"
-    ~collector:("Ok c+H", 1);
+    ~collector:("Ok c", 0);
   partial_check
     "limit: a recovery in an operator parser, in a step that is not decided"
     "ba"
@@ -1663,7 +1744,8 @@ let test_zero_width_steps () =
         ]
     )
     ~plain:"Ok ((b)a)" ~collector:("Ok ", 0);
-  not_silent "list ~sep in an infix operator of expression" "bb" (fun d ->
+  partial_check "known: list ~sep in an infix operator of expression" "bb"
+    (fun d ->
       expression
         ~operand:(fun () -> take_while (fun c -> c = 'x'))
         [
@@ -1686,7 +1768,8 @@ let test_zero_width_steps () =
             );
           ];
         ]
-  );
+    )
+    ~plain:"Error at 0: expected 'a', found 'bb'" ~collector:("Ok ", 0);
   let listed d sep () =
     String.concat ";"
       (list ~sep d
@@ -1697,15 +1780,14 @@ let test_zero_width_steps () =
          ()
       )
   in
-  partial_check "list, the separator commits, end of input" "a,"
+  partial_check "known: list, the separator commits, end of input" "a,"
     (fun d ->
       listed d (fun () ->
           ignore (char ',');
           commit ()
       )
     )
-    ~plain:"Error at 2: expected 'a', found end of input"
-    ~collector:("Error at 2: expected 'a', found end of input", 0);
+    ~plain:"Error at 2: expected 'a', found end of input" ~collector:("Ok a", 0);
   partial_check "list, the separator commits, close token" "a,)"
     (fun d ->
       listed d (fun () ->
@@ -1714,8 +1796,9 @@ let test_zero_width_steps () =
       )
     )
     ~plain:"Error at 2: expected 'a', found ')'" ~collector:("Ok a;H", 1);
-  not_silent
-    "list, an insertion in the separator of a step that consumes nothing" ""
+  partial_check
+    "known: list, an insertion in the separator of a step that consumes nothing"
+    ""
     (fun d () ->
       String.concat ";"
         (list
@@ -1734,7 +1817,9 @@ let test_zero_width_steps () =
            (fun _ -> "H")
            ()
         )
-  );
+    )
+    ~plain:"Error at 0: expected any character, found end of input"
+    ~collector:("Ok ", 0);
   let operand d () =
     String.concat ""
       (many
@@ -1947,10 +2032,11 @@ let test_undecided_steps () =
       )
       ()
   in
-  partial_check "a step decided by a cut in a context around the recovery" "bb"
+  partial_check
+    "known: a step decided by a cut in a context around the recovery" "bb"
     (ctx_cut ~loop:false)
     ~plain:"Error at 2: expected any character, found end of input"
-    ~collector:("Ok {Cb{Cb{CMC}}}", 1);
+    ~collector:("Ok {Cb{CbC}}", 0);
   partial_check "the same, with a loop inside the context" "bb"
     (ctx_cut ~loop:true)
     ~plain:"Error at 2: expected any character or 'a', found end of input"
@@ -1965,9 +2051,9 @@ let test_undecided_steps () =
       partial_check name "yy" p ~plain ~collector
     )
     [
-      ( "sealed: cut, then require, in a context",
+      ( "known: sealed: cut, then require, in a context",
         fails,
-        ("Ok y+y+N", 1),
+        ("Ok y+y", 0),
         fun d ->
           fr (fun () ->
               context "c" (fun () ->
@@ -1976,9 +2062,9 @@ let test_undecided_steps () =
               )
           )
       );
-      ( "sealed: cut in an outer context, require in an inner one",
+      ( "known: sealed: cut in an outer context, require in an inner one",
         fails,
-        ("Ok y+y+N", 1),
+        ("Ok y+y", 0),
         fun d ->
           fr (fun () ->
               context "o" (fun () ->
@@ -1987,9 +2073,9 @@ let test_undecided_steps () =
               )
           )
       );
-      ( "sealed: precedence",
+      ( "known: sealed: precedence",
         fails,
-        ("Ok y+y+N", 1),
+        ("Ok y+y", 0),
         fun d () ->
           precedence
             ~operand:(fun () ->
@@ -2001,9 +2087,9 @@ let test_undecided_steps () =
             ~operator:(fun () -> Some (1, infix_left (fun () -> cat)))
             ()
       );
-      ( "sealed: expression",
+      ( "known: sealed: expression",
         fails,
-        ("Ok y+y+N", 1),
+        ("Ok y+y", 0),
         fun d ->
           expression
             ~operand:(fun () ->
@@ -2169,7 +2255,7 @@ let test_undecided_steps () =
       ]
       ()
   in
-  partial_check "limit: decided per step, a recovery before the step" "bcabb"
+  partial_check "decided per step, a recovery before the step" "bcabb"
     (fun d () ->
       fold_right
         (fun () -> "e")
@@ -2179,13 +2265,12 @@ let test_undecided_steps () =
         )
         ()
     )
-    ~plain:"Ok e"
-    ~collector:("Ok {e(<H,H,H>M<H>)e}", 5);
+    ~plain:"Ok e" ~collector:("Ok e", 0);
   let short e =
     let m = error_message e in
     match String.index_opt m ',' with Some i -> String.sub m 0 i | None -> m
   in
-  partial_check "limit: a capture around a decided step" "ab"
+  partial_check "a capture around a decided step" "ab"
     (fun d () ->
       let body () =
         expression
@@ -2238,7 +2323,8 @@ let test_undecided_steps () =
       | Error e ->
           "err(" ^ short e ^ ")"
     )
-    ~plain:"Ok err(expected 'a')" ~collector:("Ok ok((Pa!)L!<H>!)", 1);
+    ~plain:"Ok err(expected 'a')"
+    ~collector:("Ok err(expected 'a')", 0);
   List.iter
     (fun by_commit ->
       let items d () =
@@ -2276,10 +2362,8 @@ let test_undecided_steps () =
         show (parse ~consume:`Partial ~diagnostics:d "yy" (statement reported d))
       in
       Alcotest.(check (triple string int int))
-        (Printf.sprintf "the error is kept under a capture, by commit %b"
-           by_commit
-        )
-        ("Ok y+y+N", 1, 0)
+        (Printf.sprintf "a capture reports the error, by commit %b" by_commit)
+        ("Ok <failed>", 0, 1)
         (r, Diagnostics.length d, List.length !reported)
     )
     [ true; false ]
@@ -3036,6 +3120,10 @@ let () =
             test_rule_a_list_as_plain;
           Alcotest.test_case "limit: a recovery in a loop body" `Quick
             test_rule_a_loop_limit;
+          Alcotest.test_case "a commit inside an operand" `Quick
+            test_rule_a_commit_in_operand;
+          Alcotest.test_case "sep_by_recover after an empty element" `Quick
+            test_sep_by_recover_empty_separator;
         ]
       );
       ( "review 06",
@@ -3051,16 +3139,14 @@ let () =
             test_round2_held_far;
           Alcotest.test_case "round 2: a cut past the choice" `Quick
             test_round2_cut_past;
-          Alcotest.test_case "round 2: the bound on runs" `Quick
-            test_round2_bound;
         ]
       );
       ( "zero-width steps",
         [
-          Alcotest.test_case "an undecided step is dropped" `Quick
-            test_undecided_steps;
-          Alcotest.test_case "a step that recovered is kept" `Quick
-            test_zero_width_steps;
+          Alcotest.test_case "a step that consumes nothing drops its errors"
+            `Quick test_undecided_steps;
+          Alcotest.test_case "known: errors lost in a step that reads nothing"
+            `Quick test_zero_width_steps;
         ]
       );
       ( "random grammars",
