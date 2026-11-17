@@ -338,7 +338,8 @@ let test_skip_while () =
   match
     parse_with_pos "  \t\nhello" (fun () ->
         Parseff.Utf8.skip_while Uucp.White.is_white_space;
-        Parseff.consume "hello"
+        Parseff.literal "hello";
+        "hello"
     )
   with
   | Ok (s, pos) ->
@@ -352,7 +353,8 @@ let test_skip_while_unicode_whitespace () =
   match
     parse_with_pos "\xC2\xA0hello" (fun () ->
         Parseff.Utf8.skip_while Uucp.White.is_white_space;
-        Parseff.consume "hello"
+        Parseff.literal "hello";
+        "hello"
     )
   with
   | Ok (s, pos) ->
@@ -502,7 +504,8 @@ let test_skip_whitespace () =
   match
     parse_with_pos input (fun () ->
         Parseff.Utf8.skip_whitespace ();
-        Parseff.consume "hello"
+        Parseff.literal "hello";
+        "hello"
     )
   with
   | Ok (s, pos) ->

@@ -139,8 +139,8 @@ let test_keyword_needs_one_more_byte_of_window () =
       )
   in
   Alcotest.(check string)
-    "consume fits" "Ok ()"
-    (run 3 (fun () -> ignore (Parseff.consume "let")));
+    "literal fits" "Ok ()"
+    (run 3 (fun () -> Parseff.literal "let"));
   Alcotest.(check string)
     "keyword exceeds" "Error@0 backtrack window of 3 bytes exceeded"
     (run 3 (fun () -> Parseff.keyword "let"));

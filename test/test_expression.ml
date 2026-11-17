@@ -3,7 +3,7 @@ let ws = Parseff.skip_whitespace
 
 let tok s () =
   ws ();
-  ignore (Parseff.consume s)
+  Parseff.literal s
 
 let bin s () =
   tok s ();
@@ -487,7 +487,7 @@ let test_annotation_example () =
     )
 
 let test_zero_width_steps () =
-  let raw s () = ignore (Parseff.consume s) in
+  let raw s () = Parseff.literal s in
   let bin s () =
     raw s ();
     fun a b -> "(" ^ a ^ s ^ b ^ ")"
@@ -557,7 +557,7 @@ let sized_source size input =
 let test_commit_in_token_streaming () =
   let token ~commit_first () =
     if commit_first then Parseff.commit ();
-    ignore (Parseff.consume "!=");
+    Parseff.literal "!=";
     if not commit_first then Parseff.commit ();
     ignore (Parseff.peek_char ());
     fun a b -> "(" ^ a ^ "!=" ^ b ^ ")"
@@ -612,7 +612,7 @@ let test_token_runs_once () =
     let cell = Parseff.Ref.create 0 in
     let token () =
       incr calls;
-      ignore (Parseff.consume "!=");
+      Parseff.literal "!=";
       act notes cell;
       fun a b -> "(" ^ a ^ "!=" ^ b ^ ")"
     in
@@ -803,7 +803,7 @@ module Precedence = struct
         None
 
   let read s f () =
-    ignore (Parseff.consume s);
+    Parseff.literal s;
     f
 
   let binary s = read s (fun a b -> "(" ^ a ^ s ^ b ^ ")")
@@ -902,7 +902,16 @@ module Precedence = struct
       if Parseff.peek_char () = Some '+' then
         Some (1, Parseff.infix_left (binary "+"))
       else
-        Some (1, Parseff.infix_left (read (Parseff.consume "#") (fun a _ -> a)))
+        Some
+          ( 1,
+            Parseff.infix_left
+              (read
+                 ( Parseff.literal "#";
+                   "#"
+                 )
+                 (fun a _ -> a)
+              )
+          )
     in
     Alcotest.(check string)
       "operator fails" "Ok (1+2)@3"
@@ -1438,7 +1447,7 @@ module Precedence = struct
     let run ~noisy input =
       let d = Parseff.Diagnostics.create () in
       let noted s () =
-        ignore (Parseff.consume s);
+        Parseff.literal s;
         fun a b ->
           Parseff.warn d (Printf.sprintf "%s%s%s" a s b);
           "(" ^ a ^ s ^ b ^ ")"

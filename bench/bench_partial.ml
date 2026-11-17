@@ -28,7 +28,7 @@ let small_chunks = chunks_of 64
 
 let rec head_lines count =
   let line = Parseff.take_while (fun c -> c <> '\r') in
-  ignore (Parseff.consume "\r\n");
+  Parseff.literal "\r\n";
   if line = "" then
     count
   else

@@ -73,7 +73,7 @@ let is_hex = function
       false
 
 let is_zero c = c = '0'
-let crlf () = ignore (Parseff.consume "\r\n")
+let crlf () = Parseff.literal "\r\n"
 
 let trim_ows s =
   let rec stop i =
@@ -89,7 +89,7 @@ let trim_ows s =
     String.sub s 0 n
 
 let version () =
-  let _ = Parseff.consume "HTTP/" in
+  Parseff.literal "HTTP/";
   let major = Parseff.digit () in
   let _ = Parseff.char '.' in
   let minor = Parseff.digit () in

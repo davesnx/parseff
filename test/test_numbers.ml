@@ -97,7 +97,7 @@ let int_or_null () =
   Parseff.or_
     (fun () -> Some (Parseff.integer ()))
     (fun () ->
-      Parseff.consume "null" |> ignore;
+      Parseff.literal "null";
       None
     )
     ()
@@ -211,7 +211,7 @@ let float_or_null () =
   Parseff.or_
     (fun () -> Some (Parseff.number ()))
     (fun () ->
-      Parseff.consume "null" |> ignore;
+      Parseff.literal "null";
       None
     )
     ()
@@ -229,7 +229,7 @@ let test_number_composition () =
 let test_prefixed_hex () =
   check string_of_int "0xff"
     (fun () ->
-      Parseff.consume "0x" |> ignore;
+      Parseff.literal "0x";
       Parseff.hex_integer ()
     )
     "Ok 255";
@@ -312,7 +312,7 @@ let floats () =
 let digits () = Parseff.take_while is_digit
 
 let after_prefix p () =
-  Parseff.consume "ab" |> ignore;
+  Parseff.literal "ab";
   p ()
 
 let top p show () =

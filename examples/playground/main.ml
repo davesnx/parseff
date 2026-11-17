@@ -1,12 +1,8 @@
 let parser () =
-  let a = Parseff.consume "A" in
-  let b = Parseff.optional (fun () -> Parseff.consume "B") () in
-  let c = Parseff.consume "C" in
-  match b with
-  | Some b ->
-      Printf.sprintf "[%s%s%s]" a b c
-  | None ->
-      Printf.sprintf "[%s%s]" a c
+  Parseff.literal "A";
+  let b = Parseff.optional (fun () -> Parseff.literal "B") () in
+  Parseff.literal "C";
+  match b with Some () -> "[ABC]" | None -> "[AC]"
 
 let () =
   let input = Sys.argv.(1) in

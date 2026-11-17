@@ -9,17 +9,17 @@ type json =
 let ws () = Parseff.whitespace ()
 
 let null_parser () =
-  let _ = Parseff.consume "null" in
+  Parseff.literal "null";
   Null
 
 let bool_parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "true" in
+      Parseff.literal "true";
       Bool true
     )
     (fun () ->
-      let _ = Parseff.consume "false" in
+      Parseff.literal "false";
       Bool false
     )
     ()
@@ -27,9 +27,9 @@ let bool_parser () =
 let number_parser () = Number (Parseff.number ())
 
 let string_parser () =
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let s = Parseff.take_while (fun c -> c <> '"') in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   String s
 
 let rec json () =
@@ -48,7 +48,7 @@ let rec json () =
   )
 
 and array_parser () =
-  let _ = Parseff.consume "[" in
+  Parseff.literal "[";
   let _ = ws () in
   let elements =
     Parseff.or_
@@ -58,7 +58,7 @@ and array_parser () =
           Parseff.many
             (fun () ->
               let _ = ws () in
-              let _ = Parseff.consume "," in
+              Parseff.literal ",";
               json ()
             )
             ()
@@ -69,11 +69,11 @@ and array_parser () =
       ()
   in
   let _ = ws () in
-  let _ = Parseff.consume "]" in
+  Parseff.literal "]";
   Array elements
 
 and object_parser () =
-  let _ = Parseff.consume "{" in
+  Parseff.literal "{";
   let _ = ws () in
   let pairs =
     Parseff.or_
@@ -83,7 +83,7 @@ and object_parser () =
           Parseff.many
             (fun () ->
               let _ = ws () in
-              let _ = Parseff.consume "," in
+              Parseff.literal ",";
               key_value ()
             )
             ()
@@ -94,15 +94,15 @@ and object_parser () =
       ()
   in
   let _ = ws () in
-  let _ = Parseff.consume "}" in
+  Parseff.literal "}";
   Object pairs
 
 and key_value () =
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let key = Parseff.take_while (fun c -> c <> '"') in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let _ = ws () in
-  let _ = Parseff.consume ":" in
+  Parseff.literal ":";
   let _ = ws () in
   let value = json () in
   (key, value)

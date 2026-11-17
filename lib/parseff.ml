@@ -1833,7 +1833,7 @@ let[@inline never] fail_literal st pos matched s =
   in
   fail_str st (pos + start) ((start lsl 3) lor tag_literal) s
 
-let[@inline never] consume_refilling st s =
+let[@inline never] literal_refilling st s =
   let len = String.length s in
   let pos = st.pos in
   let i = ref 0 in
@@ -1845,13 +1845,12 @@ let[@inline never] consume_refilling st s =
     done;
     if !i < avail || !i = len || not (have st (!i + 1)) then reading := false
   done;
-  if !i = len then begin
-    st.pos <- pos + len;
-    s
-  end else
+  if !i = len then
+    st.pos <- pos + len
+  else
     fail_literal st pos !i s
 
-let[@inline never] consume_mismatch st s =
+let[@inline never] literal_mismatch st s =
   let pos = st.pos in
   let i = ref 0 in
   while char_at st (pos + !i) = String.unsafe_get s !i do
@@ -1885,17 +1884,16 @@ let[@inline always] literal_at_offset input off s len =
     !i = len
   end
 
-let[@inline] handle_consume st s =
+let[@inline] handle_literal st s =
   let len = String.length s in
   let pos = st.pos in
   if len <= st.input_len - pos then
-    if len = 0 || literal_at_offset st.input (pos - st.base) s len then begin
-      st.pos <- pos + len;
-      s
-    end else
-      consume_mismatch st s
+    if len = 0 || literal_at_offset st.input (pos - st.base) s len then
+      st.pos <- pos + len
+    else
+      literal_mismatch st s
   else
-    consume_refilling st s
+    literal_refilling st s
 
 let[@inline never] satisfy_slow st pred label =
   if have st 1 then
@@ -2396,9 +2394,9 @@ let[@inline never] handle_skip_while_uchar st pred =
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
 
-let[@inline] consume s =
+let[@inline] literal s =
   let st = get_state () in
-  handle_consume st s
+  handle_literal st s
 
 let label_satisfy = "matching character"
 

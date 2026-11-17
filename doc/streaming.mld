@@ -36,7 +36,7 @@ for the position of the error, but the buffer does not grow for them.
 A stream error shows the bytes read so far. The position and the expected items
 are the same as {!val:Parseff.parse} gives on the whole input, but the [found]
 text can be shorter: Parseff does not read more input only to show it.
-{!val:Parseff.consume} compares the buffered bytes first and fails at the first
+{!val:Parseff.literal} compares the buffered bytes first and fails at the first
 byte that differs, so a peer that stops sending after a wrong byte gets an
 error at once, not a parser that waits for the rest of the literal.
 
@@ -412,11 +412,11 @@ A small example:
 let http_method () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "GET " in
+      Parseff.literal "GET ";
       Parseff.commit ();
       `GET)
     (fun () ->
-      let _ = Parseff.consume "POST " in
+      Parseff.literal "POST ";
       Parseff.commit ();
       `POST)
     ()

@@ -19,21 +19,21 @@ let declaration () =
   let _ = ws_may () in
   let property = identifier () in
   let _ = ws_may () in
-  let _ = Parseff.consume ":" in
+  Parseff.literal ":";
   let _ = ws_may () in
   let value = property_value () in
   let _ = ws_may () in
-  let _ = Parseff.consume ";" in
+  Parseff.literal ";";
   { property; value }
 
 let rule () =
   let selector = identifier () in
   let _ = ws_may () in
-  let _ = Parseff.consume "{" in
+  Parseff.literal "{";
   let _ = ws_may () in
   let declarations = Parseff.many declaration () in
   let _ = ws_may () in
-  let _ = Parseff.consume "}" in
+  Parseff.literal "}";
   { selector; declarations }
 
 let test_simple_rule () =

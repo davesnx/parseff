@@ -28,15 +28,15 @@ let parse_level () =
   Parseff.one_of
     [
       (fun () ->
-        let _ = Parseff.consume "INFO" in
+        Parseff.literal "INFO";
         Info
       );
       (fun () ->
-        let _ = Parseff.consume "WARN" in
+        Parseff.literal "WARN";
         Warn
       );
       (fun () ->
-        let _ = Parseff.consume "ERROR" in
+        Parseff.literal "ERROR";
         Error
       );
     ]

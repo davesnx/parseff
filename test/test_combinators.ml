@@ -53,12 +53,12 @@ let test_one_of_labeled_custom_error () =
           [
             ( "a",
               fun () ->
-                ignore (Parseff.consume "x");
+                Parseff.literal "x";
                 Parseff.error Cause_e
             );
             ( "b",
               fun () ->
-                ignore (Parseff.consume "y");
+                Parseff.literal "y";
                 ""
             );
           ]
@@ -73,11 +73,11 @@ let test_expect_custom_error_through_or () =
         Parseff.expect "thing" (fun () ->
             Parseff.or_
               (fun () ->
-                ignore (Parseff.consume "x");
+                Parseff.literal "x";
                 Parseff.error Cause_e
               )
               (fun () ->
-                ignore (Parseff.consume "y");
+                Parseff.literal "y";
                 ""
               )
               ()
@@ -297,21 +297,37 @@ let test_take_while_huge_at_least () =
   | Ok _ ->
       Alcotest.fail "expected a failure"
 
-let test_consume_prefix_mismatch () =
-  let r = Parseff.parse "x" (fun () -> Parseff.consume "true") in
+let test_literal_prefix_mismatch () =
+  let r =
+    Parseff.parse "x" (fun () ->
+        Parseff.literal "true";
+        "true"
+    )
+  in
   Alcotest.(check string)
     "mismatch" {|Error@0 Expected "expected \"true\", found 'x'"|}
     (show show_string r);
-  let r = Parseff.parse "tr" (fun () -> Parseff.consume "true") in
+  let r =
+    Parseff.parse "tr" (fun () ->
+        Parseff.literal "true";
+        "true"
+    )
+  in
   Alcotest.(check string)
     "proper prefix" {|Error@2 Expected "expected \"ue\", found end of input"|}
     (show show_string r)
 
-let test_consume_or_mismatch () =
+let test_literal_or_mismatch () =
   let p () =
     Parseff.or_
-      (fun () -> Parseff.consume "true")
-      (fun () -> Parseff.consume "false")
+      (fun () ->
+        Parseff.literal "true";
+        "true"
+      )
+      (fun () ->
+        Parseff.literal "false";
+        "false"
+      )
       ()
   in
   let expected =
@@ -328,10 +344,13 @@ let test_consume_or_mismatch () =
     {|Error@0 Expected "expected \"false\" or \"true\", found 'n'"|}
     (show show_string (Parseff.parse_source (chunked_source "no") p))
 
-let test_consume_each_length_and_offset () =
+let test_literal_each_length_and_offset () =
   for len = 1 to 10 do
-    let literal = String.init len (fun i -> Char.chr (Char.code 'a' + i)) in
-    let p () = Parseff.consume literal in
+    let text = String.init len (fun i -> Char.chr (Char.code 'a' + i)) in
+    let p () =
+      Parseff.literal text;
+      text
+    in
     let results input =
       [
         show show_string (Parseff.parse ~consume:`Partial input p);
@@ -348,15 +367,15 @@ let test_consume_each_length_and_offset () =
       show show_string
         (Parseff.parse_source ~consume:`Partial (chunked_source input) p)
     in
-    let ok = show show_string (Ok literal) in
+    let ok = show show_string (Ok text) in
     Alcotest.(check (list string))
-      (Printf.sprintf "match %S" literal)
+      (Printf.sprintf "match %S" text)
       [ ok; ok; ok ]
-      (results (literal ^ "!"));
+      (results (text ^ "!"));
     Alcotest.(check string)
-      (Printf.sprintf "match %S, chunks of 1" literal)
+      (Printf.sprintf "match %S, chunks of 1" text)
       ok
-      (one_byte_chunks (literal ^ "!"));
+      (one_byte_chunks (text ^ "!"));
     for k = 0 to len - 1 do
       let input =
         String.mapi
@@ -366,25 +385,25 @@ let test_consume_each_length_and_offset () =
             else
               c
           )
-          literal
+          text
       in
       let first = Parseff.parse ~consume:`Partial (input ^ "!") p in
       let at = match first with Ok _ -> -1 | Error e -> e.range.start in
       Alcotest.(check int)
-        (Printf.sprintf "%S on %S fails at the mismatch" literal input)
+        (Printf.sprintf "%S on %S fails at the mismatch" text input)
         k at;
-      let rest = String.sub literal k (len - k) in
+      let rest = String.sub text k (len - k) in
       let message found =
         Printf.sprintf {|Error@%d Expected "expected \"%s\", found '%s'"|} k
           rest found
       in
-      let expected = message ("X" ^ String.sub literal (k + 1) (len - k - 1)) in
+      let expected = message ("X" ^ String.sub text (k + 1) (len - k - 1)) in
       Alcotest.(check (list string))
-        (Printf.sprintf "%S on %S" literal input)
+        (Printf.sprintf "%S on %S" text input)
         [ expected; expected; expected ]
         (results (input ^ "!"));
       Alcotest.(check string)
-        (Printf.sprintf "%S on %S, chunks of 1" literal input)
+        (Printf.sprintf "%S on %S, chunks of 1" text input)
         (message "X")
         (one_byte_chunks (input ^ "!"))
     done
@@ -423,33 +442,52 @@ let check_stream name chunks parser expected expected_reads =
   Alcotest.(check string) name expected result;
   Alcotest.(check int) (name ^ ": reads") expected_reads !reads
 
-let test_consume_stream_mismatch_reads_no_more () =
+let test_literal_stream_mismatch_reads_no_more () =
   check_stream "HTTP/ on a request line without version" [ "GET / \r\n\r\n" ]
     (fun () ->
-      ignore (Parseff.consume "GET / ");
-      Parseff.consume "HTTP/"
+      Parseff.literal "GET / ";
+      Parseff.literal "HTTP/";
+      "HTTP/"
     )
     {|Error@6 Expected "expected \"HTTP/\", found '\\r'"|} 1;
   check_stream "CRLF on a lone carriage return" [ "\rX" ]
-    (fun () -> Parseff.consume "\r\n")
+    (fun () ->
+      Parseff.literal "\r\n";
+      "\r\n"
+    )
     {|Error@1 Expected "expected \"\\n\", found 'X'"|} 1;
   check_stream "CRLF CRLF on a lone carriage return" [ "\rX" ]
-    (fun () -> Parseff.consume "\r\n\r\n")
+    (fun () ->
+      Parseff.literal "\r\n\r\n";
+      "\r\n\r\n"
+    )
     {|Error@1 Expected "expected \"\\n\\r\\n\", found 'X'"|} 1
 
-let test_consume_stream_matching_prefix_reads () =
+let test_literal_stream_matching_prefix_reads () =
   check_stream "prefix then the rest" [ "HT"; "TP/" ]
-    (fun () -> Parseff.consume "HTTP/")
+    (fun () ->
+      Parseff.literal "HTTP/";
+      "HTTP/"
+    )
     {|Ok "HTTP/"|} 2;
   check_stream "prefix then end of input" [ "HT"; "" ]
-    (fun () -> Parseff.consume "HTTP/")
+    (fun () ->
+      Parseff.literal "HTTP/";
+      "HTTP/"
+    )
     {|Error@2 Expected "expected \"TP/\", found end of input"|} 2
 
-let test_consume_stream_or_ () =
+let test_literal_stream_or_ () =
   let p () =
     Parseff.or_
-      (fun () -> Parseff.consume "ab")
-      (fun () -> Parseff.consume "ac")
+      (fun () ->
+        Parseff.literal "ab";
+        "ab"
+      )
+      (fun () ->
+        Parseff.literal "ac";
+        "ac"
+      )
       ()
   in
   List.iter
@@ -462,10 +500,11 @@ let test_consume_stream_or_ () =
     )
     [ ("ac", [ "a"; "c" ]); ("ad", [ "a"; "d" ]); ("x", [ "x" ]) ]
 
-let test_consume_streaming_slow_source () =
+let test_literal_streaming_slow_source () =
   let r =
     Parseff.parse_source (chunked_source "true") (fun () ->
-        Parseff.consume "true"
+        Parseff.literal "true";
+        "true"
     )
   in
   Alcotest.(check string) "slow source" "Ok \"true\"" (show show_string r)
@@ -596,18 +635,18 @@ let () =
           test_case "huge at_least" `Quick test_take_while_huge_at_least;
         ]
       );
-      ( "consume",
+      ( "literal",
         [
-          test_case "prefix mismatch" `Quick test_consume_prefix_mismatch;
-          test_case "or_ mismatch" `Quick test_consume_or_mismatch;
+          test_case "prefix mismatch" `Quick test_literal_prefix_mismatch;
+          test_case "or_ mismatch" `Quick test_literal_or_mismatch;
           test_case "stream mismatch reads no more" `Quick
-            test_consume_stream_mismatch_reads_no_more;
+            test_literal_stream_mismatch_reads_no_more;
           test_case "stream matching prefix reads" `Quick
-            test_consume_stream_matching_prefix_reads;
-          test_case "stream or_" `Quick test_consume_stream_or_;
+            test_literal_stream_matching_prefix_reads;
+          test_case "stream or_" `Quick test_literal_stream_or_;
           test_case "each length and offset" `Quick
-            test_consume_each_length_and_offset;
-          test_case "slow source" `Quick test_consume_streaming_slow_source;
+            test_literal_each_length_and_offset;
+          test_case "slow source" `Quick test_literal_streaming_slow_source;
         ]
       );
     ]

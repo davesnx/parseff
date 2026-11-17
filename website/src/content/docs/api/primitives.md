@@ -14,25 +14,25 @@ Primitives are the building blocks of all parsers. These operations match input 
 ## String and character matching
 
 
-### `consume`
+### `literal`
 
-`Parseff.consume` matches an exact literal string. Returns the matched string.
+`Parseff.literal` matches the exact text of a string and returns `()`. On a mismatch it fails with an `Expected` error whose item is `Literal r`, where `r` is the rest of the string from the first byte that differs.
 
 ```ocaml
-val consume : string -> string
+val literal : string -> unit
 ```
 ```ocaml
 let parser () =
-  let _ = Parseff.consume "hello" in
-  Parseff.consume "world"
+  Parseff.literal "hello";
+  Parseff.literal "world"
 
 (* Matches "helloworld" *)
 ```
-When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `consume "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input. A mismatch inside a multi-byte character is reported at the start of that character.
+When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `literal "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input. A mismatch inside a multi-byte character is reported at the start of that character.
 
-On a stream, `consume` compares the buffered bytes first and reads more input only while they match the start of the literal, so a wrong byte fails at once. The error shows the bytes read so far: its `found` text can be shorter than on the whole input.
+On a stream, `literal` compares the buffered bytes first and reads more input only while they match the start of the literal, so a wrong byte fails at once. The error shows the bytes read so far: its `found` text can be shorter than on the whole input.
 
-**Performance:** `consume` is optimized for literal string matching.
+**Performance:** `literal` is optimized for literal string matching.
 
 
 ### `char`
@@ -58,7 +58,7 @@ let pair () =
 
 (* Matches "(1,2)" -> ('1', '2') *)
 ```
-**Tip:** Use `char` for single characters and `consume` for multi-character strings. They both match literals, but `char` makes the intent clear and avoids a string allocation for a single byte.
+**Tip:** Use `char` for single characters and `literal` for multi-character strings. They both match literals, but `char` makes the intent clear and avoids a string allocation for a single byte.
 
 
 ### `satisfy`

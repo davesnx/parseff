@@ -196,7 +196,7 @@ let ident () =
 
 let stmt () =
   context "statement" (fun () ->
-      ignore (consume "let");
+      literal "let";
       cut ();
       ws ();
       let name = ident () in
@@ -321,7 +321,16 @@ type custom_error += Too_big of int
 
 let test_error_value () =
   same_error "abx" (fun () ->
-      or_ (fun () -> consume "abc") (fun () -> consume "abd") ()
+      or_
+        (fun () ->
+          literal "abc";
+          "abc"
+        )
+        (fun () ->
+          literal "abd";
+          "abd"
+        )
+        ()
   );
   same_error "[1, x]" (array int_elem);
   same_error grammar2_input (program stmt);
@@ -367,7 +376,12 @@ let test_error_value () =
 let test_success () =
   let r =
     parse "abc" (fun () ->
-        let v = capture (fun () -> consume "ab") in
+        let v =
+          capture (fun () ->
+              literal "ab";
+              "ab"
+          )
+        in
         let p = position () in
         ignore (char 'c');
         (v, p)
@@ -469,9 +483,13 @@ let test_cut_does_not_escape () =
                char 'b'
            )
           );
-        consume "zz"
+        literal "zz";
+        "zz"
       )
-      (fun () -> consume "ax")
+      (fun () ->
+        literal "ax";
+        "ax"
+      )
       ()
   in
   Alcotest.(check (result string string))
@@ -488,9 +506,13 @@ let test_cut_does_not_escape () =
                    char 'b'
                )
               );
-            consume "zz"
+            literal "zz";
+            "zz"
           )
-          (fun () -> consume "ax")
+          (fun () ->
+            literal "ax";
+            "ax"
+          )
           ()
     )
   in
@@ -511,9 +533,13 @@ let test_default_keeps_rewind_point () =
                       char 'b'
                   )
                  );
-               consume "zz"
+               literal "zz";
+               "zz"
              )
-             (fun () -> consume "ax")
+             (fun () ->
+               literal "ax";
+               "ax"
+             )
              ()
        )
       )
@@ -527,7 +553,7 @@ let test_default_keeps_rewind_point () =
       (parse "abcd" (fun () ->
            match
              capture (fun () ->
-                 ignore (consume "ab");
+                 literal "ab";
                  advance ();
                  ignore (char '!')
              )
@@ -536,7 +562,11 @@ let test_default_keeps_rewind_point () =
                (-1, "")
            | Error _ ->
                let start = position () in
-               (start, consume "abcd")
+               ( start,
+                 ( literal "abcd";
+                   "abcd"
+                 )
+               )
        )
       )
   in
@@ -561,12 +591,12 @@ let test_default_keeps_rewind_point () =
           ignore
             (recover d
                ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ';'))
-               (fun () -> ignore (consume "ab"))
+               (fun () -> literal "ab")
                ignore
             );
           ignore (char ',');
           advance ();
-          ignore (consume "cd");
+          literal "cd";
           ignore (char ';')
         )
         ignore
@@ -604,9 +634,13 @@ let test_release_cut_in_context_does_not_escape () =
                )
            )
           );
-        consume "zz"
+        literal "zz";
+        "zz"
       )
-      (fun () -> consume "ax")
+      (fun () ->
+        literal "ax";
+        "ax"
+      )
       ()
   in
   Alcotest.(check (result string string))
@@ -622,9 +656,13 @@ let test_release_cut_in_context_does_not_escape () =
                char 'b'
            )
           );
-        consume "zz"
+        literal "zz";
+        "zz"
       )
-      (fun () -> consume "ax")
+      (fun () ->
+        literal "ax";
+        "ax"
+      )
       ()
   in
   Alcotest.(check (result string string))
@@ -642,9 +680,13 @@ let test_release_cut_passes_capture () =
                char 'b'
            )
           );
-        consume "zz"
+        literal "zz";
+        "zz"
       )
-      (fun () -> consume "ax")
+      (fun () ->
+        literal "ax";
+        "ax"
+      )
       ()
   in
   let run inner = Result.map_error error_message (parse "ax" (p inner)) in
@@ -660,11 +702,11 @@ let test_release_moves_rewind_point () =
   let body cell advance () =
     warn d "before";
     Ref.set cell 1;
-    ignore (consume "ab");
+    literal "ab";
     advance ();
     warn d "after";
     Ref.set cell 2;
-    ignore (consume "cd");
+    literal "cd";
     char '!'
   in
   let run ?release advance =
@@ -747,7 +789,7 @@ let test_release_recover_syncs_from_commit () =
               skip_while (fun c -> c <> ';')
             )
             (fun () ->
-              ignore (consume "ab");
+              literal "ab";
               commit ();
               ignore (char '!')
             )
@@ -1069,7 +1111,10 @@ let test_failure_in_sync_or_hole () =
                  (fun _ -> 0)
               )
           )
-          (fun () -> consume "?x")
+          (fun () ->
+            literal "?x";
+            "?x"
+          )
           ()
     )
   in
@@ -1092,7 +1137,12 @@ let test_rollback () =
               );
             char 'z'
           )
-          (fun () -> consume "a1" |> fun _ -> 'y')
+          (fun () ->
+            ( literal "a1";
+              "a1"
+            )
+            |> fun _ -> 'y'
+          )
           ()
     )
   in
@@ -1123,12 +1173,12 @@ let lost_argument d ~pos () =
       to_line_end ()
 
 let lost_call d ~pos () =
-  ignore (consume "print(");
+  literal "print(";
   lost_argument d ~pos ();
   ignore (char ')')
 
 let lost_top statement () =
-  ignore (consume "x = 1\n");
+  literal "x = 1\n";
   statement ();
   ignore (char '\n')
 
@@ -1157,7 +1207,7 @@ let test_inner_error_removed () =
   Alcotest.check errs "the inner error stays when the construct succeeds"
     [ unfinished ]
     (run (fun () ->
-         ignore (consume "print(");
+         literal "print(";
          lost_argument d ~pos:at_start ()
      )
     );
@@ -1181,7 +1231,7 @@ let test_nested_recovery_removed () =
   let d = Diagnostics.create () in
   let arr_stmt () =
     context "statement" (fun () ->
-        ignore (consume "let");
+        literal "let";
         cut ();
         ws ();
         ignore (ident ());
@@ -1218,7 +1268,12 @@ let test_inside_look_ahead () =
           )
         in
         let p = position () in
-        (inner, p, consume "ab")
+        ( inner,
+          p,
+          ( literal "ab";
+            "ab"
+          )
+        )
     )
   in
   ( match r with
@@ -1589,12 +1644,12 @@ let issue_62_render contexts =
       ()
   in
   let call () =
-    ignore (consume "call");
+    literal "call";
     let open_paren = position () in
     ignore (char '(');
     ws ();
     context ~delimited:true ~start:open_paren "argument list" (fun () ->
-        ignore (consume "fn");
+        literal "fn";
         ws ();
         ignore (char '{');
         ignore (body ());
@@ -1815,7 +1870,7 @@ let test_streaming_pins_start () =
     Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
   in
   let body () =
-    ignore (consume "let");
+    literal "let";
     cut ();
     skip_while (fun c -> c = ' ');
     char '!'
@@ -1941,13 +1996,13 @@ let test_streaming_release () =
     Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
   in
   let body advance () =
-    ignore (consume "let");
+    literal "let";
     advance ();
     skip_while (fun c -> c = ' ');
     char '!'
   in
   let stepwise () =
-    ignore (consume "let");
+    literal "let";
     ignore
       (many
          (fun () ->
@@ -2006,10 +2061,10 @@ let test_streaming_release_commit_in_recognize () =
              capture ~release:true (fun () ->
                  recognize (fun () ->
                      Ref.set cell 1;
-                     ignore (consume "ab");
+                     literal "ab";
                      advance ();
                      Ref.set cell 2;
-                     ignore (consume "cd");
+                     literal "cd";
                      char '!'
                  )
              )

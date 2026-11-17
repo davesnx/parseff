@@ -122,9 +122,9 @@ let png_magic () =
   Parseff.BE.int32 0x89504E47l
 
 let wav_header () =
-  let _ = Parseff.consume "RIFF" in
+  Parseff.literal "RIFF";
   let size = Parseff.LE.any_int32 () in
-  let _ = Parseff.consume "WAVE" in
+  Parseff.literal "WAVE";
   size
 ]}
 
@@ -158,7 +158,7 @@ does not copy the bytes. See {{!page-"zero-copy"}Zero-copy API}.
 
 {1 Mixing with text primitives}
 
-Binary and text primitives can be freely mixed. Use {!val:Parseff.consume} for
+Binary and text primitives can be freely mixed. Use {!val:Parseff.literal} for
 ASCII magic strings and {!module:Parseff.BE}/{!module:Parseff.LE} for numeric
 fields:
 
@@ -188,7 +188,7 @@ let tlv_field () =
   (tag, value)
 
 let tlv_message () =
-  let _ = Parseff.consume "TL" in
+  Parseff.literal "TL";
   let version = Parseff.any_uint8 () in
   let count = Parseff.BE.any_uint16 () in
   let fields = Parseff.count count tlv_field in

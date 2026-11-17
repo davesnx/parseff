@@ -262,7 +262,7 @@ let test_depth_restored_after_exception () =
     Parseff.or_
       (fun () ->
         Parseff.rec_ (fun () ->
-            ignore (Parseff.consume "x");
+            Parseff.literal "x";
             "x"
         )
       )

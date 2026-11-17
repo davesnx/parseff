@@ -12,11 +12,11 @@
 
     let ip_address () =
       let a = digit_value () in
-      let _ = Parseff.consume "." in
+      Parseff.literal ".";
       let b = digit_value () in
-      let _ = Parseff.consume "." in
+      Parseff.literal ".";
       let c = digit_value () in
-      let _ = Parseff.consume "." in
+      Parseff.literal ".";
       let d = digit_value () in
       (a, b, c, d)
 
@@ -352,7 +352,7 @@ val print_trace : Format.formatter -> trace_event -> unit
     {@ocaml[
     let _ =
       parse ~trace:(print_trace Format.std_formatter) "hello" (fun () ->
-          consume "hello"
+          literal "hello"
       )
     ]} *)
 
@@ -409,9 +409,9 @@ val parse :
 
     Example:
     {@ocaml[
-    match parse "hello" (fun () -> consume "hello") with
-    | Ok s ->
-        Printf.printf "Matched %S\n" s
+    match parse "hello" (fun () -> literal "hello") with
+    | Ok () ->
+        print_endline "Matched"
     | Error { kind = Failed msg; _ } ->
         Printf.printf "Failed: %s\n" msg
     | Error e ->
@@ -420,15 +420,16 @@ val parse :
 
 (** {1 Primitive Combinators} *)
 
-val consume : string -> string
-(** [consume s] matches the exact literal string [s]. Fails at the first byte
-    that differs from [s], expecting the rest of [s]. The failure position is
-    the mismatch, not the start of [s]: [consume "ab"] on ["ax"] fails at offset
-    [1] and expects ["b"]. When the input ends inside [s], the error says
-    [found end of input]. The one exception is a mismatch inside a multi-byte
-    character: it is reported at the start of that character.
+val literal : string -> unit
+(** [literal s] matches the exact text [s]. On a mismatch, it fails with an
+    [Expected] error whose item is [Literal r], where [r] is the rest of [s]
+    from the first byte that differs. The failure position is the mismatch, not
+    the start of [s]: [literal "ab"] on ["ax"] fails at offset [1] and expects
+    ["b"]. When the input ends inside [s], the error says [found end of input].
+    The one exception is a mismatch inside a multi-byte character: it is
+    reported at the start of that character.
 
-    In {!parse_source}, [consume] compares the buffered bytes first. It reads
+    In {!parse_source}, [literal] compares the buffered bytes first. It reads
     more input only while they match the start of [s], so a wrong byte fails at
     once, without a wait for more input. The error shows the bytes read so far:
     its [found] text can be shorter than {!parse} gives on the whole input.
@@ -436,9 +437,9 @@ val consume : string -> string
     Example:
     {@ocaml[
     let parser () =
-      let _ = consume "hello" in
-      let _ = consume " " in
-      consume "world"
+      literal "hello";
+      literal " ";
+      literal "world"
     ]} *)
 
 val satisfy : ?label:string -> (char -> bool) -> char
@@ -714,7 +715,7 @@ val end_of_input : unit -> unit
 
     Example:
     {@ocaml[
-    let some_parser () = consume "hello"
+    let some_parser () = literal "hello"
 
     let complete_parser () =
       let result = some_parser () in
@@ -730,8 +731,8 @@ val peek_char : unit -> char option
 
     Example:
     {@ocaml[
-    let parse_array () = `Array (consume "[]")
-    let parse_string () = `String (consume "\"\"")
+    let parse_array () = `Array (literal "[]")
+    let parse_string () = `String (literal "\"\"")
     let parse_number () = `Number (number ())
 
     let value () =
@@ -764,11 +765,11 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
     let bool_parser () =
       or_
         (fun () ->
-          let _ = consume "true" in
+          literal "true";
           true
         )
         (fun () ->
-          let _ = consume "false" in
+          literal "false";
           false
         )
         ()
@@ -1393,12 +1394,12 @@ val commit : unit -> unit
     let http_method () =
       or_
         (fun () ->
-          let _ = consume "GET " in
+          literal "GET ";
           commit ();
           `GET
         )
         (fun () ->
-          let _ = consume "POST " in
+          literal "POST ";
           commit ();
           `POST
         )
@@ -1437,9 +1438,9 @@ val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
     {@ocaml[
     let array_parser () =
       context ~delimited:true "array" (fun () ->
-          let _ = consume "[" in
+          literal "[";
           let xs = sep_by value comma () in
-          let _ = consume "]" in
+          literal "]";
           xs
       )
     ]} *)
@@ -1466,11 +1467,11 @@ val cut : unit -> unit
     {@ocaml[
     let let_statement () =
       context "statement" (fun () ->
-          let _ = consume "let" in
+          literal "let";
           cut ();
           (* from here on, a failure is an error of this statement *)
           let name = identifier () in
-          let _ = consume "=" in
+          literal "=";
           (name, integer ())
       )
     ]} *)
@@ -1486,13 +1487,13 @@ val rec_ : (unit -> 'a) -> 'a
       Parseff.rec_ (fun () -> Parseff.one_of [ array_parser; null_parser ] ())
 
     and array_parser () =
-      let _ = Parseff.consume "[" in
+      Parseff.literal "[";
       let elements = Parseff.sep_by json (fun () -> Parseff.char ',') () in
-      let _ = Parseff.consume "]" in
+      Parseff.literal "]";
       `Array elements
 
     and null_parser () =
-      let _ = Parseff.consume "null" in
+      Parseff.literal "null";
       `Null
     ]} *)
 
@@ -1501,10 +1502,10 @@ val expect : string -> (unit -> 'a) -> 'a
     replaces what the failure expected with [description]. The error reads
     [expected <description>]. Reads naturally: "expect a dot separator".
 
-    Only parse errors (from {!consume}, {!satisfy}, etc.) at the position where
+    Only parse errors (from {!literal}, {!satisfy}, etc.) at the position where
     [parser] started are relabeled. A failure deeper in the input keeps its own
     message, because it says more than [description]:
-    [expect "key" (fun () -> consume "id:"; digit ())] on ["id:x"] reports
+    [expect "key" (fun () -> literal "id:"; digit ())] on ["id:x"] reports
     [expected digit] at offset [3], and [expected key] on ["foo"]. A failure at
     the end of the input keeps its expected items and says [found end of input].
 
@@ -1545,9 +1546,9 @@ val one_of : (unit -> 'a) list -> unit -> 'a
     let reserved_word () =
       one_of
         [
-          (fun () -> consume "if");
-          (fun () -> consume "else");
-          (fun () -> consume "while");
+          (fun () -> literal "if");
+          (fun () -> literal "else");
+          (fun () -> literal "while");
         ]
         ()
     ]} *)
@@ -1564,10 +1565,10 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
     Example:
     {@ocaml[
     let number_parser () = `Number (number ())
-    let string_parser () = `String (consume "\"\"")
+    let string_parser () = `String (literal "\"\"")
     let bool_parser () = `Bool (bool_parser ())
 
-    let literal () =
+    let scalar () =
       one_of_labeled
         [
           ("number", number_parser);
@@ -1969,7 +1970,7 @@ val precedence :
 
     An [operator] that returns [None] adds nothing to the expected set of an
     error. Use {!peek_char}, or read a token and compare it, in place of one
-    {!consume} for each operator.
+    {!literal} for each operator.
 
     [operator] is a lookup: a {!commit} or {!cut} in it stops there, as at a
     {!look_ahead}, and has no effect, and the recovery functions in it run as
@@ -2139,7 +2140,7 @@ val keyword : ?is_ident:(char -> bool) -> string -> unit
     an identifier, so [keyword "let"] fails on ["letter"]. [is_ident] receives
     that one byte; the default accepts ASCII letters, digits and [_]. A failure
     is reported at the start of [s]. In streaming, [keyword] needs a backtrack
-    window of [String.length s + 1] bytes, one more than {!consume}. Raises
+    window of [String.length s + 1] bytes, one more than {!literal}. Raises
     [Invalid_argument] if [s] is empty.
 
     Example:
@@ -2595,9 +2596,9 @@ val finish : 'a partial -> ('a * string, error) Stdlib.result
       (chunk_type, data)
 
     let parse_wav_size () =
-      let _ = consume "RIFF" in
+      literal "RIFF";
       let size = LE.any_int32 () in
-      let _ = consume "WAVE" in
+      literal "WAVE";
       size
     ]} *)
 

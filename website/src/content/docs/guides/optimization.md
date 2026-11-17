@@ -67,11 +67,11 @@ Each `Parseff.or_` sets up a backtracking checkpoint, which is extra work the ru
 let keyword () =
   (* installs a checkpoint per alternation, per iteration *)
   Parseff.or_
-    (fun () -> Parseff.consume "class")
+    (fun () -> Parseff.literal "class")
     (fun () ->
       Parseff.or_
-        (fun () -> Parseff.consume "function")
-        (fun () -> Parseff.consume "let")
+        (fun () -> Parseff.literal "function")
+        (fun () -> Parseff.literal "let")
         ())
     ()
 

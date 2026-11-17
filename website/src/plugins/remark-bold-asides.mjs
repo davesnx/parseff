@@ -18,14 +18,14 @@
  * Any **Label:** not in the mapping is left unchanged.
  *
  * Usage in .mld files:
- *   {b Performance:} [consume] is optimized for literal string matching.
+ *   {b Performance:} [literal] is optimized for literal string matching.
  *
  * Becomes in promoted markdown:
- *   **Performance:** `consume` is optimized for literal string matching.
+ *   **Performance:** `literal` is optimized for literal string matching.
  *
  * Which this plugin transforms into the directive AST equivalent of:
  *   :::tip[Performance]
- *   `consume` is optimized for literal string matching.
+ *   `literal` is optimized for literal string matching.
  *   :::
  */
 

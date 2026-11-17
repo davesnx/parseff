@@ -54,7 +54,7 @@ let source_of_repeated_record ~chunk_size ~repetitions record =
 
 let parse_repeated_record ~repetitions record () =
   for _ = 1 to repetitions do
-    ignore (Parseff.consume record)
+    Parseff.literal record
   done;
   repetitions
 

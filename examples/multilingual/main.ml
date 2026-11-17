@@ -21,7 +21,7 @@ let value () =
 let field () =
   let k = key () in
   let _ =
-    Parseff.expect ("':' after '" ^ k ^ "'") (fun () -> Parseff.consume ":")
+    Parseff.expect ("':' after '" ^ k ^ "'") (fun () -> Parseff.literal ":")
   in
   Parseff.Utf8.skip_whitespace ();
   let v = Parseff.expect ("a value after '" ^ k ^ ":'") (fun () -> value ()) in

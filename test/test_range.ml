@@ -53,7 +53,7 @@ let test_with_range_of_composed_parser () =
     (show_with_range string_of_int)
     "x = 42;"
     (fun () ->
-      ignore (Parseff.consume "x = ");
+      Parseff.literal "x = ";
       let v = Parseff.with_range number in
       ignore (Parseff.char ';');
       v
@@ -159,7 +159,7 @@ let test_commit_inside_recognize () =
 let statement () =
   Parseff.context "statement" (fun () ->
       Parseff.recognize (fun () ->
-          ignore (Parseff.consume "let");
+          Parseff.literal "let";
           Parseff.cut ();
           ignore (Parseff.char ';')
       )
@@ -187,8 +187,18 @@ let test_cut_inside_recognize () =
 
 let alternatives wrap () =
   Parseff.or_
-    (fun () -> wrap (fun () -> Parseff.consume "abc"))
-    (fun () -> wrap (fun () -> Parseff.consume "abd"))
+    (fun () ->
+      wrap (fun () ->
+          Parseff.literal "abc";
+          "abc"
+      )
+    )
+    (fun () ->
+      wrap (fun () ->
+          Parseff.literal "abd";
+          "abd"
+      )
+    )
     ()
 
 let test_failure_is_unchanged () =

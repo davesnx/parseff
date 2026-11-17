@@ -29,11 +29,11 @@ let number () =
 
 let ip_address () =
   let a = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let b = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let c = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let d = number () in
   Parseff.end_of_input ();
   (a, b, c, d)
@@ -64,17 +64,17 @@ let rec json () =
   )
 
 and null_parser () =
-  let _ = Parseff.consume "null" in
+  Parseff.literal "null";
   Null
 
 and bool_parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "true" in
+      Parseff.literal "true";
       Bool true
     )
     (fun () ->
-      let _ = Parseff.consume "false" in
+      Parseff.literal "false";
       Bool false
     )
     ()
@@ -82,13 +82,13 @@ and bool_parser () =
 and number_parser () = Number (Parseff.number ())
 
 and string_parser () =
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let s = Parseff.take_while (fun c -> c <> '"') in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   String s
 
 and array_parser () =
-  let _ = Parseff.consume "[" in
+  Parseff.literal "[";
   let _ = ws () in
   let elements =
     Parseff.or_
@@ -98,7 +98,7 @@ and array_parser () =
           Parseff.many
             (fun () ->
               let _ = ws () in
-              let _ = Parseff.consume "," in
+              Parseff.literal ",";
               json ()
             )
             ()
@@ -109,11 +109,11 @@ and array_parser () =
       ()
   in
   let _ = ws () in
-  let _ = Parseff.consume "]" in
+  Parseff.literal "]";
   Array elements
 
 and object_parser () =
-  let _ = Parseff.consume "{" in
+  Parseff.literal "{";
   let _ = ws () in
   let pairs =
     Parseff.or_
@@ -123,7 +123,7 @@ and object_parser () =
           Parseff.many
             (fun () ->
               let _ = ws () in
-              let _ = Parseff.consume "," in
+              Parseff.literal ",";
               key_value ()
             )
             ()
@@ -134,22 +134,27 @@ and object_parser () =
       ()
   in
   let _ = ws () in
-  let _ = Parseff.consume "}" in
+  Parseff.literal "}";
   Object pairs
 
 and key_value () =
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let key = Parseff.take_while (fun c -> c <> '"') in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let _ = ws () in
-  let _ = Parseff.consume ":" in
+  Parseff.literal ":";
   let _ = ws () in
   let value = json () in
   (key, value)
 
-let test_of_string_consume () =
+let test_of_string_literal () =
   let src = Parseff.Source.of_string "hello" in
-  match parse_source_with_pos src (fun () -> Parseff.consume "hello") with
+  match
+    parse_source_with_pos src (fun () ->
+        Parseff.literal "hello";
+        "hello"
+    )
+  with
   | Ok (s, pos) ->
       Alcotest.(check string) "matched" "hello" s;
       Alcotest.(check int) "pos" 5 pos
@@ -171,8 +176,14 @@ let test_of_string_satisfy () =
 let test_of_string_alternation () =
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.consume "foo")
-      (fun () -> Parseff.consume "bar")
+      (fun () ->
+        Parseff.literal "foo";
+        "foo"
+      )
+      (fun () ->
+        Parseff.literal "bar";
+        "bar"
+      )
       ()
   in
   let src = Parseff.Source.of_string "bar" in
@@ -233,7 +244,8 @@ let test_of_string_skip_while () =
   match
     Parseff.parse_source src (fun () ->
         Parseff.skip_whitespace ();
-        Parseff.consume "hello"
+        Parseff.literal "hello";
+        "hello"
     )
   with
   | Ok s ->
@@ -245,8 +257,14 @@ let test_of_string_look_ahead () =
   let src = Parseff.Source.of_string "hello" in
   match
     Parseff.parse_source src (fun () ->
-        let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
-        Parseff.consume "hello"
+        let _ =
+          Parseff.look_ahead (fun () ->
+              Parseff.literal "hello";
+              "hello"
+          )
+        in
+        Parseff.literal "hello";
+        "hello"
     )
   with
   | Ok s ->
@@ -273,9 +291,14 @@ let test_of_string_sep_by () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_chunked_consume () =
+let test_chunked_literal () =
   let src = chunked_source ~chunk_size:1 "hello" in
-  match parse_source_with_pos src (fun () -> Parseff.consume "hello") with
+  match
+    parse_source_with_pos src (fun () ->
+        Parseff.literal "hello";
+        "hello"
+    )
+  with
   | Ok (s, pos) ->
       Alcotest.(check string) "matched" "hello" s;
       Alcotest.(check int) "pos" 5 pos
@@ -358,8 +381,14 @@ let test_chunked_take_while () =
 let test_chunked_alternation () =
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.consume "foobar")
-      (fun () -> Parseff.consume "foobaz")
+      (fun () ->
+        Parseff.literal "foobar";
+        "foobar"
+      )
+      (fun () ->
+        Parseff.literal "foobaz";
+        "foobaz"
+      )
       ()
   in
   let src = chunked_source ~chunk_size:2 "foobaz" in
@@ -398,11 +427,11 @@ let test_end_of_input_with_data () =
   | Error _ ->
       ()
 
-let test_end_of_input_after_consume () =
+let test_end_of_input_after_literal () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
     Parseff.parse_source src (fun () ->
-        let _ = Parseff.consume "hello" in
+        Parseff.literal "hello";
         Parseff.end_of_input ()
     )
   with
@@ -415,13 +444,13 @@ let test_backtrack_across_chunk () =
   let parser () =
     Parseff.or_
       (fun () ->
-        let _ = Parseff.consume "abc" in
-        let _ = Parseff.consume "def" in
+        Parseff.literal "abc";
+        Parseff.literal "def";
         "abcdef"
       )
       (fun () ->
-        let _ = Parseff.consume "abc" in
-        let _ = Parseff.consume "xyz" in
+        Parseff.literal "abc";
+        Parseff.literal "xyz";
         "abcxyz"
       )
       ()
@@ -437,12 +466,15 @@ let test_streaming_commit_blocks_backtrack () =
   let parser () =
     Parseff.or_
       (fun () ->
-        let _ = Parseff.consume "ab" in
+        Parseff.literal "ab";
         Parseff.commit ();
         let _ = Parseff.char 'x' in
         "left"
       )
-      (fun () -> Parseff.consume "abcd")
+      (fun () ->
+        Parseff.literal "abcd";
+        "abcd"
+      )
       ()
   in
   let src = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in
@@ -460,8 +492,14 @@ let test_streaming_commit_blocks_backtrack () =
 let test_backtrack_window_exceeded () =
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.consume "abx")
-      (fun () -> Parseff.consume "abcd")
+      (fun () ->
+        Parseff.literal "abx";
+        "abx"
+      )
+      (fun () ->
+        Parseff.literal "abcd";
+        "abcd"
+      )
       ()
   in
   let src = chunked_source ~chunk_size:2 "abcd" in
@@ -480,14 +518,14 @@ let test_commit_releases_backtrack_window () =
   let parser () =
     Parseff.or_
       (fun () ->
-        let _ = Parseff.consume "ab" in
+        Parseff.literal "ab";
         Parseff.commit ();
         let chars = Parseff.many (fun () -> Parseff.char 'c') () in
         Parseff.end_of_input ();
         List.length chars
       )
       (fun () ->
-        let _ = Parseff.consume "ax" in
+        Parseff.literal "ax";
         0
       )
       ()
@@ -517,8 +555,14 @@ let test_look_ahead_across_chunk () =
   let src = chunked_source ~chunk_size:2 "hello" in
   match
     Parseff.parse_source src (fun () ->
-        let _ = Parseff.look_ahead (fun () -> Parseff.consume "hello") in
-        Parseff.consume "hello"
+        let _ =
+          Parseff.look_ahead (fun () ->
+              Parseff.literal "hello";
+              "hello"
+          )
+        in
+        Parseff.literal "hello";
+        "hello"
     )
   with
   | Ok s ->
@@ -555,9 +599,14 @@ let test_deep_nesting_streaming () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-let test_consume_failure_streaming () =
+let test_literal_failure_streaming () =
   let src = chunked_source ~chunk_size:2 "hello" in
-  match Parseff.parse_source src (fun () -> Parseff.consume "world") with
+  match
+    Parseff.parse_source src (fun () ->
+        Parseff.literal "world";
+        "world"
+    )
+  with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error { kind = Expected { found = Text _; _ }; _ } ->
@@ -583,7 +632,10 @@ let test_parse_source_consume_all_requires_eof () =
   let src = Parseff.Source.of_string "abcXYZ" in
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
-    Parseff.parse_source ~diagnostics src (fun () -> Parseff.consume "abc")
+    Parseff.parse_source ~diagnostics src (fun () ->
+        Parseff.literal "abc";
+        "abc"
+    )
   in
   match outcome with
   | Ok _ ->
@@ -603,7 +655,8 @@ let test_parse_source_consume_all_error_has_diagnostics () =
   let outcome =
     Parseff.parse_source ~diagnostics src (fun () ->
         Parseff.warn diagnostics "streaming-warning";
-        Parseff.consume "y"
+        Parseff.literal "y";
+        "y"
     )
   in
   match outcome with
@@ -661,7 +714,7 @@ let test_streaming_location_basic () =
   let input = "aaa\nbbb\nccc" in
   let src = chunked_source ~chunk_size:1 input in
   let parser () =
-    let _ = Parseff.consume "aaa\nbbb\nc" in
+    Parseff.literal "aaa\nbbb\nc";
     Parseff.location ()
   in
   match Parseff.parse_source ~consume:`Partial src parser with
@@ -675,7 +728,7 @@ let test_streaming_location_across_chunks () =
   let input = "ab\ncd\nef" in
   let src = chunked_source ~chunk_size:2 input in
   let parser () =
-    let _ = Parseff.consume "ab\ncd\ne" in
+    Parseff.literal "ab\ncd\ne";
     Parseff.location ()
   in
   match Parseff.parse_source ~consume:`Partial src parser with
@@ -688,9 +741,9 @@ let test_streaming_location_multiple_calls () =
   let input = "aa\nbb\ncc" in
   let src = chunked_source ~chunk_size:1 input in
   let parser () =
-    let _ = Parseff.consume "aa" in
+    Parseff.literal "aa";
     let loc1 = Parseff.location () in
-    let _ = Parseff.consume "\nbb\nc" in
+    Parseff.literal "\nbb\nc";
     let loc2 = Parseff.location () in
     (loc1, loc2)
   in
@@ -750,7 +803,12 @@ let test_of_chunks_single_shot () =
         end
     )
   in
-  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  match
+    Parseff.parse_source src (fun () ->
+        Parseff.literal "hello";
+        "hello"
+    )
+  with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error _ ->
@@ -773,7 +831,12 @@ let test_of_chunks_empty_skipped () =
             None
     )
   in
-  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  match
+    Parseff.parse_source src (fun () ->
+        Parseff.literal "hello";
+        "hello"
+    )
+  with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error _ ->
@@ -783,8 +846,14 @@ let test_of_chunks_backtrack () =
   let src = chunked_source_chunks ~chunk_size:2 "foobaz" in
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.consume "foobar")
-      (fun () -> Parseff.consume "foobaz")
+      (fun () ->
+        Parseff.literal "foobar";
+        "foobar"
+      )
+      (fun () ->
+        Parseff.literal "foobaz";
+        "foobaz"
+      )
       ()
   in
   match Parseff.parse_source src parser with
@@ -861,8 +930,8 @@ let request_line () =
   let _ = Parseff.char ' ' in
   let target = Parseff.take_while ~at_least:1 (fun c -> c <> ' ') in
   let _ = Parseff.char ' ' in
-  let _ = Parseff.consume "HTTP/1.1" in
-  let _ = Parseff.consume "\r\n" in
+  Parseff.literal "HTTP/1.1";
+  Parseff.literal "\r\n";
   (meth, target)
 
 let show_pair (a, b) = Printf.sprintf "(%S, %S)" a b
@@ -891,8 +960,14 @@ let test_bigstring_partial_and_backtrack () =
   let parser () =
     let s =
       Parseff.or_
-        (fun () -> Parseff.consume "foobar")
-        (fun () -> Parseff.consume "foobaz")
+        (fun () ->
+          Parseff.literal "foobar";
+          "foobar"
+        )
+        (fun () ->
+          Parseff.literal "foobaz";
+          "foobaz"
+        )
         ()
     in
     (s, Parseff.position ())
@@ -924,7 +999,12 @@ let test_bigstring_empty_slices_skipped () =
             Some x
     )
   in
-  match Parseff.parse_source src (fun () -> Parseff.consume "hello") with
+  match
+    Parseff.parse_source src (fun () ->
+        Parseff.literal "hello";
+        "hello"
+    )
+  with
   | Ok s ->
       Alcotest.(check string) "matched" "hello" s
   | Error e ->
@@ -1204,7 +1284,7 @@ let runs () =
 let opt_tail () =
   Parseff.recognize (fun () ->
       ignore (Parseff.char 'a');
-      ignore (Parseff.optional (fun () -> Parseff.consume "bc") ())
+      ignore (Parseff.optional (fun () -> Parseff.literal "bc") ())
   )
 
 let windows = List.init 19 (fun i -> i + 2)
@@ -1267,7 +1347,7 @@ let test_token_window_boundary () =
                   (window_case ~window ~chunk input)
                   expected
                   (run_window ~window ~chunk input (fun () ->
-                       ignore (Parseff.consume "x;");
+                       Parseff.literal "x;";
                        parser ()
                    )
                   )
@@ -1411,9 +1491,10 @@ let test_window_differential () =
 let test_peek_window_accounting () =
   let input = "xyab" ^ String.make 100 'z' in
   let parser () =
-    ignore (Parseff.consume "xy");
+    Parseff.literal "xy";
     ignore (Parseff.peek_char ());
-    Parseff.consume "ab"
+    Parseff.literal "ab";
+    "ab"
   in
   match
     Parseff.parse_source ~consume:`Partial ~backtrack_window:8
@@ -1430,14 +1511,14 @@ let test_location_after_backtrack () =
   let parser () =
     Parseff.or_
       (fun () ->
-        ignore (Parseff.consume input);
+        Parseff.literal input;
         ignore (Parseff.location ());
         ignore (Parseff.char 'z');
         ""
       )
       (fun () ->
         let l1 = Parseff.location () in
-        ignore (Parseff.consume input);
+        Parseff.literal input;
         let l2 = Parseff.location () in
         Printf.sprintf "%d:%d %d:%d" l1.line l1.col l2.line l2.col
       )
@@ -1568,12 +1649,17 @@ let test_streaming_matches_parse () =
   let letters () = Parseff.take_while is_lower in
   let cases =
     [
-      ( "consume",
+      ( "literal",
         "hello world",
         fun () ->
-          let a = Parseff.consume "hello" in
+          Parseff.literal "hello";
+          let a = "hello" in
           let _ = Parseff.skip_whitespace () in
-          a ^ Parseff.consume "world"
+          a
+          ^
+          ( Parseff.literal "world";
+            "world"
+          )
       );
       ( "location",
         "ab\ncd\nef",
@@ -1586,8 +1672,14 @@ let test_streaming_matches_parse () =
         "abc",
         fun () ->
           Parseff.or_
-            (fun () -> Parseff.consume "abx")
-            (fun () -> Parseff.consume "aby")
+            (fun () ->
+              Parseff.literal "abx";
+              "abx"
+            )
+            (fun () ->
+              Parseff.literal "aby";
+              "aby"
+            )
             ()
       );
       ( "skip_while then char",
@@ -1677,7 +1769,7 @@ let test_error_position_across_chunk_boundary () =
     (fun chunk_size ->
       let r =
         Parseff.parse_source (chunked_source ~chunk_size "help") (fun () ->
-            ignore (Parseff.consume "hello")
+            Parseff.literal "hello"
         )
       in
       Alcotest.(check string)
@@ -1695,7 +1787,7 @@ let test_error_position_after_compaction () =
       let r =
         Parseff.parse_source ~backtrack_window:64
           (chunked_source ~chunk_size input) (fun () ->
-            ignore (Parseff.many (fun () -> Parseff.consume item) ());
+            ignore (Parseff.many (fun () -> Parseff.literal item) ());
             Parseff.end_of_input ()
         )
       in
@@ -1721,7 +1813,7 @@ let test_error_at_end_of_input_after_compaction () =
 let cut_window_parser ~cut () =
   Parseff.or_
     (fun () ->
-      ignore (Parseff.consume "x");
+      Parseff.literal "x";
       if cut then Parseff.cut ();
       List.length (Parseff.many (fun () -> Parseff.char 'a') ())
     )
@@ -1754,7 +1846,7 @@ let test_context_in_streaming () =
   let input = String.concat "" (List.init 3000 (fun _ -> "ab")) ^ "ax" in
   let parser () =
     Parseff.context "items" (fun () ->
-        ignore (Parseff.many (fun () -> Parseff.consume "ab") ());
+        ignore (Parseff.many (fun () -> Parseff.literal "ab") ());
         Parseff.end_of_input ()
     )
   in
@@ -1789,9 +1881,10 @@ let test_error_does_not_read_more_input () =
     )
   in
   let parser () =
-    ignore (Parseff.consume "a");
+    Parseff.literal "a";
     failed_at := true;
-    Parseff.consume "x"
+    Parseff.literal "x";
+    "x"
   in
   match Parseff.parse_source src parser with
   | Error e ->
@@ -1860,7 +1953,8 @@ let test_error_on_open_source_shows_only_input () =
   let src = Parseff.Source.of_seq (List.to_seq [ "abc"; "def" ]) in
   let parser () =
     ignore (Parseff.look_ahead (fun () -> Parseff.take 3));
-    Parseff.consume "x"
+    Parseff.literal "x";
+    "x"
   in
   match Parseff.parse_source src parser with
   | Error { kind = Expected { found = Text t; _ }; _ } ->
@@ -1894,8 +1988,14 @@ let test_rest_of_split_chunk () =
   let parser () =
     let a =
       Parseff.or_
-        (fun () -> Parseff.consume "abx")
-        (fun () -> Parseff.consume "abc")
+        (fun () ->
+          Parseff.literal "abx";
+          "abx"
+        )
+        (fun () ->
+          Parseff.literal "abc";
+          "abc"
+        )
         ()
     in
     a ^ "|" ^ all_chars ()
@@ -1907,8 +2007,14 @@ let test_rest_of_split_chunk () =
 let test_split_chunk_keeps_the_window () =
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.consume "abcdex")
-      (fun () -> Parseff.consume "abcdefgh")
+      (fun () ->
+        Parseff.literal "abcdex";
+        "abcdex"
+      )
+      (fun () ->
+        Parseff.literal "abcdefgh";
+        "abcdefgh"
+      )
       ()
   in
   match
@@ -1941,7 +2047,8 @@ let test_none_is_final () =
     )
   in
   let parser () =
-    let s = Parseff.consume "ab" in
+    Parseff.literal "ab";
+    let s = "ab" in
     let c = Parseff.optional (fun () -> Parseff.char 'c') () in
     Parseff.end_of_input ();
     (s, c)
@@ -1994,7 +2101,11 @@ let test_chunk_function_raises () =
   );
   Alcotest.(check (result string reject))
     "later parse" (Ok "xy")
-    (Parseff.parse "xy" (fun () -> Parseff.consume "xy"))
+    (Parseff.parse "xy" (fun () ->
+         Parseff.literal "xy";
+         "xy"
+     )
+    )
 
 let test_parser_catches_chunk_exception () =
   let calls = ref 0 in
@@ -2112,8 +2223,14 @@ let test_take_while_reads_across_chunks () =
 let test_backtrack_across_chunk_borders () =
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.consume "abcdx")
-      (fun () -> Parseff.consume "abcde")
+      (fun () ->
+        Parseff.literal "abcdx";
+        "abcdx"
+      )
+      (fun () ->
+        Parseff.literal "abcde";
+        "abcde"
+      )
       ()
   in
   List.iter
@@ -2279,7 +2396,7 @@ let () =
       );
       ( "Source.of_string",
         [
-          test_case "consume" `Quick test_of_string_consume;
+          test_case "literal" `Quick test_of_string_literal;
           test_case "satisfy" `Quick test_of_string_satisfy;
           test_case "alternation" `Quick test_of_string_alternation;
           test_case "many" `Quick test_of_string_many;
@@ -2294,7 +2411,7 @@ let () =
       );
       ( "chunked",
         [
-          test_case "consume 1-byte" `Quick test_chunked_consume;
+          test_case "literal 1-byte" `Quick test_chunked_literal;
           test_case "ip 1-byte" `Quick test_chunked_ip;
           test_case "ip 2-byte" `Quick test_chunked_ip_2byte;
           test_case "json array 1-byte" `Quick test_chunked_json;
@@ -2320,8 +2437,8 @@ let () =
           test_case "take beyond end of input" `Quick
             test_take_beyond_end_of_input;
           test_case "take beyond window" `Quick test_take_beyond_window;
-          test_case "end_of_input after consume" `Quick
-            test_end_of_input_after_consume;
+          test_case "end_of_input after literal" `Quick
+            test_end_of_input_after_literal;
           test_case "backtrack across chunk" `Quick test_backtrack_across_chunk;
           test_case "commit blocks backtrack" `Quick
             test_streaming_commit_blocks_backtrack;
@@ -2333,7 +2450,7 @@ let () =
             test_look_ahead_across_chunk;
           test_case "many across chunks" `Quick test_many_across_chunks;
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
-          test_case "consume failure" `Quick test_consume_failure_streaming;
+          test_case "literal failure" `Quick test_literal_failure_streaming;
           test_case "take_while_span" `Quick test_take_while_span_streaming;
           test_case "parse_source_consume_all requires eof" `Quick
             test_parse_source_consume_all_requires_eof;

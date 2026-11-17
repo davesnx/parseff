@@ -207,7 +207,10 @@ let rec run cx g =
   | Char c ->
       Chr (Parseff.char c)
   | Consume s ->
-      Str (Parseff.consume s)
+      Str
+        ( Parseff.literal s;
+          s
+        )
   | Any ->
       Chr (Parseff.any_char ())
   | Soft_error ->

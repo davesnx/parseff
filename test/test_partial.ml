@@ -14,11 +14,11 @@ let number () =
 
 let ip_address () =
   let a = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let b = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let c = number () in
-  let _ = Parseff.consume "." in
+  Parseff.literal ".";
   let d = number () in
   Printf.sprintf "%d.%d.%d.%d" a b c d
 
@@ -27,15 +27,24 @@ let ws () = Parseff.skip_whitespace ()
 let rec json () =
   Parseff.rec_ (fun () ->
       ws ();
-      Parseff.one_of [ array; object_; literal; num; str ] ()
+      Parseff.one_of [ array; object_; scalar; num; str ] ()
   )
 
-and literal () =
+and scalar () =
   Parseff.one_of
     [
-      (fun () -> Parseff.consume "null");
-      (fun () -> Parseff.consume "true");
-      (fun () -> Parseff.consume "false");
+      (fun () ->
+        Parseff.literal "null";
+        "null"
+      );
+      (fun () ->
+        Parseff.literal "true";
+        "true"
+      );
+      (fun () ->
+        Parseff.literal "false";
+        "false"
+      );
     ]
     ()
 
@@ -90,16 +99,25 @@ let request_line () =
   let meth =
     Parseff.one_of
       [
-        (fun () -> Parseff.consume "GET");
-        (fun () -> Parseff.consume "POST");
-        (fun () -> Parseff.consume "PUT");
+        (fun () ->
+          Parseff.literal "GET";
+          "GET"
+        );
+        (fun () ->
+          Parseff.literal "POST";
+          "POST"
+        );
+        (fun () ->
+          Parseff.literal "PUT";
+          "PUT"
+        );
       ]
       ()
   in
   Parseff.commit ();
   let _ = Parseff.char ' ' in
   let path = Parseff.take_while ~at_least:1 (fun c -> c <> ' ') in
-  let _ = Parseff.consume " HTTP/1.1\r\n" in
+  Parseff.literal " HTTP/1.1\r\n";
   meth ^ " " ^ path
 
 let show = function
@@ -626,13 +644,19 @@ let test_finish () =
     "await at the end of the value" true
     (Parseff.feed t "34" = Parseff.Await);
   Alcotest.(check bool) "finish" true (Parseff.finish t = Ok ("1234", ""));
-  let t = Parseff.parse_partial (fun () -> Parseff.consume "abc") in
+  let t =
+    Parseff.parse_partial (fun () ->
+        Parseff.literal "abc";
+        "abc"
+    )
+  in
   ignore (Parseff.feed t "ab");
   Alcotest.(check string)
     "short input"
     (show
        (Parseff.parse_source (Parseff.Source.of_string "ab") (fun () ->
-            Parseff.consume "abc"
+            Parseff.literal "abc";
+            "abc"
         )
        )
     )
@@ -647,11 +671,23 @@ let whole parser () =
   v
 
 let test_end_of_input_waits_for_finish () =
-  let t = Parseff.parse_partial (fun () -> Parseff.consume "ab") in
+  let t =
+    Parseff.parse_partial (fun () ->
+        Parseff.literal "ab";
+        "ab"
+    )
+  in
   Alcotest.(check bool)
     "done at the value" true
     (Parseff.feed t "abc" = Parseff.Done (Ok ("ab", "c")));
-  let t = Parseff.parse_partial (whole (fun () -> Parseff.consume "ab")) in
+  let t =
+    Parseff.parse_partial
+      (whole (fun () ->
+           Parseff.literal "ab";
+           "ab"
+       )
+      )
+  in
   Alcotest.(check bool)
     "await after the value" true
     (Parseff.feed t "ab" = Parseff.Await);
@@ -721,9 +757,13 @@ let test_backtrack_window () =
     Parseff.or_
       (fun () ->
         let _ = Parseff.take_while (fun c -> c = 'a') in
-        Parseff.consume "!"
+        Parseff.literal "!";
+        "!"
       )
-      (fun () -> Parseff.consume "a")
+      (fun () ->
+        Parseff.literal "a";
+        "a"
+      )
       ()
   in
   match
@@ -741,7 +781,7 @@ exception Boom
 let test_exception () =
   let t =
     Parseff.parse_partial (fun () ->
-        let _ = Parseff.consume "ab" in
+        Parseff.literal "ab";
         raise Boom
     )
   in
@@ -762,7 +802,7 @@ let[@inline never] deep_raise () = raise Boom
 let backtrace_of chunks =
   let t =
     Parseff.parse_partial (fun () ->
-        let _ = Parseff.consume "ab" in
+        Parseff.literal "ab";
         deep_raise ()
     )
   in
@@ -870,7 +910,8 @@ let test_dropped_feed () =
   let p () =
     Parseff.warn diagnostics 1;
     Parseff.Ref.set cell 1;
-    Parseff.consume "abc"
+    Parseff.literal "abc";
+    "abc"
   in
   let t = Parseff.parse_partial ~diagnostics p in
   ignore (Parseff.feed t "a");
@@ -896,7 +937,8 @@ let[@inline never] start_dropped finalised =
   Gc.finalise_last (fun () -> finalised := true) marker;
   let t =
     Parseff.parse_partial (fun () ->
-        let s = Parseff.consume "abc" in
+        Parseff.literal "abc";
+        let s = "abc" in
         incr marker;
         s
     )
@@ -916,7 +958,12 @@ let test_options () =
   let p () =
     Parseff.context "x" (fun () ->
         Parseff.warn diagnostics 7;
-        Parseff.rec_ (fun () -> Parseff.rec_ (fun () -> Parseff.consume "ab"))
+        Parseff.rec_ (fun () ->
+            Parseff.rec_ (fun () ->
+                Parseff.literal "ab";
+                "ab"
+            )
+        )
     )
   in
   let r =

@@ -773,7 +773,7 @@ module Z1 = struct
         [
           [
             infix_left (fun () ->
-                ignore (consume "ab");
+                literal "ab";
                 fun () () -> ()
             );
           ];
@@ -1012,7 +1012,7 @@ module V2 = struct
                 fun () -> ()
             );
             infix_right (fun () ->
-                ignore (consume "ab");
+                literal "ab";
                 fun () () -> ()
             );
           ];
@@ -1030,7 +1030,10 @@ module V2 = struct
             ignore
               (recover ~release:true errors
                  ~sync:(fun () -> ())
-                 (fun () -> consume "ab")
+                 (fun () ->
+                   literal "ab";
+                   "ab"
+                 )
                  (fun _ -> "H")
               )
           );

@@ -99,9 +99,9 @@ let show_failure = function
 let test_interleaved_failures_keep_separate_groups () =
   let a = ref "unset" and b = ref "unset" in
   let parser () =
-    ignore (Parseff.optional (fun () -> Parseff.consume "abd") ());
-    ignore (Parseff.consume "abc");
-    ignore (Parseff.consume "d")
+    ignore (Parseff.optional (fun () -> Parseff.literal "abd") ());
+    Parseff.literal "abc";
+    Parseff.literal "d"
   in
   let go r data =
     spawn (fun () ->

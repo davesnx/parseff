@@ -23,17 +23,17 @@ type json =
 let ws () = Parseff.whitespace ()
 
 let null_parser () =
-  let _ = Parseff.consume "null" in
+  Parseff.literal "null";
   Null
 
 let bool_parser () =
   Parseff.or_
     (fun () ->
-      let _ = Parseff.consume "true" in
+      Parseff.literal "true";
       Bool true
     )
     (fun () ->
-      let _ = Parseff.consume "false" in
+      Parseff.literal "false";
       Bool false
     )
     ()
@@ -41,9 +41,9 @@ let bool_parser () =
 let number_parser () = Number (Parseff.number ())
 
 let string_parser () =
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let s = Parseff.take_while (fun c -> c <> '"') in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   String s
 
 let rec json () =
@@ -62,7 +62,7 @@ let rec json () =
   )
 
 and array_parser () =
-  let _ = Parseff.consume "[" in
+  Parseff.literal "[";
   let _ = ws () in
   let elements =
     Parseff.or_
@@ -72,7 +72,7 @@ and array_parser () =
           Parseff.many
             (fun () ->
               let _ = ws () in
-              let _ = Parseff.consume "," in
+              Parseff.literal ",";
               json ()
             )
             ()
@@ -83,11 +83,11 @@ and array_parser () =
       ()
   in
   let _ = ws () in
-  let _ = Parseff.consume "]" in
+  Parseff.literal "]";
   Array elements
 
 and object_parser () =
-  let _ = Parseff.consume "{" in
+  Parseff.literal "{";
   let _ = ws () in
   let pairs =
     Parseff.or_
@@ -97,7 +97,7 @@ and object_parser () =
           Parseff.many
             (fun () ->
               let _ = ws () in
-              let _ = Parseff.consume "," in
+              Parseff.literal ",";
               key_value ()
             )
             ()
@@ -108,16 +108,16 @@ and object_parser () =
       ()
   in
   let _ = ws () in
-  let _ = Parseff.consume "}" in
+  Parseff.literal "}";
   Object pairs
 
 and key_value () =
   let _ = ws () in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let key = Parseff.take_while (fun c -> c <> '"') in
-  let _ = Parseff.consume "\"" in
+  Parseff.literal "\"";
   let _ = ws () in
-  let _ = Parseff.consume ":" in
+  Parseff.literal ":";
   let _ = ws () in
   let value = json () in
   (key, value)
@@ -130,7 +130,10 @@ let test_basic_parallel_parsing () =
   let results =
     parallel num_domains (fun i ->
         let input = inputs.(i mod Array.length inputs) in
-        Parseff.parse input (fun () -> Parseff.consume input)
+        Parseff.parse input (fun () ->
+            Parseff.literal input;
+            input
+        )
     )
   in
   List.iteri
@@ -171,10 +174,22 @@ let test_alternation_across_domains () =
   let parser () =
     Parseff.one_of
       [
-        (fun () -> Parseff.consume "alpha");
-        (fun () -> Parseff.consume "beta");
-        (fun () -> Parseff.consume "gamma");
-        (fun () -> Parseff.consume "delta");
+        (fun () ->
+          Parseff.literal "alpha";
+          "alpha"
+        );
+        (fun () ->
+          Parseff.literal "beta";
+          "beta"
+        );
+        (fun () ->
+          Parseff.literal "gamma";
+          "gamma"
+        );
+        (fun () ->
+          Parseff.literal "delta";
+          "delta"
+        );
       ]
       ()
   in
@@ -235,7 +250,12 @@ let test_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "item%d" i in
         let source = Parseff.Source.of_string input in
-        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
+        ( input,
+          Parseff.parse_source source (fun () ->
+              Parseff.literal input;
+              input
+          )
+        )
     )
   in
   List.iteri
@@ -282,11 +302,23 @@ let test_errors_isolated_across_domains () =
         if i mod 2 = 0 then
           (* Valid parse *)
           let input = "hello" in
-          (i, true, Parseff.parse input (fun () -> Parseff.consume "hello"))
+          ( i,
+            true,
+            Parseff.parse input (fun () ->
+                Parseff.literal "hello";
+                "hello"
+            )
+          )
         else
           (* Invalid parse — should fail *)
           let input = "xyz" in
-          (i, false, Parseff.parse input (fun () -> Parseff.consume "hello"))
+          ( i,
+            false,
+            Parseff.parse input (fun () ->
+                Parseff.literal "hello";
+                "hello"
+            )
+          )
     )
   in
   List.iter
@@ -389,7 +421,12 @@ let test_chunked_streaming_across_domains () =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "hello%d" i in
         let source = chunked_source 2 input in
-        (input, Parseff.parse_source source (fun () -> Parseff.consume input))
+        ( input,
+          Parseff.parse_source source (fun () ->
+              Parseff.literal input;
+              input
+          )
+        )
     )
   in
   List.iteri
@@ -410,9 +447,9 @@ let test_context_across_domains () =
     for _ = 1 to 200 do
       let parser () =
         Parseff.context name (fun () ->
-            ignore (Parseff.many (fun () -> Parseff.consume "ab") ());
+            ignore (Parseff.many (fun () -> Parseff.literal "ab") ());
             Parseff.cut ();
-            ignore (Parseff.consume "!")
+            Parseff.literal "!"
         )
       in
       match Parseff.parse "ababx" parser with

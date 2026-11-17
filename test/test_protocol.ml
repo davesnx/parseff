@@ -88,8 +88,9 @@ let test_within_read_past_end () =
 let test_within_found_stops_at_end () =
   let parser () =
     Parseff.within 4 (fun () ->
-        let _ = Parseff.consume "ab" in
-        Parseff.consume "xyz"
+        Parseff.literal "ab";
+        Parseff.literal "xyz";
+        "xyz"
     )
   in
   let message found = Printf.sprintf "expected \"xyz\", found '%s'" found in
@@ -134,8 +135,16 @@ let test_within_negative () =
 let test_within_backtrack () =
   both "or_ after a failed frame" "abcd"
     (Parseff.or_
-       (fun () -> Parseff.within 3 (fun () -> Parseff.consume "abcd"))
-       (fun () -> Parseff.consume "abcd")
+       (fun () ->
+         Parseff.within 3 (fun () ->
+             Parseff.literal "abcd";
+             "abcd"
+         )
+       )
+       (fun () ->
+         Parseff.literal "abcd";
+         "abcd"
+       )
     )
     (fun name -> check_ok name Alcotest.string "abcd")
 
@@ -272,8 +281,9 @@ let test_within_capture_excerpt () =
         Parseff.within 7 (fun () ->
             let r =
               Parseff.capture (fun () ->
-                  let _ = Parseff.consume "key=" in
-                  Parseff.consume "abcd"
+                  Parseff.literal "key=";
+                  Parseff.literal "abcd";
+                  "abcd"
               )
             in
             ignore (Parseff.take_while always);
@@ -303,7 +313,7 @@ let test_within_fail_range () =
   both "fail inside the frame" "key=abcNEXT"
     (fun () ->
       Parseff.within 7 (fun () ->
-          let _ = Parseff.consume "key=" in
+          Parseff.literal "key=";
           Parseff.fail "bad value"
       )
     )
@@ -323,7 +333,10 @@ let test_within_recover_sync_to_end () =
       Parseff.within 6 (fun () ->
           Parseff.recover errors
             ~sync:(fun () -> Parseff.skip_while always)
-            (fun () -> Parseff.consume "abX")
+            (fun () ->
+              Parseff.literal "abX";
+              "abX"
+            )
             (fun _ -> "hole")
       )
     in
@@ -444,13 +457,13 @@ let alpha c = c >= 'a' && c <= 'z'
 let test_limit_and_farther_failures () =
   both "take_while after a farther failure" "aaaaa"
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.consume "aaaaX") ());
+      ignore (Parseff.optional (fun () -> Parseff.literal "aaaaX") ());
       Parseff.take_while ~at_most:2 alpha
     )
     (check_message "expected \"X\", found 'a'");
   both "take_while after a farther failure, with commit" "aaaaa"
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.consume "aaaaX") ());
+      ignore (Parseff.optional (fun () -> Parseff.literal "aaaaX") ());
       Parseff.or_
         (fun () ->
           Parseff.commit ();
@@ -464,8 +477,14 @@ let test_limit_and_farther_failures () =
     (fun () ->
       Parseff.many ~at_most:1
         (Parseff.or_
-           (fun () -> Parseff.consume "aaX")
-           (fun () -> Parseff.consume "a")
+           (fun () ->
+             Parseff.literal "aaX";
+             "aaX"
+           )
+           (fun () ->
+             Parseff.literal "a";
+             "a"
+           )
         )
         ()
     )
@@ -474,9 +493,13 @@ let test_limit_and_farther_failures () =
     (fun () ->
       Parseff.many ~at_most:1
         (Parseff.or_
-           (fun () -> Parseff.consume "aaX")
            (fun () ->
-             let a = Parseff.consume "a" in
+             Parseff.literal "aaX";
+             "aaX"
+           )
+           (fun () ->
+             Parseff.literal "a";
+             let a = "a" in
              Parseff.commit ();
              a
            )
@@ -511,14 +534,14 @@ let test_take_while_at_most () =
 
 let test_within_keeps_outer_found_text () =
   let parser () =
-    ignore (Parseff.optional (fun () -> Parseff.consume "abX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "abX") ());
     Parseff.within 3 (fun () ->
         ignore (Parseff.char 'z');
         "w"
     )
   in
   let plain () =
-    ignore (Parseff.optional (fun () -> Parseff.consume "abX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "abX") ());
     ignore (Parseff.char 'z');
     "w"
   in
@@ -724,7 +747,15 @@ let is_a c = c = 'a'
 
 let test_recovered_limit_leaves_no_trace () =
   let g lim () =
-    ignore (Parseff.or_ (fun () -> Parseff.consume "aaaX") (fun () -> "") ());
+    ignore
+      (Parseff.or_
+         (fun () ->
+           Parseff.literal "aaaX";
+           "aaaX"
+         )
+         (fun () -> "")
+         ()
+      );
     ignore
       (Parseff.or_
          (fun () -> Parseff.take_while ?at_most:lim is_a)
@@ -736,7 +767,15 @@ let test_recovered_limit_leaves_no_trace () =
   same_as "or_ recovers from the limit" "aaab" ~with_frame:(g (Some 1))
     ~without:(g None);
   let h () =
-    ignore (Parseff.or_ (fun () -> Parseff.consume "aaaX") (fun () -> "") ());
+    ignore
+      (Parseff.or_
+         (fun () ->
+           Parseff.literal "aaaX";
+           "aaaX"
+         )
+         (fun () -> "")
+         ()
+      );
     ignore
       (Parseff.optional
          (fun () -> Parseff.many ~at_most:1 Parseff.any_char ())
@@ -750,7 +789,7 @@ let test_recovered_limit_leaves_no_trace () =
 let test_limit_through_look_ahead () =
   both "look_ahead with a farther failure" "aaab"
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.consume "aaaX") ());
+      ignore (Parseff.optional (fun () -> Parseff.literal "aaaX") ());
       Parseff.look_ahead (fun () -> Parseff.take_while ~at_most:1 is_a)
     )
     (check_message "expected \"X\", found 'b'");
@@ -1013,7 +1052,7 @@ let test_limit_with_a_pause_in_recover () =
   in
   let errors = Parseff.Diagnostics.create () in
   let parser () =
-    ignore (Parseff.optional (fun () -> Parseff.consume "aaaX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "aaaX") ());
     Parseff.recover errors
       ~sync:(fun () -> Parseff.skip_while (fun _ -> true))
       (fun () -> Parseff.take_while ~at_most:1 is_a)

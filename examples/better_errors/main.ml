@@ -104,13 +104,22 @@ let rec expr_to_string = function
 let keyword () =
   Parseff.one_of
     [
-      (fun () -> Parseff.consume "if");
-      (fun () -> Parseff.consume "else");
-      (fun () -> Parseff.consume "while");
+      (fun () ->
+        Parseff.literal "if";
+        "if"
+      );
+      (fun () ->
+        Parseff.literal "else";
+        "else"
+      );
+      (fun () ->
+        Parseff.literal "while";
+        "while"
+      );
     ]
     ()
 
-let literal () =
+let scalar () =
   Parseff.one_of_labeled
     [
       ("number", fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'));
@@ -118,11 +127,11 @@ let literal () =
         fun () ->
           Parseff.or_
             (fun () ->
-              let _ = Parseff.consume "true" in
+              Parseff.literal "true";
               Num 1
             )
             (fun () ->
-              let _ = Parseff.consume "false" in
+              Parseff.literal "false";
               Num 0
             )
             ()
@@ -133,7 +142,7 @@ let literal () =
 let pairs () =
   let items =
     Parseff.sep_by
-      (fun () -> Parseff.consume "ab")
+      (fun () -> Parseff.literal "ab")
       (fun () -> Parseff.char ',')
       ()
   in
@@ -151,7 +160,7 @@ let value () =
   )
 
 let let_statement () =
-  let _ = Parseff.consume "let" in
+  Parseff.literal "let";
   Parseff.cut ();
   Parseff.skip_whitespace ();
   let name = ident () in
@@ -196,7 +205,7 @@ let rec json_value () =
       Parseff.expect "value" (fun () ->
           Parseff.one_of
             [
-              (fun () -> ignore (Parseff.consume "null"));
+              (fun () -> Parseff.literal "null");
               json_array;
               json_object;
               json_string;
@@ -275,7 +284,7 @@ let run_keyword input =
       Printf.printf "%-20s -> %s\n" input (format_error e)
 
 let run_literal input =
-  match Parseff.parse input literal with
+  match Parseff.parse input scalar with
   | Ok e ->
       Printf.printf "%-20s -> %s\n" input (expr_to_string e)
   | Error e ->
