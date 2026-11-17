@@ -32,15 +32,6 @@ let string_lit () =
   let _ = Parseff.char '"' in
   string_body ()
 
-let number () =
-  Parseff.take_while ~at_least:1
-    (fun c ->
-      (c >= '0' && c <= '9')
-      || c = '-' || c = '+' || c = '.' || c = 'e' || c = 'E'
-    )
-    ~label:"number"
-  |> float_of_string
-
 let rec value () =
   Parseff.rec_ (fun () ->
       let v =
@@ -77,7 +68,7 @@ let rec value () =
             let _ = Parseff.consume "null" in
             Null
         | _ ->
-            Number (number ())
+            Number (Parseff.number ())
       in
       ws ();
       v
@@ -118,18 +109,23 @@ let generate count =
   )
 
 let () =
-  let count = int_of_string Sys.argv.(1) in
+  let source =
+    match Sys.argv.(1) with
+    | "-e" ->
+        Parseff.Source.of_string Sys.argv.(2)
+    | count ->
+        generate (int_of_string count)
+  in
   let elements = ref 0 and ids = ref 0 in
   let on_element = function
-    | Object (("id", Number id) :: _) ->
+    | Object (("id", Number id) :: _) | Number id ->
         incr elements;
         ids := !ids + int_of_float id
     | _ ->
         failwith "unexpected element"
   in
   match
-    Parseff.parse_source ~backtrack_window:4096 (generate count)
-      (top_array on_element)
+    Parseff.parse_source ~backtrack_window:4096 source (top_array on_element)
   with
   | Ok () ->
       Printf.printf "elements=%d sum_of_ids=%d\n" !elements !ids

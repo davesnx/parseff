@@ -105,7 +105,7 @@ let point () =
 
 ### `number`
 
-`Parseff.number` parses a number with the JSON grammar: an optional `-`, digits, an optional fraction and an optional exponent.
+`Parseff.number` parses a decimal number: an optional `-`, digits, an optional fraction and an optional exponent. It reads the longest number at the position: it reads a fraction only when a digit follows the `.`, and an exponent only when a digit, or a sign then a digit, follows the `e`. It fails when the value is too large for a `float`. `"-0"` gives `-0.`, where `Parseff.integer` gives `0`.
 
 ```ocaml
 val number : unit -> float
@@ -137,7 +137,7 @@ let color () =
 
 ### Other number formats
 
-The number parsers do not read a leading `+`, `.5`, `5.`, digit separators such as `1_000`, `inf` or `nan`. An `e` or `E` after a number always starts an exponent, so a unit such as `2em` fails.
+The number parsers do not read a leading `+`, `.5`, `5.`, digit separators such as `1_000`, `inf` or `nan`. They stop before such text: `number` on `5.` reads `5` and stops at `.`.
 
 For these formats, write your own parser with `Parseff.take_while`, `Parseff.recognize` and a conversion function. This one reads a number and its unit:
 
