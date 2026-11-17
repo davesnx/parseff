@@ -149,7 +149,7 @@ x = 1; <hole>; z = 3; <hole>
 `or_`, `many` and `optional` go back and try something else when their branch fails. `commit` and `cut` turn that off: they seal the construct, so it does not go back. `recover` and `require` recover only where nothing can go back:
 
 - `Parseff.commit` seals the nearest `or_`, `one_of`, `optional`, `many`, `sep_by` or fold.
-- `Parseff.cut` seals each of them that started since the nearest `Parseff.context`. If that context then fails, `cut` also seals the constructs outside the context. `cut` does not go past `look_ahead`, `peek_with` or `capture`.
+- `Parseff.cut` seals each of them that started since the nearest `Parseff.context`. If that context then fails, `cut` also seals the constructs outside the context. `cut` does not go past `look_ahead`, `peek_with` or `capture`. It goes past `recover`, as without the collector.
 
 `require errors parser hole` runs `parser`. If it fails where `require` started, `Parseff.require` records the error `e`, puts `hole e` in its place, and goes on without skipping input. Here a statement is a `let` statement or a number, and `require` inserts a value when it is missing. `let_rest` reads the statement after `let`:
 
@@ -222,7 +222,7 @@ let signed seal errors () =
     (fun () ->
       let _ = Parseff.char '-' in
       seal ();
-      -Parseff.require errors integer (fun _ -> 0))
+      -Parseff.require errors integer (fun _ -> 1))
     integer ()
 
 let signed_statements seal errors =
@@ -236,7 +236,7 @@ The `-` decides the `or_`, so `commit` lets `require` insert the number after it
 
 ```ocaml
 # run (signed_statements Parseff.commit) "let x = -; let y = -2;";;
-x = 0; y = -2
+x = -1; y = -2
 1:10: [error] expected integer, found ';'
 1 | let x = -; let y = -2;
   |          ^
@@ -256,7 +256,7 @@ Without `commit`, the `or_` is open when the number is missing. `require` does n
 - : unit = ()
 ```
 
-A `cut` in `signed` would also seal the outer loop: it seals everything back to the nearest context, or to the start of the parse when there is none. A loop around `signed` then cannot stop before a broken `-`, and the failure is an error of the parse. Here `many` stops before the broken `-` with `commit`, and fails with `cut`:
+A `cut` in place of `commit` would also seal the outer loop: it seals everything back to the nearest context, or to the start of the parse when there is none. A loop around the choice then cannot stop before a broken `-`, and the failure is an error of the parse. `numbers` reads numbers as `signed` does, without `require`. Its `many` stops before the broken `-` with `commit`, and fails with `cut`:
 
 ```ocaml
 # let numbers seal =
@@ -382,7 +382,7 @@ let strict_statements errors =
 - : unit = ()
 ```
 
-The parse fails with the error of `sync`, at 1:19. The error at 1:18 is the one that `recover` recorded before it called `sync`. `statements` uses `skip_statement`, which makes the `;` optional, and gives a hole:
+The parse fails with the error of `sync`, at 1:19. The error at 1:18 is the one that `recover` recorded before it called `sync`. The `cut` in `statement` goes past `recover` and seals `many`, so `many` cannot stop before the broken statement. `statements` uses `skip_statement`, which makes the `;` optional, and gives a hole:
 
 ```ocaml
 # run statements "let x = 1; let y 2";;
@@ -768,7 +768,7 @@ let prints ?keep input =
     (Parseff.Diagnostics.to_list errors)
 ```
 
-The missing quote is removed, and only the error of the statement stays:
+The missing quote is removed, and only the error of the statement stays. `skip_statement` then skips to the `;` after `"b"`, so the second `print` is part of the hole:
 
 ```ocaml
 # prints "print \"a\nprint \"b\";";;

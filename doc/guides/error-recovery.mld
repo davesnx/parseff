@@ -157,7 +157,8 @@ go back. [recover] and [require] recover only where nothing can go back:
 - {!val:Parseff.cut} seals each of them that started since the nearest
   {!val:Parseff.context}. If that context then fails, [cut] also seals the
   constructs outside the context. [cut] does not go past [look_ahead],
-  [peek_with] or [capture].
+  [peek_with] or [capture]. It goes past [recover], as without the
+  collector.
 
 [require errors parser hole] runs [parser]. If it fails where [require]
 started, {!val:Parseff.require} records the error [e], puts [hole e] in its
@@ -237,7 +238,7 @@ let signed seal errors () =
     (fun () ->
       let _ = Parseff.char '-' in
       seal ();
-      -Parseff.require errors integer (fun _ -> 0))
+      -Parseff.require errors integer (fun _ -> 1))
     integer ()
 
 let signed_statements seal errors =
@@ -252,7 +253,7 @@ it:
 
 {@ocaml[
 # run (signed_statements Parseff.commit) "let x = -; let y = -2;";;
-x = 0; y = -2
+x = -1; y = -2
 1:10: [error] expected integer, found ';'
 1 | let x = -; let y = -2;
   |          ^
@@ -274,10 +275,11 @@ statement:
 - : unit = ()
 ]}
 
-A [cut] in [signed] would also seal the outer loop: it seals everything back
-to the nearest context, or to the start of the parse when there is none. A
-loop around [signed] then cannot stop before a broken [-], and the failure is
-an error of the parse. Here [many] stops before the broken [-] with [commit],
+A [cut] in place of [commit] would also seal the outer loop: it seals
+everything back to the nearest context, or to the start of the parse when
+there is none. A loop around the choice then cannot stop before a broken [-],
+and the failure is an error of the parse. [numbers] reads numbers as [signed]
+does, without [require]. Its [many] stops before the broken [-] with [commit],
 and fails with [cut]:
 
 {@ocaml[
@@ -413,7 +415,9 @@ let strict_statements errors =
 ]}
 
 The parse fails with the error of [sync], at 1:19. The error at 1:18 is the one
-that [recover] recorded before it called [sync]. [statements] uses
+that [recover] recorded before it called [sync]. The [cut] in [statement] goes
+past [recover] and seals [many], so [many] cannot stop before the broken
+statement. [statements] uses
 [skip_statement], which makes the [;] optional, and gives a hole:
 
 {@ocaml[
@@ -871,7 +875,9 @@ let prints ?keep input =
     (Parseff.Diagnostics.to_list errors)
 ]}
 
-The missing quote is removed, and only the error of the statement stays:
+The missing quote is removed, and only the error of the statement stays.
+[skip_statement] then skips to the [;] after ["b"], so the second [print] is
+part of the hole:
 
 {@ocaml[
 # prints "print \"a\nprint \"b\";";;
