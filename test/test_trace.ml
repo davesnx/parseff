@@ -266,13 +266,15 @@ let test_captured () =
     )
     (true, 0)
     [ "captured 1 2 expected 'c', found end of input" ];
-  check "sep_by_recover" "1,?,x,2"
+  check "list ~sep" "1,?,x,2"
     (fun errors () ->
       ignore
-        (Parseff.sep_by_recover errors
+        (Parseff.list
+           ~sep:(fun () -> ignore (Parseff.char ','))
+           errors
+           ~close:(fun () -> false)
            ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
            Parseff.digit
-           (fun () -> Parseff.char ',')
            (fun _ -> '?')
            ()
         )
@@ -328,25 +330,23 @@ let test_captured_only_when_continued () =
       ignore (Parseff.char 'b')
     )
     (true, 0) [];
-  check "record fails" "1,?,2"
+  check "keep raises" "1,?,2"
     (fun errors () ->
-      ignore
-        (Parseff.or_
-           (fun () ->
-             ignore
-               (Parseff.sep_by_recover errors
-                  ~record:(fun _ _ -> ignore (Parseff.char 'z'))
-                  ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
-                  Parseff.digit
-                  (fun () -> Parseff.char ',')
-                  (fun _ -> '?')
-                  ()
-               );
-             Parseff.end_of_input ()
-           )
-           (fun () -> ignore (Parseff.take_while (fun _ -> true)))
-           ()
-        )
+      ( try
+          ignore
+            (Parseff.list
+               ~sep:(fun () -> ignore (Parseff.char ','))
+               errors
+               ~keep:(fun _ _ -> raise Exit)
+               ~close:(fun () -> false)
+               ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
+               Parseff.digit
+               (fun _ -> '?')
+               ()
+            )
+        with Exit -> ()
+      );
+      ignore (Parseff.take_while (fun _ -> true))
     )
     (true, 0) [];
   check "after sync and hole" "?x;"

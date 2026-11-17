@@ -679,7 +679,7 @@ let test_list_in_or_branch () =
     Alcotest.(check (pair string errs)) input expected (run input)
   in
   check "[1, 2]" ("Ok 1,2", []);
-  check "[a]" ("Ok _", [ (1, "expected integer, found 'a'") ])
+  check "[a]" ("Ok letter", [])
 
 exception Loop
 
@@ -786,7 +786,10 @@ let test_record_separator () =
         sym '{' ();
         let xs =
           list ~sep:(sym ',')
-            ~record:(fun e _ -> calls := e.range.start :: !calls)
+            ~keep:(fun e _ ->
+              calls := e.pos :: !calls;
+              []
+            )
             d ~close:(at '}') ~sync:skip_argument expr
             (fun _ -> Hole_expr)
             ()
@@ -796,9 +799,8 @@ let test_record_separator () =
     )
   in
   Alcotest.(check string) "value" "Ok 1,2,_" (show_result show_exprs r);
-  Alcotest.check errs "record replaces every recording" [] (entries d);
-  Alcotest.(check (list int))
-    "record gets both errors" [ 3; 6 ] (List.rev !calls)
+  Alcotest.check errs "keep replaces every recording" [] (entries d);
+  Alcotest.(check (list int)) "keep gets both errors" [ 3; 6 ] (List.rev !calls)
 
 let paren_item () =
   if at '(' () then begin
@@ -1064,16 +1066,14 @@ let test_raising_callbacks () =
     ignore (char ',');
     ws ()
   in
-  let lst ?(record = fun _ _ -> ()) ?(sync = sync) ?(hole = fun _ -> '?')
+  let lst ?(keep = fun e _ -> [ e ]) ?(sync = sync) ?(hole = fun _ -> '?')
       ?(close = fun () -> peek_char () = Some ')') ?(sep = sep_comma)
       ?(element = digit_ws) d =
-    String.of_seq
-      (List.to_seq (list ~record ~sep d ~close ~sync element hole ()))
+    String.of_seq (List.to_seq (list ~keep ~sep d ~close ~sync element hole ()))
   in
   let stop _ = raise Stop in
-  guarded "record, missing separator" "1 2)"
-    (lst ~record:(fun _ _ -> raise Stop));
-  guarded "record, element" "1, x)" (lst ~record:(fun _ _ -> raise Stop));
+  guarded "keep, missing separator" "1 2)" (lst ~keep:(fun _ _ -> raise Stop));
+  guarded "keep, element" "1, x)" (lst ~keep:(fun _ _ -> raise Stop));
   guarded "sync" "1, x)" (lst ~sync:(fun () -> raise Stop));
   guarded "sync, missing separator" "1 x)" (lst ~sync:(fun () -> raise Stop));
   guarded "hole" "1, x)" (lst ~hole:stop);
@@ -1794,9 +1794,9 @@ let test_commit_never_reaches_the_caller () =
           )
         in
         let ok r = String.length r > 13 && String.sub r 0 12 = "f got 0; Ok " in
+        let a = alone false in
         List.iter
           (fun collector ->
-            let a = alone collector in
             let expected =
               if ok a then
                 a
@@ -1895,7 +1895,7 @@ let () =
             test_skip_past_the_error;
           test_case "an empty element is a value" `Quick
             test_empty_element_is_a_value;
-          test_case "record: separator errors" `Quick test_record_separator;
+          test_case "keep: separator errors" `Quick test_record_separator;
           test_case "a failed step leaves no entry and no event" `Quick
             test_failed_step_leaves_nothing;
           test_case "require: commit in the parser" `Quick test_require_commit;
@@ -1932,7 +1932,7 @@ let () =
           test_case "require: the furthest failure decides" `Quick
             test_require_furthest_failure;
           test_case "recover inside an element" `Quick test_recover_in_element;
-          test_case "rule A not built: list in a branch of or_" `Quick
+          test_case "rule A: list in a branch of or_" `Quick
             test_list_in_or_branch;
           test_case "forward progress on random input" `Quick test_progress;
           test_case "forward progress: sync stops before an element" `Quick

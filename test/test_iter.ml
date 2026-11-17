@@ -573,14 +573,17 @@ let test_recover_raises_with_collector () =
       )
       (fun _ -> "hole")
   in
-  let in_sep_by_recover () =
+  let in_list () =
     String.concat ","
-      (Parseff.sep_by_recover errs ~sync:ignore
+      (Parseff.list
+         ~sep:(fun () -> ignore (comma ()))
+         errs
+         ~close:(fun () -> false)
+         ~sync:ignore
          (fun () ->
            items ();
            "ok"
          )
-         comma
          (fun _ -> "hole")
          ()
       )
@@ -597,7 +600,7 @@ let test_recover_raises_with_collector () =
           Parseff.parse ~diagnostics:errs "1;2;" p
       )
     )
-    [ ("recover", in_recover); ("sep_by_recover", in_sep_by_recover) ]
+    [ ("recover", in_recover); ("list ~sep", in_list) ]
 
 let test_barriers_raise () =
   let d = Parseff.Diagnostics.create () in

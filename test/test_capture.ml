@@ -947,7 +947,13 @@ let test_from_before_start () =
 let test_wrong_collector () =
   let calls = ref 0 in
   let p d () =
-    recover d ~record:(fun _ _ -> incr calls) ~sync:no_sync integer (fun _ -> 0)
+    recover d
+      ~keep:(fun e _ ->
+        incr calls;
+        [ e ]
+      )
+      ~sync:no_sync integer
+      (fun _ -> 0)
   in
   let d = Diagnostics.create () in
   let same name run =
@@ -957,7 +963,7 @@ let test_wrong_collector () =
           (name ^ ", " ^ input ^ ": same as without recover")
           (show_error (parse input integer))
           (show_error (run input));
-        Alcotest.(check int) (name ^ ": record not called") 0 !calls;
+        Alcotest.(check int) (name ^ ": keep not called") 0 !calls;
         Alcotest.(check int)
           (name ^ ": nothing recorded")
           0 (Diagnostics.length d)
@@ -1368,23 +1374,25 @@ let one_byte_reads input =
 let test_recover_record () =
   let d = Diagnostics.create () in
   let seen = ref [] in
-  let keep_inner e inner =
-    seen := (e.range.start, error_message e) :: !seen;
-    List.iter (fun (x : _ Diagnostics.entry) -> warn ~pos:x.pos d x.value) inner;
-    if inner = [] then warn ~pos:e.range.start d e
+  let keep_inner (e : error Diagnostics.entry) inner =
+    seen := (e.pos, error_message e.value) :: !seen;
+    if inner = [] then
+      [ e ]
+    else
+      inner
   in
-  let statement ?record () =
-    recover ?record d ~sync:to_line_end (lost_call d ~pos:at_start) ignore
+  let statement ?keep () =
+    recover ?keep d ~sync:to_line_end (lost_call d ~pos:at_start) ignore
   in
-  let run ?(source = false) ?record () =
+  let run ?(source = false) ?keep () =
     seen := [];
     let r =
       if source then
         parse_source ~diagnostics:d
           (one_byte_reads lost_input)
-          (lost_top (statement ?record))
+          (lost_top (statement ?keep))
       else
-        parse ~diagnostics:d lost_input (lost_top (statement ?record))
+        parse ~diagnostics:d lost_input (lost_top (statement ?keep))
     in
     Alcotest.(check string) "value" "Ok" (show_error r);
     entries d
@@ -1392,15 +1400,15 @@ let test_recover_record () =
   Alcotest.check entry_list "default records only the failure"
     [ (16, no_closer) ]
     (run ());
-  Alcotest.check entry_list "record gets the removed entries"
+  Alcotest.check entry_list "keep gets the removed entries"
     [ (12, unfinished) ]
-    (run ~record:keep_inner ());
-  Alcotest.check errs "record gets the failure" [ no_closer ] !seen;
+    (run ~keep:keep_inner ());
+  Alcotest.check errs "keep gets the failure" [ no_closer ] !seen;
   Alcotest.check entry_list "parse_source, one byte per read"
     [ (12, unfinished) ]
-    (run ~source:true ~record:keep_inner ());
-  Alcotest.check entry_list "record replaces the default" []
-    (run ~record:(fun _ _ -> ()) ())
+    (run ~source:true ~keep:keep_inner ());
+  Alcotest.check entry_list "keep replaces the default" []
+    (run ~keep:(fun _ _ -> []) ())
 
 let test_recover_record_scope () =
   let d = Diagnostics.create () in
@@ -1409,8 +1417,9 @@ let test_recover_record_scope () =
     parse ~diagnostics:d "a" (fun () ->
         warn d (note "before");
         recover d
-          ~record:(fun _ inner ->
-            seen := List.map (fun x -> error_message x.Diagnostics.value) inner
+          ~keep:(fun _ inner ->
+            seen := List.map (fun x -> error_message x.Diagnostics.value) inner;
+            []
           )
           ~sync:no_sync
           (fun () ->
@@ -1442,7 +1451,10 @@ let test_recover_record_order () =
   let r =
     parse ~diagnostics:d ~consume:`Partial "abc?" (fun () ->
         recover d
-          ~record:(fun _ inner -> seen := show_entries inner)
+          ~keep:(fun _ inner ->
+            seen := show_entries inner;
+            []
+          )
           ~sync:(fun () -> ())
           (fun () ->
             ignore (char 'a');
@@ -1463,10 +1475,10 @@ let test_recover_record_order () =
 let test_recover_record_release () =
   let d = Diagnostics.create () in
   let seen = ref [] in
-  let run ?record () =
+  let run ?keep () =
     let r =
       parse ~diagnostics:d ~consume:`Partial "ab?;" (fun () ->
-          recover ~release:true ?record d
+          recover ~release:true ?keep d
             ~sync:(fun () -> skip_while (fun c -> c <> ';'))
             (fun () ->
               ignore (char 'a');
@@ -1485,14 +1497,12 @@ let test_recover_record_release () =
   Alcotest.check entry_list "default"
     [ (1, (1, "before")); (2, (2, "expected '!', found '?'")) ]
     (run ());
-  Alcotest.check entry_list "record gets only the entries after the commit"
+  Alcotest.check entry_list "keep gets only the entries after the commit"
     [ (1, (1, "before")); (2, (2, "after")) ]
     (run
-       ~record:(fun _ inner ->
+       ~keep:(fun _ inner ->
          seen := show_entries inner;
-         List.iter
-           (fun (x : _ Diagnostics.entry) -> warn ~pos:x.pos d x.value)
-           inner
+         inner
        )
        ()
     );
@@ -1532,14 +1542,14 @@ let test_outer_false () =
         (kind ^ ": capture default")
         [ "outer"; "inner" ] (captured capture p);
       Alcotest.check ctx
-        (kind ^ ": capture ~outer:false")
+        (kind ^ ": capture ~contexts:`Inner")
         [ "inner" ]
-        (captured (capture ~outer:false) p);
+        (captured (capture ~contexts:`Inner) p);
       let d = Diagnostics.create () in
-      let recovered outer =
+      let recovered contexts =
         let r =
           parse ~consume:`Partial ~diagnostics:d "(ax" (fun () ->
-              in_outer (fun () -> recover ?outer d ~sync:ignore p ignore) ()
+              in_outer (fun () -> recover ?contexts d ~sync:ignore p ignore) ()
           )
         in
         Alcotest.(check string) (kind ^ ": value") "Ok" (show_error r);
@@ -1549,12 +1559,12 @@ let test_outer_false () =
         (kind ^ ": recover default")
         [ "outer"; "inner" ] (recovered None);
       Alcotest.check ctx
-        (kind ^ ": recover ~outer:false")
-        [ "inner" ] (recovered (Some false))
+        (kind ^ ": recover ~contexts:`Inner")
+        [ "inner" ] (recovered (Some `Inner))
     )
     [ ("expected", inner_expected); ("fail", inner_fail) ]
 
-let issue_62_render outer =
+let issue_62_render contexts =
   let d = Diagnostics.create () in
   let is_letter c = c >= 'a' && c <= 'z' in
   let statement () =
@@ -1568,7 +1578,7 @@ let issue_62_render outer =
       (fun () ->
         ws ();
         ignore (look_ahead (fun () -> satisfy ~label:"statement" is_letter));
-        recover ?outer d
+        recover ?contexts d
           ~sync:(fun () ->
             skip_while (fun c -> c <> ';' && c <> '}');
             ignore (optional (fun () -> char ';') ())
@@ -1618,9 +1628,9 @@ let test_outer_false_render () =
     ]
     (issue_62_render None);
   Alcotest.(check (list string))
-    "~outer:false"
+    "~contexts:`Inner"
     [ "5:5: [error] expected ';', found 'd'\n4 |   c;\n5 |   d d;\n  |     ^" ]
-    (issue_62_render (Some false))
+    (issue_62_render (Some `Inner))
 
 let test_recover_record_nested () =
   let d = Diagnostics.create () in
@@ -1628,7 +1638,10 @@ let test_recover_record_nested () =
   let r =
     parse ~diagnostics:d ~consume:`Partial "a?b?" (fun () ->
         recover d
-          ~record:(fun _ inner -> seen := show_entries inner)
+          ~keep:(fun _ inner ->
+            seen := show_entries inner;
+            []
+          )
           ~sync:(fun () -> ())
           (fun () ->
             ignore (char 'a');
@@ -1650,7 +1663,10 @@ let test_recover_record_not_called () =
   let r =
     parse ~diagnostics:d "ab" (fun () ->
         recover d
-          ~record:(fun _ _ -> incr calls)
+          ~keep:(fun e _ ->
+            incr calls;
+            [ e ]
+          )
           ~sync:(fun () -> ())
           (fun () ->
             ignore (char 'a');
@@ -1661,6 +1677,51 @@ let test_recover_record_not_called () =
   in
   Alcotest.(check string) "value" "Ok" (show_error r);
   Alcotest.(check int) "not called on success" 0 !calls
+
+let test_recover_keep_entries () =
+  let item d () =
+    let v =
+      recover d
+        ~keep:(fun e _ -> [ e; e ])
+        ~sync:ignore
+        (fun () -> char 'a')
+        (fun _ -> 'H')
+    in
+    ignore (char ';');
+    v
+  in
+  let run input =
+    let d = Diagnostics.create () in
+    let r =
+      parse ~consume:`Partial ~diagnostics:d input (fun () ->
+          String.of_seq (List.to_seq (many (item d) ()))
+      )
+    in
+    ( (match r with Ok s -> "Ok " ^ s | Error e -> error_message e),
+      Diagnostics.length d
+    )
+  in
+  Alcotest.(check (pair string int))
+    "the entries that keep returns are recorded" ("Ok H", 2) (run "x;");
+  Alcotest.(check (pair string int))
+    "a step that goes back removes them" ("Ok ", 0) (run "x");
+  let d = Diagnostics.create () in
+  Alcotest.(check string)
+    "an exception from keep leaves the parse" "raised Exit"
+    ( match
+        parse ~diagnostics:d "x" (fun () ->
+            recover d
+              ~keep:(fun _ _ -> raise Exit)
+              ~sync:ignore
+              (fun () -> char 'a')
+              (fun _ -> 'H')
+        )
+      with
+    | _ ->
+        "returned"
+    | exception Exit ->
+        "raised Exit"
+    )
 
 let test_outer_false_release () =
   let names (e : error) = List.map (fun (c : context) -> c.name) e.contexts in
@@ -1675,7 +1736,7 @@ let test_outer_false_release () =
     parse ~consume:`Partial "(ax" (fun () ->
         in_outer
           (fun () ->
-            match capture ~release:true ~outer:false parser with
+            match capture ~release:true ~contexts:`Inner parser with
             | Ok () ->
                 Alcotest.fail "expected a failure"
             | Error e ->
@@ -1693,7 +1754,7 @@ let test_outer_false_release () =
     parse ~consume:`Partial ~diagnostics:d "(ax" (fun () ->
         in_outer
           (fun () ->
-            recover ~release:true ~outer:false d ~sync:ignore parser ignore
+            recover ~release:true ~contexts:`Inner d ~sync:ignore parser ignore
           )
           ()
     )
@@ -1815,15 +1876,6 @@ let test_guard_read_raises () =
               recover d ~sync:ignore two_then_fail (fun _ -> ())
           )
       );
-      ( "sep_by_recover",
-        fun d ->
-          in_capture (fun () ->
-              sep_by_recover d ~sync:ignore two_then_fail
-                (fun () -> char ',')
-                (fun _ -> ())
-                ()
-          )
-      );
     ]
   in
   List.iter
@@ -1874,11 +1926,8 @@ let test_jump_read_raises () =
   let r =
     parse_source ~diagnostics:d ~consume:`Partial (byte_reads ~fail_at:10 input)
       (fun () ->
-        match capture (fun () -> try body d () with Io -> -1) with
-        | Ok p ->
-            (p, position ())
-        | Error _ ->
-            (-2, position ())
+        let p = try body d () with Io -> -1 in
+        (p, position ())
     )
   in
   Alcotest.(check (result (pair int int) string))
@@ -2076,11 +2125,14 @@ let test_release_keeps_inner_rewinds () =
          recover ~release:true d ~sync:ignore (empty_steps d cell) (fun _ -> "H")
      )
     );
-  Alcotest.check release_outcome "sep_by_recover ~release:true" plain
+  Alcotest.check release_outcome "list ~sep ~release:true" plain
     (release_state (fun d cell ->
          String.concat ","
-           (sep_by_recover ~release:true d ~sync:ignore (empty_steps d cell)
-              (fun () -> char ',')
+           (list ~release:true
+              ~sep:(fun () -> ignore (char ','))
+              d
+              ~close:(fun () -> false)
+              ~sync:ignore (empty_steps d cell)
               (fun _ -> "H")
               ()
            )
@@ -2368,17 +2420,6 @@ let test_release_construct_rewinds () =
                ()
             )
       );
-      ( "require",
-        fun d _ effects ->
-          ignore
-            (require d
-               (fun () ->
-                 effects ~warns:true ();
-                 ignore (char 'q')
-               )
-               ignore
-            )
-      );
       ( "list",
         fun d _ effects ->
           ignore
@@ -2433,7 +2474,22 @@ let test_release_construct_rewinds () =
       | exception Invalid_argument _ ->
           ()
     )
-    constructs
+    constructs;
+  Alcotest.check release_outcome "require: under a capture, the parser alone"
+    (after_failure ~release:true (fun _ _ effects ->
+         effects ~warns:true ();
+         ignore (char 'q')
+     )
+    )
+    (after_failure ~release:true (fun d _ effects ->
+         require d
+           (fun () ->
+             effects ~warns:true ();
+             ignore (char 'q')
+           )
+           ignore
+     )
+    )
 
 let () =
   let open Alcotest in
@@ -2468,13 +2524,15 @@ let () =
           test_case "nested recovery is removed" `Quick
             test_nested_recovery_removed;
           test_case "inner error is removed" `Quick test_inner_error_removed;
-          test_case "record: scope" `Quick test_recover_record_scope;
-          test_case "record" `Quick test_recover_record;
-          test_case "record: order" `Quick test_recover_record_order;
-          test_case "record: release" `Quick test_recover_record_release;
-          test_case "record: nested recover" `Quick test_recover_record_nested;
-          test_case "record: not called on success" `Quick
+          test_case "keep: scope" `Quick test_recover_record_scope;
+          test_case "keep" `Quick test_recover_record;
+          test_case "keep: order" `Quick test_recover_record_order;
+          test_case "keep: release" `Quick test_recover_record_release;
+          test_case "keep: nested recover" `Quick test_recover_record_nested;
+          test_case "keep: not called on success" `Quick
             test_recover_record_not_called;
+          test_case "keep: the returned entries" `Quick
+            test_recover_keep_entries;
         ]
       );
       ( "capture",
@@ -2503,9 +2561,10 @@ let () =
           test_case "nested" `Quick test_nested;
           test_case "outer contexts" `Quick test_outer_contexts;
           test_case "more than 8 outer contexts" `Quick test_many_outer_contexts;
-          test_case "outer:false" `Quick test_outer_false;
-          test_case "outer:false render" `Quick test_outer_false_render;
-          test_case "outer:false with release" `Quick test_outer_false_release;
+          test_case "contexts:`Inner" `Quick test_outer_false;
+          test_case "contexts:`Inner render" `Quick test_outer_false_render;
+          test_case "contexts:`Inner with release" `Quick
+            test_outer_false_release;
           test_case "limits propagate" `Quick test_limits_propagate;
           test_case "streaming pins start" `Quick test_streaming_pins_start;
           test_case "streaming release" `Quick test_streaming_release;

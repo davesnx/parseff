@@ -22,7 +22,6 @@
   test_ref_model
   test_source_each
   test_numbers
-  test_sep_by_recover
   test_list
   test_list_sep_by
   test_peek
@@ -31,7 +30,8 @@
   test_protocol
   test_protocol_fuzz
   test_iter
-  test_recovery_property)
+  test_recovery_property
+  test_recovery_bound)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest re uucp))
 
