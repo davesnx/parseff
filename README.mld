@@ -59,7 +59,7 @@ v}
 - API is designed to be expressive enough to {b not need monadic operators} ([>>=], [>>|], [*>]), {b nor binding operators} ([let*], [let+], [and+])
 - {{:https://davesnx.github.io/parseff/api/errors/}{b Typed domain errors and source excerpts}}: every error says what was expected at the furthest failure, with a caret under the source
 - {b Automatic backtracking} with {{:https://davesnx.github.io/parseff/api/combinators/#or_}[Parseff.or_]}
-- {b Minimal dependency footprint} only [re] for regex support and [uucp] for Unicode support
+- {b Minimal dependency footprint} only [uucp] for Unicode support
 - {{:https://davesnx.github.io/parseff/api/streaming/}{b Streaming support}}
 - {b Domain-safe} each {{:https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics}[Parseff.parse]} / {{:https://davesnx.github.io/parseff/api/streaming/#parse_source}[Parseff.parse_source]} call keeps its state per domain, so independent parses can run in parallel across domains
 - {{:https://davesnx.github.io/parseff/api/zero-copy/}{b Zero-copy span APIs}} for low-allocation parsing

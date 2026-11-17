@@ -59,7 +59,7 @@ address:1:11: [error] expected digit, found end of input
 - API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
 - [**Typed domain errors and source excerpts**](https://davesnx.github.io/parseff/api/errors/): every error says what was expected at the furthest failure, with a caret under the source
 - **Automatic backtracking** with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
-- **Minimal dependency footprint** only `re` for regex support and `uucp` for Unicode support
+- **Minimal dependency footprint** only `uucp` for Unicode support
 - [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)
 - **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
 - [**Zero-copy span APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing

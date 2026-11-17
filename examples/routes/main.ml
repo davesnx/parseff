@@ -1,7 +1,5 @@
 type route = Home | About | Terms | Blog_home | Blog_article of string
 
-let slug_re = Parseff.regex (Re.Posix.re ".+")
-
 let home () =
   let _ = Parseff.consume "/" in
   Parseff.end_of_input ();
@@ -24,7 +22,7 @@ let blog_home () =
 
 let blog_article () =
   let _ = Parseff.consume "/blog/" in
-  let slug = Parseff.match_regex slug_re in
+  let slug = Parseff.take_while ~at_least:1 ~label:"slug" (fun _ -> true) in
   Parseff.end_of_input ();
   Blog_article slug
 

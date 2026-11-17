@@ -206,15 +206,24 @@ let fn_src data chunk =
       n
   )
 
-let test_regex_window_pinned () =
-  let re = Parseff.regex (Re.rep1 (Re.char 'a')) in
+let a_run () = Parseff.take_while ~at_least:1 (fun c -> c = 'a')
+let is_alpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+
+let contains text needle =
+  let n = String.length needle in
+  let rec go i =
+    i + n <= String.length text && (String.sub text i n = needle || go (i + 1))
+  in
+  go 0
+
+let test_window_pinned () =
   let data = String.make 16 'x' ^ String.make 8 'a' in
   let r =
     Parseff.parse_source ~backtrack_window:16 (fn_src data 4) (fun () ->
         Parseff.or_
           (fun () ->
             ignore (Parseff.take 16);
-            Parseff.match_regex re
+            a_run ()
           )
           (fun () -> "ALT")
           ()
@@ -228,20 +237,19 @@ let test_regex_window_pinned () =
   | Error _ ->
       Alcotest.fail "wrong error"
 
-let pinned_regex_parser re () =
+let pinned_parser () =
   Parseff.or_
     (fun () ->
       ignore (Parseff.take 10);
-      Parseff.match_regex re
+      a_run ()
     )
     (fun () -> "ALT")
     ()
 
-let test_regex_pinned_complete_match () =
-  let re = Parseff.regex (Re.rep1 (Re.char 'a')) in
+let test_pinned_complete_match () =
   let data = String.make 10 'x' ^ "aabccc" in
   let expected =
-    match Parseff.parse ~consume:`Partial data (pinned_regex_parser re) with
+    match Parseff.parse ~consume:`Partial data pinned_parser with
     | Ok s ->
         s
     | Error _ ->
@@ -252,7 +260,7 @@ let test_regex_pinned_complete_match () =
     (fun chunk ->
       match
         Parseff.parse_source ~consume:`Partial ~backtrack_window:16
-          (fn_src data chunk) (pinned_regex_parser re)
+          (fn_src data chunk) pinned_parser
       with
       | Ok s ->
           Alcotest.(check string) (Printf.sprintf "chunk %d" chunk) expected s
@@ -261,12 +269,10 @@ let test_regex_pinned_complete_match () =
     )
     [ 1; 3; 4; 4096 ]
 
-let test_regex_pinned_match_at_buffer_end () =
-  let re = Parseff.regex (Re.rep1 (Re.char 'a')) in
+let test_pinned_match_at_buffer_end () =
   let data = String.make 10 'x' ^ "aaaaaab" in
   match
-    Parseff.parse_source ~backtrack_window:16 (fn_src data 4096)
-      (pinned_regex_parser re)
+    Parseff.parse_source ~backtrack_window:16 (fn_src data 4096) pinned_parser
   with
   | Error { kind = Backtrack_window_exceeded _; _ } ->
       ()
@@ -294,11 +300,12 @@ let blocking_src parts =
           n
   )
 
-let test_regex_feed_stops_after_value () =
-  let re = Parseff.regex (Re.rep1 (Re.rg 'a' 'z')) in
+let letters () = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z')
+
+let test_feed_stops_after_value () =
   let feed =
     Parseff.parse_partial (fun () ->
-        let s = Parseff.match_regex re in
+        let s = letters () in
         ignore (Parseff.char ';');
         s
     )
@@ -311,95 +318,31 @@ let test_regex_feed_stops_after_value () =
   | Await ->
       Alcotest.fail "Await after a complete value"
 
-let test_regex_no_read_past_decided_match () =
+let test_no_read_past_decided_value () =
   List.iter
-    (fun (name, re, parts, expected) ->
+    (fun (name, parts, expected) ->
       match
-        Parseff.parse_source ~consume:`Partial (blocking_src parts) (fun () ->
-            Parseff.match_regex (Parseff.regex re)
-        )
+        Parseff.parse_source ~consume:`Partial (blocking_src parts) letters
       with
       | Ok s ->
           Alcotest.(check string) name expected s
       | Error e ->
           Alcotest.failf "%s: %s" name (Parseff.error_message e)
       | exception Blocked ->
-          Alcotest.failf "%s: read after a decided match" name
+          Alcotest.failf "%s: read after a decided value" name
     )
     [
-      ("word", Re.rep1 (Re.rg 'a' 'z'), [ "abc;" ], "abc");
-      ("word in parts", Re.rep1 (Re.rg 'a' 'z'), [ "ab"; "c;" ], "abc");
-      ("before a newline", Re.rep1 (Re.rg 'a' 'z'), [ "abc\n" ], "abc");
+      ("word", [ "abc;" ], "abc");
+      ("word in parts", [ "ab"; "c;" ], "abc");
+      ("before a newline", [ "abc\n" ], "abc");
     ]
-
-let regex_on_string re data =
-  Parseff.parse ~consume:`Partial data (fun () ->
-      Parseff.match_regex (Parseff.regex re)
-  )
-
-let regex_on_stream ?backtrack_window re data chunk =
-  Parseff.parse_source ~consume:`Partial ?backtrack_window (fn_src data chunk)
-    (fun () -> Parseff.match_regex (Parseff.regex re)
-  )
-
-let show = function
-  | Ok s ->
-      Printf.sprintf "Ok %d bytes" (String.length s)
-  | Error { Parseff.kind = Backtrack_window_exceeded _; _ } ->
-      "Backtrack_window_exceeded"
-  | Error e ->
-      "Error " ^ Parseff.error_message e
-
-let x_bc = Re.seq [ Re.rep (Re.char 'x'); Re.opt (Re.str "bc") ]
-
-let test_regex_longer_match_like_string () =
-  let data = String.make 32767 'x' ^ "bc;" in
-  let expected = show (regex_on_string x_bc data) in
-  Alcotest.(check string) "string" "Ok 32769 bytes" expected;
-  List.iter
-    (fun chunk ->
-      Alcotest.(check string)
-        (Printf.sprintf "reads of %d" chunk)
-        expected
-        (show (regex_on_stream x_bc data chunk))
-    )
-    [ 1; 7; 4096 ]
-
-let test_regex_small_window_no_short_match () =
-  List.iter
-    (fun chunk ->
-      Alcotest.(check string)
-        (Printf.sprintf "reads of %d" chunk)
-        "Backtrack_window_exceeded"
-        (show (regex_on_stream ~backtrack_window:3 x_bc "xxbc" chunk))
-    )
-    [ 1; 4096 ]
-
-let test_regex_leol_like_string () =
-  let re = Re.seq [ Re.rep (Re.compl [ Re.char '\n' ]); Re.leol ] in
-  List.iter
-    (fun data ->
-      let expected = show (regex_on_string re data) in
-      List.iter
-        (fun (backtrack_window, chunk) ->
-          Alcotest.(check string)
-            (Printf.sprintf "%S, window %d, reads of %d" data backtrack_window
-               chunk
-            )
-            expected
-            (show (regex_on_stream ~backtrack_window re data chunk))
-        )
-        [ (6, 1); (6, 3); (65536, 1); (65536, 3); (65536, 4096) ]
-    )
-    [ "ab\ncd"; "ab\n"; "ab"; "\n\n" ]
 
 let test_small_window_rejected () =
   List.iter
     (fun w ->
       match
         Parseff.parse_source ~consume:`Partial ~backtrack_window:w
-          (fn_src "hello" 5) (fun () ->
-            Parseff.match_regex (Parseff.regex (Re.rep1 Re.alpha))
+          (fn_src "hello" 5) (fun () -> Parseff.take_while ~at_least:1 is_alpha
         )
       with
       | _ ->
@@ -410,7 +353,7 @@ let test_small_window_rejected () =
     [ -5; 0; 1 ];
   match
     Parseff.parse_source ~consume:`Partial ~backtrack_window:2 (fn_src "hello" 5)
-      (fun () -> Parseff.match_regex (Parseff.regex (Re.rep1 Re.alpha))
+      (fun () -> Parseff.take_while ~at_least:1 is_alpha
     )
   with
   | Error
@@ -444,7 +387,7 @@ let test_bad_read_result () =
           Alcotest.(check bool)
             ("reports the read result: " ^ msg)
             true
-            (Re.execp (Re.compile (Re.str "read returned")) msg)
+            (contains msg "read returned")
     )
     [ -1; max_int ]
 
@@ -470,25 +413,19 @@ let () =
       );
       ( "window",
         [
-          test_case "regex with pinned window" `Quick test_regex_window_pinned;
-          test_case "regex pinned complete match" `Quick
-            test_regex_pinned_complete_match;
-          test_case "regex pinned match at buffer end" `Quick
-            test_regex_pinned_match_at_buffer_end;
+          test_case "pinned window" `Quick test_window_pinned;
+          test_case "pinned complete match" `Quick test_pinned_complete_match;
+          test_case "pinned match at buffer end" `Quick
+            test_pinned_match_at_buffer_end;
           test_case "small window rejected" `Quick test_small_window_rejected;
         ]
       );
-      ( "regex on buffered bytes",
+      ( "buffered bytes",
         [
           test_case "feed stops after the value" `Quick
-            test_regex_feed_stops_after_value;
-          test_case "no read past a decided match" `Quick
-            test_regex_no_read_past_decided_match;
-          test_case "longer match as on a string" `Quick
-            test_regex_longer_match_like_string;
-          test_case "small window, no shorter match" `Quick
-            test_regex_small_window_no_short_match;
-          test_case "leol as on a string" `Quick test_regex_leol_like_string;
+            test_feed_stops_after_value;
+          test_case "no read past a decided value" `Quick
+            test_no_read_past_decided_value;
         ]
       );
       ( "source validation",

@@ -40,11 +40,7 @@
     [Limit_exceeded] error are unstable too, but have no alert.
 
     A 1.x release can add events to {!type:trace_event} and fields to some
-    records; {!type:error_kind} says which types are final until 2.0.
-
-    {!val:regex} takes an [Re.t], so the API of 1.x uses the type [Re.t] of the
-    [re] library. Add [re] to the [libraries] of your dune stanza to build a
-    regex. *)
+    records; {!type:error_kind} says which types are final until 2.0. *)
 
 (** {1 Span Type} *)
 
@@ -463,58 +459,11 @@ val char : char -> char
     let comma () = char ','
     ]} *)
 
-type regex
-(** A regular expression for {!match_regex}. Build it with {!val:regex}. *)
-
-val regex : Re.t -> regex
-(** [regex r] compiles [r] for {!match_regex}, anchored at the position where
-    the match starts. Compile once, outside the parser, and reuse the value.
-
-    Example:
-    {@ocaml[
-    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
-    ]} *)
-
-val match_regex : ?label:string -> regex -> string
-(** [match_regex ?label re] matches [re] at the current position and returns the
-    matched text.
-
-    When the regex does not match, the parse fails with [expected <label>] if
-    [~label] is given, so the failure merges with the other alternatives
-    expected at the same position like any other primitive. Without [~label] the
-    label is ["text matching the pattern"].
-
-    A failed match examines only the bytes that the regex needs to fail, not the
-    rest of the input. [Re.bol] and word boundaries see the byte before the
-    current position.
-
-    In streaming mode, [match_regex] first runs the regex on the bytes that are
-    already buffered. It reads only when those bytes cannot decide the result,
-    one read at a time, and runs the regex again from the position after each
-    read. A streaming match gives the same result as on a string. The match is
-    decided when the regex cannot use more bytes, which needs the byte after the
-    match or the end of the source, with or without {!within}. A match and the
-    bytes needed to decide it must fit in the backtrack window. Otherwise the
-    parse fails with [Backtrack_window_exceeded]: [x*(bc)?] on ["xxbc"] with a
-    window of [3] fails, and a regex that can still match with more input, for
-    example one with a leading [.*], reads until the window is full and then
-    fails. When the last buffered byte is a newline that [Re.leol] could test,
-    the result waits for the next byte or the end of the source. As the regex
-    runs again after each read, a long match that arrives in many small reads
-    costs time in proportion to its length times the number of reads.
-
-    Example:
-    {@ocaml[
-    let identifier_re = regex (Re.Posix.re ("[a-zA-Z_]" ^ "[a-zA-Z0-9_]*"))
-    let identifier () = match_regex ~label:"identifier" identifier_re
-    ]} *)
-
 val take_while :
   ?at_least:int -> ?at_most:int -> ?label:string -> (char -> bool) -> string
 (** [take_while fun] reads characters one by one as long as [fun] returns [true]
     for each one. Returns the matched string (may be empty if the very first
-    character doesn't match). Much faster than regex for simple character
-    classes.
+    character doesn't match).
 
     When [~at_least] is specified, requires at least that many characters to
     match. Fails with [expected <label>] if fewer characters match, or with
@@ -1673,12 +1622,12 @@ val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
     {@ocaml[
     let csv_line () =
       sep_by
-        (fun () -> match_regex (regex (Re.Posix.re "[^,]+")))
+        (fun () -> take_while ~at_least:1 (fun c -> c <> ','))
         (fun () -> char ',')
         ()
     let csv_line_nonempty () =
       sep_by ~at_least:1
-        (fun () -> match_regex (regex (Re.Posix.re "[^,]+")))
+        (fun () -> take_while ~at_least:1 (fun c -> c <> ','))
         (fun () -> char ',')
         ()
     ]} *)
@@ -2157,7 +2106,7 @@ val is_whitespace : char -> bool
 
 val whitespace : ?at_least:int -> unit -> string
 (** [whitespace ()] parses zero or more whitespace characters (space, tab,
-    newline, carriage return). Uses fast character scanning (not regex).
+    newline, carriage return).
 
     When [~at_least] is specified, requires at least that many whitespace
     characters. [whitespace ~at_least:1 ()] fails if no whitespace is found. *)
@@ -2251,19 +2200,8 @@ val within : int -> (unit -> 'a) -> 'a
 
     [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
     be larger than [~backtrack_window] when [parser] calls {!commit} as it
-    reads. Two things copy inside a frame. Once the frame end is buffered,
-    {!match_regex} works on a copy of the frame bytes, as it does at the end of
-    a source with no frame: the copy starts at the byte before the position and
-    is made again only when a call is at a position before it. In that case it
-    starts at the byte before the frame start, or at the frame start when that
-    byte is not buffered, or at the oldest byte still buffered when the frame
-    start is not, so on string input it is made at most twice per frame. Before
-    the frame end is buffered, it reads as with no frame, up to the frame end,
-    so a regex inside a frame behaves as on a stream with no frame, with the
-    limits that {!match_regex} states: a match that does not fit in the window
-    fails with [Backtrack_window_exceeded]. On string input, {!take_span},
-    {!take_while_span} and {!recognize_span} return copies, as they do with
-    {!parse_source}.
+    reads. Inside a frame on string input, {!take_span}, {!take_while_span} and
+    {!recognize_span} return copies, as they do with {!parse_source}.
 
     Inside the frame the input ends at the frame end, so {!skip_to} raises
     [Invalid_argument] for a target past it, also for a position that

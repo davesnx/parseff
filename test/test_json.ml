@@ -6,10 +6,7 @@ type json =
   | Array of json list
   | Object of (string * json) list
 
-let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
-let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
-let ws () = Parseff.match_regex ws_re
+let ws () = Parseff.whitespace ()
 
 let null_parser () =
   let _ = Parseff.consume "null" in
@@ -27,13 +24,11 @@ let bool_parser () =
     )
     ()
 
-let number_parser () =
-  let s = Parseff.match_regex number_re in
-  Number (float_of_string s)
+let number_parser () = Number (Parseff.number ())
 
 let string_parser () =
   let _ = Parseff.consume "\"" in
-  let s = Parseff.match_regex string_content_re in
+  let s = Parseff.take_while (fun c -> c <> '"') in
   let _ = Parseff.consume "\"" in
   String s
 
@@ -104,7 +99,7 @@ and object_parser () =
 
 and key_value () =
   let _ = Parseff.consume "\"" in
-  let key = Parseff.match_regex string_content_re in
+  let key = Parseff.take_while (fun c -> c <> '"') in
   let _ = Parseff.consume "\"" in
   let _ = ws () in
   let _ = Parseff.consume ":" in

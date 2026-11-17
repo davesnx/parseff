@@ -58,7 +58,7 @@ On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result
 
 ### Why Parseff is faster
 
-**Direct character scanning.** `Parseff.take_while` runs a tight `while` loop with character predicates. No regex compilation, no automaton overhead.
+**Direct character scanning.** `Parseff.take_while` runs a tight `while` loop with character predicates.
 
 **Fewer allocations.** Span-based APIs return slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
 

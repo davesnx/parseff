@@ -139,13 +139,12 @@ let test_within_backtrack () =
     )
     (fun name -> check_ok name Alcotest.string "abcd")
 
-let letters = Parseff.regex (Re.Posix.re "[a-z]+")
-
-let test_within_regex () =
-  both "regex stops at the frame end" "abcdef"
+let test_within_take_while () =
+  let letters () = Parseff.take_while (fun c -> c >= 'a' && c <= 'z') in
+  both "take_while stops at the frame end" "abcdef"
     (fun () ->
-      let a = Parseff.within 3 (fun () -> Parseff.match_regex letters) in
-      (a, Parseff.match_regex letters)
+      let a = Parseff.within 3 letters in
+      (a, letters ())
     )
     (fun name -> check_ok name Alcotest.(pair string string) ("abc", "def"))
 
@@ -439,35 +438,6 @@ let test_within_read_suspends () =
   in
   check_ok "suspended reads" Alcotest.string "hello" result;
   Alcotest.(check bool) "other parses ran" true (!other > 0)
-
-let letters_then anchor = Parseff.regex Re.(seq [ rep1 (rg 'a' 'z'); anchor ])
-
-let test_within_regex_anchors () =
-  List.iter
-    (fun (name, anchor) ->
-      let re = letters_then anchor in
-      both name "abcdef"
-        (fun () ->
-          let a = Parseff.within 3 (fun () -> Parseff.match_regex re) in
-          (a, Parseff.take_while always)
-        )
-        (fun name -> check_ok name Alcotest.(pair string string) ("abc", "def"))
-    )
-    [ ("eos", Re.eos); ("eol", Re.eol); ("eow", Re.eow); ("leol", Re.leol) ];
-  let after_x re =
-    let _ = Parseff.char 'x' in
-    Parseff.within 3 (fun () -> Parseff.match_regex re)
-  in
-  both "bow at the frame start sees the byte before" "xabcdef"
-    (fun () -> after_x (Parseff.regex Re.(seq [ bow; rep1 (rg 'a' 'z') ])))
-    (fun name -> function
-      | Ok s -> Alcotest.failf "%s: matched %S" name s | Error _ -> ()
-      );
-  both "bos is not the frame start" "xabcdef"
-    (fun () -> after_x (Parseff.regex Re.(seq [ bos; rep1 (rg 'a' 'z') ])))
-    (fun name -> function
-      | Ok s -> Alcotest.failf "%s: matched %S" name s | Error _ -> ()
-      )
 
 let alpha c = c >= 'a' && c <= 'z'
 
@@ -788,14 +758,13 @@ let test_limit_through_look_ahead () =
     (fun () -> Parseff.look_ahead (fun () -> Parseff.take_while ~at_most:1 is_a))
     (fun name -> check_limit name ~limit:1 ~range:(0, 2))
 
-let regex_words n =
+let frame_words n =
   let input = String.concat " " (List.init n (fun _ -> "ab")) in
-  let word = Parseff.regex Re.(rep1 (rg 'a' 'z')) in
   let parser () =
     Parseff.within (String.length input) (fun () ->
         Parseff.many
           (fun () ->
-            let w = Parseff.match_regex word in
+            let w = Parseff.take_while ~at_least:1 alpha in
             ignore (Parseff.optional (fun () -> Parseff.char ' ') ());
             w
           )
@@ -811,9 +780,8 @@ let regex_words n =
   );
   Gc.allocated_bytes () -. before
 
-let regex_stepping_back ~stream n =
+let stepping_back ~stream n =
   let input = String.make n 'a' in
-  let letter = Parseff.regex Re.(rg 'a' 'z') in
   let parser () =
     Parseff.within n (fun () ->
         ignore (Parseff.look_ahead (fun () -> Parseff.skip_while always));
@@ -821,7 +789,7 @@ let regex_stepping_back ~stream n =
           ignore
             (Parseff.look_ahead (fun () ->
                  Parseff.skip_to i;
-                 Parseff.match_regex letter
+                 Parseff.satisfy alpha
              )
             )
         done;
@@ -842,13 +810,12 @@ let regex_stepping_back ~stream n =
   );
   Gc.allocated_bytes () -. before
 
-let regex_reads_in_frame ~window n =
+let reads_in_frame ~window n =
   let input = String.make n 'a' in
-  let letter = Parseff.regex (Re.rg 'a' 'z') in
   let parser () =
     Parseff.within n (fun () ->
         for _ = 1 to n do
-          ignore (Parseff.match_regex letter)
+          ignore (Parseff.satisfy alpha)
         done
     )
   in
@@ -866,119 +833,25 @@ let regex_reads_in_frame ~window n =
   );
   Gc.allocated_bytes () -. before
 
-let anchor_regexes =
-  Re.
-    [
-      ("letters eol", seq [ rep1 (rg 'a' 'z'); eol ]);
-      ("any eol", seq [ any; eol ]);
-      ("letters eow", seq [ rep1 (rg 'a' 'z'); eow ]);
-      ("letters not_boundary", seq [ rep1 (rg 'a' 'z'); not_boundary ]);
-      ("letters eos", seq [ rep1 (rg 'a' 'z'); eos ]);
-      ("letters space? bow", seq [ rep1 (rg 'a' 'z'); opt (char ' '); bow ]);
-      ("letters eos group", seq [ rep1 (rg 'a' 'z'); group eos ]);
-    ]
-
-let anchor_inputs =
-  [
-    "a\n\nb\na\n \nb";
-    "xx\n";
-    "xx\ny";
-    "ab cd";
-    "ab\n";
-    "ab";
-    "a\n\n";
-    "ab\nc\n\n";
-  ]
-
-let anchor_outcome = function
-  | Ok (v, p) ->
-      Printf.sprintf "ok %S @%d" v p
-  | Error (e : Parseff.error) -> (
-      match e.kind with
-      | Backtrack_window_exceeded _ ->
-          "window"
-      | _ ->
-          Printf.sprintf "error @%d" e.range.start
-    )
-
-let test_regex_anchors_agree_with_string () =
-  List.iter
-    (fun (rname, r) ->
-      let re = Parseff.regex r in
-      List.iter
-        (fun input ->
-          let len = String.length input in
-          for pre = 0 to len do
-            let plain () =
-              ignore (Parseff.take pre);
-              let v = Parseff.match_regex re in
-              (v, Parseff.position ())
-            in
-            let framed () =
-              ignore (Parseff.take pre);
-              Parseff.within (len - pre) (fun () ->
-                  let v = Parseff.match_regex re in
-                  let p = Parseff.position () in
-                  Parseff.skip_while always;
-                  (v, p)
-              )
-            in
-            List.iter
-              (fun (kind, parser) ->
-                let expected =
-                  anchor_outcome (Parseff.parse ~consume:`Partial input parser)
-                in
-                List.iter
-                  (fun (chunk_size, window) ->
-                    let got =
-                      anchor_outcome
-                        (Parseff.parse_source ~consume:`Partial
-                           ~backtrack_window:window
-                           (chunked_source ~chunk_size input)
-                           parser
-                        )
-                    in
-                    if got <> "window" && got <> expected then
-                      Alcotest.failf
-                        "%s %s on %S after %d bytes, reads of %d, window %d: \
-                         %s on the string, %s on the stream"
-                        rname kind input pre chunk_size window expected got
-                  )
-                  [
-                    (1, 65536);
-                    (2, 65536);
-                    (3, 65536);
-                    (4096, 65536);
-                    (1, 8);
-                    (3, 8);
-                  ]
-              )
-              [ ("with no frame", plain); ("in a frame", framed) ]
-          done
-        )
-        anchor_inputs
-    )
-    anchor_regexes
-
-let test_regex_reads_in_frame_are_linear () =
+let test_reads_in_frame_are_linear () =
   List.iter
     (fun (window, size) ->
-      let small = regex_reads_in_frame ~window size
-      and large = regex_reads_in_frame ~window (4 * size) in
+      let small = reads_in_frame ~window size
+      and large = reads_in_frame ~window (4 * size) in
       if large > 8. *. small then
         Alcotest.failf
-          "match_regex in a frame on reads of 1 byte with ~backtrack_window:%d \
-           allocated %.0f bytes for %d bytes and %.0f for %d bytes, expected \
-           at most 8 times more"
+          "a frame on reads of 1 byte with ~backtrack_window:%d allocated %.0f \
+           bytes for %d bytes and %.0f for %d bytes, expected at most 8 times \
+           more"
           window small size large (4 * size)
     )
     [ (4096, 1_000); (65536, 16_000) ]
 
-let test_regex_going_back_is_linear () =
+let test_going_back_in_frame_is_linear () =
   List.iter
     (fun stream ->
-      let small = regex_stepping_back ~stream 4_000
-      and large = regex_stepping_back ~stream 16_000 in
+      let small = stepping_back ~stream 4_000
+      and large = stepping_back ~stream 16_000 in
       if large > 6. *. small then
         Alcotest.failf
           "%s: allocation grows faster than the input: %.0f bytes for 4000, \
@@ -992,9 +865,7 @@ let test_regex_going_back_is_linear () =
     )
     [ false; true ]
 
-let letter = Parseff.regex (Re.rg 'a' 'z')
-
-let regex_after_commit () =
+let after_commit () =
   ignore (Parseff.take 40);
   Parseff.commit ();
   ignore (Parseff.take 10);
@@ -1002,19 +873,19 @@ let regex_after_commit () =
     Parseff.or_
       (fun () ->
         ignore (Parseff.take 5);
-        ignore (Parseff.match_regex letter);
+        ignore (Parseff.satisfy alpha);
         ignore (Parseff.char '!');
         "left"
       )
-      (fun () -> Parseff.match_regex letter)
+      (fun () -> String.make 1 (Parseff.satisfy alpha))
       ()
   in
   Parseff.skip_while always;
   v
 
-let test_regex_before_a_dropped_frame_start () =
+let test_commit_before_a_dropped_frame_start () =
   let input = String.make 100 'a' ^ "tail" in
-  let parser () = Parseff.within 100 regex_after_commit in
+  let parser () = Parseff.within 100 after_commit in
   check_ok "string" Alcotest.string "a"
     (Parseff.parse ~consume:`Partial input parser);
   List.iter
@@ -1032,8 +903,8 @@ let test_regex_before_a_dropped_frame_start () =
     )
     [ (64, 1); (64, 7); (65_536, 1); (65_536, 7) ]
 
-let test_regex_in_frame_is_linear () =
-  let small = regex_words 2_000 and large = regex_words 8_000 in
+let test_frame_is_linear () =
+  let small = frame_words 2_000 and large = frame_words 8_000 in
   if large > 6. *. small then
     Alcotest.failf
       "allocation grows faster than the input: %.0f bytes for 2000, %.0f for \
@@ -1271,7 +1142,7 @@ let () =
           Alcotest.test_case "nested" `Quick test_within_nested;
           Alcotest.test_case "negative" `Quick test_within_negative;
           Alcotest.test_case "backtrack" `Quick test_within_backtrack;
-          Alcotest.test_case "regex" `Quick test_within_regex;
+          Alcotest.test_case "take_while" `Quick test_within_take_while;
           Alcotest.test_case "UTF-8 boundary" `Quick test_within_utf8_boundary;
           Alcotest.test_case "Utf8.take_while" `Quick
             test_within_utf8_take_while;
@@ -1289,8 +1160,6 @@ let () =
             test_within_recover_sync_to_end;
           Alcotest.test_case "read raises" `Quick test_within_read_raises;
           Alcotest.test_case "read suspends" `Quick test_within_read_suspends;
-          Alcotest.test_case "regex anchors at the frame end" `Quick
-            test_within_regex_anchors;
           Alcotest.test_case "found text of a failure before the frame" `Quick
             test_within_keeps_outer_found_text;
         ]
@@ -1321,18 +1190,15 @@ let () =
             test_recovered_limit_leaves_no_trace;
           Alcotest.test_case "limit through look_ahead" `Quick
             test_limit_through_look_ahead;
-          Alcotest.test_case "regex in a frame is linear" `Quick
-            test_regex_in_frame_is_linear;
           Alcotest.test_case "found text at 64 items and more" `Quick
             test_found_text_at_capacity;
-          Alcotest.test_case "regex anchors agree with string input" `Quick
-            test_regex_anchors_agree_with_string;
-          Alcotest.test_case "regex reads in a frame are linear" `Quick
-            test_regex_reads_in_frame_are_linear;
-          Alcotest.test_case "regex going back in a frame is linear" `Quick
-            test_regex_going_back_is_linear;
-          Alcotest.test_case "regex before a dropped frame start" `Quick
-            test_regex_before_a_dropped_frame_start;
+          Alcotest.test_case "a frame is linear" `Quick test_frame_is_linear;
+          Alcotest.test_case "reads in a frame are linear" `Quick
+            test_reads_in_frame_are_linear;
+          Alcotest.test_case "going back in a frame is linear" `Quick
+            test_going_back_in_frame_is_linear;
+          Alcotest.test_case "commit before a dropped frame start" `Quick
+            test_commit_before_a_dropped_frame_start;
           Alcotest.test_case "take_while at_least above at_most" `Quick
             test_take_while_at_least_above_at_most;
           Alcotest.test_case "limit with a parse in the trace function" `Quick

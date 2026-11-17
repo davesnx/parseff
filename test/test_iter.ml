@@ -504,7 +504,12 @@ let test_zero_width_effects_kept () =
 let message_of run =
   match run () with _ -> "no exception" | exception e -> Printexc.to_string e
 
-let contains text needle = Re.execp (Re.compile (Re.str needle)) text
+let contains text needle =
+  let n = String.length needle in
+  let rec go i =
+    i + n <= String.length text && (String.sub text i n = needle || go (i + 1))
+  in
+  go 0
 
 let test_ref_set_in_callback () =
   let x = Parseff.Ref.create 0 in

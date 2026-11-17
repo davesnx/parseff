@@ -63,23 +63,19 @@ let bool_parser () =
 ### Numbers
 
 ```ocaml
-let number_re = Parseff.regex (Re.Posix.re "-?[0-9]+(\\.[0-9]+)?")
-
-let number_parser () =
-  let s = Parseff.match_regex number_re in
-  Number (float_of_string s)
+let number_parser () = Number (Parseff.number ())
 ```
 
-We match the number as a string with a regex, then convert it. The regex handles integers, decimals, and negative numbers.
+`Parseff.number` parses a number with the JSON grammar: integers, decimals, exponents, and negative numbers.
 
 ### Strings
 
 ```ocaml
-let string_content_re = Parseff.regex (Re.Posix.re "[^\"]*")
+let string_content () = Parseff.take_while (fun c -> c <> '"')
 
 let string_parser () =
   let _ = Parseff.char '"' in
-  let s = Parseff.match_regex string_content_re in
+  let s = string_content () in
   let _ = Parseff.char '"' in
   String s
 ```
@@ -183,7 +179,7 @@ The structure mirrors the array parser exactly. The only difference is that elem
 ```ocaml
 and key_value () =
   let _ = Parseff.char '"' in
-  let key = Parseff.match_regex string_content_re in
+  let key = string_content () in
   let _ = Parseff.char '"' in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ':' in
@@ -192,7 +188,7 @@ and key_value () =
   (key, value)
 ```
 
-Parse a string key (reusing the same regex as `string_parser`), a colon separator, and then recursively parse the value.
+Parse a string key (reusing `string_content` from `string_parser`), a colon separator, and then recursively parse the value.
 
 ## Running the parser
 

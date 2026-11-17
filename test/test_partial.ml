@@ -22,8 +22,7 @@ let ip_address () =
   let d = number () in
   Printf.sprintf "%d.%d.%d.%d" a b c d
 
-let ws_re = Parseff.regex (Re.Posix.re "[ \t\n\r]*")
-let ws () = ignore (Parseff.match_regex ws_re)
+let ws () = Parseff.skip_whitespace ()
 
 let rec json () =
   Parseff.rec_ (fun () ->

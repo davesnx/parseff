@@ -32,7 +32,7 @@ When the input differs from the literal, the error sits at the first byte that d
 
 On a stream, `consume` compares the buffered bytes first and reads more input only while they match the start of the literal, so a wrong byte fails at once. The error shows the bytes read so far: its `found` text can be shorter than on the whole input.
 
-**Performance:** `consume` is optimized for literal string matching. It's much faster than using regex for exact matches.
+**Performance:** `consume` is optimized for literal string matching.
 
 
 ### `char`
@@ -160,46 +160,6 @@ let csv_value () =
 ```
 **Tip:** If you don't need the matched string, prefer `skip_while` over `take_while` to avoid allocating.
 
-
-## Regular expressions
-
-
-### `match_regex`
-
-`Parseff.match_regex` matches a regular expression at the current position. Build the regex with `Parseff.regex`, which compiles an `Re.t` anchored at the position where the match starts, so a failed match examines only the bytes that the regex needs to fail, not the rest of the input. In streaming mode, `match_regex` reads only when the buffered bytes cannot decide the match, and gives the same result as on a string.
-
-```ocaml
-val regex : Re.t -> Parseff.regex
-val match_regex : ?label:string -> Parseff.regex -> string
-```
-```ocaml
-(* Pre-compile at module level. Never inside a parser function *)
-let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
-let number_from_re () = Parseff.match_regex number_re
-```
-Without `~label`, a failed match expects `"text matching the pattern"`. With `~label`, it reports `expected <label>` and merges with what the other alternatives expected at the same position, like `satisfy` and `take_while ~label`:
-
-```ocaml
-let identifier_re = Parseff.regex (Re.Posix.re "[a-z]+")
-
-let value () =
-  Parseff.or_
-    (fun () -> Parseff.match_regex ~label:"number" number_re)
-    (fun () -> Parseff.match_regex ~label:"identifier" identifier_re)
-    ()
-(* "!" -> Error: expected identifier or number *)
-```
-**Danger:** Always pre-compile regexes at module level. Compiling inside a parser function recompiles on every call (100x+ slower). For simple character classes, prefer `Parseff.take_while` which avoids regex overhead entirely:
-
-```ocaml
-(* Regex. Use for complex patterns (alternation, grouping) *)
-let number_re = Parseff.regex (Re.Posix.re "[0-9]+")
-let number () = Parseff.match_regex number_re
-
-(* take_while. No regex overhead for simple predicates *)
-let number () =
-  Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-```
 
 ## Control flow
 

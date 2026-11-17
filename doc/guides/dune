@@ -3,4 +3,4 @@
 
 (mdx
  (files *.mld)
- (libraries parseff re))
+ (libraries parseff))

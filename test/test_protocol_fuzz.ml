@@ -47,29 +47,7 @@ let frame () =
 
 let frames () = Parseff.many frame ()
 
-let anchored =
-  List.map
-    (fun r () -> Parseff.match_regex (Parseff.regex r))
-    Re.
-      [
-        seq [ rep1 (rg 'a' 'z'); eos ];
-        seq [ rep1 (rg 'a' 'z'); eow ];
-        seq [ rep1 digit; eol ];
-        seq [ bow; rep1 (rg 'A' 'Z') ];
-        seq [ bol; char '#' ];
-        rep1 (set " \n");
-      ]
-
-let regex_frame () =
-  let len = Parseff.any_uint8 () in
-  Parseff.within len (fun () -> Parseff.many (Parseff.one_of anchored) ())
-
-let regex_frames () = Parseff.many regex_frame ()
-
-let regex_valid =
-  [ "\x03abc\x06ab cd\n\x04 12\n\x05#AB c"; "\x02zz\x07 99\n#xy"; "" ]
-
-let words = Parseff.regex Re.(rep1 (rg 'a' 'z'))
+let words () = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z')
 
 let backtracking_item seal () =
   let c = Parseff.any_char () in
@@ -77,12 +55,12 @@ let backtracking_item seal () =
   Parseff.or_
     (fun () ->
       ignore (Parseff.take_while (fun c -> c >= 'a' && c <= 'c'));
-      ignore (Parseff.match_regex words);
+      ignore (words ());
       ignore (Parseff.char '!');
       c
     )
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.match_regex words) ());
+      ignore (Parseff.optional words ());
       c
     )
     ()
@@ -445,16 +423,7 @@ let () =
                  valid = [ "3\r\nabc\r\n1;e=v\r\nd\r\n0\r\nT: x\r\n\r\n" ];
                }
             );
-          Alcotest.test_case "anchored regexes in frames" `Quick
-            (fuzz
-               {
-                 name = "regex";
-                 parser = regex_frames;
-                 each = false;
-                 valid = regex_valid;
-               }
-            );
-          Alcotest.test_case "commit or cut before a backtracking regex" `Quick
+          Alcotest.test_case "commit or cut before a backtracking branch" `Quick
             (fuzz
                ~seeds:(List.init 16 (fun i -> i + 1))
                {

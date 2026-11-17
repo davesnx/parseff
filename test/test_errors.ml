@@ -1,3 +1,10 @@
+let contains text needle =
+  let n = String.length needle in
+  let rec go i =
+    i + n <= String.length text && (String.sub text i n = needle || go (i + 1))
+  in
+  go 0
+
 let check_parseff_error exn =
   let msg = Printexc.to_string exn in
   Alcotest.(check bool)
@@ -5,7 +12,7 @@ let check_parseff_error exn =
     (String.length msg >= 7 && String.sub msg 0 7 = "Parseff");
   Alcotest.(check bool)
     "mentions parse context" true
-    (Re.(execp (compile (str "parse context"))) msg)
+    (contains msg "parse context")
 
 let test_fold_left_user_exception () =
   let op () =
@@ -80,10 +87,10 @@ let test_outside_parse_message_content () =
       let msg = Printexc.to_string exn in
       Alcotest.(check bool)
         "mentions Parseff.parse" true
-        (Re.(execp (compile (str "Parseff.parse"))) msg);
+        (contains msg "Parseff.parse");
       Alcotest.(check bool)
         "mentions parse_source" true
-        (Re.(execp (compile (str "Parseff.parse_source"))) msg)
+        (contains msg "Parseff.parse_source")
 
 let check_outside_parse () =
   match Parseff.position () with
@@ -2105,43 +2112,6 @@ let test_fail_frames () =
   Alcotest.(check string)
     "contexts" "outer@0!; inner@1" (contexts_of "abc" parser)
 
-let id_re = Parseff.regex (Re.Posix.re "[a-z]+")
-let digit_re = Parseff.regex (Re.Posix.re "[0-9]+")
-
-let test_match_regex_label () =
-  let parser () = ignore (Parseff.match_regex ~label:"identifier" id_re) in
-  both_runners
-    (fun s -> s)
-    "x"
-    (fun () -> Parseff.match_regex ~label:"identifier" id_re)
-    "Ok x";
-  both_runners show_unit "1" parser
-    {|Error@0 Expected "expected identifier, found '1'"|};
-  both_runners show_unit "" parser
-    {|Error@0 Expected "expected identifier, found end of input"|};
-  let both () =
-    ignore
-      (Parseff.or_
-         (fun () -> Parseff.match_regex ~label:"number" digit_re)
-         (fun () -> Parseff.match_regex ~label:"identifier" id_re)
-         ()
-      )
-  in
-  both_runners show_unit "!" both
-    {|Error@0 Expected "expected identifier or number, found '!'"|};
-  check_render "label is rendered"
-    (lines
-       [
-         "input.json:1:1: [error] expected identifier or number, found '!'";
-         "1 | !";
-         "  | ^";
-       ]
-    )
-    (render_error "!" both);
-  both_runners show_unit "!"
-    (fun () -> ignore (Parseff.match_regex id_re))
-    {|Error@0 Expected "expected text matching the pattern, found '!'"|}
-
 let test_note_on_dropped_line () =
   let input = String.make 2000 'a' ^ "!" in
   let chunked =
@@ -2823,18 +2793,6 @@ let test_built_in_failures_are_expected_items () =
     | Ok _ ->
         "ok"
   in
-  Alcotest.(check string)
-    "regex without label"
-    "expected text matching the pattern or \"x\", found '?'"
-    (message "?" (fun () ->
-         ignore
-           (Parseff.or_
-              (fun () -> Parseff.match_regex (Parseff.regex (Re.rep1 Re.digit)))
-              (fun () -> Parseff.consume "x")
-              ()
-           )
-     )
-    );
   Alcotest.(check string)
     "int16 mismatch" "expected int16be 0x0203 or \"x\", found '\\x00'"
     (message "\x00\x01" (fun () ->
@@ -3897,14 +3855,6 @@ let test_one_hidden_frame_is_printed () =
        (String.split_on_char '\n' out)
     )
 
-let test_regex_label_without_label () =
-  Alcotest.(check string)
-    "unlabeled regex" "expected text matching the pattern, found '!'"
-    (message_of "!" (fun () ->
-         ignore (Parseff.match_regex (Parseff.regex (Re.rep1 Re.digit)))
-     )
-    )
-
 let test_built_in_labels () =
   let message input parser = message_of input parser in
   Alcotest.(check (list string))
@@ -4674,7 +4624,6 @@ let () =
           test_case "fail ~help" `Quick test_fail_help;
           test_case "error ~help" `Quick test_error_help;
           test_case "fail contexts" `Quick test_fail_frames;
-          test_case "match_regex label" `Quick test_match_regex_label;
           test_case "note on a dropped line" `Quick test_note_on_dropped_line;
           test_case "~upto past the buffered input" `Quick
             test_upto_past_the_buffer;
@@ -4766,7 +4715,6 @@ let () =
             test_limits_keep_frames_and_give_help;
           test_case "one hidden context is printed" `Quick
             test_one_hidden_frame_is_printed;
-          test_case "regex label" `Quick test_regex_label_without_label;
           test_case "built-in labels" `Quick test_built_in_labels;
           test_case "gap row in the gutter" `Quick test_gap_row_is_in_the_gutter;
           test_case "empty one_of adds no item" `Quick

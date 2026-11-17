@@ -1635,82 +1635,6 @@ let test_alphanum_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* --- match_regex --- *)
-
-let test_match_regex_success () =
-  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
-  match
-    Parseff.parse ~consume:`Partial "12345abc" (fun () -> Parseff.match_regex re)
-  with
-  | Ok s ->
-      Alcotest.(check string) "matched digits" "12345" s
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let test_match_regex_failure () =
-  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
-  match Parseff.parse "abc" (fun () -> Parseff.match_regex re) with
-  | Ok _ ->
-      Alcotest.fail "Expected failure"
-  | Error ({ kind = Expected { found = Text _; _ }; _ } as e) ->
-      let pos = e.range.start in
-      Alcotest.(check int) "error position" 0 pos;
-      Alcotest.(check string)
-        "error message" "expected text matching the pattern, found 'abc'"
-        (Parseff.error_message e)
-  | Error _ ->
-      Alcotest.fail "Unexpected error type"
-
-let test_match_regex_anchored () =
-  let re = Parseff.regex (Re.Posix.re "[0-9]+") in
-  match
-    parse_with_pos "abc123" (fun () ->
-        let _ = Parseff.consume "abc" in
-        Parseff.match_regex re
-    )
-  with
-  | Ok (s, pos) ->
-      Alcotest.(check string) "matched from current pos" "123" s;
-      Alcotest.(check int) "final position" 6 pos
-  | Error _ ->
-      Alcotest.fail "Expected success"
-
-let failing_regex_loop parse =
-  let n = 1 lsl 18 in
-  let budget = 5.0 in
-  let re = Parseff.regex (Re.char 'b') in
-  let start = Sys.time () in
-  let steps = ref 0 in
-  let step () =
-    Parseff.or_
-      (fun () -> ignore (Parseff.match_regex re))
-      (fun () ->
-        incr steps;
-        if !steps land 1023 = 0 && Sys.time () -. start > budget then
-          Parseff.fail "over budget";
-        ignore (Parseff.any_char ())
-      )
-      ()
-  in
-  let result =
-    parse (String.make n 'a') (fun () -> List.length (Parseff.many step ()))
-  in
-  let elapsed = Sys.time () -. start in
-  Alcotest.(check bool)
-    (Printf.sprintf "%d failed matches within %.1f s (took %.3f s)" !steps
-       budget elapsed
-    )
-    true
-    (result = Ok n && elapsed <= budget)
-
-let test_match_regex_failure_constant_time () =
-  failing_regex_loop (fun input p -> Parseff.parse input p)
-
-let test_match_regex_failure_constant_time_source () =
-  failing_regex_loop (fun input p ->
-      Parseff.parse_source (Parseff.Source.of_string input) p
-  )
-
 (* --- sep_by_take --- *)
 
 let test_sep_by_take_empty () =
@@ -2154,17 +2078,6 @@ let () =
           test_case "whitespace empty" `Quick test_whitespace_empty;
           test_case "whitespace1 success" `Quick test_whitespace1_success;
           test_case "whitespace1 failure" `Quick test_whitespace1_failure;
-        ]
-      );
-      ( "match_regex",
-        [
-          test_case "success" `Quick test_match_regex_success;
-          test_case "failure" `Quick test_match_regex_failure;
-          test_case "anchored at position" `Quick test_match_regex_anchored;
-          test_case "failure takes constant time" `Quick
-            test_match_regex_failure_constant_time;
-          test_case "failure takes constant time on a source" `Quick
-            test_match_regex_failure_constant_time_source;
         ]
       );
       ( "fused operations",

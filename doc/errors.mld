@@ -421,8 +421,8 @@ of [kind] too:
 | Error { kind = Expected { found = End; _ }; _ } -> ...
 ]}
 
-The 0.4 messages of primitives that were not expectations (invalid UTF-8, failed
-regex, mismatched [BE.int16]) are now [Expected] items: [valid UTF-8],
-[text matching the pattern] and [int16be 0xFFFE].
+The 0.4 messages of primitives that were not expectations (invalid UTF-8,
+mismatched [BE.int16]) are now [Expected] items: [valid UTF-8] and
+[int16be 0xFFFE].
 An error at the end of the input now says what was expected. The position is
 [e.range.start].
