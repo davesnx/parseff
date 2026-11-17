@@ -344,7 +344,7 @@ type trace_event +=
             A recovery inside a parser that is later undone, such as the [close]
             of {!val:list} or a branch of {!val:or_}, still gives its event.
             [capture] gives the event when it returns [Error error]. [recover]
-            gives it after [sync], [~record] and [hole] return, so the events of
+            gives it after [sync], [~keep] and [hole] return, so the events of
             [sync] and [hole] come first. When one of them fails, the failure
             was not recovered and no event is given. *)
 
@@ -708,7 +708,7 @@ val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
     Thus a diagnostic recorded inside a construct is lost when an enclosing
     {!capture} or {!recover} fails later: only the error of the enclosing
     construct stays. This rule is final. To keep the inner diagnostics, give
-    [~record] to {!recover} or {!list}. *)
+    [~keep] to {!recover} or {!list}. *)
 
 val position : unit -> int
 (** [position ()] returns the current parser offset in bytes from the start of
@@ -915,7 +915,11 @@ val skip_to : int -> unit
     [Invalid_argument], also one that {!peek_with} returned outside the frame.
 *)
 
-val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
+val capture :
+  ?release:bool ->
+  ?contexts:[ `All | `Inner ] ->
+  (unit -> 'a) ->
+  ('a, error) result
 (** [capture parser] runs [parser] and returns its failure as a value, so that
     the parser can recover from an error and continue.
 
@@ -923,7 +927,7 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
     returns [Error e], where [e] is the furthest failure inside [parser], built
     as {!parse} builds an error. The position then goes back to where [capture]
     started, and the diagnostics that [parser] recorded are removed. This rule
-    is final; the [~record] of {!recover} gets the removed diagnostics. A {!cut}
+    is final; the [~keep] of {!recover} gets the removed diagnostics. A {!cut}
     or {!commit} in [parser] does not reach past [capture]. [capture] turns a
     failure into a value, as a choice does, so the recovery functions inside
     [parser] do not recover: [parser] runs as without the collector, as
@@ -950,11 +954,11 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
     must fit in [~backtrack_window], so a parser that calls {!cut} after each
     decided part can be longer than the window. The default is [false].
 
-    With [~outer:false], [e] keeps only the contexts that [parser] opened, as if
-    the parse started at [capture]: the contexts open around [capture] are not
-    in [e.contexts] and {!render_error} does not show them. Use it for an error
-    that is recorded and parsed past, whose construct is [parser]. The default
-    is [true].
+    With [~contexts:`Inner], [e] keeps only the contexts that [parser] opened,
+    as if the parse started at [capture]: the contexts open around [capture] are
+    not in [e.contexts] and {!render_error} does not show them. Use it for an
+    error that is recorded and parsed past, whose construct is [parser]. The
+    default [`All] keeps every context open at the error.
 
     Example:
     {@ocaml[
@@ -971,8 +975,12 @@ val capture : ?release:bool -> ?outer:bool -> (unit -> 'a) -> ('a, error) result
 
 val recover :
   ?release:bool ->
-  ?outer:bool ->
-  ?record:(error -> error Diagnostics.entry list -> unit) ->
+  ?contexts:[ `All | `Inner ] ->
+  ?keep:
+    (error Diagnostics.entry ->
+    error Diagnostics.entry list ->
+    error Diagnostics.entry list
+    ) ->
   error Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -1053,26 +1061,31 @@ val recover :
     the parse without the collector.
 
     The errors that [parser] recorded in [errors] before it failed are removed,
-    as with {!capture}: only [e] stays. To keep them, give [~record].
+    as with {!capture}: only [e] stays. To keep them, give [~keep].
 
-    [~record] replaces the recording of [e]: [recover] calls [record e inner]
-    where [inner] holds the errors that [parser] recorded in [errors] and that
-    the failure removed, in the order they were recorded. To keep one, record it
-    again: [warn ~pos:d.pos errors d.value] gives the same entry. With
-    [~release:true], [inner] holds only the errors recorded after the last
-    {!commit}, {!cut} or value given out by a [*_iter] function, such as
-    {!many_iter}, that reached [recover], since the errors before it stay as in
-    {!capture}. For example, to keep the errors of [parser] and record [e] only
-    when there are none:
+    [~keep] chooses what is recorded in place of [e]: [recover] calls
+    [keep entry inner], where [entry] is the entry of [e] (at [e.range.start])
+    and [inner] holds the entries that [parser] recorded in [errors] and that
+    the failure removed, in the order they were recorded. [recover] records the
+    entries that [keep] returns, in that order, so they are removed when a
+    construct around [recover] goes back, as any other diagnostic. The default
+    is [fun entry _ -> [ entry ]]. With [~release:true], [inner] holds only the
+    entries recorded after the last {!commit}, {!cut} or value given out by a
+    [*_iter] function, such as {!many_iter}, that reached [recover], since the
+    entries before it stay as in {!capture}. [keep] must be a pure function: no
+    side effects and no parsing. It can run more than once for the same error,
+    as a construct that runs again calls it again. If [keep] raises, the
+    exception leaves the parse, as an exception from a build function does. For
+    example, to keep the errors of [parser], and [e] only when there are none:
     {@ocaml[
-    let record errors e inner =
-      List.iter
-        (fun (d : _ Diagnostics.entry) -> warn ~pos:d.pos errors d.value)
-        inner;
-      if inner = [] then warn ~pos:e.range.start errors e
+    let keep entry inner =
+      if inner = [] then
+        [ entry ]
+      else
+        inner
     ]}
 
-    [~release] and [~outer] are given to {!capture}. With [~release:true],
+    [~release] and [~contexts] are given to {!capture}. With [~release:true],
     [sync] starts at the last {!commit}, {!cut} or value given out by a [*_iter]
     function that reached [recover], and the errors recorded before that call
     stay as in {!capture}.
@@ -1198,8 +1211,12 @@ val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
 
 val list :
   ?release:bool ->
-  ?outer:bool ->
-  ?record:(error -> error Diagnostics.entry list -> unit) ->
+  ?contexts:[ `All | `Inner ] ->
+  ?keep:
+    (error Diagnostics.entry ->
+    error Diagnostics.entry list ->
+    error Diagnostics.entry list
+    ) ->
   ?sep:(unit -> unit) ->
   ?trailing:bool ->
   error Diagnostics.t ->
@@ -1229,8 +1246,8 @@ val list :
     {!many}.
 
     When [element] fails with the error [e], [list] records [e], calls [sync ()]
-    and puts [hole e] in the list, as {!recover} does. [~release], [~outer] and
-    [~record] are as in {!recover}. A {!commit} in [element] reaches no frame
+    and puts [hole e] in the list, as {!recover} does. [~release], [~contexts]
+    and [~keep] are as in {!recover}. A {!commit} in [element] reaches no frame
     outside [list], as in {!many}. A {!cut} reaches them, as in {!many}.
 
     Without [~sep], [close] runs before each element. When [sync] consumes
@@ -1281,9 +1298,9 @@ val list :
       since {!sep_by} would not run it. When it fails at the end of the input,
       the list ends before it with no error, and the error is the one of the
       separator, as {!sep_by} ends where its separator fails. The error of the
-      separator goes through [~record], with no inner diagnostics. It is
-      recorded, and its [Captured] event is given, after those of that element,
-      and only when that step succeeds.
+      separator goes through [~keep], with no inner entries. It is recorded, and
+      its [Captured] event is given, after those of that element, and only when
+      that step succeeds.
 
     To find the next element when a separator is missing, [element] and [sep]
     must skip the whitespace after them, not before.

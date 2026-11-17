@@ -333,9 +333,9 @@ A `commit` or `cut` that reached the choice decides it, as without the collector
 (Error "expected integer, found end of input", 0)
 ```
 
-**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~record:(fun e inner -> ...)`: it replaces the recording of `e`, and `inner` holds the removed errors. `list` takes the same `~record`.
+**`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed, such as an `unfinished string` that then makes the statement fail. To keep them, pass `~keep:(fun entry inner -> ...)`: `entry` is the entry of the error, `inner` holds the removed entries, and the entries that `keep` returns are recorded. For example, `~keep:(fun entry inner -> if inner = [] then [ entry ] else inner)` keeps the inner errors, and the error only when there are none. `keep` must be pure: it can run more than once. `list` takes the same `~keep`.
 
-**A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error. Pass `~outer:false` to keep only the contexts that the parser opened.
+**A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error. Pass `` ~contexts:`Inner `` to keep only the contexts that the parser opened.
 
 **Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover`, `require` and `list` run as the plain parser, and `warn` records nothing when the runner got no collector. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
 

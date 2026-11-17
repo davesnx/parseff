@@ -252,7 +252,10 @@ let test_wrong_collector () =
   let calls = ref 0 in
   let list () =
     list ~sep:comma
-      ~record:(fun _ _ -> incr calls)
+      ~keep:(fun e _ ->
+        incr calls;
+        [ e ]
+      )
       d
       ~close:(fun () -> false)
       ~sync:skip_value (value d)
@@ -277,7 +280,7 @@ let test_wrong_collector () =
         )
     )
     [ "1"; "1, 2"; "1, ?, 3"; "?" ];
-  Alcotest.(check int) "record not called" 0 !calls;
+  Alcotest.(check int) "keep not called" 0 !calls;
   Alcotest.(check int) "nothing recorded" 0 (Diagnostics.length d)
 
 let test_rollback () =
@@ -301,7 +304,7 @@ let note ?from msg =
   | Ok () ->
       Alcotest.fail "expected a failure"
 
-let issue_60_list ?record ?(source = false) input =
+let issue_60_list ?keep ?(source = false) input =
   let d = Diagnostics.create () in
   let element () =
     let start = position () in
@@ -320,9 +323,7 @@ let issue_60_list ?record ?(source = false) input =
   let parser () =
     ignore (char '[');
     let xs =
-      list ~sep:comma
-        ?record:(Option.map (fun f -> f d) record)
-        d
+      list ~sep:comma ?keep d
         ~close:(fun () -> peek_char () = Some ']')
         ~sync:(skip_nested [ ('[', ']') ] (fun c -> c = ','))
         element
@@ -342,9 +343,11 @@ let issue_60_list ?record ?(source = false) input =
   in
   (show_result r, errors d)
 
-let keep_inner d e inner =
-  List.iter (fun (x : _ Diagnostics.entry) -> warn ~pos:x.pos d x.value) inner;
-  if inner = [] then warn ~pos:e.range.start d e
+let keep_inner e inner =
+  if inner = [] then
+    [ e ]
+  else
+    inner
 
 let test_record () =
   let input = "[\"a\", \"bc\n, \"d\"]" in
@@ -354,14 +357,14 @@ let test_record () =
   check "default records only the failure"
     ("Ok [\"\"; _; \"\"]", [ (9, "expected '\"', found '\\n'") ])
     (issue_60_list input);
-  check "the documented record keeps the inner error"
+  check "the documented keep keeps the inner error"
     ("Ok [\"\"; _; \"\"]", [ (6, "unfinished string") ])
-    (issue_60_list ~record:keep_inner input);
+    (issue_60_list ~keep:keep_inner input);
   check "parse_source, one byte per read"
     ("Ok [\"\"; _; \"\"]", [ (6, "unfinished string") ])
-    (issue_60_list ~source:true ~record:keep_inner input);
-  check "record replaces the default" ("Ok [\"\"; _; \"\"]", [])
-    (issue_60_list ~record:(fun _ _ _ -> ()) input)
+    (issue_60_list ~source:true ~keep:keep_inner input);
+  check "keep replaces the default" ("Ok [\"\"; _; \"\"]", [])
+    (issue_60_list ~keep:(fun _ _ -> []) input)
 
 let test_record_arguments () =
   let d = Diagnostics.create () in
@@ -380,14 +383,12 @@ let test_record_arguments () =
         ignore (char ',');
         list
           ~sep:(fun () -> ignore (char ','))
-          ~record:(fun e inner ->
+          ~keep:(fun e inner ->
             seen :=
-              (e.range.start, error_message e)
-              :: List.map
-                   (fun (x : _ Diagnostics.entry) ->
-                     (x.pos, error_message x.value)
-                   )
-                   inner
+              List.map
+                (fun (x : _ Diagnostics.entry) -> (x.pos, error_message x.value))
+                (e :: inner);
+            []
           )
           d
           ~close:(fun () -> false)
@@ -417,11 +418,11 @@ let test_release () =
     ignore (char '!');
     Int 1
   in
-  let run ?release ?record () =
+  let run ?release ?keep () =
     let r =
       parse ~diagnostics:d "ab?,ab!" (fun () ->
           List
-            (list ?release ?record
+            (list ?release ?keep
                ~sep:(fun () -> ignore (char ','))
                d
                ~close:(fun () -> false)
@@ -461,13 +462,14 @@ let test_release () =
   let inner = ref [] in
   ignore
     (run ~release:true
-       ~record:(fun _ l ->
-         inner := List.map (fun x -> error_message x.Diagnostics.value) l
+       ~keep:(fun _ l ->
+         inner := List.map (fun x -> error_message x.Diagnostics.value) l;
+         []
        )
        ()
     );
   Alcotest.(check (list string))
-    "record gets the entries after the commit" [ "after" ] !inner
+    "keep gets the entries after the commit" [ "after" ] !inner
 
 let test_streaming_release () =
   let input = "[" ^ String.make 40 ' ' ^ "?, 2]" in
@@ -518,24 +520,28 @@ let test_streaming_release () =
     (run ~release:true ())
 
 let test_failing_hole () =
-  let run input hole record =
+  let run input hole keep =
     let d = Diagnostics.create () in
-    show_result
-      (parse ~diagnostics:d input (fun () ->
-           ignore (char '[');
-           let xs =
-             list ?record
-               ~sep:(fun () -> ignore (char ','))
-               d
-               ~close:(fun () -> peek_char () = Some ']')
-               ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ']'))
-               (fun () -> Int (Char.code (digit ()) - 48))
-               hole ()
-           in
-           ignore (char ']');
-           List xs
-       )
+    match
+      parse ~diagnostics:d input (fun () ->
+          ignore (char '[');
+          let xs =
+            list ?keep
+              ~sep:(fun () -> ignore (char ','))
+              d
+              ~close:(fun () -> peek_char () = Some ']')
+              ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ']'))
+              (fun () -> Int (Char.code (digit ()) - 48))
+              hole ()
+          in
+          ignore (char ']');
+          List xs
       )
+    with
+    | r ->
+        show_result r
+    | exception Exit ->
+        "raised Exit"
   in
   let z _ =
     ignore (char 'z');
@@ -548,20 +554,20 @@ let test_failing_hole () =
     (run "[?,2]" z None);
   check "later element, hole" "Error at 4: expected 'z', found ','"
     (run "[1,?,2]" z None);
-  check "later element, record" "Error at 3: expected 'z', found '?'"
-    (run "[1,?,2]" (fun _ -> Hole) (Some (fun _ _ -> ignore (char 'z'))));
+  check "later element, keep raises" "raised Exit"
+    (run "[1,?,2]" (fun _ -> Hole) (Some (fun _ _ -> raise Exit)));
   check "later element, fail in hole" "Error at 4: bad hole"
     (run "[1,?,2]" (fun _ -> fail "bad hole") None)
 
 let test_outer_false () =
   let d = Diagnostics.create () in
-  let run outer =
+  let run contexts =
     let r =
       parse ~diagnostics:d "[ab, ax]" (fun () ->
           context ~delimited:true "list" (fun () ->
               ignore (char '[');
               let xs =
-                list ?outer ~sep:comma d
+                list ?contexts ~sep:comma d
                   ~close:(fun () -> peek_char () = Some ']')
                   ~sync:skip_value
                   (fun () ->
@@ -587,7 +593,8 @@ let test_outer_false () =
       (Diagnostics.to_list d)
   in
   Alcotest.(check (list string)) "default" [ "list"; "element" ] (run None);
-  Alcotest.(check (list string)) "~outer:false" [ "element" ] (run (Some false))
+  Alcotest.(check (list string))
+    "~contexts:`Inner" [ "element" ] (run (Some `Inner))
 
 let run_table ?trailing input =
   let d = Diagnostics.create () in
@@ -637,7 +644,10 @@ let test_record_not_called () =
           ignore (char '[');
           let xs =
             list ~sep:comma
-              ~record:(fun _ _ -> incr calls)
+              ~keep:(fun e _ ->
+                incr calls;
+                [ e ]
+              )
               d
               ~close:(fun () -> peek_char () = Some ']')
               ~sync:skip_value
@@ -681,14 +691,14 @@ let () =
           test_case "same as sep_by" `Quick test_same_as_sep_by;
           test_case "wrong collector" `Quick test_wrong_collector;
           test_case "release" `Quick test_release;
-          test_case "failing hole or record" `Quick test_failing_hole;
+          test_case "failing hole or keep" `Quick test_failing_hole;
           test_case "streaming release" `Quick test_streaming_release;
           test_case "rollback" `Quick test_rollback;
-          test_case "record" `Quick test_record;
-          test_case "record: arguments" `Quick test_record_arguments;
-          test_case "outer:false" `Quick test_outer_false;
+          test_case "keep" `Quick test_record;
+          test_case "keep: arguments" `Quick test_record_arguments;
+          test_case "contexts:`Inner" `Quick test_outer_false;
           test_case "trailing separator" `Quick test_trailing_separator;
-          test_case "record: not called" `Quick test_record_not_called;
+          test_case "keep: not called" `Quick test_record_not_called;
         ]
       );
     ]

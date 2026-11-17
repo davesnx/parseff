@@ -330,19 +330,22 @@ let test_captured_only_when_continued () =
       ignore (Parseff.char 'b')
     )
     (true, 0) [];
-  check "record fails" "1,?,2"
+  check "keep raises" "1,?,2"
     (fun errors () ->
-      ignore
-        (Parseff.list
-           ~sep:(fun () -> ignore (Parseff.char ','))
-           errors
-           ~record:(fun _ _ -> ignore (Parseff.char 'z'))
-           ~close:(fun () -> false)
-           ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
-           Parseff.digit
-           (fun _ -> '?')
-           ()
-        );
+      ( try
+          ignore
+            (Parseff.list
+               ~sep:(fun () -> ignore (Parseff.char ','))
+               errors
+               ~keep:(fun _ _ -> raise Exit)
+               ~close:(fun () -> false)
+               ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
+               Parseff.digit
+               (fun _ -> '?')
+               ()
+            )
+        with Exit -> ()
+      );
       ignore (Parseff.take_while (fun _ -> true))
     )
     (true, 0) [];

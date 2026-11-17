@@ -6325,13 +6325,10 @@ let capture_rewind st frame saved e =
   captured st st.pos e;
   Stdlib.Error e
 
-let outer_of st outer pos =
-  if outer then
-    outer_contexts st pos
-  else
-    []
+let outer_of st contexts pos =
+  match contexts with `All -> outer_contexts st pos | `Inner -> []
 
-let capture ?(release = false) ?(outer = true) p =
+let capture ?(release = false) ?(contexts = `All) p =
   let st = get_state () in
   let frame =
     State.push_rewind_frame st
@@ -6356,7 +6353,7 @@ let capture ?(release = false) ?(outer = true) p =
       Stdlib.Ok v
   | exception Fail ->
       capture_rewind st frame saved
-        (error_of_far ~last:false st (outer_of st outer st.far.pos))
+        (error_of_far ~last:false st (outer_of st contexts st.far.pos))
   | exception exn ->
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -6381,8 +6378,21 @@ let record_error errors st record e inner =
   | Some f ->
       f e inner
 
-let recovering_on st ~release ~outer ~record ~progress errors ~sync parser hole
-    =
+let record_of_keep errors st = function
+  | None ->
+      None
+  | Some keep ->
+      Some
+        (fun e inner ->
+          List.iter
+            (fun (x : _ diagnostic_entry) ->
+              record_diagnostic errors st x.pos x.value
+            )
+            (keep { pos = e.range.start; value = e } inner)
+        )
+
+let recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
+    hole =
   let start = st.pos in
   let frame =
     State.push_rewind_frame st
@@ -6463,25 +6473,28 @@ let recovering_on st ~release ~outer ~record ~progress errors ~sync parser hole
             f.pos
       in
       caught Fail at (fun () ->
-          error_of_far ~last:false st (outer_of st outer st.far.pos)
+          error_of_far ~last:false st (outer_of st contexts st.far.pos)
       )
   | exception exn ->
       leave exn
 
-let recovering st ~release ~outer ~record ~progress errors ~sync parser hole =
+let recovering st ~release ~contexts ~record ~progress errors ~sync parser hole
+    =
   if st.recovery_off > 0 then
     parser ()
   else
-    recovering_on st ~release ~outer ~record ~progress errors ~sync parser hole
+    recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
+      hole
 
-let recover ?(release = false) ?(outer = true) ?record errors ~sync parser hole
+let recover ?(release = false) ?(contexts = `All) ?keep errors ~sync parser hole
     =
   let st = get_state () in
   if st.diag != errors.self || st.recovery_off > 0 || not (have st 1) then
     parser ()
   else
-    recovering_on st ~release ~outer ~record ~progress:true errors ~sync parser
-      hole
+    recovering_on st ~release ~contexts
+      ~record:(record_of_keep errors st keep)
+      ~progress:true errors ~sync parser hole
 
 let skip_nested ?atom pairs stop () =
   let st = get_state () in
@@ -6577,7 +6590,7 @@ let require errors parser missing =
           st.far <- saved;
           far_merge st own
         end;
-        let e = error_of_far ~last:false st (outer_of st true st.far.pos) in
+        let e = error_of_far ~last:false st (outer_of st `All st.far.pos) in
         restore_rewind_frame st frame;
         State.pop_rewind_frame st frame;
         st.far <-
@@ -6604,9 +6617,10 @@ let skip_char st =
 
 exception Not_an_element
 
-let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
+let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
     errors ~close ~sync element hole () =
   let st = get_state () in
+  let record = record_of_keep errors st keep in
   if st.diag != errors.self || st.recovery_off > 0 || open_choice st then (
     match sep with
     | None ->
@@ -6621,7 +6635,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
       if not (have st 1) then
         element ()
       else
-        recovering st ~release ~outer ~record ~progress:(Option.is_none sep)
+        recovering st ~release ~contexts ~record ~progress:(Option.is_none sep)
           errors ~sync element hole
     in
     let rec attempt ?(again = item) frame f =
@@ -6797,7 +6811,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
             List.rev acc
           end else
             let e =
-              error_of_far ~last:false st (outer_of st outer st.far.pos)
+              error_of_far ~last:false st (outer_of st contexts st.far.pos)
             in
             far_back st saved;
             missing_separator s acc at e
@@ -6824,7 +6838,7 @@ let list ?(release = false) ?(outer = true) ?record ?sep ?(trailing = false)
       in
       let frame = State.push_rewind_frame st frame_barrier in
       match
-        recovering st ~release ~outer ~record:(Some record) ~progress:false
+        recovering st ~release ~contexts ~record:(Some record) ~progress:false
           errors ~sync element hole
       with
       | v ->
