@@ -562,11 +562,15 @@ f(1)
 `Parseff.expression` reads operands and operators from a table, as the [expression guide](./expression-parser.md) shows. Here a missing operand is inserted with `require`:
 
 ```ocaml
-type expr = Num of int | Neg of expr | Bin of string * expr * expr | Missing
+type expr =
+  | Num of int
+  | Negation of expr
+  | Bin of string * expr * expr
+  | Missing
 
 let rec show_expr = function
   | Num n -> string_of_int n
-  | Neg e -> Printf.sprintf "(-%s)" (show_expr e)
+  | Negation e -> Printf.sprintf "(-%s)" (show_expr e)
   | Bin (op, a, b) -> Printf.sprintf "(%s %s %s)" (show_expr a) op (show_expr b)
   | Missing -> "<hole>"
 
@@ -583,14 +587,18 @@ let infix token name =
       token ();
       fun a b -> Bin (name, a, b))
 
-let expr ~neg ~ops errors () =
-  let e = Parseff.expression ~operand:(operand errors) [ ops; [ neg ] ] () in
+let expr ~negation ~ops errors () =
+  let e =
+    Parseff.expression ~operand:(operand errors) [ ops; [ negation ] ] ()
+  in
   let _ = Parseff.char ';' in
   e
 
-let run_expr ~neg ~ops input =
+let run_expr ~negation ~ops input =
   let errors = Parseff.Diagnostics.create () in
-  (match Parseff.parse ~diagnostics:errors input (expr ~neg ~ops errors) with
+  (match
+     Parseff.parse ~diagnostics:errors input (expr ~negation ~ops errors)
+   with
   | Ok e -> print_endline (show_expr e)
   | Error e -> print_endline (Parseff.render_error ~source:input e));
   List.iter
@@ -602,22 +610,22 @@ let plus () =
   let _ = Parseff.char '+' in
   ws ()
 
-let neg_open =
+let negation_open =
   Parseff.prefix (fun () ->
       ignore (Parseff.char '-');
-      fun e -> Neg e)
+      fun e -> Negation e)
 
-let neg_commit =
+let negation_commit =
   Parseff.prefix (fun () ->
       ignore (Parseff.char '-');
       Parseff.commit ();
-      fun e -> Neg e)
+      fun e -> Negation e)
 ```
 
 A `Parseff.prefix` operator is an open choice for its whole operand: when the operand fails, `expression` tries the other prefix operators and the plain operand. So `require` does not insert the operand of `-`. `expression` runs the plain operand at the `-` instead, and `require` inserts a hole there. The `char ';'` after the expression then fails at the `-`, and the parse fails. The first error, at 1:2, is the error of the parse: the furthest failure, at the `;`. The second, at 1:1, is the hole that `require` recorded:
 
 ```ocaml
-# run_expr ~neg:neg_open ~ops:[ infix plus "+" ] "-;";;
+# run_expr ~negation:negation_open ~ops:[ infix plus "+" ] "-;";;
 1:2: [error] expected integer or '-', found ';'
 1 | -;
   |  ^
@@ -630,7 +638,7 @@ A `Parseff.prefix` operator is an open choice for its whole operand: when the op
 Call `commit` in the token parser of the operator. The `-` then decides the choice, and the operand recovers:
 
 ```ocaml
-# run_expr ~neg:neg_commit ~ops:[ infix plus "+" ] "-;";;
+# run_expr ~negation:negation_commit ~ops:[ infix plus "+" ] "-;";;
 (-<hole>)
 1:2: [error] expected integer or '-', found ';'
 1 | -;
@@ -647,7 +655,9 @@ let plus_plus () =
 ```
 
 ```ocaml
-# run_expr ~neg:neg_commit ~ops:[ infix plus "+"; infix plus_plus "++" ] "1++2;";;
+# run_expr ~negation:negation_commit
+    ~ops:[ infix plus "+"; infix plus_plus "++" ]
+    "1++2;";;
 ((1 + <hole>) + 2)
 1:3: [error] expected integer or '-', found '+'
 1 | 1++2;
@@ -664,7 +674,7 @@ let plus_longest () =
 ```
 
 ```ocaml
-# run_expr ~neg:neg_commit
+# run_expr ~negation:negation_commit
     ~ops:[ infix plus_longest "+"; infix plus_plus "++" ]
     "1++2;";;
 (1 ++ 2)
