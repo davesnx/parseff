@@ -2,7 +2,8 @@
 
 let is_field_char c = c = '\t' || (c >= ' ' && c <> '\127')
 let field = Parseff.Charset.of_predicate is_field_char
-let ays = Parseff.Charset.of_predicate (fun c -> c = 'a')
+let is_a c = c = 'a'
+let ays = Parseff.Charset.of_predicate is_a
 
 let show = function
   | Ok (s, pos) ->
@@ -52,10 +53,46 @@ let test_matches_take_while () =
   List.iter
     (fun input ->
       let by_pred = run (fun () -> Parseff.take_while is_field_char) input in
-      let by_set = run (fun () -> Parseff.take_while_set field) input in
+      let by_set =
+        run (fun () -> Parseff.take_while ~set:field is_field_char) input
+      in
       Alcotest.(check string) input (show by_pred) (show by_set)
     )
     inputs
+
+let test_predicate_not_called () =
+  let calls = ref 0 in
+  let counted c =
+    incr calls;
+    is_field_char c
+  in
+  let input = "abc\r" in
+  ignore (run (fun () -> Parseff.take_while ~set:field counted) input);
+  ignore (run (fun () -> Parseff.take_while ~at_most:8 ~set:field counted) input);
+  ignore
+    (run
+       (fun () ->
+         Parseff.skip_while ~set:field counted;
+         ""
+       )
+       input
+    );
+  ignore
+    (run
+       (fun () ->
+         Parseff.span_to_string (Parseff.take_while_span ~set:field counted)
+       )
+       input
+    );
+  ignore
+    (run
+       (fun () ->
+         Parseff.take_while_iter ~set:field counted (fun _ -> ());
+         ""
+       )
+       input
+    );
+  Alcotest.(check int) "calls" 0 !calls
 
 let test_at_least () =
   let input = "\r" in
@@ -66,7 +103,9 @@ let test_at_least () =
   in
   let by_set =
     run
-      (fun () -> Parseff.take_while_set ~at_least:1 ~label:"field" field)
+      (fun () ->
+        Parseff.take_while ~at_least:1 ~label:"field" ~set:field is_field_char
+      )
       input
   in
   Alcotest.(check string) "message" (show by_pred) (show by_set)
@@ -76,21 +115,25 @@ let test_at_most () =
   let by_pred =
     run (fun () -> Parseff.take_while ~at_most:4 is_field_char) over
   in
-  let by_set = run (fun () -> Parseff.take_while_set ~at_most:4 field) over in
+  let by_set =
+    run (fun () -> Parseff.take_while ~at_most:4 ~set:field is_field_char) over
+  in
   Alcotest.(check string) "over the limit" (show by_pred) (show by_set);
   let exact = String.make 4 'a' ^ "\r" in
-  let got = run (fun () -> Parseff.take_while_set ~at_most:4 field) exact in
+  let got =
+    run (fun () -> Parseff.take_while ~at_most:4 ~set:field is_field_char) exact
+  in
   Alcotest.(check string) "at the limit" "Ok \"aaaa\" at 4" (show got)
 
 let test_invalid_at_most () =
   let message =
-    "Parseff.take_while_set: at_most must be at least 0 and at least at_least"
+    "Parseff.take_while: at_most must be at least 0 and at least at_least"
   in
   let boom ~at_least ~at_most =
     try
       ignore
         (Parseff.parse "" (fun () ->
-             Parseff.take_while_set ~at_least ~at_most field
+             Parseff.take_while ~at_least ~at_most ~set:field is_field_char
          )
         );
       Alcotest.fail "expected Invalid_argument"
@@ -104,7 +147,7 @@ let test_skip_and_span () =
   let skipped =
     run
       (fun () ->
-        Parseff.skip_while_set field;
+        Parseff.skip_while ~set:field is_field_char;
         ""
       )
       input
@@ -113,7 +156,7 @@ let test_skip_and_span () =
   let spanned =
     run
       (fun () ->
-        let sp = Parseff.take_while_span_set field in
+        let sp = Parseff.take_while_span ~set:field is_field_char in
         Parseff.span_to_string sp
       )
       input
@@ -125,7 +168,7 @@ let test_iter_pieces () =
   let r =
     run
       (fun () ->
-        Parseff.take_while_iter_set field (fun piece ->
+        Parseff.take_while_iter ~set:field is_field_char (fun piece ->
             got := Parseff.span_to_string piece :: !got
         );
         ""
@@ -138,7 +181,7 @@ let test_iter_pieces () =
   let r =
     run
       (fun () ->
-        Parseff.take_while_iter_set field (fun _ -> incr calls);
+        Parseff.take_while_iter ~set:field is_field_char (fun _ -> incr calls);
         ""
       )
       "\r"
@@ -152,7 +195,7 @@ let test_stream () =
   let skipped =
     Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () ->
-        Parseff.skip_while_set ays;
+        Parseff.skip_while ~set:ays is_a;
         Parseff.position ()
     )
   in
@@ -161,7 +204,7 @@ let test_stream () =
     (Result.map_error Parseff.error_message skipped);
   let taken =
     Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
-      (fun () -> Parseff.take_while_set ays
+      (fun () -> Parseff.take_while ~set:ays is_a
     )
   in
   ( match taken with
@@ -177,7 +220,7 @@ let test_stream () =
   let walked =
     Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () ->
-        Parseff.take_while_iter_set ays (fun piece ->
+        Parseff.take_while_iter ~set:ays is_a (fun piece ->
             Buffer.add_string out (Parseff.span_to_string piece)
         );
         Parseff.char '\r'
@@ -196,8 +239,9 @@ let () =
         [
           test_case "mem matches the predicate" `Quick
             test_mem_matches_predicate;
-          test_case "take_while_set matches take_while" `Quick
-            test_matches_take_while;
+          test_case "~set matches the predicate" `Quick test_matches_take_while;
+          test_case "~set does not call the predicate" `Quick
+            test_predicate_not_called;
           test_case "at_least" `Quick test_at_least;
           test_case "at_most" `Quick test_at_most;
           test_case "invalid at_most" `Quick test_invalid_at_most;

@@ -2594,22 +2594,6 @@ let[@inline never] scan_until st ~keep_from start stop pred =
   done;
   !p
 
-let[@inline never] take_while_at_most st at_least at_most pred =
-  if at_most < 0 || at_most < at_least then
-    invalid_arg
-      "Parseff.take_while: at_most must be at least 0 and at least at_least";
-  let start = st.pos in
-  let stop =
-    if at_most >= max_int - start then
-      max_int
-    else
-      start + at_most + 1
-  in
-  let end_pos = scan_until st ~keep_from:start start stop pred in
-  if end_pos - start > at_most then
-    fail_limit st ~from:start ~upto:end_pos at_most;
-  end_pos
-
 let[@inline never] scan_set_until st ~keep_from start stop set =
   let p = ref start in
   let continue_loop = ref true in
@@ -2627,10 +2611,10 @@ let[@inline never] scan_set_until st ~keep_from start stop set =
   done;
   !p
 
-let[@inline never] take_while_set_at_most st at_least at_most set =
+let[@inline never] take_while_at_most st at_least at_most set pred =
   if at_most < 0 || at_most < at_least then
     invalid_arg
-      "Parseff.take_while_set: at_most must be at least 0 and at least at_least";
+      "Parseff.take_while: at_most must be at least 0 and at least at_least";
   let start = st.pos in
   let stop =
     if at_most >= max_int - start then
@@ -2638,7 +2622,13 @@ let[@inline never] take_while_set_at_most st at_least at_most set =
     else
       start + at_most + 1
   in
-  let end_pos = scan_set_until st ~keep_from:start start stop set in
+  let end_pos =
+    match set with
+    | None ->
+        scan_until st ~keep_from:start start stop pred
+    | Some set ->
+        scan_set_until st ~keep_from:start start stop set
+  in
   if end_pos - start > at_most then
     fail_limit st ~from:start ~upto:end_pos at_most;
   end_pos
@@ -2698,45 +2688,17 @@ let[@inline] end_of_input () =
   let st = get_state () in
   if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
-let[@inline] take_while ?(at_least = 0) ?at_most ?label pred =
+let[@inline] take_while ?(at_least = 0) ?at_most ?label ?set pred =
   let st = get_state () in
   let start = st.pos in
   let end_pos =
-    match at_most with
-    | None ->
+    match (at_most, set) with
+    | None, None ->
         scan_while st ~keep_from:start start pred
-    | Some n ->
-        take_while_at_most st at_least n pred
-  in
-  st.pos <- end_pos;
-  let n = end_pos - start in
-  if n < at_least then
-    begin match label with
-    | Some l ->
-        fail_str_cold st end_pos tag_label l
-    | None ->
-        fail_at_least st at_least
-  end
-  else
-    slice st start n
-
-let[@inline] skip_while pred =
-  let st = get_state () in
-  handle_skip_while st pred
-
-let[@inline] take_while_span pred =
-  let st = get_state () in
-  handle_take_while_span st pred
-
-let[@inline] take_while_set ?(at_least = 0) ?at_most ?label set =
-  let st = get_state () in
-  let start = st.pos in
-  let end_pos =
-    match at_most with
-    | None ->
+    | None, Some set ->
         scan_set st ~keep_from:start start set
-    | Some n ->
-        take_while_set_at_most st at_least n set
+    | Some n, _ ->
+        take_while_at_most st at_least n set pred
   in
   st.pos <- end_pos;
   let n = end_pos - start in
@@ -2750,16 +2712,24 @@ let[@inline] take_while_set ?(at_least = 0) ?at_most ?label set =
   else
     slice st start n
 
-let[@inline] skip_while_set set =
+let[@inline] skip_while ?set pred =
   let st = get_state () in
-  st.pos <- scan_set st ~keep_from:no_keep st.pos set
+  match set with
+  | None ->
+      handle_skip_while st pred
+  | Some set ->
+      st.pos <- scan_set st ~keep_from:no_keep st.pos set
 
-let[@inline] take_while_span_set set =
+let[@inline] take_while_span ?set pred =
   let st = get_state () in
-  let start = st.pos in
-  let end_pos = scan_set st ~keep_from:start start set in
-  st.pos <- end_pos;
-  span st start (end_pos - start)
+  match set with
+  | None ->
+      handle_take_while_span st pred
+  | Some set ->
+      let start = st.pos in
+      let end_pos = scan_set st ~keep_from:start start set in
+      st.pos <- end_pos;
+      span st start (end_pos - start)
 
 let take_until ?(at_most = max_int) ?label t =
   let st = get_state () in
@@ -3463,27 +3433,25 @@ let take_iter n (f : span -> unit) =
     if left > 0 then fail_bytes st left
   end
 
-let take_while_iter pred (f : span -> unit) =
+let take_while_iter ?set pred (f : span -> unit) =
   let st = get_state () in
   check_sealable st "take_while_iter";
-  let scan p stop =
-    let i = ref p in
-    while !i < stop && pred (char_at st !i) do
-      incr i
-    done;
-    !i
-  in
-  ignore (iter_input st max_int scan f : int)
-
-let take_while_iter_set set (f : span -> unit) =
-  let st = get_state () in
-  check_sealable st "take_while_iter_set";
-  let scan p stop =
-    let i = ref p in
-    while !i < stop && Charset.mem set (char_at st !i) do
-      incr i
-    done;
-    !i
+  let scan =
+    match set with
+    | None ->
+        fun p stop ->
+          let i = ref p in
+          while !i < stop && pred (char_at st !i) do
+            incr i
+          done;
+          !i
+    | Some set ->
+        fun p stop ->
+          let i = ref p in
+          while !i < stop && Charset.mem set (char_at st !i) do
+            incr i
+          done;
+          !i
   in
   ignore (iter_input st max_int scan f : int)
 

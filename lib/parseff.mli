@@ -468,11 +468,34 @@ val char : char -> char
     let comma () = char ','
     ]} *)
 
+(** A 256-entry table of bytes, for the [~set] argument of {!take_while},
+    {!skip_while}, {!take_while_span} and {!take_while_iter}. Build it once,
+    outside the parser. *)
+module Charset : sig
+  type t
+
+  val of_predicate : (char -> bool) -> t
+  (** [of_predicate f] calls [f] on every byte and stores the answers. *)
+
+  val mem : t -> char -> bool
+  (** [mem set c] is [true] when [c] belongs to [set]. *)
+end
+
 val take_while :
-  ?at_least:int -> ?at_most:int -> ?label:string -> (char -> bool) -> string
+  ?at_least:int ->
+  ?at_most:int ->
+  ?label:string ->
+  ?set:Charset.t ->
+  (char -> bool) ->
+  string
 (** [take_while fun] reads characters one by one as long as [fun] returns [true]
     for each one. Returns the matched string (may be empty if the very first
     character doesn't match).
+
+    With [~set], [take_while] looks each byte up in [set] instead of calling
+    [fun] on it, and [fun] is not called at all. Build [set] with
+    [Charset.of_predicate fun] so the two agree. The result, limits and errors
+    are the same either way.
 
     When [~at_least] is specified, requires at least that many characters to
     match. Fails with [expected <label>] if fewer characters match, or with
@@ -507,57 +530,26 @@ val take_while :
     let digits () = take_while (fun c -> c >= '0' && c <= '9')
     let digits1 () =
       take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
+
+    let is_field_char c = c = '\t' || (c >= ' ' && c <> '\127')
+    let field_char = Charset.of_predicate is_field_char
+    let value () = take_while ~at_most:8190 ~set:field_char is_field_char
     ]} *)
 
-val skip_while : (char -> bool) -> unit
+val skip_while : ?set:Charset.t -> (char -> bool) -> unit
 (** [skip_while fun] advances past characters as long as [fun] returns [true].
     Like {!take_while} but doesn't build a string — use this when you only need
     to move past characters. Always succeeds (skips nothing if the first
-    character doesn't match).
+    character doesn't match). With [~set], it looks each byte up in [set] and
+    does not call [fun].
 
     Example:
     {@ocaml[
     let skip_spaces () = skip_while (fun c -> c = ' ')
-    ]} *)
 
-(** A 256-entry table of bytes. Build it once, outside the parser. The `*_set`
-    scans look each byte up in the table instead of calling a function. *)
-module Charset : sig
-  type t
-
-  val of_predicate : (char -> bool) -> t
-  (** [of_predicate f] calls [f] on every byte and stores the answers. *)
-
-  val mem : t -> char -> bool
-  (** [mem set c] is [true] when [c] belongs to [set]. *)
-end
-
-val take_while_set :
-  ?at_least:int -> ?at_most:int -> ?label:string -> Charset.t -> string
-(** [take_while_set set] reads bytes that belong to [set]. The result, the
-    [~at_least] and [~at_most] limits, and the errors are the same as
-    {!take_while}.
-
-    Raises [Invalid_argument] when [at_most] is negative or below [at_least].
-    Unstable: [~at_most] can change in a 1.x release.
-
-    Example:
-    {@ocaml[
-    let field_char =
-      Charset.of_predicate (fun c -> c = '\t' || (c >= ' ' && c <> '\127'))
-
-    let value () = take_while_set ~at_most:8190 field_char
-    ]} *)
-
-val skip_while_set : Charset.t -> unit
-(** [skip_while_set set] advances past bytes that belong to [set]. Like
-    {!skip_while}, it builds no string, and it succeeds when the first byte is
-    not in [set].
-
-    Example:
-    {@ocaml[
-    let ows = Charset.of_predicate (fun c -> c = ' ' || c = '\t')
-    let skip_ows () = skip_while_set ows
+    let is_ows c = c = ' ' || c = '\t'
+    let ows = Charset.of_predicate is_ows
+    let skip_ows () = skip_while ~set:ows is_ows
     ]} *)
 
 val take_until : ?at_most:int -> ?label:string -> string -> string
@@ -620,14 +612,10 @@ val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
     the whitespace in front of it, and leaves them unread. Runs entirely in a
     single operation for maximum efficiency. *)
 
-val take_while_span : (char -> bool) -> span
+val take_while_span : ?set:Charset.t -> (char -> bool) -> span
 (** [take_while_span fun] like {!take_while} but returns a zero-copy
     {!type:span} instead of allocating a string. No memory allocation until you
-    call {!span_to_string}. *)
-
-val take_while_span_set : Charset.t -> span
-(** [take_while_span_set set] is {!take_while_set} with no limits, returning a
-    {!type:span} like {!take_while_span}. *)
+    call {!span_to_string}. [~set] is as in {!take_while}. *)
 
 val sep_by_take_span :
   ws:(char -> bool) -> sep:char -> (char -> bool) -> span list
@@ -2439,20 +2427,12 @@ val take_iter : int -> (span -> unit) -> unit
       )
     ]} *)
 
-val take_while_iter : (char -> bool) -> (span -> unit) -> unit
+val take_while_iter : ?set:Charset.t -> (char -> bool) -> (span -> unit) -> unit
 [@@alert unstable "This value can change in a 1.x release."]
 (** [take_while_iter pred f] reads bytes while [pred] holds, like {!take_while},
     and gives them to [f] in pieces as {!take_iter} does. It never fails. When
-    the first byte does not match, [f] is not called.
-
-    Unstable: this function can change in a 1.x release. *)
-
-val take_while_iter_set : Charset.t -> (span -> unit) -> unit
-[@@alert unstable "This value can change in a 1.x release."]
-(** [take_while_iter_set set f] reads bytes that belong to [set], like
-    {!take_while_set}, and gives them to [f] in pieces as {!take_while_iter}
-    does. It never fails. When the first byte is not in [set], [f] is not
-    called.
+    the first byte does not match, [f] is not called. [~set] is as in
+    {!take_while}.
 
     Unstable: this function can change in a 1.x release. *)
 
