@@ -515,6 +515,121 @@ let test_fail_ties () =
     (fun () -> Parseff.or_ (fun () -> Parseff.error Cause_e) boom ())
     "Error@0 E"
 
+let test_fail_expected_merges () =
+  both_runners show_unit "let"
+    (Parseff.or_
+       (fun () -> Parseff.fail_expected "name")
+       (fun () -> ignore (Parseff.char '1'))
+    )
+    {|Error@0 Expected "expected name or '1', found 'let'"|}
+
+let test_fail_expected_at_start_of_a_read () =
+  let reserved () =
+    let at = Parseff.position () in
+    ignore (Parseff.literal "let");
+    Parseff.fail_expected ~at "name"
+  in
+  both_runners show_unit "let" reserved
+    {|Error@0 Expected "expected name, found 'let'"|};
+  both_runners show_unit "let"
+    (fun () ->
+      Parseff.or_ reserved
+        (fun () ->
+          Parseff.keyword "let";
+          ()
+        )
+        ()
+    )
+    "Ok ()"
+
+let test_fail_wins_over_fail_expected () =
+  both_runners show_unit "x"
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.fail_expected "name")
+        (fun () -> Parseff.fail "reserved")
+        ()
+    )
+    {|Error@0 Failed "reserved"|};
+  both_runners show_unit "x"
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.fail "reserved")
+        (fun () -> Parseff.fail_expected "name")
+        ()
+    )
+    {|Error@0 Failed "reserved"|};
+  both_runners show_unit "x"
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.fail_expected "name")
+        (fun () -> Parseff.error Cause_e)
+        ()
+    )
+    "Error@0 E";
+  both_runners show_unit "x"
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.error Cause_e)
+        (fun () -> Parseff.fail_expected "name")
+        ()
+    )
+    "Error@0 E"
+
+let test_fail_expected_is_relabeled () =
+  both_runners show_unit "x"
+    (fun () -> Parseff.expect "a name" (fun () -> Parseff.fail_expected "word"))
+    {|Error@0 Expected "expected a name, found 'x'"|};
+  both_runners show_unit "let"
+    (fun () ->
+      Parseff.expect "statement" (fun () ->
+          ignore (Parseff.literal "let");
+          Parseff.fail_expected "name"
+      )
+    )
+    {|Error@3 Expected "expected name, found end of input"|};
+  both_runners show_unit "x"
+    (fun () ->
+      ignore
+        (Parseff.one_of_labeled
+           [ ("a name", fun () -> Parseff.fail_expected "word") ]
+           ()
+        )
+    )
+    {|Error@0 Expected "expected a name, found 'x'"|}
+
+let test_fail_expected_furthest_wins () =
+  both_runners show_unit "abc"
+    (fun () ->
+      Parseff.or_
+        (fun () ->
+          ignore (Parseff.literal "ab");
+          Parseff.fail_expected "name"
+        )
+        (fun () -> ignore (Parseff.char 'q'))
+        ()
+    )
+    {|Error@2 Expected "expected name, found 'c'"|};
+  both_runners show_unit "x"
+    (fun () -> Parseff.fail_expected ~at:(-1) "name")
+    {|Error@0 Expected "expected name, found 'x'"|}
+
+let test_fail_expected_backtracks () =
+  both_runners show_int_option "x"
+    (Parseff.optional (fun () -> Parseff.fail_expected "name"))
+    "Ok None";
+  both_runners show_unit "x"
+    (fun () ->
+      Parseff.or_
+        (fun () ->
+          Parseff.cut ();
+          Parseff.fail_expected "name"
+        )
+        (fun () -> ignore (Parseff.char '1'))
+        ()
+    )
+    {|Error@0 Expected "expected name, found 'x'"|}
+
 let test_expect_keeps_failure () =
   let boom () = Parseff.fail "boom" in
   both_runners show_unit "x"
@@ -4552,6 +4667,17 @@ let () =
             test_fail_behind_furthest_ignored;
           test_case "fail ties" `Quick test_fail_ties;
           test_case "expect keeps failure" `Quick test_expect_keeps_failure;
+          test_case "fail_expected merges" `Quick test_fail_expected_merges;
+          test_case "fail_expected at the start of a read" `Quick
+            test_fail_expected_at_start_of_a_read;
+          test_case "fail wins over fail_expected" `Quick
+            test_fail_wins_over_fail_expected;
+          test_case "fail_expected is relabeled" `Quick
+            test_fail_expected_is_relabeled;
+          test_case "fail_expected furthest wins" `Quick
+            test_fail_expected_furthest_wins;
+          test_case "fail_expected backtracks" `Quick
+            test_fail_expected_backtracks;
           test_case "cut then fail is final" `Quick test_cut_fail_is_final;
           test_case "cut then fail keeps contexts" `Quick
             test_cut_fail_keeps_contexts;

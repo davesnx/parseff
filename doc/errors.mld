@@ -134,6 +134,28 @@ address:1:4: [error] octet out of range
   * note: octets go from 0 to 255
 v}
 
+{1 [fail_expected]}
+
+Fail with an [expected <label>] error, at the current position or at [~at].
+The label merges with the other alternatives expected there, and
+{!val:Parseff.or_} tries the next branch. Use it when a check on a value
+already read should take part in the expected set. {!val:Parseff.fail} and
+{!val:Parseff.error} stay separate messages: at the same position either of
+them is reported instead of the label.
+
+{@ocaml skip[val fail_expected : ?at:int -> string -> 'a]}
+
+{@ocaml[
+let reserved_name () =
+  let at = Parseff.position () in
+  let s =
+    Parseff.take_while ~at_least:1
+      (fun c -> c >= 'a' && c <= 'z')
+      ~label:"name"
+  in
+  if s = "let" then Parseff.fail_expected ~at "name" else s
+]}
+
 {1 [error]}
 
 Abort parsing with a custom error value. {!type:Parseff.custom_error} is an

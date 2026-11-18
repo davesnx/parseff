@@ -624,7 +624,9 @@ val fail :
     next option. The parse reports [Failed msg] only when it is the furthest
     failure, as {!parse} says. At the same position, a [fail] wins over
     [Expected], and between two failures of [fail] or {!val-error} the first one
-    wins. {!expect} and {!one_of_labeled} do not relabel it.
+    wins. {!expect} and {!one_of_labeled} do not relabel it. To record
+    [expected <label>] and merge with the other alternatives, use
+    {!fail_expected}.
 
     To make the failure final for the enclosing combinators, call {!cut} before
     it: after [cut (); fail msg], no enclosing {!or_}, {!many} or similar
@@ -640,6 +642,36 @@ val fail :
         n
       else
         fail "number out of range"
+    ]} *)
+
+val fail_expected : ?at:int -> string -> 'a
+(** [fail_expected label] fails with [expected <label>] at the current position.
+    [~at] records the failure at that byte offset instead, so a check on a value
+    already read can fail at the position from before the read. A negative [at]
+    means the current position.
+
+    The failure is an ordinary [Expected] failure. {!or_}, {!one_of}, {!many},
+    {!sep_by}, {!optional}, the [fold_*] combinators and {!look_ahead} try the
+    next option, and at the same position the label merges with the other
+    alternatives. {!expect} and {!one_of_labeled} relabel it when it is where
+    the parser started, as they relabel a primitive. A {!fail} or {!error} at
+    the same position is reported instead, as it is for every [Expected]
+    failure. Further on, the furthest failure wins, so a [fail_expected] past a
+    {!fail} replaces that message.
+
+    {!identifier} uses this for a reserved word.
+
+    Example:
+    {@ocaml[
+    let reserved_name () =
+      let at = position () in
+      let s =
+        take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"name"
+      in
+      if s = "let" then
+        fail_expected ~at "name"
+      else
+        s
     ]} *)
 
 val error :
@@ -2205,12 +2237,16 @@ val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
     let comma () = token (fun () -> char ',')
     ]} *)
 
+val is_ident_char : char -> bool
+(** [is_ident_char c] is true for an ASCII letter, a digit or [_]. This is the
+    default continuation class of {!keyword}. *)
+
 val keyword : ?is_ident:(char -> bool) -> string -> unit
 (** [keyword s] matches the literal [s] only when the next byte cannot continue
     an identifier, so [keyword "let"] fails on ["letter"]. [is_ident] receives
-    that one byte; the default accepts ASCII letters, digits and [_]. A failure
-    is reported at the start of [s]. In streaming, [keyword] needs a backtrack
-    window of [String.length s + 1] bytes, one more than {!literal}. Raises
+    that one byte; the default is {!is_ident_char}. A failure is reported at the
+    start of [s]. In streaming, [keyword] needs a backtrack window of
+    [String.length s + 1] bytes, one more than {!literal}. Raises
     [Invalid_argument] if [s] is empty.
 
     Example:
@@ -2219,6 +2255,43 @@ val keyword : ?is_ident:(char -> bool) -> string -> unit
       keyword "let";
       skip_whitespace ();
       take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"name"
+    ]} *)
+
+val identifier :
+  ?label:string ->
+  ?reserved:(string -> bool) ->
+  (char -> bool) ->
+  (char -> bool) ->
+  string
+(** [identifier start inner] reads one byte for which [start] is true, then the
+    bytes for which [inner] is true, and returns them. The first byte is tested
+    only with [start]. It fails with [expected <label>] where it started when
+    that byte does not satisfy [start], or when [reserved] returns true for the
+    word. The default label is ["identifier"]. [reserved] defaults to a function
+    that always returns false.
+
+    Both failures are ordinary [Expected] failures, as from {!fail_expected}:
+    {!or_} tries the next branch, and the label merges with the other
+    alternatives at that position. The [found] text is the usual one, so a
+    reserved ["let"] reads [expected identifier, found 'let']. A word whose
+    later bytes are not {!is_ident_char}, such as ["foo-bar"], is reported only
+    up to the first such byte.
+
+    On a stream, the word and the byte after it must fit in the backtrack
+    window. The scan keeps the start so the failure can be reported there, and
+    it reads one byte past the word to know the word has ended.
+
+    Example:
+    {@ocaml[
+    let is_start c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+
+    let reserved = function
+      | "let" | "in" | "if" | "then" | "else" ->
+          true
+      | _ ->
+          false
+
+    let name () = Parseff.identifier ~reserved is_start is_ident_char
     ]} *)
 
 val alphanum : unit -> char
