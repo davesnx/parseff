@@ -879,7 +879,7 @@ let bigstring_source ~size input =
       end
   )
 
-let bigstring_sizes = [ 1; 7; 65_536 ]
+let bigstring_sizes = [ 1; 7; 1_021; 65_536 ]
 
 let bytes_source ~size input =
   let pos = ref 0 in

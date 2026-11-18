@@ -2630,8 +2630,8 @@ type 'a partial
     The parse stops there, and the next {!feed} resumes it with the chunk. This
     is one effect for each chunk that the parser waits for. {!parse} and
     {!parse_source} use no effects, and {!parse_partial} does not change them. A
-    454-byte HTTP request head in one chunk takes about 15000 instructions with
-    {!parse_partial} and 13800 with {!parse_source}, 9% more.
+    454-byte HTTP request head in one chunk takes about 14500 instructions with
+    {!parse_partial} and 13400 with {!parse_source}, 8% more.
 
     A partial parse always stops after the value and returns the bytes that
     follow it. To require the whole input, end the parser with {!end_of_input}:

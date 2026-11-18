@@ -581,6 +581,35 @@ let test_leftover_not_read () =
   | _ ->
       Alcotest.fail "expected Done (Ok (42, \"abc\"))"
 
+let test_leftover_whole_input () =
+  let t =
+    Parseff.parse_partial (fun () ->
+        Parseff.look_ahead (fun () -> Parseff.literal "abc")
+    )
+  in
+  ( match Parseff.feed t "abc" with
+  | Parseff.Done (Ok ((), "abc")) ->
+      ()
+  | _ ->
+      Alcotest.fail "feed: expected Done (Ok ((), \"abc\"))"
+  );
+  let t =
+    Parseff.parse_partial (fun () ->
+        Parseff.look_ahead (fun () -> Parseff.take_while (fun _ -> true))
+    )
+  in
+  ( match Parseff.feed t "abc" with
+  | Parseff.Await ->
+      ()
+  | Parseff.Done _ ->
+      Alcotest.fail "feed: expected Await"
+  );
+  match Parseff.finish t with
+  | Ok ("abc", "abc") ->
+      ()
+  | _ ->
+      Alcotest.fail "finish: expected Ok (\"abc\", \"abc\")"
+
 let values_of_stream chunks =
   let start () = Parseff.parse_partial request_line in
   let rec drive t values = function
@@ -1006,6 +1035,8 @@ let () =
             test_leftover_after_frame;
           Alcotest.test_case "chunk the parser did not read" `Quick
             test_leftover_not_read;
+          Alcotest.test_case "chunk the parser only peeked at" `Quick
+            test_leftover_whole_input;
           Alcotest.test_case "many values by restart" `Quick test_many_values;
           Alcotest.test_case "many values, then an error" `Quick
             test_many_values_error;

@@ -1244,6 +1244,13 @@ let[@inline never] handle_location st =
     col = st.pos - idx.starts.(line_idx) + 1;
   }
 
+let buffer_room kept n =
+  if kept + n + imax kept n > young_buf_size && (2 * kept) + n <= young_buf_size
+  then
+    young_buf_size - kept - n
+  else
+    imax kept n
+
 let[@inline never] relocate st ~floor ~adopt n =
   let cur_len = st.input_len - st.base in
   let floor = imax 0 (floor - 1) in
@@ -1260,17 +1267,8 @@ let[@inline never] relocate st ~floor ~adopt n =
     st.input <- Bytes.unsafe_of_string adopt;
     true
   end else begin
-    let room =
-      if
-        kept + n + imax kept n > young_buf_size
-        && (2 * kept) + n <= young_buf_size
-      then
-        young_buf_size - kept - n
-      else
-        imax kept n
-    in
-    let buf = Bytes.create (kept + n + room) in
-    Bytes.blit st.input drop buf 0 kept;
+    let buf = Bytes.create (kept + n + buffer_room kept n) in
+    if kept > 0 then Bytes.blit st.input drop buf 0 kept;
     st.input <- buf;
     false
   end
@@ -1310,7 +1308,9 @@ let blit_bigstring src src_off dst dst_off n =
   done
 
 let append_bigstring st ~floor src off n =
-  if Bytes.length st.input - (st.input_len - st.base) < n then
+  if st.input_len = st.base then
+    st.input <- Bytes.create (n + buffer_room 0 n)
+  else if Bytes.length st.input - (st.input_len - st.base) < n then
     ignore (relocate st ~floor ~adopt:"" n : bool);
   blit_bigstring src off st.input (st.input_len - st.base) n;
   st.input_len <- st.input_len + n
@@ -1429,20 +1429,22 @@ let[@inline never] rec fill st ~keep_from need =
             | Chunks c ->
                 let avail = chunk_avail st c room in
                 let off = c.pending_pos in
-                let n =
-                  if
-                    st.input_len = st.base && off = 0
-                    && avail = String.length c.pending
-                  then
-                    avail
-                  else
-                    imin avail default_buf_size
-                in
-                if n > 0 then begin
-                  c.pending_pos <- off + n;
-                  append st ~floor ~own:true c.pending off n
-                end;
-                n
+                if
+                  avail > 0 && st.input_len = st.base && off = 0
+                  && avail = String.length c.pending
+                then begin
+                  c.pending_pos <- avail;
+                  st.input <- Bytes.unsafe_of_string c.pending;
+                  st.input_len <- st.input_len + avail;
+                  avail
+                end else begin
+                  let n = imin avail default_buf_size in
+                  if n > 0 then begin
+                    c.pending_pos <- off + n;
+                    append st ~floor ~own:true c.pending off n
+                  end;
+                  n
+                end
             | other -> (
                 match other with
                 | Bigstrings b ->
@@ -6956,9 +6958,13 @@ let parse_source_each ?(max_depth = 128)
 type _ Effect.t += Need : string option Effect.t
 type 'a step = Await | Done of ('a * string, error) Stdlib.result
 
+type 'a outcome =
+  | Finished of ('a * string, error) Stdlib.result
+  | Paused of (string option, 'a outcome) Effect.Deep.continuation
+
 type 'a status =
-  | Fresh of (unit -> 'a step)
-  | Waiting of (string option, 'a step) Effect.Deep.continuation
+  | Fresh of (unit -> ('a * string, error) Stdlib.result)
+  | Waiting of (string option, 'a outcome) Effect.Deep.continuation
   | Running
   | Ended
 
@@ -6968,10 +6974,25 @@ type 'a partial = {
   mutable closed : bool;
 }
 
+let pause_handler =
+  {
+    Effect.Deep.retc = (fun r -> Finished r);
+    exnc =
+      (fun exn ->
+        Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+      );
+    effc =
+      (fun (type b) (eff : b Effect.t) ->
+        match eff with
+        | Need ->
+            Some (fun (k : (b, _) Effect.Deep.continuation) -> Paused k)
+        | _ ->
+            None
+      );
+  }
+
 let leftover t st c =
-  let buffered =
-    Bytes.sub_string st.input (st.pos - st.base) (st.input_len - st.pos)
-  in
+  let buffered = slice st st.pos (st.input_len - st.pos) in
   let rest = String.length c.pending - c.pending_pos in
   let pending =
     if rest = 0 then
@@ -7007,57 +7028,47 @@ let parse_partial ?(max_depth = 128)
   let c = { next; pending = ""; pending_pos = 0 } in
   let src = Source.make ~initial:"" ~eof:false (Chunks c) in
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
-  let body () =
-    match run st ~consume:`Partial ~diagnostics parser with
-    | Ok v ->
-        Done (Ok (v, leftover t st c))
-    | Error e ->
-        Done (Error e)
-  in
-  let effc : type b.
-      b Effect.t -> ((b, 'a step) Effect.Deep.continuation -> 'a step) option =
-    function
-    | Need ->
-        Some
-          (fun k ->
-            t.status <- Waiting k;
-            Await
-          )
-    | _ ->
-        None
-  in
-  let exnc exn =
-    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
-  in
   t.status <-
     Fresh
-      (fun () -> Effect.Deep.match_with body () { retc = Fun.id; exnc; effc });
+      (fun () ->
+        match run st ~consume:`Partial ~diagnostics parser with
+        | Ok v ->
+            Ok (v, leftover t st c)
+        | Error _ as e ->
+            e
+      );
   t
 
 let step name t chunk =
-  let resume =
-    match t.status with
-    | Fresh run ->
-        fun () ->
-          t.first <- chunk;
-          run ()
-    | Waiting k ->
-        fun () -> Effect.Deep.continue k chunk
-    | Running ->
-        invalid_arg ("Parseff." ^ name ^ ": called from its own parser")
-    | Ended ->
-        invalid_arg ("Parseff." ^ name ^ ": the parse is done")
-  in
+  let status = t.status in
+  ( match status with
+  | Fresh _ | Waiting _ ->
+      ()
+  | Running ->
+      invalid_arg ("Parseff." ^ name ^ ": called from its own parser")
+  | Ended ->
+      invalid_arg ("Parseff." ^ name ^ ": the parse is done")
+  );
   if State.current () != State.none then
     invalid_arg ("Parseff." ^ name ^ ": called from inside a parser");
   if chunk = None then t.closed <- true;
   t.status <- Running;
-  match resume () with
-  | Await ->
+  match
+    match status with
+    | Fresh body ->
+        t.first <- chunk;
+        Effect.Deep.match_with body () pause_handler
+    | Waiting k ->
+        Effect.Deep.continue k chunk
+    | Running | Ended ->
+        assert false
+  with
+  | Paused k ->
+      t.status <- Waiting k;
       Await
-  | Done _ as done_ ->
+  | Finished r ->
       t.status <- Ended;
-      done_
+      Done r
   | exception exn ->
       let bt = Printexc.get_raw_backtrace () in
       t.status <- Ended;
