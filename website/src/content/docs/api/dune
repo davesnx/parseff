@@ -119,3 +119,31 @@
  (action
   (system
    "printf '%s\\n' '---' 'title: Streaming' 'description: Parse from files, channels, and custom readers' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
+
+(rule
+ (alias generate-markdown)
+ (enabled_if
+  (= %{env:PARSEFF_GENERATE_MARKDOWN=false} "true"))
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/binary.md
+  %{workspace_root}/website/fix-code-spans.sh)
+ (targets binary.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: Binary parsing' 'description: Big-endian and little-endian integers, floats and varints' '---' '' '<!-- This file is generated from doc/binary.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/binary.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
+
+(rule
+ (alias generate-markdown)
+ (enabled_if
+  (= %{env:PARSEFF_GENERATE_MARKDOWN=false} "true"))
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/utf8.md
+  %{workspace_root}/website/fix-code-spans.sh)
+ (targets utf8.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: UTF-8 parsing' 'description: Parse Unicode code points from UTF-8 input' '---' '' '<!-- This file is generated from doc/utf8.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/utf8.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))

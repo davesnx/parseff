@@ -1106,6 +1106,13 @@ val recover :
     error range starts: a {!fail} [~from] an earlier position, such as
     [number too large] for the last number of the input, is recovered.
 
+    When [sync] fails, [recover] fails with the failure of [sync]. A [sync] that
+    reads a closing token fails at the end of the input when the token is
+    missing: [skip_while (fun c -> c <> ';'); ignore (char ';')] fails when the
+    last statement has no [;]. Make each token that [sync] reads optional, as in
+    [ignore (optional (fun () -> char ';') ())], so that [sync] does not fail
+    there.
+
     Example:
     {@ocaml[
     let assignment errors () =
