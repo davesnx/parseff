@@ -76,7 +76,7 @@ let test_keyword_merges_alternatives () =
     )
     "Error@0 expected \"in\" or \"let\", found 'inx'"
 
-let identifier () =
+let letters () =
   Parseff.take_while ~at_least:1
     (fun c -> c >= 'a' && c <= 'z')
     ~label:"identifier"
@@ -88,7 +88,7 @@ let test_keyword_falls_back_to_identifier () =
         Parseff.keyword "in";
         "IN"
       )
-      identifier ()
+      letters ()
   in
   both show_string "int" token "Ok (\"int\", 3)";
   both show_string "in" token "Ok (\"IN\", 2)"
@@ -271,13 +271,13 @@ let test_identifier_needs_one_more_byte_of_window () =
 
 let test_lexeme_skips_whitespace () =
   both show_string "abc  \n\tx"
-    (fun () -> Parseff.lexeme identifier)
+    (fun () -> Parseff.lexeme letters)
     "Ok (\"abc\", 7)";
   both ~consume:`All show_string "abc"
-    (fun () -> Parseff.lexeme identifier)
+    (fun () -> Parseff.lexeme letters)
     "Ok (\"abc\", 3)";
   both show_string "1"
-    (fun () -> Parseff.lexeme identifier)
+    (fun () -> Parseff.lexeme letters)
     "Error@0 expected identifier, found '1'"
 
 let skip_space_and_comments () =
