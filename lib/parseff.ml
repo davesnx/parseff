@@ -1981,6 +1981,53 @@ let[@inline always] handle_take_while_span st pred =
 let[@inline always] handle_skip_while st pred =
   st.pos <- scan_while st ~keep_from:no_keep st.pos pred
 
+module Charset = struct
+  type t = string
+
+  let of_predicate f =
+    String.init 256 (fun i ->
+        if f (Char.chr i) then
+          '\001'
+        else
+          '\000'
+    )
+
+  let[@inline always] mem set c = String.unsafe_get set (Char.code c) <> '\000'
+end
+
+let[@inline never] scan_set_refilling st ~keep_from start set =
+  let p = ref start in
+  let continue_loop = ref true in
+  while !continue_loop do
+    let base = st.base in
+    let inp = st.input in
+    let len = st.input_len - base in
+    let i = ref (!p - base) in
+    while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
+      incr i
+    done;
+    p := !i + base;
+    if !i < len || not (refill_at st keep_from !p) then continue_loop := false
+  done;
+  !p
+
+let[@inline always] scan_set st ~keep_from start set =
+  let base = st.base in
+  let inp = st.input in
+  let len = st.input_len - base in
+  let i = ref (start - base) in
+  while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
+    incr i
+  done;
+  if !i < len then
+    !i + base
+  else
+    match st.source with
+    | None ->
+        !i + base
+    | Some _ ->
+        scan_set_refilling st ~keep_from (!i + base) set
+
 let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
   let start = st.pos in
   let first_end = scan_while st ~keep_from:start start take_pred in
@@ -2563,6 +2610,39 @@ let[@inline never] take_while_at_most st at_least at_most pred =
     fail_limit st ~from:start ~upto:end_pos at_most;
   end_pos
 
+let[@inline never] scan_set_until st ~keep_from start stop set =
+  let p = ref start in
+  let continue_loop = ref true in
+  while !continue_loop do
+    let base = st.base in
+    let inp = st.input in
+    let len = imin (st.input_len - base) (stop - base) in
+    let i = ref (!p - base) in
+    while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
+      incr i
+    done;
+    p := !i + base;
+    if !i < len || !p >= stop || not (refill_at st keep_from !p) then
+      continue_loop := false
+  done;
+  !p
+
+let[@inline never] take_while_set_at_most st at_least at_most set =
+  if at_most < 0 || at_most < at_least then
+    invalid_arg
+      "Parseff.take_while_set: at_most must be at least 0 and at least at_least";
+  let start = st.pos in
+  let stop =
+    if at_most >= max_int - start then
+      max_int
+    else
+      start + at_most + 1
+  in
+  let end_pos = scan_set_until st ~keep_from:start start stop set in
+  if end_pos - start > at_most then
+    fail_limit st ~from:start ~upto:end_pos at_most;
+  end_pos
+
 let[@inline never] find_terminator st ~name ~keep_from ~at_most ?label t =
   let m = String.length t in
   if m = 0 then invalid_arg (name ^ ": empty terminator");
@@ -2647,6 +2727,39 @@ let[@inline] skip_while pred =
 let[@inline] take_while_span pred =
   let st = get_state () in
   handle_take_while_span st pred
+
+let[@inline] take_while_set ?(at_least = 0) ?at_most ?label set =
+  let st = get_state () in
+  let start = st.pos in
+  let end_pos =
+    match at_most with
+    | None ->
+        scan_set st ~keep_from:start start set
+    | Some n ->
+        take_while_set_at_most st at_least n set
+  in
+  st.pos <- end_pos;
+  let n = end_pos - start in
+  if n < at_least then
+    begin match label with
+    | Some l ->
+        fail_str_cold st end_pos tag_label l
+    | None ->
+        fail_at_least st at_least
+  end
+  else
+    slice st start n
+
+let[@inline] skip_while_set set =
+  let st = get_state () in
+  st.pos <- scan_set st ~keep_from:no_keep st.pos set
+
+let[@inline] take_while_span_set set =
+  let st = get_state () in
+  let start = st.pos in
+  let end_pos = scan_set st ~keep_from:start start set in
+  st.pos <- end_pos;
+  span st start (end_pos - start)
 
 let take_until ?(at_most = max_int) ?label t =
   let st = get_state () in
@@ -3356,6 +3469,18 @@ let take_while_iter pred (f : span -> unit) =
   let scan p stop =
     let i = ref p in
     while !i < stop && pred (char_at st !i) do
+      incr i
+    done;
+    !i
+  in
+  ignore (iter_input st max_int scan f : int)
+
+let take_while_iter_set set (f : span -> unit) =
+  let st = get_state () in
+  check_sealable st "take_while_iter_set";
+  let scan p stop =
+    let i = ref p in
+    while !i < stop && Charset.mem set (char_at st !i) do
       incr i
     done;
     !i

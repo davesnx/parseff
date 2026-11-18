@@ -73,6 +73,22 @@ let is_hex = function
       false
 
 let is_zero c = c = '0'
+let tchar = Parseff.Charset.of_predicate is_tchar
+let field_char = Parseff.Charset.of_predicate is_field_char
+let target_char = Parseff.Charset.of_predicate is_target_char
+let ows = Parseff.Charset.of_predicate is_ows
+let digit = Parseff.Charset.of_predicate is_digit
+let hex = Parseff.Charset.of_predicate is_hex
+let zero = Parseff.Charset.of_predicate is_zero
+
+let qdtext =
+  Parseff.Charset.of_predicate (fun c ->
+      c <> '"' && c <> '\\' && is_field_char c
+  )
+
+let form_key = Parseff.Charset.of_predicate (fun c -> c <> '=' && c <> '&')
+let form_value = Parseff.Charset.of_predicate (fun c -> c <> '&')
+let any_byte = Parseff.Charset.of_predicate (fun _ -> true)
 let crlf () = Parseff.literal "\r\n"
 
 let trim_ows s =
@@ -97,12 +113,12 @@ let version () =
 
 let field () =
   let name =
-    Parseff.take_while ~at_least:1 ~at_most:max_name ~label:"field name"
-      is_tchar
+    Parseff.take_while_set ~at_least:1 ~at_most:max_name ~label:"field name"
+      tchar
   in
   let _ = Parseff.char ':' in
-  Parseff.skip_while is_ows;
-  let value = Parseff.take_while ~at_most:max_value is_field_char in
+  Parseff.skip_while_set ows;
+  let value = Parseff.take_while_set ~at_most:max_value field_char in
   crlf ();
   (name, trim_ows value)
 
@@ -117,15 +133,15 @@ let request_head () =
   if Parseff.peek_char () = Some '\r' then crlf ();
   let meth =
     Parseff.context "method" (fun () ->
-        Parseff.take_while ~at_least:1 ~at_most:max_method ~label:"method"
-          is_tchar
+        Parseff.take_while_set ~at_least:1 ~at_most:max_method ~label:"method"
+          tchar
     )
   in
   let _ = Parseff.char ' ' in
   let target =
     Parseff.context "request target" (fun () ->
-        Parseff.take_while ~at_least:1 ~at_most:max_target
-          ~label:"request target" is_target_char
+        Parseff.take_while_set ~at_least:1 ~at_most:max_target
+          ~label:"request target" target_char
     )
   in
   let _ = Parseff.char ' ' in
@@ -135,7 +151,7 @@ let request_head () =
   { meth; target; version; headers }
 
 let status () =
-  let code = Parseff.take_while is_digit in
+  let code = Parseff.take_while_set digit in
   match String.length code with
   | 0 ->
       Parseff.fail "status code empty"
@@ -156,8 +172,8 @@ let folded_fields () =
         | _ when n = max_headers ->
             Parseff.error (Parseff.Limit_exceeded { limit = max_headers })
         | Some (' ' | '\t'), (name, value) :: rest ->
-            Parseff.skip_while is_ows;
-            let more = Parseff.take_while ~at_most:max_value is_field_char in
+            Parseff.skip_while_set ows;
+            let more = Parseff.take_while_set ~at_most:max_value field_char in
             crlf ();
             let value =
               if value = "" then
@@ -189,7 +205,7 @@ let response_head () =
   let _ = Parseff.char ' ' in
   let status = status () in
   let _ = Parseff.char ' ' in
-  let reason = Parseff.take_while ~at_most:max_value is_field_char in
+  let reason = Parseff.take_while_set ~at_most:max_value field_char in
   crlf ();
   let headers = folded_fields () in
   { version; status; reason; headers }
@@ -222,12 +238,12 @@ let list_elements values =
 let chunk_size () =
   Parseff.context "chunk size" (fun () ->
       let start = Parseff.position () in
-      Parseff.skip_while is_zero;
+      Parseff.skip_while_set zero;
       let digits =
-        Parseff.take_while ~at_most:max_chunk_digits ~label:"chunk size" is_hex
+        Parseff.take_while_set ~at_most:max_chunk_digits ~label:"chunk size" hex
       in
       if Parseff.position () = start then
-        ignore (Parseff.take_while ~at_least:1 ~label:"chunk size" is_hex);
+        ignore (Parseff.take_while_set ~at_least:1 ~label:"chunk size" hex);
       if digits = "" then
         0
       else
@@ -235,19 +251,18 @@ let chunk_size () =
   )
 
 let token label =
-  Parseff.take_while ~at_least:1 ~at_most:max_name ~label is_tchar
+  Parseff.take_while_set ~at_least:1 ~at_most:max_name ~label tchar
 
 let quoted_string () =
   let _ = Parseff.char '"' in
   let rec rest () =
-    ignore
-      (Parseff.take_while ~at_most:max_value (fun c ->
-           c <> '"' && c <> '\\' && is_field_char c
-       )
-      );
+    ignore (Parseff.take_while_set ~at_most:max_value qdtext);
     if Parseff.peek_char () = Some '\\' then begin
       let _ = Parseff.char '\\' in
-      ignore (Parseff.satisfy ~label:"quoted character" is_field_char);
+      ignore
+        (Parseff.satisfy ~label:"quoted character"
+           (Parseff.Charset.mem field_char)
+        );
       rest ()
     end else
       ignore (Parseff.char '"')
@@ -255,16 +270,16 @@ let quoted_string () =
   rest ()
 
 let chunk_extension () =
-  Parseff.skip_while is_ows;
+  Parseff.skip_while_set ows;
   let _ = Parseff.char ';' in
-  Parseff.skip_while is_ows;
+  Parseff.skip_while_set ows;
   ignore (token "extension name");
   ignore
     (Parseff.optional
        (fun () ->
-         Parseff.skip_while is_ows;
+         Parseff.skip_while_set ows;
          let _ = Parseff.char '=' in
-         Parseff.skip_while is_ows;
+         Parseff.skip_while_set ows;
          Parseff.or_ quoted_string
            (fun () -> ignore (token "extension value"))
            ()
@@ -309,16 +324,12 @@ let form_decode s =
     (List.to_seq (Result.get_ok (Parseff.parse s (Parseff.many form_char))))
 
 let form_field () =
-  let key =
-    Parseff.take_while ~at_least:1 ~label:"form key" (fun c ->
-        c <> '=' && c <> '&'
-    )
-  in
+  let key = Parseff.take_while_set ~at_least:1 ~label:"form key" form_key in
   let value =
     Parseff.optional
       (fun () ->
         let _ = Parseff.char '=' in
-        Parseff.take_while (fun c -> c <> '&')
+        Parseff.take_while_set form_value
       )
       ()
   in
@@ -394,7 +405,7 @@ let response_body ~meth (head : response) =
   then
     body ~version:head.version head.headers
   else
-    Raw (Parseff.take_while (fun _ -> true))
+    Raw (Parseff.take_while_set any_byte)
 
 let request () =
   let head = Parseff.context "head" request_head in
