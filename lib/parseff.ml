@@ -2673,16 +2673,6 @@ let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
   let st = get_state () in
   fail_user st st.pos (Payload_failure (msg, { from; upto; notes; help }))
 
-let[@inline never] fail_expected ?(at = -1) label =
-  let st = get_state () in
-  let p =
-    if at < 0 then
-      st.pos
-    else
-      at
-  in
-  fail_str st p tag_label label
-
 let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
   let st = get_state () in
   if from < 0 && upto < 0 && notes == [] && help == None then
@@ -4522,13 +4512,13 @@ let identifier ?(label = "identifier") ?(reserved = accepts_any_word) start
     let end_pos = scan_while st ~keep_from:pos (pos + 1) inner in
     let word = slice st pos (end_pos - pos) in
     if reserved word then
-      fail_expected ~at:pos label
+      fail_str_cold st pos tag_label label
     else begin
       st.pos <- end_pos;
       word
     end
   end else
-    fail_expected ~at:pos label
+    fail_str_cold st pos tag_label label
 
 let is_alphanum_char c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
