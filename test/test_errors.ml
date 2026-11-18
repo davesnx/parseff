@@ -2363,7 +2363,7 @@ let test_migration_pattern () =
 let test_diagnostics_carry_the_error () =
   let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
-    Parseff.warn diagnostics "careful";
+    Parseff.warn (Warning.W "careful");
     Parseff.literal "ab";
     Parseff.literal "c";
     "c"
@@ -2374,7 +2374,7 @@ let test_diagnostics_carry_the_error () =
         "message" "expected \"c\", found 'x'"
         (Parseff.error_message error);
       match Parseff.Diagnostics.to_list diagnostics with
-      | [ { value = "careful"; pos = 0 } ] ->
+      | [ { value = { kind = Custom (Warning.W "careful"); _ }; pos = 0 } ] ->
           ()
       | _ ->
           Alcotest.fail "expected the diagnostic"

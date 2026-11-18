@@ -7,7 +7,7 @@ let test_ref_kept_after_backtrack () =
   let d = Diagnostics.create () in
   let bump () =
     incr r;
-    warn d "bump"
+    warn (Warning.W "bump")
   in
   let after_or =
     ok_exn
@@ -674,7 +674,7 @@ let test_escaping_exceptions () =
         parse ~diagnostics:d "a" (fun () ->
             wrap (fun () ->
                 Ref.set c 1;
-                warn d "w";
+                warn (Warning.W "w");
                 raise_it ()
             )
         )

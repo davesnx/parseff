@@ -15,7 +15,7 @@ same parsers, same result type, same error handling.
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?consume:[ `All | `Partial ] ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result]}
@@ -77,7 +77,7 @@ must get each value as it arrives.
 {@ocaml skip[val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   ?pending:(unit -> bool) ->
   Source.t ->

@@ -6,7 +6,7 @@ let recovering d ~sync ~hole p () = recover d ~sync p (fun _ -> hole)
 
 let errors d =
   List.map
-    (fun { Diagnostics.value = e; _ } -> (e.range.start, error_message e))
+    (fun { Diagnostics.value = e; _ } -> (e.range.start, Warning.text e))
     (Diagnostics.to_list d)
 
 let renders ~input d =
@@ -93,24 +93,24 @@ let test_grammar1 () =
     ]
     (renders ~input d)
 
-let capture_elem d () =
+let capture_elem () =
   match capture int_elem with
   | Ok v ->
       v
   | Error e ->
-      warn ~pos:e.range.start d e;
+      warn ~from:e.range.start (Warning.Recorded e);
       skip_elem ();
       Hole
 
 let entries d =
   List.map
-    (fun { Diagnostics.pos; value = e } -> (pos, error_message e))
+    (fun { Diagnostics.pos; value = e } -> (pos, Warning.text e))
     (Diagnostics.to_list d)
 
 let test_empty_element () =
   let case input value errors =
     let d = Diagnostics.create () in
-    let r = parse ~diagnostics:d input (array (capture_elem d)) in
+    let r = parse ~diagnostics:d input (array capture_elem) in
     Alcotest.(check string) (input ^ ": value") value (show_list pp_elt r);
     Alcotest.check errs (input ^ ": entries") errors (entries d)
   in
@@ -418,7 +418,7 @@ let test_failure_restores () =
         let e =
           capture (fun () ->
               ignore (char 'a');
-              warn d "inside";
+              warn (Warning.W "inside");
               ignore (char 'b');
               char 'c'
           )
@@ -700,11 +700,11 @@ let test_release_cut_passes_capture () =
 let test_release_moves_rewind_point () =
   let d = Diagnostics.create () in
   let body cell advance () =
-    warn d "before";
+    warn (Warning.W "before");
     Ref.set cell 1;
     literal "ab";
     advance ();
-    warn d "after";
+    warn (Warning.W "after");
     Ref.set cell 2;
     literal "cd";
     char '!'
@@ -718,7 +718,9 @@ let test_release_moves_rewind_point () =
       )
     in
     ( Result.get_ok r,
-      List.map (fun (e : _ Diagnostics.entry) -> e.value) (Diagnostics.to_list d)
+      List.map
+        (fun (e : Diagnostics.entry) -> Warning.text e.value)
+        (Diagnostics.to_list d)
     )
   in
   let outcome = Alcotest.(pair (triple string int int) (list string)) in
@@ -821,7 +823,7 @@ let test_inside_or () =
             | Ok _ ->
                 ()
             | Error e ->
-                warn d e
+                warn (Warning.Recorded e)
             );
             char 'z'
           )
@@ -1164,17 +1166,17 @@ let lost_string () =
 
 let to_line_end () = skip_while (fun c -> c <> '\n')
 
-let lost_argument d ~pos () =
+let lost_argument ~pos () =
   match capture lost_string with
   | Ok () ->
       ()
   | Error e ->
-      warn ~pos:(pos e) d e;
+      warn ~from:(pos e) (Warning.Recorded e);
       to_line_end ()
 
-let lost_call d ~pos () =
+let lost_call ~pos () =
   literal "print(";
-  lost_argument d ~pos ();
+  lost_argument ~pos ();
   ignore (char ')')
 
 let lost_top statement () =
@@ -1187,7 +1189,7 @@ let at_start (e : error) = e.range.start
 let show_entries l =
   List.map
     (fun { Diagnostics.pos; value = (e : error) } ->
-      (pos, (e.range.start, error_message e))
+      (pos, (e.range.start, Warning.text e))
     )
     l
 
@@ -1208,17 +1210,15 @@ let test_inner_error_removed () =
     [ unfinished ]
     (run (fun () ->
          literal "print(";
-         lost_argument d ~pos:at_start ()
+         lost_argument ~pos:at_start ()
      )
     );
   Alcotest.check errs "recover keeps only the outer error" [ no_closer ]
-    (run (fun () ->
-         recover d ~sync:to_line_end (lost_call d ~pos:at_start) ignore
-     )
+    (run (fun () -> recover d ~sync:to_line_end (lost_call ~pos:at_start) ignore)
     );
   Alcotest.check errs "capture removes the inner error" []
     (run (fun () ->
-         match capture (lost_call d ~pos:at_start) with
+         match capture (lost_call ~pos:at_start) with
          | Ok () ->
              ()
          | Error _ ->
@@ -1263,7 +1263,7 @@ let test_inside_look_ahead () =
           look_ahead (fun () ->
               let ok = capture (fun () -> char 'a') in
               let ko = capture (fun () -> char 'x') in
-              (match ko with Error e -> warn d e | Ok _ -> ());
+              (match ko with Error e -> warn (Warning.Recorded e) | Ok _ -> ());
               (ok, ko)
           )
         in
@@ -1300,7 +1300,7 @@ let test_nested () =
         | Ok _ ->
             ()
         | Error e ->
-            warn d e;
+            warn (Warning.Recorded e);
             ignore (char 'a')
         );
         char last
@@ -1324,7 +1324,7 @@ let test_nested () =
   let r2 = parse ~diagnostics:d "(ax" (fun () -> capture (outer ~last:'x')) in
   (match r2 with Ok (Ok 'x') -> () | _ -> Alcotest.fail "expected outer Ok");
   match Diagnostics.to_list d with
-  | [ { value = e; _ } ] ->
+  | [ { value = { kind = Custom (Warning.Recorded e); _ }; _ } ] ->
       Alcotest.(check string)
         "inner error" "expected 'b', found 'x'" (error_message e);
       Alcotest.(check (list string))
@@ -1416,28 +1416,21 @@ let test_many_outer_contexts () =
   let input = String.make 13 'a' ^ "!" in
   same_as_runner "12 levels" input (nest 0) (fun () -> char 'b')
 
-let note msg =
-  match capture (fun () -> (fail msg : unit)) with
-  | Error e ->
-      e
-  | Ok () ->
-      Alcotest.fail "expected a failure"
-
 let one_byte_reads input =
   Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
 
 let test_recover_record () =
   let d = Diagnostics.create () in
   let seen = ref [] in
-  let keep_inner (e : error Diagnostics.entry) inner =
-    seen := (e.pos, error_message e.value) :: !seen;
+  let keep_inner (e : Diagnostics.entry) inner =
+    seen := (e.pos, Warning.text e.value) :: !seen;
     if inner = [] then
       [ e ]
     else
       inner
   in
   let statement ?keep () =
-    recover ?keep d ~sync:to_line_end (lost_call d ~pos:at_start) ignore
+    recover ?keep d ~sync:to_line_end (lost_call ~pos:at_start) ignore
   in
   let run ?(source = false) ?keep () =
     seen := [];
@@ -1470,24 +1463,24 @@ let test_recover_record_scope () =
   let seen = ref [] in
   let r =
     parse ~diagnostics:d "a" (fun () ->
-        warn d (note "before");
+        warn (Warning.W "before");
         recover d
           ~keep:(fun _ inner ->
-            seen := List.map (fun x -> error_message x.Diagnostics.value) inner;
+            seen := List.map (fun x -> Warning.text x.Diagnostics.value) inner;
             []
           )
           ~sync:no_sync
           (fun () ->
-            warn d (note "inside");
+            warn (Warning.W "inside");
             ignore
               (optional
                  (fun () ->
-                   warn d (note "branch");
+                   warn (Warning.W "branch");
                    char 'b'
                  )
                  ()
               );
-            warn d (note "inside 2");
+            warn (Warning.W "inside 2");
             ignore (char 'b')
           )
           ignore
@@ -1498,7 +1491,7 @@ let test_recover_record_scope () =
     "only the entries of the failed parser" [ "inside"; "inside 2" ] !seen;
   Alcotest.(check (list string))
     "failure removes the entries" [ "before" ]
-    (List.map error_message (values d))
+    (List.map Warning.text (values d))
 
 let test_recover_record_order () =
   let d = Diagnostics.create () in
@@ -1513,9 +1506,9 @@ let test_recover_record_order () =
           ~sync:(fun () -> ())
           (fun () ->
             ignore (char 'a');
-            warn d (note "first");
+            warn (Warning.W "first");
             ignore (char 'b');
-            warn ~pos:0 d (note "second");
+            warn ~from:0 (Warning.W "second");
             ignore (char 'c');
             ignore (char '!')
           )
@@ -1524,7 +1517,7 @@ let test_recover_record_order () =
   in
   Alcotest.(check string) "value" "Ok" (show_error r);
   Alcotest.check entry_list "in the order recorded"
-    [ (1, (1, "first")); (0, (2, "second")) ]
+    [ (1, (1, "first")); (0, (0, "second")) ]
     !seen
 
 let test_recover_record_release () =
@@ -1537,10 +1530,10 @@ let test_recover_record_release () =
             ~sync:(fun () -> skip_while (fun c -> c <> ';'))
             (fun () ->
               ignore (char 'a');
-              warn d (note "before");
+              warn (Warning.W "before");
               commit ();
               ignore (char 'b');
-              warn d (note "after");
+              warn (Warning.W "after");
               ignore (char '!')
             )
             ignore
@@ -2151,24 +2144,24 @@ let test_release_keeps_inner_rewinds () =
     | Ok () ->
         Alcotest.fail "expected a failure"
   in
-  let empty_steps d cell () =
+  let empty_steps cell () =
     String.concat ""
       (many
          (fun () ->
            Ref.set cell 2;
-           warn d warning;
+           warn (Warning.Recorded warning);
            cut ();
            ""
          )
          ()
       )
   in
-  let plain = release_state (fun d cell -> empty_steps d cell ()) in
+  let plain = release_state (fun _ cell -> empty_steps cell ()) in
   Alcotest.check release_outcome "plain many undoes the empty step"
     ("Ok ", 0, 0) plain;
   Alcotest.check release_outcome "capture ~release:true" plain
-    (release_state (fun d cell ->
-         match capture ~release:true (empty_steps d cell) with
+    (release_state (fun _ cell ->
+         match capture ~release:true (empty_steps cell) with
          | Ok v ->
              v
          | Error _ ->
@@ -2177,7 +2170,7 @@ let test_release_keeps_inner_rewinds () =
     );
   Alcotest.check release_outcome "recover ~release:true" plain
     (release_state (fun d cell ->
-         recover ~release:true d ~sync:ignore (empty_steps d cell) (fun _ -> "H")
+         recover ~release:true d ~sync:ignore (empty_steps cell) (fun _ -> "H")
      )
     );
   Alcotest.check release_outcome "list ~sep ~release:true" plain
@@ -2187,7 +2180,7 @@ let test_release_keeps_inner_rewinds () =
               ~sep:(fun () -> ignore (char ','))
               d
               ~close:(fun () -> false)
-              ~sync:ignore (empty_steps d cell)
+              ~sync:ignore (empty_steps cell)
               (fun _ -> "H")
               ()
            )
@@ -2224,12 +2217,12 @@ let test_release_keeps_inner_rewinds () =
     );
   Alcotest.check release_outcome
     "a commit inside many seals many and does not reach the capture"
-    (release_state (fun d cell ->
+    (release_state (fun _ cell ->
          String.concat ""
            (many
               (fun () ->
                 Ref.set cell 2;
-                warn d warning;
+                warn (Warning.Recorded warning);
                 commit ();
                 ""
               )
@@ -2237,14 +2230,14 @@ let test_release_keeps_inner_rewinds () =
            )
      )
     )
-    (release_state (fun d cell ->
+    (release_state (fun _ cell ->
          match
            capture ~release:true (fun () ->
                String.concat ""
                  (many
                     (fun () ->
                       Ref.set cell 2;
-                      warn d warning;
+                      warn (Warning.Recorded warning);
                       commit ();
                       ""
                     )
@@ -2269,11 +2262,11 @@ let test_release_keeps_effects_before_the_cut () =
   in
   Alcotest.check release_outcome "the capture keeps what came before the cut"
     ("Ok E", 1, 3)
-    (release_state (fun d cell ->
+    (release_state (fun _ cell ->
          match
            capture ~release:true (fun () ->
                Ref.set cell 3;
-               warn d warning;
+               warn (Warning.Recorded warning);
                cut ();
                ignore (char 'y');
                "y"
@@ -2346,7 +2339,7 @@ let after_failure ~release ?(input = "x") body =
   let w = release_warning () in
   let effects ~warns () =
     Ref.set cell 1;
-    if warns then warn d w;
+    if warns then warn (Warning.Recorded w);
     cut ()
   in
   let r =
@@ -2377,17 +2370,17 @@ let test_release_clamps_the_capture () =
       ignore (many (fun () -> effects ~warns:false ()) ());
       Ref.set cell 2
   );
-  check "diagnostics: a warning after an empty step is removed" (fun d _ _ ->
+  check "diagnostics: a warning after an empty step is removed" (fun _ _ _ ->
       let w = release_warning () in
       ignore
         (many
            (fun () ->
-             warn d w;
+             warn (Warning.Recorded w);
              cut ()
            )
            ()
         );
-      warn d w
+      warn (Warning.Recorded w)
   )
 
 let test_release_construct_rewinds () =

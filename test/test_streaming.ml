@@ -654,7 +654,7 @@ let test_parse_source_consume_all_error_has_diagnostics () =
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
     Parseff.parse_source ~diagnostics src (fun () ->
-        Parseff.warn diagnostics "streaming-warning";
+        Parseff.warn (Warning.W "streaming-warning");
         Parseff.literal "y";
         "y"
     )
@@ -665,7 +665,7 @@ let test_parse_source_consume_all_error_has_diagnostics () =
   | Error { kind = Expected { found = Text _; _ }; _ } ->
       let got =
         List.map
-          (fun ({ value; _ } : string Parseff.Diagnostics.entry) -> value)
+          (fun ({ value; _ } : Parseff.Diagnostics.entry) -> Warning.text value)
           (Parseff.Diagnostics.to_list diagnostics)
       in
       Alcotest.(check (list string))

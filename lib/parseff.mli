@@ -155,7 +155,12 @@ type error_kind = private
           and [limit] is the configured [backtrack_window]. The error position
           is the parser position when the overflow happened. *)
 
+type severity = [ `Error | `Warning ]
+(** [`Warning] marks an error that {!val:warn} recorded. A parse failure and an
+    error that {!recover}, {!require} or {!list} recorded are [`Error]. *)
+
 type error = private {
+  severity : severity;
   kind : error_kind;
   range : range;
       (** The bytes the error is about, never reversed, empty at the end of the
@@ -217,39 +222,42 @@ val render_error :
     character column, because Parseff counts the characters of the line that it
     drops. The excerpt of the error line is then cut on the left with [...], and
     a [* while parsing] line for a context that starts in the dropped part of
-    the line says [from byte N]. When the error starts in the dropped part of
-    its line, the header column is [location.col], which counts bytes, the
-    excerpt shows the kept part of the line, and carets mark only the kept part
-    of the range, with no caret row when the whole range is dropped. Carets
-    count terminal cells, so a wide character such as [名] takes two and a
-    combining mark takes none, and a control byte, an invalid UTF-8 byte or a C1
-    control prints in the excerpt as the escape {!val:error_message} uses, such
-    as [\x1B], with as many carets as the escape has characters. An error with a
-    [help] text ends with a [* help:] line, and so does a [Depth_limit_exceeded]
-    or [Backtrack_window_exceeded] error. The rows the renderer adds never end
-    with a space, and source text is printed byte for byte. The result has no
-    trailing newline. *)
+    the line says [from byte N]. A [`Warning] error from {!val:warn} prints
+    [[warning]] in the header in place of [[error]]. When the error starts in
+    the dropped part of its line, the header column is [location.col], which
+    counts bytes, the excerpt shows the kept part of the line, and carets mark
+    only the kept part of the range, with no caret row when the whole range is
+    dropped. Carets count terminal cells, so a wide character such as [名] takes
+    two and a combining mark takes none, and a control byte, an invalid UTF-8
+    byte or a C1 control prints in the excerpt as the escape
+    {!val:error_message} uses, such as [\x1B], with as many carets as the escape
+    has characters. An error with a [help] text ends with a [* help:] line, and
+    so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded] error. The
+    rows the renderer adds never end with a space, and source text is printed
+    byte for byte. The result has no trailing newline. *)
 
 (** {1 Diagnostics} *)
 
 module Diagnostics : sig
-  type 'd entry = { pos : int; value : 'd }
-  (** A non-fatal diagnostic and the byte offset it refers to. *)
+  type entry = { pos : int; value : error }
+  (** A non-fatal diagnostic and the byte offset it refers to. [pos] is
+      [value.range.start]. [value.severity] is [`Warning] for a diagnostic from
+      {!val:Parseff.warn} and [`Error] for an error that {!val:Parseff.recover},
+      {!val:Parseff.require} or {!val:Parseff.list} recorded. *)
 
-  type 'd t
-  (** Collects the diagnostics of one parse. ['d] is the type of the values
-      given to {!val:Parseff.warn}. *)
+  type t
+  (** Collects the diagnostics of one parse. *)
 
-  val create : unit -> 'd t
+  val create : unit -> t
 
-  val to_list : 'd t -> 'd entry list
+  val to_list : t -> entry list
   (** Diagnostics in emission order. Available after the parse, on [Ok] and on
       [Error]. *)
 
-  val length : 'd t -> int
-  val is_empty : 'd t -> bool
+  val length : t -> int
+  val is_empty : t -> bool
 
-  val clear : 'd t -> unit
+  val clear : t -> unit
   (** Empties the collector. Raises [Invalid_argument] while a parse uses it. *)
 end
 
@@ -361,7 +369,7 @@ val print_trace : Format.formatter -> trace_event -> unit
 val parse :
   ?max_depth:int ->
   ?consume:[ `All | `Partial ] ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   string ->
   (unit -> 'a) ->
@@ -382,8 +390,8 @@ val parse :
     [Error]. With any other collector, {!recover}, {!require} and {!list} do not
     recover: the parse fails at the first error, as without them. Thus the same
     parser can report every error with [~diagnostics] and stop at the first one
-    without it. {!warn} records nothing when the runner got no [~diagnostics],
-    and raises [Invalid_argument] when it got another collector.
+    without it. {!warn} records its warnings in [diagnostics], and records
+    nothing when the runner got no [~diagnostics].
 
     [trace] receives a {!type:trace_event} when a {!val:context} starts, returns
     and fails. {!print_trace} prints the events as a tree. An exception from
@@ -689,13 +697,44 @@ val error :
 
     For a string message with the same rules, see {!val:fail}. *)
 
-val warn : ?pos:int -> 'd Diagnostics.t -> 'd -> unit
-(** [warn diagnostics d] records [d] at the current position and continues
-    parsing. [warn ~pos diagnostics d] records it at the byte offset [pos]. When
-    the runner got no [~diagnostics], [warn] records nothing, so a parser that
-    warns also runs without a collector. When the runner got a collector,
-    [diagnostics] must be that collector: for any other one [warn] raises
-    [Invalid_argument].
+val warn :
+  ?from:int ->
+  ?upto:int ->
+  ?notes:note list ->
+  ?help:string ->
+  custom_error ->
+  unit
+(** [warn e] records a warning and continues parsing. The warning is an
+    {!type:error} with [severity = `Warning] and [kind = Custom e], built as
+    {!val-error} builds its error: [~from], [~upto], [~notes] and [~help] work
+    as in {!fail}, the range is at the current position by default, and the
+    contexts are the {!val:context}s open at the start of the range. [warn]
+    records it in the collector that the runner got as [~diagnostics]. When the
+    runner got no [~diagnostics], [warn] records nothing, so a parser that warns
+    also runs without a collector. {!render_error} prints a warning with
+    [[warning]] in its header.
+
+    {@ocaml[
+    type custom_error += Leading_zero
+
+    let plain_int () =
+      let start = position () in
+      let digits = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+      if String.length digits > 1 && digits.[0] = '0' then
+        warn ~from:start ~upto:(position ()) Leading_zero;
+      int_of_string digits
+
+    let () =
+      let d = Diagnostics.create () in
+      assert (parse ~diagnostics:d "007" plain_int = Ok 7);
+      match Diagnostics.to_list d with
+      | [
+       { value = { severity = `Warning; kind = Custom Leading_zero; _ }; _ };
+      ] ->
+          ()
+      | _ ->
+          assert false
+    ]}
 
     A diagnostic lives as long as the input position that it was recorded at.
     When a parser fails and the position goes back, the diagnostics recorded
@@ -963,12 +1002,14 @@ val capture :
 
     Example:
     {@ocaml[
-    let statement_or_hole errors () =
+    type custom_error += Skipped of error
+
+    let statement_or_hole () =
       match capture statement with
       | Ok s ->
           s
       | Error e ->
-          warn ~pos:e.range.start errors e;
+          warn ~from:e.range.start (Skipped e);
           skip_while (fun c -> c <> ';');
           let _ = char ';' in
           `Hole
@@ -977,12 +1018,8 @@ val capture :
 val recover :
   ?release:bool ->
   ?contexts:[ `All | `Inner ] ->
-  ?keep:
-    (error Diagnostics.entry ->
-    error Diagnostics.entry list ->
-    error Diagnostics.entry list
-    ) ->
-  error Diagnostics.t ->
+  ?keep:(Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
+  Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
@@ -1066,20 +1103,20 @@ val recover :
 
     [~keep] chooses what is recorded in place of [e]: [recover] calls
     [keep entry inner], where [entry] is the entry of [e] (at [e.range.start])
-    and [inner] holds the entries that [parser] recorded in [errors] and that
-    the failure removed, in the order they were recorded. [recover] records the
-    entries that [keep] returns, in that order, so they are removed when a
-    construct around [recover] goes back, as any other diagnostic. The default
-    is [fun entry _ -> [ entry ]]. With [~release:true], [inner] holds only the
-    entries recorded after the last {!commit}, {!cut} or value given out by a
-    [*_iter] function, such as {!many_iter}, that reached [recover], since the
-    entries before it stay as in {!capture}. [keep] must be a pure function: no
-    side effects and no parsing. It can run more than once for the same error: a
-    loop such as {!many} runs its element again at the same position and then
-    drops that step, so [many (fun () -> list ~keep ...)] on ["a,x"] calls
-    [keep] twice for the error at [x]. If [keep] raises, the exception leaves
-    the parse, as an exception from a build function does. For example, to keep
-    the errors of [parser], and [e] only when there are none:
+    and [inner] holds the entries, errors and warnings, that [parser] recorded
+    in [errors] and that the failure removed, in the order they were recorded.
+    [recover] records the entries that [keep] returns, in that order, so they
+    are removed when a construct around [recover] goes back, as any other
+    diagnostic. The default is [fun entry _ -> [ entry ]]. With [~release:true],
+    [inner] holds only the entries recorded after the last {!commit}, {!cut} or
+    value given out by a [*_iter] function, such as {!many_iter}, that reached
+    [recover], since the entries before it stay as in {!capture}. [keep] must be
+    a pure function: no side effects and no parsing. It can run more than once
+    for the same error: a loop such as {!many} runs its element again at the
+    same position and then drops that step, so [many (fun () -> list ~keep ...)]
+    on ["a,x"] calls [keep] twice for the error at [x]. If [keep] raises, the
+    exception leaves the parse, as an exception from a build function does. For
+    example, to keep the errors of [parser], and [e] only when there are none:
     {@ocaml[
     let keep entry inner =
       if inner = [] then
@@ -1138,7 +1175,7 @@ val recover :
       assert (Diagnostics.length errors = 1)
     ]} *)
 
-val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
+val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
 (** [require errors parser missing] runs [parser]. If the furthest failure of
     [parser] is at the position where [require] started, [require] records the
     error [e] in [errors], goes back to that position and returns [missing e]:
@@ -1222,14 +1259,10 @@ val require : error Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
 val list :
   ?release:bool ->
   ?contexts:[ `All | `Inner ] ->
-  ?keep:
-    (error Diagnostics.entry ->
-    error Diagnostics.entry list ->
-    error Diagnostics.entry list
-    ) ->
+  ?keep:(Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
   ?sep:(unit -> unit) ->
   ?trailing:bool ->
-  error Diagnostics.t ->
+  Diagnostics.t ->
   close:(unit -> bool) ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
@@ -2497,7 +2530,7 @@ val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?consume:[ `All | `Partial ] ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   Source.t ->
   (unit -> 'a) ->
@@ -2543,7 +2576,7 @@ val parse_source :
 val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   ?pending:(unit -> bool) ->
   Source.t ->
@@ -2646,7 +2679,7 @@ type 'a step =
 val parse_partial :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   (unit -> 'a) ->
   'a partial

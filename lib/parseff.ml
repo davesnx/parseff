@@ -54,48 +54,6 @@ type note_data = { at : range_data option; text : string }
 
 type endian = Big | Little
 
-type 'd diagnostic_entry = { pos : int; value : 'd }
-
-type 'd diagnostics = {
-  busy : bool Atomic.t;
-  mutable rev : 'd diagnostic_entry list;
-  mutable self : diag_sink;
-}
-
-and diag_sink = No_sink | Sink : 'd diagnostics -> diag_sink
-
-let diagnostics_create () =
-  let t = { busy = Atomic.make false; rev = []; self = No_sink } in
-  t.self <- Sink t;
-  t
-let diagnostics_to_list t = List.rev t.rev
-let diagnostics_length t = List.length t.rev
-let diagnostics_is_empty t = t.rev = []
-
-let diagnostics_reset t = t.rev <- []
-
-let diagnostics_clear t =
-  if Atomic.get t.busy then
-    invalid_arg "Parseff.Diagnostics.clear: a parse is using these diagnostics";
-  diagnostics_reset t
-
-let rec drop_entries l k =
-  if k = 0 then
-    l
-  else
-    match l with _ :: rest -> drop_entries rest (k - 1) | [] -> l
-
-module Diagnostics = struct
-  type 'd entry = 'd diagnostic_entry = { pos : int; value : 'd }
-  type 'd t = 'd diagnostics
-
-  let create = diagnostics_create
-  let to_list = diagnostics_to_list
-  let length = diagnostics_length
-  let is_empty = diagnostics_is_empty
-  let clear = diagnostics_clear
-end
-
 type custom_error = ..
 type custom_error += Limit_exceeded of { limit : int }
 
@@ -305,7 +263,10 @@ type error_kind =
   | Depth_limit_exceeded of { limit : int }
   | Backtrack_window_exceeded of { limit : int; oldest : int }
 
+type severity = [ `Error | `Warning ]
+
 type error = {
+  severity : severity;
   kind : error_kind;
   range : range;
   location : location option;
@@ -314,6 +275,48 @@ type error = {
   help : string option;
   excerpt : excerpt;
 }
+
+type diagnostic_entry = { pos : int; value : error }
+
+type diagnostics = {
+  busy : bool Atomic.t;
+  mutable rev : diagnostic_entry list;
+  mutable self : diag_sink;
+}
+
+and diag_sink = No_sink | Sink of diagnostics
+
+let diagnostics_create () =
+  let t = { busy = Atomic.make false; rev = []; self = No_sink } in
+  t.self <- Sink t;
+  t
+let diagnostics_to_list t = List.rev t.rev
+let diagnostics_length t = List.length t.rev
+let diagnostics_is_empty t = t.rev = []
+
+let diagnostics_reset t = t.rev <- []
+
+let diagnostics_clear t =
+  if Atomic.get t.busy then
+    invalid_arg "Parseff.Diagnostics.clear: a parse is using these diagnostics";
+  diagnostics_reset t
+
+let rec drop_entries l k =
+  if k = 0 then
+    l
+  else
+    match l with _ :: rest -> drop_entries rest (k - 1) | [] -> l
+
+module Diagnostics = struct
+  type entry = diagnostic_entry = { pos : int; value : error }
+  type t = diagnostics
+
+  let create = diagnostics_create
+  let to_list = diagnostics_to_list
+  let length = diagnostics_length
+  let is_empty = diagnostics_is_empty
+  let clear = diagnostics_clear
+end
 
 type trace_event = ..
 
@@ -2680,26 +2683,11 @@ let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
   else
     fail_user st st.pos (Payload_ext (e, { from; upto; notes; help }))
 
-let[@inline always] record_diagnostic (type d) (c : d diagnostics) st pos
-    (value : d) =
+let[@inline always] record_diagnostic c st pos value =
   if st.diag == c.self then begin
     c.rev <- { pos; value } :: c.rev;
     st.diag_len <- st.diag_len + 1
   end
-
-let[@inline never] warn_wrong_collector () =
-  invalid_arg
-    "Parseff.warn: these diagnostics are not the ones passed to the running \
-     parse as ~diagnostics"
-
-let[@inline] warn ?pos c value =
-  let st = get_state () in
-  if st.diag == c.self then begin
-    c.rev <-
-      { pos = (match pos with Some p -> p | None -> st.pos); value } :: c.rev;
-    st.diag_len <- st.diag_len + 1
-  end else
-    match st.diag with No_sink -> () | Sink _ -> warn_wrong_collector ()
 
 let[@inline never] commit_reset_held st =
   let rec commits i =
@@ -5465,7 +5453,8 @@ let render ?name ?source ?custom e =
       Buffer.add_string b "byte ";
       Buffer.add_string b (string_of_int e.range.start)
   );
-  Buffer.add_string b ": [error]";
+  Buffer.add_string b
+    (match e.severity with `Error -> ": [error]" | `Warning -> ": [warning]");
   add_text b (error_message ?custom e);
   let frames = List.mapi (fun i f -> (f, frame_loc i f)) e.contexts in
   let note_line (n : note) =
@@ -6139,6 +6128,7 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
             end
       end;
       {
+        severity = `Error;
         kind;
         range = span;
         location;
@@ -6180,6 +6170,7 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
           None
       in
       {
+        severity = `Error;
         kind;
         range = span;
         location;
@@ -6263,6 +6254,19 @@ let outer_contexts st pos =
   done;
   !acc
 
+let warn ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
+  let st = get_state () in
+  match st.diag with
+  | No_sink ->
+      ()
+  | Sink c ->
+      let span = extras_span st.pos { from; upto; notes; help } in
+      let e =
+        build st ~last:false ~pos:span.start ~notes ?help (Custom e) span
+          (outer_contexts st span.start)
+      in
+      record_diagnostic c st span.start { e with severity = `Warning }
+
 let captured st start e =
   match st.trace with
   | None ->
@@ -6317,7 +6321,7 @@ let rec take_entries l k acc =
   else
     match l with x :: rest -> take_entries rest (k - 1) (x :: acc) | [] -> acc
 
-let removed_entries (type d) st frame (c : d diagnostics) =
+let removed_entries st frame c =
   if st.diag == c.self then
     take_entries c.rev (st.diag_len - State.frame_diag_len st frame) []
   else
@@ -6337,7 +6341,7 @@ let record_of_keep errors st = function
       Some
         (fun e inner ->
           List.iter
-            (fun (x : _ diagnostic_entry) ->
+            (fun (x : diagnostic_entry) ->
               record_diagnostic errors st x.pos x.value
             )
             (keep { pos = e.range.start; value = e } inner)
@@ -6856,7 +6860,7 @@ let run_detailed st ~all thunk =
       State.leave st previous;
       Printexc.raise_with_backtrace exn bt
 
-let with_diagnostics st ~all thunk (c : _ diagnostics) =
+let with_diagnostics st ~all thunk (c : diagnostics) =
   if not (Atomic.compare_and_set c.busy false true) then
     invalid_arg "Parseff: these diagnostics are in use by another parse";
   diagnostics_reset c;

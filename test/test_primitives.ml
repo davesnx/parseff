@@ -645,15 +645,17 @@ let test_parse_consume_all_requires_eof () =
 
 let diag_list d =
   List.map
-    (fun ({ pos; value } : string Parseff.Diagnostics.entry) -> (pos, value))
+    (fun ({ pos; value } : Parseff.Diagnostics.entry) ->
+      (pos, Warning.text value)
+    )
     (Parseff.Diagnostics.to_list d)
 
 let test_parse_consume_all_collects_diagnostics () =
   let diagnostics = Parseff.Diagnostics.create () in
   let parser () =
-    Parseff.warn diagnostics "start";
+    Parseff.warn (Warning.W "start");
     Parseff.literal "ok";
-    Parseff.warn ~pos:0 diagnostics "forced";
+    Parseff.warn ~from:0 (Warning.W "forced");
     42
   in
   let outcome = Parseff.parse ~diagnostics "ok" parser in
@@ -673,11 +675,11 @@ let test_diagnostics_rollback_on_or () =
   let parser () =
     Parseff.or_
       (fun () ->
-        Parseff.warn diagnostics "left";
+        Parseff.warn (Warning.W "left");
         Parseff.literal "x"
       )
       (fun () ->
-        Parseff.warn diagnostics "right";
+        Parseff.warn (Warning.W "right");
         Parseff.literal "b"
       )
       ()
@@ -695,7 +697,7 @@ let test_diagnostics_rollback_on_look_ahead () =
   let parser () =
     let _ =
       Parseff.look_ahead (fun () ->
-          Parseff.warn diagnostics "peek";
+          Parseff.warn (Warning.W "peek");
           Parseff.literal "a"
       )
     in
@@ -716,7 +718,7 @@ let test_diagnostics_rollback_on_many_stop () =
     let ds =
       Parseff.many
         (fun () ->
-          Parseff.warn diagnostics "iter";
+          Parseff.warn (Warning.W "iter");
           Parseff.digit ()
         )
         ()
@@ -739,7 +741,7 @@ let test_diagnostics_rollback_on_zero_width_stop () =
   let parser () =
     Parseff.many
       (fun () ->
-        Parseff.warn diagnostics "iter";
+        Parseff.warn (Warning.W "iter");
         Parseff.optional (fun () -> Parseff.char 'x') ()
       )
       ()
@@ -757,7 +759,7 @@ let test_error_contains_diagnostics () =
   let diagnostics = Parseff.Diagnostics.create () in
   let outcome =
     Parseff.parse ~diagnostics "y" (fun () ->
-        Parseff.warn diagnostics "before-failure";
+        Parseff.warn (Warning.W "before-failure");
         Parseff.literal "x"
     )
   in
@@ -910,60 +912,150 @@ let test_one_of_success () =
 let raises_invalid_argument f =
   match f () with _ -> false | exception Invalid_argument _ -> true
 
-let test_warn_into_other_collector_raises () =
-  let given = Parseff.Diagnostics.create () in
-  let other = Parseff.Diagnostics.create () in
-  let raises label run =
-    match run () with
-    | exception Invalid_argument _ ->
-        ()
-    | _ ->
-        Alcotest.failf "%s: expected Invalid_argument" label
-  in
-  raises "other collector" (fun () ->
-      Parseff.parse ~diagnostics:given "" (fun () ->
-          Parseff.warn given "z";
-          Parseff.warn other "x"
-      )
-  );
-  raises "other collector with ~pos" (fun () ->
-      Parseff.parse ~diagnostics:given "" (fun () ->
-          Parseff.warn ~pos:3 other "y"
-      )
-  );
-  Alcotest.(check int) "other is empty" 0 (Parseff.Diagnostics.length other);
-  ( match
-      Parseff.parse "" (fun () ->
-          Parseff.warn other "x";
-          2
-      )
-    with
-  | Ok n ->
-      Alcotest.(check int) "no collector given: value" 2 n
-  | Error _ ->
-      Alcotest.fail "Expected success"
-  );
-  Alcotest.(check int)
-    "no collector given: nothing recorded" 0
-    (Parseff.Diagnostics.length other);
-  ( match
-      Parseff.parse ~diagnostics:given "" (fun () ->
-          Parseff.warn given "z";
-          1
-      )
-    with
+let test_warn_without_collector () =
+  match
+    Parseff.parse "ab" (fun () ->
+        Parseff.warn (Warning.W "x");
+        Parseff.warn ~from:0 ~upto:2 ~help:"h" (Warning.W "y");
+        Parseff.literal "ab";
+        1
+    )
+  with
   | Ok n ->
       Alcotest.(check int) "value" 1 n
-  | Error _ ->
-      Alcotest.fail "Expected success"
-  );
-  Alcotest.(check int) "given has one" 1 (Parseff.Diagnostics.length given)
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
+type Parseff.custom_error += Leading_zero
+
+let leading_zero_printer = function
+  | Leading_zero ->
+      "leading zero"
+  | _ ->
+      "other"
+
+let severity_name (e : Parseff.error) =
+  match e.severity with `Error -> "error" | `Warning -> "warning"
+
+let digits_with_warning () =
+  let start = Parseff.position () in
+  let s =
+    Parseff.take_while ~at_least:1 ~label:"digit" (fun c -> c >= '0' && c <= '9')
+  in
+  if String.length s > 1 && s.[0] = '0' then
+    Parseff.warn ~from:start ~upto:(Parseff.position ()) Leading_zero;
+  int_of_string s
+
+let test_warning_next_to_recovered_error () =
+  let d = Parseff.Diagnostics.create () in
+  let sync () = Parseff.skip_while (fun c -> c <> ';') in
+  let item () = Parseff.recover d ~sync digits_with_warning (fun _ -> -1) in
+  let r =
+    Parseff.parse ~diagnostics:d "07;x" (fun () ->
+        let a = item () in
+        ignore (Parseff.char ';');
+        let b = item () in
+        (a, b)
+    )
+  in
+  Alcotest.(check (result (pair int int) reject)) "value" (Ok (7, -1)) r;
+  Alcotest.(check (list (pair string (triple int int string))))
+    "severity, range and message of each entry"
+    [
+      ("warning", (0, 2, "leading zero"));
+      ("error", (3, 4, "expected digit, found 'x'"));
+    ]
+    (List.map
+       (fun ({ pos; value } : Parseff.Diagnostics.entry) ->
+         ( severity_name value,
+           ( pos,
+             value.range.stop,
+             Parseff.error_message ~custom:leading_zero_printer value
+           )
+         )
+       )
+       (Parseff.Diagnostics.to_list d)
+    );
+  match Parseff.Diagnostics.to_list d with
+  | [ { value = { kind = Custom Leading_zero; _ }; _ }; _ ] ->
+      ()
+  | _ ->
+      Alcotest.fail "expected Custom Leading_zero first"
+
+let test_render_warning () =
+  let d = Parseff.Diagnostics.create () in
+  let input = "x = 007" in
+  ignore
+    (Parseff.parse ~diagnostics:d input (fun () ->
+         Parseff.context "assignment" (fun () ->
+             ignore (Parseff.literal "x = ");
+             digits_with_warning ()
+         )
+     )
+    );
+  Alcotest.(check (list string))
+    "render_error"
+    [
+      "input:1:5: [warning] leading zero\n\
+       1 | x = 007\n\
+      \  |     ^^^\n\
+      \  * while parsing assignment, from 1:1";
+    ]
+    (List.map
+       (fun ({ value; _ } : Parseff.Diagnostics.entry) ->
+         Parseff.render_error ~name:"input" ~source:input
+           ~custom:leading_zero_printer value
+       )
+       (Parseff.Diagnostics.to_list d)
+    )
+
+let test_warning_removed_by_or () =
+  let d = Parseff.Diagnostics.create () in
+  let r =
+    Parseff.parse ~diagnostics:d "07" (fun () ->
+        Parseff.or_
+          (fun () ->
+            ignore (digits_with_warning ());
+            Parseff.char 'a'
+          )
+          (fun () ->
+            ignore (Parseff.char '0');
+            Parseff.char '7'
+          )
+          ()
+    )
+  in
+  Alcotest.(check (result char reject)) "value" (Ok '7') r;
+  Alcotest.(check int) "warning removed" 0 (Parseff.Diagnostics.length d)
+
+let test_warn_range () =
+  let d = Parseff.Diagnostics.create () in
+  ignore
+    (Parseff.parse ~diagnostics:d "abcdef" (fun () ->
+         Parseff.literal "abc";
+         Parseff.warn (Warning.W "here");
+         Parseff.warn ~from:1 (Warning.W "from");
+         Parseff.warn ~upto:5 (Warning.W "upto");
+         Parseff.warn ~from:5 ~upto:1 (Warning.W "swapped");
+         Parseff.literal "def"
+     )
+    );
+  Alcotest.(check (list (triple string int int)))
+    "ranges"
+    [ ("here", 3, 3); ("from", 1, 3); ("upto", 3, 5); ("swapped", 1, 5) ]
+    (List.map
+       (fun ({ pos; value } : Parseff.Diagnostics.entry) ->
+         Alcotest.(check int) "pos is the range start" value.range.start pos;
+         (Warning.text value, value.range.start, value.range.stop)
+       )
+       (Parseff.Diagnostics.to_list d)
+    )
 
 let test_collector_is_reset_by_each_parse () =
   let diagnostics = Parseff.Diagnostics.create () in
   let run () =
     ignore
-      (Parseff.parse ~diagnostics "" (fun () -> Parseff.warn diagnostics "w"))
+      (Parseff.parse ~diagnostics "" (fun () -> Parseff.warn (Warning.W "w")))
   in
   run ();
   run ();
@@ -993,15 +1085,15 @@ let test_collector_in_use_by_a_nested_parse () =
     "usable again" true
     (Parseff.Diagnostics.is_empty diagnostics)
 
-type duplicate_key = Duplicate_key of string
+type Parseff.custom_error += Duplicate_key of string
 
-let key_value diagnostics () =
+let key_value () =
   let seen = ref [] in
   let pair () =
     let k = Parseff.take_while ~at_least:1 ~label:"key" (fun c -> c <> '=') in
     ignore (Parseff.char '=');
     let v = Parseff.take_while ~at_least:1 ~label:"value" (fun c -> c <> ';') in
-    if List.mem k !seen then Parseff.warn diagnostics (Duplicate_key k);
+    if List.mem k !seen then Parseff.warn (Duplicate_key k);
     seen := k :: !seen;
     (k, v)
   in
@@ -1009,15 +1101,18 @@ let key_value diagnostics () =
 
 let duplicates diagnostics =
   List.map
-    (fun ({ pos; value = Duplicate_key k } :
-           duplicate_key Parseff.Diagnostics.entry
-           ) -> (pos, k)
+    (fun (e : Parseff.Diagnostics.entry) ->
+      match e.value.kind with
+      | Custom (Duplicate_key k) ->
+          (e.pos, k)
+      | _ ->
+          Alcotest.fail "expected Duplicate_key"
     )
     (Parseff.Diagnostics.to_list diagnostics)
 
 let test_key_value_duplicates_on_ok () =
   let diagnostics = Parseff.Diagnostics.create () in
-  match Parseff.parse ~diagnostics "a=1;b=2;a=3" (key_value diagnostics) with
+  match Parseff.parse ~diagnostics "a=1;b=2;a=3" key_value with
   | Ok pairs ->
       Alcotest.(check (list (pair string string)))
         "pairs"
@@ -1032,7 +1127,7 @@ let test_key_value_duplicates_on_ok () =
 
 let test_key_value_duplicates_on_error () =
   let diagnostics = Parseff.Diagnostics.create () in
-  match Parseff.parse ~diagnostics "a=1;a=2;b" (key_value diagnostics) with
+  match Parseff.parse ~diagnostics "a=1;a=2;b" key_value with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error e ->
@@ -1127,7 +1222,7 @@ let test_warn_pos_nonzero () =
   let outcome =
     Parseff.parse ~diagnostics "ab" (fun () ->
         Parseff.literal "ab";
-        Parseff.warn ~pos:5 diagnostics "at-five";
+        Parseff.warn ~from:5 ~upto:5 (Warning.W "at-five");
         42
     )
   in
@@ -2158,9 +2253,14 @@ let () =
             test_error_contains_diagnostics;
           test_case "preserves end_of_input semantics" `Quick
             test_parse_consume_all_preserves_end_of_input_semantics;
-          test_case "warn ~pos nonzero" `Quick test_warn_pos_nonzero;
-          test_case "warn into another collector raises" `Quick
-            test_warn_into_other_collector_raises;
+          test_case "warn after the position" `Quick test_warn_pos_nonzero;
+          test_case "warn without a collector" `Quick
+            test_warn_without_collector;
+          test_case "warning next to a recovered error" `Quick
+            test_warning_next_to_recovered_error;
+          test_case "render a warning" `Quick test_render_warning;
+          test_case "warning removed by or_" `Quick test_warning_removed_by_or;
+          test_case "warn range" `Quick test_warn_range;
           test_case "collector reset by each parse" `Quick
             test_collector_is_reset_by_each_parse;
           test_case "collector in use by a nested parse" `Quick

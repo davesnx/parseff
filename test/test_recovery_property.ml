@@ -1199,8 +1199,8 @@ let test_rule_a_loop_limit () =
 
 let entries d =
   List.map
-    (fun (x : _ Diagnostics.entry) ->
-      Printf.sprintf "%d %s" x.pos (error_message x.value)
+    (fun (x : Diagnostics.entry) ->
+      Printf.sprintf "%d %s" x.pos (Warning.text x.value)
     )
     (Diagnostics.to_list d)
 
@@ -1351,7 +1351,7 @@ let test_rule_a_list_as_plain () =
           String.concat ","
             (items d plain
                (fun () ->
-                 warn d w;
+                 warn (Warning.Recorded w);
                  "w"
                )
                ()
@@ -2088,7 +2088,7 @@ let test_undecided_steps () =
           v
         in
         let l = many item () in
-        warn d w;
+        warn (Warning.Recorded w);
         "[" ^ String.concat "" l ^ "]"
       in
       let r =
@@ -2134,7 +2134,7 @@ let test_undecided_steps () =
             String.concat "" l
           in
           let l = many item () in
-          warn d w;
+          warn (Warning.Recorded w);
           "[" ^ String.concat "" l ^ "]"
         )
         (fun () ->
@@ -2323,7 +2323,7 @@ let test_undecided_steps () =
                    ~close:(fun () -> peek_char () = Some ')')
                    ~sync:ignore
                    (fun () ->
-                     warn d w;
+                     warn (Warning.Recorded w);
                      "w"
                    )
                    (fun _ -> "H")
@@ -2598,7 +2598,7 @@ let rec eval d g =
       | Ok v ->
           v
       | Error e ->
-          if !warn_captured then warn d e;
+          if !warn_captured then warn (Warning.Recorded e);
           "E"
     )
   | Recover (release, a, s) ->

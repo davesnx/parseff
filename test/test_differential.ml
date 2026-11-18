@@ -193,7 +193,7 @@ let show_error (e : Parseff.error) =
 (* Interpreter (a): the real combinators. *)
 
 type cx = {
-  diags : int Parseff.Diagnostics.t;
+  diags : Parseff.Diagnostics.t;
   cell : int Parseff.Ref.t;
   mutable steps : int;
 }
@@ -316,7 +316,7 @@ let rec run cx g =
           Cap_err (show_error e)
     )
   | Warn k ->
-      Parseff.warn cx.diags k;
+      Parseff.warn (Warning.W (string_of_int k));
       Unit
   | Set k ->
       Parseff.Ref.set cx.cell k;
@@ -510,7 +510,9 @@ let run_real ?(traced = false) ~partial runner g input =
     result;
     diags =
       List.map
-        (fun (d : int Parseff.Diagnostics.entry) -> (d.pos, d.value))
+        (fun (d : Parseff.Diagnostics.entry) ->
+          (d.pos, int_of_string (Warning.text d.value))
+        )
         (Parseff.Diagnostics.to_list cx.diags);
     cell = Parseff.Ref.get cx.cell;
     trace = List.rev !events;

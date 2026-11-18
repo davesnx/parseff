@@ -299,11 +299,11 @@ let test_diagnostics_per_value () =
   let diags = Parseff.Diagnostics.create () in
   let parser () =
     let v = digits () in
-    if String.length v > 1 then Parseff.warn diags v;
+    if String.length v > 1 then Parseff.warn (Warning.W v);
     ignore
       (Parseff.or_
          (fun () ->
-           Parseff.warn diags "dropped";
+           Parseff.warn (Warning.W "dropped");
            Parseff.char ';'
          )
          (fun () -> Parseff.char '\n')
@@ -313,8 +313,8 @@ let test_diagnostics_per_value () =
   in
   let seen () =
     List.map
-      (fun (d : string Parseff.Diagnostics.entry) ->
-        Printf.sprintf "%d:%s" d.pos d.value
+      (fun (d : Parseff.Diagnostics.entry) ->
+        Printf.sprintf "%d:%s" d.pos (Warning.text d.value)
       )
       (Parseff.Diagnostics.to_list diags)
   in

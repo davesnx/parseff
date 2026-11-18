@@ -58,7 +58,7 @@ type env = {
   model : int array;
   initial : int array;
   mutable size : int;
-  errors : error Diagnostics.t;
+  errors : Diagnostics.t;
   mutable checks : int;
   mutable mismatch : string option;
 }

@@ -38,7 +38,7 @@ let show_result show = function
 
 let entries d =
   List.map
-    (fun { Diagnostics.value = e; _ } -> (e.range.start, error_message e))
+    (fun { Diagnostics.value = e; _ } -> (e.range.start, Warning.text e))
     (Diagnostics.to_list d)
 
 let errs = Alcotest.(list (pair int string))
@@ -523,7 +523,9 @@ let test_require () =
   let inner d () =
     require d
       (fun () ->
-        warn d (Result.get_error (capture (fun () -> fail "inner")));
+        warn
+          (Warning.Recorded (Result.get_error (capture (fun () -> fail "inner")))
+          );
         ignore (char ';')
       )
       ignore;
@@ -683,8 +685,6 @@ let test_list_in_or_branch () =
 
 exception Loop
 
-let note msg = Result.get_error (capture (fun () -> (fail msg : unit)))
-
 let test_element_without_progress () =
   let calls = ref 0 in
   let guard () =
@@ -722,10 +722,10 @@ let test_element_without_progress () =
     require d (sym ';') ignore;
     e
   in
-  let warns d () =
+  let warns _ () =
     guard ();
     if at '@' () then begin
-      warn d (note "empty statement");
+      warn (Warning.W "empty statement");
       0
     end else begin
       let v = integer () in
@@ -864,7 +864,7 @@ let test_require_commit () =
     parse ~diagnostics:d "x" (fun () ->
         require d
           (fun () ->
-            warn d (note "inner");
+            warn (Warning.W "inner");
             commit ();
             ignore (char ')')
           )
@@ -1448,8 +1448,8 @@ let run_iter ?(window = 4) ~collector ~stream input p =
   Printf.sprintf "f got %d; %s; entries [%s]" (Buffer.length given) r
     (String.concat "; "
        (List.map
-          (fun (x : _ Diagnostics.entry) ->
-            Printf.sprintf "%d:%s" x.pos (error_message x.value)
+          (fun (x : Diagnostics.entry) ->
+            Printf.sprintf "%d:%s" x.pos (Warning.text x.value)
           )
           (Diagnostics.to_list d)
        )

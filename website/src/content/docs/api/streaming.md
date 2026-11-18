@@ -20,7 +20,7 @@ val parse_source :
   ?max_depth:int ->
   ?backtrack_window:int ->
   ?consume:[ `All | `Partial ] ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   Source.t ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
@@ -66,7 +66,7 @@ Parseff.parse_source ~consume:`Partial source parser
 val parse_source_each :
   ?max_depth:int ->
   ?backtrack_window:int ->
-  ?diagnostics:'d Diagnostics.t ->
+  ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
   ?pending:(unit -> bool) ->
   Source.t ->

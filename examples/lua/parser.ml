@@ -1,6 +1,8 @@
 open Ast
 
-let errors : Parseff.error Parseff.Diagnostics.t = Parseff.Diagnostics.create ()
+let errors : Parseff.Diagnostics.t = Parseff.Diagnostics.create ()
+
+type Parseff.custom_error += Reported of Parseff.error
 
 type opener = { kind : string; at : range; indent : int }
 type closer = Chunk | End_only | If_branch | Until
@@ -59,7 +61,8 @@ let report ?word ?region (e : Parseff.error) =
     | None ->
         false
   in
-  if not consequence then Parseff.warn ~pos:e.range.start errors e
+  if not consequence then
+    Parseff.warn ~from:e.range.start ~upto:e.range.stop (Reported e)
 
 let fail_here ?notes ?help msg : 'a =
   match st.tok with

@@ -486,7 +486,7 @@ let test_zero_width_effects_kept () =
           Parseff.many
             (fun () ->
               Parseff.Ref.set z 7;
-              Parseff.warn d "w";
+              Parseff.warn (Warning.W "w");
               Parseff.sep_by_iter
                 (fun () -> Parseff.take_while (fun c -> c = 'a'))
                 comma ignore ()
@@ -549,7 +549,7 @@ let test_warn_in_callback () =
   let msg =
     message_of (fun () ->
         Parseff.parse ~diagnostics:d "1" (fun () ->
-            Parseff.take_iter 1 (fun _ -> Parseff.warn d "w")
+            Parseff.take_iter 1 (fun _ -> Parseff.warn (Warning.W "w"))
         )
     )
   in
