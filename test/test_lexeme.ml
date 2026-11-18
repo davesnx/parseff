@@ -163,6 +163,112 @@ let test_keyword_empty_raises () =
 let test_keyword_is_ident_reads_bytes () =
   both show_unit "let\xC3\xA9" (fun () -> Parseff.keyword "let") "Ok ((), 3)"
 
+let is_start c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+
+let reserved = function "let" | "in" -> true | _ -> false
+
+let name () = Parseff.identifier ~reserved is_start Parseff.is_ident_char
+
+let plain_name () = Parseff.identifier is_start Parseff.is_ident_char
+
+let test_is_ident_char () =
+  Alcotest.(check bool) "letter" true (Parseff.is_ident_char 'a');
+  Alcotest.(check bool) "digit" true (Parseff.is_ident_char '1');
+  Alcotest.(check bool) "underscore" true (Parseff.is_ident_char '_');
+  Alcotest.(check bool) "hyphen" false (Parseff.is_ident_char '-')
+
+let test_identifier_reads_a_word () =
+  both show_string "letter" name "Ok (\"letter\", 6)";
+  both show_string "a1" name "Ok (\"a1\", 2)";
+  both show_string "ab+" name "Ok (\"ab\", 2)";
+  both ~consume:`All show_string "abc" plain_name "Ok (\"abc\", 3)"
+
+let test_identifier_rejects_reserved_at_start () =
+  both show_string "let" name "Error@0 expected identifier, found 'let'";
+  both show_string "in" name "Error@0 expected identifier, found 'in'"
+
+let test_identifier_rejects_a_bad_start () =
+  Alcotest.(check string)
+    "parse" "Error@0 expected identifier, found '1abc'"
+    (show_result show_string (Parseff.parse ~consume:`Partial "1abc" name));
+  Alcotest.(check string)
+    "parse_source" "Error@0 expected identifier, found '1'"
+    (show_result show_string
+       (Parseff.parse_source ~consume:`Partial (chunked_source "1abc") name)
+    );
+  both show_string "(" name "Error@0 expected identifier, found '('";
+  both ~consume:`All show_string "" name
+    "Error@0 expected identifier, found end of input"
+
+let test_identifier_custom_label () =
+  let named () =
+    Parseff.identifier ~label:"name" ~reserved is_start Parseff.is_ident_char
+  in
+  both show_string "1" named "Error@0 expected name, found '1'";
+  both show_string "let" named "Error@0 expected name, found 'let'"
+
+let test_identifier_keyword_after () =
+  let token () =
+    Parseff.or_
+      (fun () ->
+        Parseff.keyword "let";
+        "LET"
+      )
+      name ()
+  in
+  both show_string "let" token "Ok (\"LET\", 3)";
+  both show_string "letter" token "Ok (\"letter\", 6)";
+  both show_string "in" token
+    "Error@0 expected identifier or \"let\", found 'in'"
+
+let test_identifier_keyword_before_recovers () =
+  let token () =
+    Parseff.or_ name
+      (fun () ->
+        Parseff.keyword "let";
+        "LET"
+      )
+      ()
+  in
+  both show_string "let" token "Ok (\"LET\", 3)";
+  both show_string "letter" token "Ok (\"letter\", 6)"
+
+let test_identifier_merges_with_char () =
+  both show_unit "let"
+    (Parseff.or_
+       (fun () -> ignore (name ()))
+       (fun () -> ignore (Parseff.char '('))
+    )
+    "Error@0 expected identifier or '(', found 'let'"
+
+let test_identifier_inner_can_differ () =
+  let is_head c = c = '-' || (c >= 'a' && c <= 'z') in
+  let is_tail c = (c >= 'a' && c <= 'z') || c = '-' in
+  let reserved = function "foo-bar" -> true | _ -> false in
+  let word () = Parseff.identifier ~reserved is_head is_tail in
+  both show_string "foo-baz" word "Ok (\"foo-baz\", 7)";
+  both show_string "foo-bar" word "Error@0 expected identifier, found 'foo'"
+
+let test_identifier_look_ahead_consumes_nothing () =
+  both show_unit "abc"
+    (fun () -> Parseff.look_ahead (fun () -> ignore (plain_name ())))
+    "Ok ((), 0)"
+
+let test_identifier_needs_one_more_byte_of_window () =
+  let run window parser =
+    show_result show_string
+      (Parseff.parse_source ~backtrack_window:window (chunked_source "let")
+         parser
+      )
+  in
+  Alcotest.(check string)
+    "window of 3" "Error@0 backtrack window of 3 bytes exceeded"
+    (run 3 plain_name);
+  Alcotest.(check string) "window of 4" "Ok \"let\"" (run 4 plain_name);
+  Alcotest.(check string)
+    "reserved in window of 4" "Error@0 expected identifier, found 'let'"
+    (run 4 name)
+
 let test_lexeme_skips_whitespace () =
   both show_string "abc  \n\tx"
     (fun () -> Parseff.lexeme identifier)
@@ -215,6 +321,29 @@ let () =
           Alcotest.test_case "empty raises" `Quick test_keyword_empty_raises;
           Alcotest.test_case "is_ident reads bytes" `Quick
             test_keyword_is_ident_reads_bytes;
+        ]
+      );
+      ( "identifier",
+        [
+          Alcotest.test_case "is_ident_char" `Quick test_is_ident_char;
+          Alcotest.test_case "reads a word" `Quick test_identifier_reads_a_word;
+          Alcotest.test_case "reserved at start" `Quick
+            test_identifier_rejects_reserved_at_start;
+          Alcotest.test_case "bad start" `Quick
+            test_identifier_rejects_a_bad_start;
+          Alcotest.test_case "custom label" `Quick test_identifier_custom_label;
+          Alcotest.test_case "keyword then identifier" `Quick
+            test_identifier_keyword_after;
+          Alcotest.test_case "identifier then keyword" `Quick
+            test_identifier_keyword_before_recovers;
+          Alcotest.test_case "merges with char" `Quick
+            test_identifier_merges_with_char;
+          Alcotest.test_case "inner differs from start" `Quick
+            test_identifier_inner_can_differ;
+          Alcotest.test_case "look_ahead" `Quick
+            test_identifier_look_ahead_consumes_nothing;
+          Alcotest.test_case "window of length + 1" `Quick
+            test_identifier_needs_one_more_byte_of_window;
         ]
       );
       ( "lexeme",

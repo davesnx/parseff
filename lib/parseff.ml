@@ -4478,7 +4478,7 @@ let[@inline] lexeme ?(skip = skip_whitespace) p =
   skip ();
   v
 
-let is_ident_byte c =
+let is_ident_char c =
   (c >= 'a' && c <= 'z')
   || (c >= 'A' && c <= 'Z')
   || (c >= '0' && c <= '9')
@@ -4489,7 +4489,7 @@ let rec literal_at st pos s i =
   || char_at st (pos + i) = String.unsafe_get s i
      && literal_at st pos s (i + 1)
 
-let keyword ?(is_ident = is_ident_byte) s =
+let keyword ?(is_ident = is_ident_char) s =
   let len = String.length s in
   if len = 0 then invalid_arg "Parseff.keyword: empty keyword";
   let st = get_state () in
@@ -4501,6 +4501,24 @@ let keyword ?(is_ident = is_ident_byte) s =
     st.pos <- pos + len
   else
     fail_str_cold st pos tag_literal s
+
+let accepts_any_word _ = false
+
+let identifier ?(label = "identifier") ?(reserved = accepts_any_word) start
+    inner =
+  let st = get_state () in
+  let pos = st.pos in
+  if have st 1 && start (char_at st pos) then begin
+    let end_pos = scan_while st ~keep_from:pos (pos + 1) inner in
+    let word = slice st pos (end_pos - pos) in
+    if reserved word then
+      fail_str_cold st pos tag_label label
+    else begin
+      st.pos <- end_pos;
+      word
+    end
+  end else
+    fail_str_cold st pos tag_label label
 
 let is_alphanum_char c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
@@ -5989,12 +6007,12 @@ let found_of st stop pos =
     let rel = p - st.base in
     let len = stop - st.base in
     let c = Bytes.unsafe_get st.input rel in
-    if is_ident_byte c then begin
+    if is_ident_char c then begin
       let k = ref 0 in
       while
         rel + !k < len
         && !k < 33
-        && is_ident_byte (Bytes.get st.input (rel + !k))
+        && is_ident_char (Bytes.get st.input (rel + !k))
       do
         incr k
       done;
