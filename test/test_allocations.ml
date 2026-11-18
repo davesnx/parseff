@@ -218,15 +218,15 @@ let parse_head source =
   | Error error ->
       Alcotest.fail (Parseff.render_error error)
 
-let words_per_head make_source =
+let words_per_head parse =
   for _ = 1 to warmup_iterations do
-    parse_head (make_source ())
+    parse ()
   done;
   Gc.full_major ();
   let heads = 10_000 in
   let before = Gc.minor_words () in
   for _ = 1 to heads do
-    parse_head (make_source ())
+    parse ()
   done;
   (Gc.minor_words () -. before) /. Float.of_int heads
 
@@ -240,15 +240,60 @@ let head_function ?initial_buffer_size () =
   )
 
 let test_one_chunk_head () =
-  let fn = words_per_head (fun () -> head_function ()) in
+  let fn = words_per_head (fun () -> parse_head (head_function ())) in
   let seq =
-    words_per_head (fun () -> Parseff.Source.of_seq (Seq.return head))
+    words_per_head (fun () ->
+        parse_head (Parseff.Source.of_seq (Seq.return head))
+    )
   in
   if seq > 250. || seq > fn /. 2. then
     Alcotest.failf
       "of_seq with the %d-byte head as one chunk allocated %.1f minor words \
        per parse, of_function %.1f; expected at most 250 and at most half"
       (String.length head) seq fn
+
+let feed_head chunks =
+  let t = Parseff.parse_partial (fun () -> head_lines 0) in
+  let rec go = function
+    | [] ->
+        Parseff.finish t
+    | chunk :: rest -> (
+        match Parseff.feed t chunk with
+        | Parseff.Await ->
+            go rest
+        | Parseff.Done r ->
+            r
+      )
+  in
+  match go chunks with
+  | Ok (11, "") ->
+      ()
+  | Ok (n, rest) ->
+      Alcotest.failf "parsed %d lines with leftover %S, expected 11 and none" n
+        rest
+  | Error error ->
+      Alcotest.fail (Parseff.render_error error)
+
+let test_partial_head () =
+  let check name maximum chunks =
+    let actual = words_per_head (fun () -> feed_head chunks) in
+    if actual > maximum then
+      Alcotest.failf
+        "parse_partial with the %d-byte head %s allocated %.1f minor words per \
+         parse, expected at most %.0f"
+        (String.length head) name actual maximum
+  in
+  let chunk_size = 64 in
+  let chunks =
+    List.init
+      ((String.length head + chunk_size - 1) / chunk_size)
+      (fun i ->
+        let off = i * chunk_size in
+        String.sub head off (min chunk_size (String.length head - off))
+      )
+  in
+  check "in one chunk" 160. [ head ];
+  check "in 64-byte chunks" 400. chunks
 
 let test_head_in_large_chunk () =
   let chunk = head ^ String.make 1_000_000 'x' in
@@ -513,6 +558,7 @@ let () =
         [
           Alcotest.test_case "one byte per read" `Quick test_source_reads;
           Alcotest.test_case "head as one chunk" `Quick test_one_chunk_head;
+          Alcotest.test_case "head with parse_partial" `Quick test_partial_head;
           Alcotest.test_case "head in a large chunk" `Quick
             test_head_in_large_chunk;
           Alcotest.test_case "short message" `Quick test_short_message;
