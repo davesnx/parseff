@@ -1448,7 +1448,7 @@ let given = Buffer.create 16
 let iter_a () =
   take_while_iter
     (fun c -> c = 'a')
-    (fun sp -> Buffer.add_string given (span_to_string sp))
+    (fun sp -> Buffer.add_string given (Slice.to_string sp))
 
 let comma_only () = ignore (char ',')
 let rest () = take_while (fun _ -> true)

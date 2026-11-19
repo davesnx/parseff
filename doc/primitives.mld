@@ -320,15 +320,15 @@ let octet () =
   n
 ]}
 
-{2 [recognize] and [recognize_span]}
+{2 [recognize] and [Slice.recognize]}
 
 {!val:Parseff.recognize} runs a parser, drops its result, and returns the input
-text the parser consumed. {!val:Parseff.recognize_span} returns it as a
-{!type:Parseff.span}.
+text the parser consumed. {!val:Parseff.Slice.recognize} returns it as a
+{!type:Parseff.Slice.t}.
 
 {@ocaml skip[
 val recognize : (unit -> 'a) -> string
-val recognize_span : (unit -> 'a) -> span
+val Slice.recognize : (unit -> 'a) -> Slice.t
 ]}
 
 {@ocaml[

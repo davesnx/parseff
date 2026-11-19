@@ -34,7 +34,7 @@ Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
 Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 ```
 
-**Optimized** uses `sep_by_take_span` plus `List.map` over zero-copy spans. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.span_to_string`.
+**Optimized** uses `Slice.sep_by_take` plus `List.map` over zero-copy slices. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.Slice.to_string`.
 
 **Generic** uses the ordinary `char`, `skip_while`, `take_while`, and `sep_by` combinators with the same `float_of_string` conversion as `Angstrom (generic)`, so it reflects the baseline direct-style API.
 
@@ -62,7 +62,7 @@ On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result
 
 **Fewer allocations.** Span-based APIs return slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
 
-**Fused operations.** `Parseff.sep_by_take_span` parses an entire separated list in one fused operation. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
+**Fused operations.** `Parseff.Slice.sep_by_take` parses an entire separated list in one fused operation. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
 
 **No monadic overhead.** Parsers are direct function calls. No CPS, no closure allocation for sequencing.
 
@@ -206,7 +206,7 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | API style | Imperative (direct style) | Monadic (CPS-based) |
 | Streaming | `parse_source` with `Source.t` | Buffered / Unbuffered modules |
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
-| Zero-copy | `span` type + fused ops | Limited via `Unsafe` / bigstring slices |
+| Zero-copy | `Slice.t` type + fused ops | Limited via `Unsafe` / bigstring slices |
 | Recursion safety | `rec_` with `~max_depth` | Manual (no built-in depth limit) |
 | Custom errors | `error` with an extensible variant (`custom_error`) | Limited (string-based) |
 | Error labels | `expect`, `one_of_labeled` | `<?>` operator |

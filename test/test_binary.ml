@@ -656,13 +656,13 @@ let test_take_span_in_parse () =
   match
     Parseff.parse ~consume:`Partial input (fun () ->
         ignore (Parseff.take 1);
-        let s = Parseff.take_span 3 in
+        let s = Parseff.Slice.take 3 in
         (s, Parseff.position ())
     )
   with
   | Ok (s, pos) ->
-      Alcotest.(check int) "length" 3 (Parseff.span_length s);
-      Alcotest.(check string) "text" "bcd" (Parseff.span_to_string s);
+      Alcotest.(check int) "length" 3 (Parseff.Slice.length s);
+      Alcotest.(check string) "text" "bcd" (Parseff.Slice.to_string s);
       Alcotest.(check int) "position" 4 pos
   | Error e ->
       Alcotest.fail (Parseff.error_message e)
@@ -671,13 +671,13 @@ let test_take_span_streaming () =
   match
     Parseff.parse_source ~consume:`Partial (byte_at_a_time "abcdef") (fun () ->
         ignore (Parseff.take 1);
-        let s = Parseff.take_span 3 in
+        let s = Parseff.Slice.take 3 in
         (s, Parseff.position ())
     )
   with
   | Ok (s, pos) ->
-      Alcotest.(check string) "text" "bcd" (Parseff.span_to_string s);
-      Alcotest.(check int) "length" 3 (Parseff.span_length s);
+      Alcotest.(check string) "text" "bcd" (Parseff.Slice.to_string s);
+      Alcotest.(check int) "length" 3 (Parseff.Slice.length s);
       Alcotest.(check int) "position" 4 pos
   | Error e ->
       Alcotest.fail (Parseff.error_message e)
@@ -685,24 +685,24 @@ let test_take_span_streaming () =
 let test_take_span_zero () =
   List.iter
     (check_ok Alcotest.string "empty" "")
-    (both "" (fun () -> Parseff.span_to_string (Parseff.take_span 0)))
+    (both "" (fun () -> Parseff.Slice.to_string (Parseff.Slice.take 0)))
 
 let test_take_span_truncated () =
   List.iter
     (check_failure ~pos:0 "expected 10 bytes, found only 3 (end of input)")
-    (both "abc" (fun () -> Parseff.take_span 10));
+    (both "abc" (fun () -> Parseff.Slice.take 10));
   List.iter
     (check_failure ~pos:0 "expected 2 bytes, found end of input")
-    (both "" (fun () -> Parseff.take_span 2))
+    (both "" (fun () -> Parseff.Slice.take 2))
 
 let test_take_span_negative () =
   List.iter
     (check_failure ~pos:0 "expected non-negative length, found -1")
-    (both "abc" (fun () -> Parseff.take_span (-1)));
+    (both "abc" (fun () -> Parseff.Slice.take (-1)));
   let p () =
     let v =
       Parseff.or_
-        (fun () -> Parseff.span_to_string (Parseff.take_span (-1)))
+        (fun () -> Parseff.Slice.to_string (Parseff.Slice.take (-1)))
         (fun () -> "x")
         ()
     in
@@ -714,14 +714,17 @@ let test_take_span_negative () =
 
 let same_as_take name run n msg =
   let as_take = run (fun () -> Parseff.take n) in
-  let as_span = run (fun () -> Parseff.span_to_string (Parseff.take_span n)) in
+  let as_span =
+    run (fun () -> Parseff.Slice.to_string (Parseff.Slice.take n))
+  in
   match (as_take, as_span) with
   | Error a, Error b ->
       Alcotest.(check string) (name ^ " take") msg (Parseff.error_message a);
-      Alcotest.(check string) (name ^ " take_span") msg (Parseff.error_message b);
+      Alcotest.(check string)
+        (name ^ " Slice.take") msg (Parseff.error_message b);
       Alcotest.(check int) (name ^ " position") a.range.start b.range.start
   | _ ->
-      Alcotest.failf "%s: expected take and take_span to fail" name
+      Alcotest.failf "%s: expected take and Slice.take to fail" name
 
 let test_take_span_like_take () =
   same_as_take "huge" (Parseff.parse "abc") max_int
@@ -922,7 +925,7 @@ let () =
           Alcotest.test_case "in combinators" `Quick test_any_varint_combinators;
         ]
       );
-      ( "take_span",
+      ( "Slice.take",
         [
           Alcotest.test_case "in parse" `Quick test_take_span_in_parse;
           Alcotest.test_case "owned copy in parse_source" `Quick

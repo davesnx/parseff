@@ -39,13 +39,13 @@ let[@inline always] string_slice inp off len total_len =
 let[@inline always] span_to_string s =
   let total_len = String.length s.buf in
   if s.off < 0 || s.len < 0 || s.off > total_len - s.len then
-    invalid_arg "Parseff.span_to_string";
+    invalid_arg "Parseff.Slice.to_string";
   string_slice (Bytes.unsafe_of_string s.buf) s.off s.len total_len
 
 let[@inline always] span_length s = s.len
 
 let[@inline always] span_get s i =
-  if i < 0 || i >= s.len then invalid_arg "Parseff.span_get";
+  if i < 0 || i >= s.len then invalid_arg "Parseff.Slice.get";
   String.unsafe_get s.buf (s.off + i)
 
 type location = { offset : int; line : int; byte_col : int }
@@ -4789,6 +4789,10 @@ module Utf8 = struct
     take_while ~at_least ~label:"whitespace" is_whitespace
 
   let skip_whitespace () = skip_while is_whitespace
+
+  module Slice = struct
+    let take_while = take_while_span
+  end
 end
 
 let far_chain st =
@@ -7243,6 +7247,18 @@ module Ref = struct
       st.trail <- Undo { cell = c; old = c.value; depth; token; next }
     end;
     c.value <- value
+end
+
+module Slice = struct
+  type t = span
+
+  let to_string = span_to_string
+  let length = span_length
+  let get = span_get
+  let take_while = take_while_span
+  let sep_by_take = sep_by_take_span
+  let recognize = recognize_span
+  let take = take_span
 end
 
 type trace_event +=

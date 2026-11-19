@@ -265,7 +265,7 @@ let test_random_chunks () =
 
 let joined f =
   let b = Buffer.create 16 in
-  f (fun piece -> Buffer.add_string b (Parseff.span_to_string piece));
+  f (fun piece -> Buffer.add_string b (Parseff.Slice.to_string piece));
   Buffer.contents b
 
 let digit c = c >= '0' && c <= '9'
@@ -355,7 +355,7 @@ let test_frame_larger_than_window () =
     let b = Buffer.create 16 in
     Parseff.within len (fun () ->
         Parseff.take_iter len (fun piece ->
-            Buffer.add_string b (Parseff.span_to_string piece)
+            Buffer.add_string b (Parseff.Slice.to_string piece)
         )
     );
     Buffer.contents b

@@ -32,14 +32,14 @@ Fewer parser round-trips means less work overall. A fused operation parses a who
 ```
 Operation                              Replaces
 sep_by_take ~ws ~sep pred              sep_by (take_while ~at_least:1 pred) (skip_while ws; char sep; skip_while ws)
-sep_by_take_span ~ws ~sep pred         Same, but returns spans instead of strings
+Slice.sep_by_take ~ws ~sep pred         Same, but returns slices instead of strings
 ```
 
 Values must be nonempty: on a trailing or doubled separator, `sep_by_take` stops before that separator and the whitespace in front of it, and leaves them unread.
 
-### Use zero-copy spans
+### Use zero-copy slices
 
-Avoid intermediate string allocations when you can work with slices. Spans point into the original input buffer with no allocation until you call `Parseff.span_to_string`, giving a 2-3x speed improvement and roughly 3x less memory allocation:
+Avoid intermediate string allocations when you can work with slices. Spans point into the original input buffer with no allocation until you call `Parseff.Slice.to_string`, giving a 2-3x speed improvement and roughly 3x less memory allocation:
 
 ```ocaml
 (* allocates a string per element *)
@@ -49,9 +49,9 @@ let parse_values () =
     (fun () -> Parseff.char ',')
     ()
 
-(* zero-copy: spans point into the original buffer *)
+(* zero-copy: slices point into the original buffer *)
 let parse_values () =
-  let spans = Parseff.sep_by_take_span ~ws:is_whitespace ~sep:',' is_digit in
+  let spans = Parseff.Slice.sep_by_take ~ws:is_whitespace ~sep:',' is_digit in
   List.map int_of_span spans
 ```
 

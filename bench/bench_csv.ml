@@ -73,9 +73,9 @@ module Parseff_CSV_Fused = struct
   let[@inline always] is_not_comma c = c <> ','
   let csv () =
     let spans =
-      Parseff.sep_by_take_span ~ws:(fun _ -> false) ~sep:',' is_not_comma
+      Parseff.Slice.sep_by_take ~ws:(fun _ -> false) ~sep:',' is_not_comma
     in
-    let fields = List.map Parseff.span_to_string spans in
+    let fields = List.map Parseff.Slice.to_string spans in
     fields
 
   let parse input =

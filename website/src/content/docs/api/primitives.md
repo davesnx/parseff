@@ -308,13 +308,13 @@ let octet () =
   n
 ```
 
-### `recognize` and `recognize_span`
+### `recognize` and `Slice.recognize`
 
-`Parseff.recognize` runs a parser, drops its result, and returns the input text the parser consumed. `Parseff.recognize_span` returns it as a `Parseff.span`.
+`Parseff.recognize` runs a parser, drops its result, and returns the input text the parser consumed. `Parseff.Slice.recognize` returns it as a `Parseff.Slice.t`.
 
 ```ocaml
 val recognize : (unit -> 'a) -> string
-val recognize_span : (unit -> 'a) -> span
+val Slice.recognize : (unit -> 'a) -> Slice.t
 ```
 ```ocaml
 let identifier () =

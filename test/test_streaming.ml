@@ -618,8 +618,8 @@ let test_take_while_span_streaming () =
   let src = chunked_source ~chunk_size:2 "aaabbb" in
   match
     parse_source_with_pos src (fun () ->
-        let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        Parseff.span_to_string sp
+        let sp = Parseff.Slice.take_while (fun c -> c = 'a') in
+        Parseff.Slice.to_string sp
     )
   with
   | Ok (s, pos) ->
@@ -1554,25 +1554,25 @@ let sep_take_position_take () =
   (l, pos, rest)
 
 let sep_take_span_position_take () =
-  let l = Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower in
+  let l = Parseff.Slice.sep_by_take ~ws:is_space ~sep:',' is_lower in
   let pos = Parseff.position () in
   let rest = Parseff.take 3 in
-  (List.map Parseff.span_to_string l, pos, rest)
+  (List.map Parseff.Slice.to_string l, pos, rest)
 
 let test_sep_by_take_long_whitespace () =
   let input = "a" ^ String.make 5000 ' ' ^ "b" in
   check_matches_parse ~chunk_sizes:[ 4096 ] "sep_by_take" input
     sep_take_position_take;
-  check_matches_parse ~chunk_sizes:[ 4096 ] "sep_by_take_span" input
+  check_matches_parse ~chunk_sizes:[ 4096 ] "Slice.sep_by_take" input
     sep_take_span_position_take
 
 let test_sep_by_take_leading_whitespace () =
   let with_pos l = (l, Parseff.position ()) in
   let take () = with_pos (Parseff.sep_by_take ~ws:is_space ~sep:',' is_lower) in
-  let take_span () =
+  let slices () =
     with_pos
-      (List.map Parseff.span_to_string
-         (Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower)
+      (List.map Parseff.Slice.to_string
+         (Parseff.Slice.sep_by_take ~ws:is_space ~sep:',' is_lower)
       )
   in
   let expect name input expected parser =
@@ -1586,9 +1586,9 @@ let test_sep_by_take_leading_whitespace () =
     check_matches_parse name input parser
   in
   expect "sep_by_take leading" "  a,b" ([], 0) take;
-  expect "sep_by_take_span leading" "  a,b" ([], 0) take_span;
+  expect "Slice.sep_by_take leading" "  a,b" ([], 0) slices;
   expect "sep_by_take around separator" "a , b" ([ "a"; "b" ], 5) take;
-  expect "sep_by_take_span around separator" "a , b" ([ "a"; "b" ], 5) take_span
+  expect "Slice.sep_by_take around separator" "a , b" ([ "a"; "b" ], 5) slices
 
 let test_utf8_truncated_at_eof () =
   let rejects name parser =
@@ -1602,9 +1602,9 @@ let test_utf8_truncated_at_eof () =
   rejects "Utf8.take_while" (fun () ->
       ignore (Parseff.Utf8.take_while (fun _ -> true))
   );
-  rejects "Utf8.take_while_span" (fun () ->
+  rejects "Utf8.Slice.take_while" (fun () ->
       ignore
-        (Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true)))
+        (Parseff.Slice.to_string (Parseff.Utf8.Slice.take_while (fun _ -> true)))
   );
   rejects "Utf8.skip_while" (fun () -> Parseff.Utf8.skip_while (fun _ -> true));
   List.iter
@@ -2453,7 +2453,7 @@ let () =
           test_case "many across chunks" `Quick test_many_across_chunks;
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
           test_case "literal failure" `Quick test_literal_failure_streaming;
-          test_case "take_while_span" `Quick test_take_while_span_streaming;
+          test_case "Slice.take_while" `Quick test_take_while_span_streaming;
           test_case "parse_source_consume_all requires eof" `Quick
             test_parse_source_consume_all_requires_eof;
           test_case "parse_source_consume_all error diagnostics" `Quick

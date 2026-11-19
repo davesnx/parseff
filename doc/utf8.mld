@@ -87,13 +87,13 @@ the result.
 
 {@ocaml skip[val skip_while : (Uchar.t -> bool) -> unit]}
 
-{2 [take_while_span]}
+{2 [Slice.take_while]}
 
-{!val:Parseff.Utf8.take_while_span} returns a zero-copy {!type:Parseff.span} instead
-of allocating a new string. Use {!val:Parseff.span_to_string} to materialize
+{!val:Parseff.Utf8.Slice.take_while} returns a zero-copy {!type:Parseff.Slice.t} instead
+of allocating a new string. Use {!val:Parseff.Slice.to_string} to materialize
 when needed.
 
-{@ocaml skip[val take_while_span : (Uchar.t -> bool) -> span]}
+{@ocaml skip[val Slice.take_while : (Uchar.t -> bool) -> Slice.t]}
 
 {1 Convenience combinators}
 

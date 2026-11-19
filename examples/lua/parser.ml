@@ -1520,7 +1520,7 @@ let pending () = !started && not (is_eof ())
 let error_at source (r : range) ?notes ?help msg =
   match
     Parseff.parse ~consume:`Partial source (fun () ->
-        if r.start > 0 then ignore (Parseff.take_span r.start);
+        if r.start > 0 then ignore (Parseff.Slice.take r.start);
         (Lexer.error ~from:r.start ~upto:r.stop ?notes ?help msg : unit)
     )
   with

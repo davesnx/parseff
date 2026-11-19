@@ -77,20 +77,20 @@ let test_recognize_returns_consumed_text () =
     "Ok a=1|bc=23"
 
 let test_recognize_span_returns_consumed_text () =
-  check_all "recognize_span" Fun.id "a=1,bc=23;" ~consume:`Partial
+  check_all "Slice.recognize" Fun.id "a=1,bc=23;" ~consume:`Partial
     (fun () ->
-      ignore (Parseff.recognize_span key_value);
+      ignore (Parseff.Slice.recognize key_value);
       ignore (Parseff.char ',');
-      Parseff.span_to_string (Parseff.recognize_span key_value)
+      Parseff.Slice.to_string (Parseff.Slice.recognize key_value)
     )
     "Ok bc=23"
 
 let test_recognize_span_in_parse () =
   let input = "ab=12" in
-  match Parseff.parse input (fun () -> Parseff.recognize_span key_value) with
+  match Parseff.parse input (fun () -> Parseff.Slice.recognize key_value) with
   | Ok s ->
-      Alcotest.(check string) "text" input (Parseff.span_to_string s);
-      Alcotest.(check int) "length" 5 (Parseff.span_length s)
+      Alcotest.(check string) "text" input (Parseff.Slice.to_string s);
+      Alcotest.(check int) "length" 5 (Parseff.Slice.length s)
   | Error e ->
       Alcotest.fail (show_error e)
 
@@ -208,8 +208,8 @@ let test_failure_is_unchanged () =
   check_all "with_range" Fun.id "abx"
     (alternatives (fun p -> fst (Parseff.with_range p)))
     expected;
-  check_all "recognize_span" Fun.id "abx"
-    (alternatives (fun p -> Parseff.span_to_string (Parseff.recognize_span p)))
+  check_all "Slice.recognize" Fun.id "abx"
+    (alternatives (fun p -> Parseff.Slice.to_string (Parseff.Slice.recognize p)))
     expected
 
 let test_inside_look_ahead_and_many () =

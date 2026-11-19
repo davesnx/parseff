@@ -1814,13 +1814,13 @@ let test_sep_by_take_several () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- sep_by_take_span --- *)
+(* --- Slice.sep_by_take --- *)
 
 let test_sep_by_take_span_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "" (fun () ->
-        Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_alpha
+        Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok lst ->
@@ -1832,24 +1832,24 @@ let test_sep_by_take_span_several () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
     Parseff.parse "aa , bb , cc" (fun () ->
-        Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_alpha
+        Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_alpha
     )
   with
   | Ok spans ->
-      let strs = List.map Parseff.span_to_string spans in
+      let strs = List.map Parseff.Slice.to_string spans in
       Alcotest.(check (list string)) "three items" [ "aa"; "bb"; "cc" ] strs;
-      let lengths = List.map Parseff.span_length spans in
+      let lengths = List.map Parseff.Slice.length spans in
       Alcotest.(check (list int)) "lengths" [ 2; 2; 2 ] lengths
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- take_while_span --- *)
+(* --- Slice.take_while --- *)
 
 let test_take_while_span () =
   match
     parse_with_pos "aaabbb" (fun () ->
-        let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        (Parseff.span_to_string sp, Parseff.span_length sp)
+        let sp = Parseff.Slice.take_while (fun c -> c = 'a') in
+        (Parseff.Slice.to_string sp, Parseff.Slice.length sp)
     )
   with
   | Ok ((s, len), pos) ->
@@ -1862,8 +1862,8 @@ let test_take_while_span () =
 let test_take_while_span_empty () =
   match
     Parseff.parse ~consume:`Partial "xyz" (fun () ->
-        let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        (Parseff.span_to_string sp, Parseff.span_length sp)
+        let sp = Parseff.Slice.take_while (fun c -> c = 'a') in
+        (Parseff.Slice.to_string sp, Parseff.Slice.length sp)
     )
   with
   | Ok (s, len) ->
@@ -1876,7 +1876,7 @@ let span_at buf off len =
   match
     Parseff.parse ~consume:`Partial buf (fun () ->
         ignore (Parseff.take off);
-        Parseff.take_span len
+        Parseff.Slice.take len
     )
   with
   | Ok sp ->
@@ -1891,7 +1891,7 @@ let test_span_to_string_valid () =
       Alcotest.(check string)
         (Printf.sprintf "off %d len %d" off len)
         expected
-        (Parseff.span_to_string (span_at buf off len))
+        (Parseff.Slice.to_string (span_at buf off len))
     )
     [
       (3, 0, "");
@@ -1907,12 +1907,12 @@ let test_span_get () =
   let sp = span_at "abcdef" 2 3 in
   Alcotest.(check (list char))
     "bytes" [ 'c'; 'd'; 'e' ]
-    (List.init (Parseff.span_length sp) (Parseff.span_get sp));
+    (List.init (Parseff.Slice.length sp) (Parseff.Slice.get sp));
   List.iter
     (fun i ->
       Alcotest.check_raises (Printf.sprintf "index %d" i)
-        (Invalid_argument "Parseff.span_get") (fun () ->
-          ignore (Parseff.span_get sp i)
+        (Invalid_argument "Parseff.Slice.get") (fun () ->
+          ignore (Parseff.Slice.get sp i)
       )
     )
     [ -1; 3; 4; max_int; min_int ]
@@ -2226,13 +2226,13 @@ let () =
           test_case "sep_by_take empty" `Quick test_sep_by_take_empty;
           test_case "sep_by_take single" `Quick test_sep_by_take_single;
           test_case "sep_by_take several" `Quick test_sep_by_take_several;
-          test_case "sep_by_take_span empty" `Quick test_sep_by_take_span_empty;
-          test_case "sep_by_take_span several" `Quick
+          test_case "Slice.sep_by_take empty" `Quick test_sep_by_take_span_empty;
+          test_case "Slice.sep_by_take several" `Quick
             test_sep_by_take_span_several;
-          test_case "take_while_span" `Quick test_take_while_span;
-          test_case "take_while_span empty" `Quick test_take_while_span_empty;
-          test_case "span_to_string valid" `Quick test_span_to_string_valid;
-          test_case "span_get" `Quick test_span_get;
+          test_case "Slice.take_while" `Quick test_take_while_span;
+          test_case "Slice.take_while empty" `Quick test_take_while_span_empty;
+          test_case "Slice.to_string valid" `Quick test_span_to_string_valid;
+          test_case "Slice.get" `Quick test_span_get;
         ]
       );
       ( "diagnostics",

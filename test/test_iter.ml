@@ -294,7 +294,7 @@ let test_recognize_pins () =
         ignore
           (Parseff.recognize (fun () ->
                Parseff.take_iter 1000 (fun s ->
-                   got := !got + Parseff.span_length s
+                   got := !got + Parseff.Slice.length s
                )
            )
           )
@@ -313,7 +313,7 @@ let test_with_range_does_not_pin () =
         ignore
           (Parseff.with_range (fun () ->
                Parseff.take_iter 1000 (fun s ->
-                   got := !got + Parseff.span_length s
+                   got := !got + Parseff.Slice.length s
                )
            )
           )
@@ -352,8 +352,8 @@ let test_take_iter_pieces () =
           (fun () ->
             Parseff.literal "len:";
             Parseff.take_iter body_len (fun piece ->
-                largest := max !largest (Parseff.span_length piece);
-                Buffer.add_string out (Parseff.span_to_string piece)
+                largest := max !largest (Parseff.Slice.length piece);
+                Buffer.add_string out (Parseff.Slice.to_string piece)
             );
             Parseff.char '!'
           )
@@ -384,7 +384,7 @@ let test_take_while_iter_pieces () =
       (body_source ~prefix:"" ~len:body_len ~suffix:"0") (fun () ->
         Parseff.take_while_iter
           (fun c -> c >= 'a' && c <= 'z')
-          (fun piece -> Buffer.add_string out (Parseff.span_to_string piece));
+          (fun piece -> Buffer.add_string out (Parseff.Slice.to_string piece));
         Parseff.char '0'
     )
   in
@@ -397,7 +397,7 @@ let pieces_of run input =
   let got = ref [] in
   let r =
     Parseff.parse ~consume:`Partial input (fun () ->
-        run (fun s -> got := Parseff.span_to_string s :: !got)
+        run (fun s -> got := Parseff.Slice.to_string s :: !got)
     )
   in
   (show r, List.rev !got)

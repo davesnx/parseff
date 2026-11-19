@@ -42,26 +42,6 @@
     A 1.x release can add events to {!type:trace_event} and fields to some
     records; {!type:error_kind} says which types are final until 2.0. *)
 
-(** {1 Span Type} *)
-
-type span
-(** A slice of the input. With [parse] it is zero-copy: it points into the input
-    string. With [parse_source] it is an owned copy. Use [span_length] and
-    [span_get] to read it without a copy, and [span_to_string] to materialize it
-    when needed. *)
-
-val span_to_string : span -> string
-(** [span_to_string s] extracts the string from a span. Only call this when you
-    actually need the string value. *)
-
-val span_length : span -> int
-(** [span_length s] is the number of bytes in [s]. *)
-
-val span_get : span -> int -> char
-(** [span_get s i] is the byte at index [i] of [s], counted from the start of
-    the span. Raises [Invalid_argument] if [i] is not in
-    [0 .. span_length s - 1]. *)
-
 (** {1 Location Type} *)
 
 type location = private { offset : int; line : int; byte_col : int }
@@ -468,7 +448,7 @@ val char : char -> char
     ]} *)
 
 (** A 256-entry table of bytes, for the [~set] argument of {!take_while},
-    {!skip_while}, {!take_while_span} and {!take_while_iter}. Build it once,
+    {!skip_while}, {!Slice.take_while} and {!take_while_iter}. Build it once,
     outside the parser. *)
 module Charset : sig
   type t
@@ -610,17 +590,6 @@ val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
     trailing or doubled separator, [sep_by_take] stops before that separator and
     the whitespace in front of it, and leaves them unread. Runs entirely in a
     single operation for maximum efficiency. *)
-
-val take_while_span : ?set:Charset.t -> (char -> bool) -> span
-(** [take_while_span fun] like {!take_while} but returns a zero-copy
-    {!type:span} instead of allocating a string. No memory allocation until you
-    call {!span_to_string}. [~set] is as in {!take_while}. *)
-
-val sep_by_take_span :
-  ws:(char -> bool) -> sep:char -> (char -> bool) -> span list
-(** [sep_by_take_span ~ws ~sep is_value_char] like {!sep_by_take} but returns
-    zero-copy {!type:span}s instead of strings. No [String.sub] allocations per
-    element. *)
 
 val fail :
   ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> string -> 'a
@@ -814,10 +783,6 @@ val recognize : (unit -> 'a) -> string
       )
     (* "foo_1 = 2" -> "foo_1" *)
     ]} *)
-
-val recognize_span : (unit -> 'a) -> span
-(** [recognize_span parser] is {!recognize} but returns a {!type:span}. With
-    {!parse_source} the span is an owned copy. *)
 
 val location : unit -> location
 (** [location ()] returns the current parser location with line and column. Zero
@@ -1698,6 +1663,52 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
     (* On failure: "expected boolean, number, or string" *)
     ]} *)
 
+(** {1:slices Slices} *)
+
+module Slice : sig
+  type t
+  (** A slice of the input. With {!Parseff.parse} it is zero-copy: it points
+      into the input string. With {!Parseff.parse_source} it is an owned copy.
+      Use {!length} and {!get} to read it without a copy, and {!to_string} to
+      materialize it when needed. *)
+
+  val to_string : t -> string
+  (** [to_string s] extracts the string from a slice. Only call this when you
+      actually need the string value. *)
+
+  val length : t -> int
+  (** [length s] is the number of bytes in [s]. *)
+
+  val get : t -> int -> char
+  (** [get s i] is the byte at index [i] of [s], counted from the start of the
+      slice. Raises [Invalid_argument] if [i] is not in [0 .. length s - 1]. *)
+
+  val take_while : ?set:Charset.t -> (char -> bool) -> t
+  (** [take_while fun] like {!Parseff.take_while} but returns a zero-copy slice
+      instead of allocating a string. No memory allocation until you call
+      {!to_string}. [~set] is as in {!Parseff.take_while}. *)
+
+  val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> t list
+  (** [sep_by_take ~ws ~sep is_value_char] like {!Parseff.sep_by_take} but
+      returns zero-copy slices instead of strings. No [String.sub] allocations
+      per element. *)
+
+  val recognize : (unit -> 'a) -> t
+  (** [recognize parser] is {!Parseff.recognize} but returns a slice. With
+      {!Parseff.parse_source} the slice is an owned copy. *)
+
+  val take : int -> t
+  (** [take n] reads exactly [n] bytes like {!Parseff.take}, and returns them as
+      a slice. With {!Parseff.parse_source} the slice is an owned copy.
+
+      Example:
+      {@ocaml[
+      let payload () =
+        let len = BE.any_uint16 () in
+        Slice.take len
+      ]} *)
+end
+
 (** {1 Repetition Combinators} *)
 
 val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
@@ -1774,7 +1785,7 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
     frame outside it can rewind before that value, and a streaming source can
     drop the input before it. Thus with {!parse_source} memory is bounded by the
     size of one element, not by the number of elements. The exception is
-    {!recognize} and {!recognize_span}: they keep their input, so inside them
+    {!recognize} and {!Slice.recognize}: they keep their input, so inside them
     the parse fails with [Backtrack_window_exceeded] when that input is larger
     than the window. {!with_range} keeps no input.
 
@@ -2346,17 +2357,6 @@ val take : int -> string
       take len
     ]} *)
 
-val take_span : int -> span
-(** [take_span n] reads exactly [n] bytes like {!take}, and returns them as a
-    {!type:span}. With {!parse_source} the span is an owned copy.
-
-    Example:
-    {@ocaml[
-    let payload () =
-      let len = BE.any_uint16 () in
-      take_span len
-    ]} *)
-
 val within : int -> (unit -> 'a) -> 'a
 [@@alert unstable "This value can change in a 1.x release."]
 (** [within n parser] runs [parser] on the next [n] bytes exactly, as the
@@ -2373,8 +2373,8 @@ val within : int -> (unit -> 'a) -> 'a
 
     [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
     be larger than [~backtrack_window] when [parser] calls {!commit} as it
-    reads. Inside a frame on string input, {!take_span}, {!take_while_span} and
-    {!recognize_span} return copies, as they do with {!parse_source}.
+    reads. Inside a frame on string input, {!Slice.take}, {!Slice.take_while}
+    and {!Slice.recognize} return copies, as they do with {!parse_source}.
 
     Inside the frame the input ends at the frame end, so {!skip_to} raises
     [Invalid_argument] for a target past it, also for a position that
@@ -2389,19 +2389,19 @@ val within : int -> (unit -> 'a) -> 'a
       within len (fun () -> (kind, take_while (fun _ -> true)))
     ]} *)
 
-val take_iter : int -> (span -> unit) -> unit
+val take_iter : int -> (Slice.t -> unit) -> unit
 [@@alert unstable "This value can change in a 1.x release."]
 (** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
     in pieces, in order, with no empty piece. Joined, the pieces are the [n]
     bytes. With {!parse} there is one piece. With {!parse_source} a piece is the
     part of the [n] bytes that is in the input buffer, so the [n] bytes are
     never held whole and [n] can be larger than [~backtrack_window]. Inside
-    {!recognize} or {!recognize_span} the input is kept: when [n] is larger than
-    the window, the parse fails with [Backtrack_window_exceeded] after [f] got
-    the bytes that fit.
+    {!recognize} or {!Slice.recognize} the input is kept: when [n] is larger
+    than the window, the parse fails with [Backtrack_window_exceeded] after [f]
+    got the bytes that fit.
 
     A piece points into the input buffer with no copy. It is valid only while
-    [f] runs: use {!span_to_string} to keep it.
+    [f] runs: use {!Slice.to_string} to keep it.
 
     [take_iter] gives out values as {!many_iter} does: it seals every open frame
     before each piece, [f] runs outside the parse, an exception from [f] stops
@@ -2417,13 +2417,14 @@ val take_iter : int -> (span -> unit) -> unit
     let body out () =
       let len = BE.any_uint16 () in
       take_iter len (fun piece ->
-          for i = 0 to span_length piece - 1 do
-            Buffer.add_char out (span_get piece i)
+          for i = 0 to Slice.length piece - 1 do
+            Buffer.add_char out (Slice.get piece i)
           done
       )
     ]} *)
 
-val take_while_iter : ?set:Charset.t -> (char -> bool) -> (span -> unit) -> unit
+val take_while_iter :
+  ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
 [@@alert unstable "This value can change in a 1.x release."]
 (** [take_while_iter pred f] reads bytes while [pred] holds, like {!take_while},
     and gives them to [f] in pieces as {!take_iter} does. It never fails. When
@@ -2444,7 +2445,7 @@ val take_while_iter : ?set:Charset.t -> (char -> bool) -> (span -> unit) -> unit
     raise [Invalid_argument] inside a frame that cannot be sealed. Sealing is
     also what lets a source drop the input before that point, so a parse that
     gives its values out this way can read input much larger than
-    [~backtrack_window]. The exception is {!recognize} and {!recognize_span},
+    [~backtrack_window]. The exception is {!recognize} and {!Slice.recognize},
     which keep all the input that they read. *)
 
 (** Input sources for incremental parsing. A source wraps a readable byte stream
@@ -2950,9 +2951,11 @@ module Utf8 : sig
   (** [skip_while pred] advances past code points while [pred] returns [true].
       Like {!take_while} but returns [unit] — no string allocation. *)
 
-  val take_while_span : (Uchar.t -> bool) -> span
-  (** [take_while_span pred] like {!take_while} but returns a zero-copy
-      {!type:span}. *)
+  module Slice : sig
+    val take_while : (Uchar.t -> bool) -> Slice.t
+    (** [take_while pred] like {!Parseff.Utf8.take_while} but returns a
+        zero-copy {!Parseff.Slice.t}. *)
+  end
 
   val is_whitespace : Uchar.t -> bool
   (** [is_whitespace u] returns [true] for Unicode whitespace characters, using
