@@ -14,7 +14,7 @@
   | `take_while_span` | `Slice.take_while` |
   | `recognize_span` | `Slice.recognize` |
   | `sep_by_take_span` | `Slice.sep_by_take` |
-  | `Utf8.take_while_span` | `Slice.Utf8.take_while` |
+  | `Utf8.take_while_span` | `Utf8.Slice.take_while` |
 
 - **Breaking: `fold_left` and `fold_right` take `?otherwise` first.** The signature is now `?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a`, with the optional argument before the positional ones, as in the other combinators. Apart from the trailing `()` that every combinator lost (see above), a call with `~otherwise:x` in any position compiles as before: `fold_left element op ~otherwise:x` and `fold_left ~otherwise:x element op` give the same parse. Code that gives `~otherwise` in a later application must change: in `let f = fold_left element op in f ~otherwise:x`, `fold_left element op` is a complete call that runs the fold without `~otherwise`, and `f ~otherwise:x` fails to compile because `f` is not a function. Pass `~otherwise` in the same call.
 - **Breaking: `location.col` is renamed to `byte_col`.** The field counts bytes from the start of the line, while the column that `render_error` prints counts Unicode characters, so the two differ on a line with non-ASCII text. The new name says which one it is. Write `l.byte_col` for `l.col`, and `{ line; byte_col; _ }` for `{ line; col; _ }`. The value and the rendered errors do not change.

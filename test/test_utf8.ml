@@ -367,7 +367,7 @@ let test_take_while_span () =
   match
     parse_with_pos "héllo world" (fun () ->
         let sp =
-          Parseff.Slice.Utf8.take_while (fun u ->
+          Parseff.Utf8.Slice.take_while (fun u ->
               not (Uucp.White.is_white_space u)
           )
         in

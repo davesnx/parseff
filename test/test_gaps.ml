@@ -106,7 +106,7 @@ let test_utf8_take_while_span_split () =
     (fun text ->
       check_all "Slice.take_while" Fun.id text
         (fun () ->
-          Parseff.Slice.to_string (Parseff.Slice.Utf8.take_while (fun _ -> true))
+          Parseff.Slice.to_string (Parseff.Utf8.Slice.take_while (fun _ -> true))
         )
         ("Ok " ^ text)
     )
