@@ -975,6 +975,32 @@ val peek_with : (unit -> 'a) -> 'a * int
     [~backtrack_window]. This includes the whitespace and comments that it skips
     before the token. *)
 
+val not_followed_by : ?label:string -> (unit -> 'a) -> unit
+(** [not_followed_by parser] succeeds when [parser] fails, and fails when
+    [parser] succeeds. It consumes no input in both cases.
+
+    When [parser] succeeds, [not_followed_by] fails where it started with
+    [expected <label>], an ordinary [Expected] failure as {!keyword} gives:
+    {!or_} tries the next branch, and the label merges with the other
+    alternatives at that position. The default label is ["something else"].
+
+    When [parser] fails, its failures are forgotten, so they are not the error
+    of the parse. As in {!peek_with}, diagnostics recorded by [parser] with
+    {!warn} and {!Ref} writes made by [parser] are removed, a {!commit} or
+    {!cut} inside [parser] has no effect outside it, and the recovery functions
+    inside [parser] run as without the collector.
+
+    In {!parse_source}, the input that [parser] reads must fit in
+    [~backtrack_window].
+
+    Example:
+    {@ocaml[
+    let bang () =
+      literal "!";
+      not_followed_by ~label:"'!' alone" (fun () -> char '=')
+    (* reads "!" in "!x", fails on "!=" with expected '!' alone at offset 1 *)
+    ]} *)
+
 val skip_to : int -> unit
 (** [skip_to target] moves the position forward to [target], an absolute offset
     as {!position} returns it. It reads nothing and never fails. Use it with a
