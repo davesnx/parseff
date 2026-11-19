@@ -1975,8 +1975,11 @@ val expression :
   unit ->
   'a
 (** [expression ~operand table] parses operands with [operand], joined by the
-    operators of [table]. It is {!precedence} with a lookup made from [table]:
-    the operators of level [i] have the precedence [i].
+    operators of [table]. The operators of level [i] have the precedence [i].
+    [expression] and {!precedence} each have their own loop, with the same rules
+    for build functions, depth and {!commit}. Use [expression] for a table of
+    token parsers: tokens with a shared prefix, one token in two roles, and the
+    operator tokens in the expected set of an error.
 
     [table] lists the precedence levels from the lowest to the highest
     precedence. [operand] parses an operand; for parentheses, it calls the
@@ -2062,10 +2065,12 @@ val precedence :
   unit ->
   'a
 (** [precedence ~operand ~operator] parses operands with [operand], joined by
-    the operators that [operator] finds. {!expression} uses the same loop. Where
-    {!expression} runs the token parsers of its table, [precedence] calls
-    [operator] once after each operand. For a grammar with many precedence
-    levels, this is faster.
+    the operators that [operator] finds. [precedence] and {!expression} each
+    have their own loop, with the same rules for build functions, depth and
+    {!commit}. Where {!expression} runs the token parsers of its table,
+    [precedence] calls [operator] once after each operand. Use [precedence] when
+    [operator] can decide from the next character or from the token of a lexer.
+    For a grammar with many precedence levels, this is faster.
 
     [operator] looks at the input and returns [Some (prec, op)], or [None] when
     no operator is next. A higher [prec] binds tighter, and each [int] is a
