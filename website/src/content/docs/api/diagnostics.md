@@ -49,7 +49,7 @@ val warn :
 
 ## Collecting diagnostics
 
-Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. `Parseff.warn` records into that collector. When the runner got no collector, `warn` records nothing. `recover`, `require` and `list` take the collector as an argument, and recover only with the collector that the runner got.
+Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. `Parseff.warn`, `recover`, `require` and `list` record into that collector. When the runner got no collector, `warn` records nothing, and `recover`, `require` and `list` do not recover.
 
 The result of the parse is the usual `Parseff.error` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
 

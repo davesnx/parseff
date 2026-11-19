@@ -949,7 +949,7 @@ let digits_with_warning () =
 let test_warning_next_to_recovered_error () =
   let d = Parseff.Diagnostics.create () in
   let sync () = Parseff.skip_while (fun c -> c <> ';') in
-  let item () = Parseff.recover d ~sync digits_with_warning (fun _ -> -1) in
+  let item () = Parseff.recover ~sync digits_with_warning (fun _ -> -1) in
   let r =
     Parseff.parse ~diagnostics:d "07;x" (fun () ->
         let a = item () in

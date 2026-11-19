@@ -384,14 +384,13 @@ val parse :
     from the start of a buffer. With [`Partial], the result does not say where
     the parser stopped; call {!position} at the end of the parser to read it.
 
-    [diagnostics] is the collector given to {!warn}, {!recover}, {!require} and
-    {!list}. The runner empties it before the parser starts. Read it with
-    {!Diagnostics.to_list} after the parse, whether the result is [Ok] or
-    [Error]. With any other collector, {!recover}, {!require} and {!list} do not
-    recover: the parse fails at the first error, as without them. Thus the same
-    parser can report every error with [~diagnostics] and stop at the first one
-    without it. {!warn} records its warnings in [diagnostics], and records
-    nothing when the runner got no [~diagnostics].
+    [diagnostics] is the collector of {!warn}, {!recover}, {!require} and
+    {!list}: they record into it. The runner empties it before the parser
+    starts. Read it with {!Diagnostics.to_list} after the parse, whether the
+    result is [Ok] or [Error]. Without [~diagnostics], {!recover}, {!require}
+    and {!list} do not recover: the parse fails at the first error, as without
+    them, and {!warn} records nothing. Thus the same parser can report every
+    error with [~diagnostics] and stop at the first one without it.
 
     [trace] receives a {!type:trace_event} when a {!val:context} starts, returns
     and fails. {!print_trace} prints the events as a tree. An exception from
@@ -1051,16 +1050,15 @@ val recover :
   ?release:bool ->
   ?contexts:[ `All | `Inner ] ->
   ?keep:(Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
-  Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
-    [parser] fails with the error [e], [recover] records [e] in [errors], calls
-    [sync ()] to skip to a point where parsing can continue, and returns
-    [hole e]. Unlike {!capture}, [recover] lets the recovery functions inside
-    [parser] recover.
+(** [recover ~sync parser hole] runs [parser] with {!capture}. If [parser] fails
+    with the error [e], [recover] records [e] in the collector that the runner
+    got as [~diagnostics], calls [sync ()] to skip to a point where parsing can
+    continue, and returns [hole e]. Unlike {!capture}, [recover] lets the
+    recovery functions inside [parser] recover.
 
     A recovery does not take the place of an alternative. [recover], {!require}
     and {!list} recover only where no open choice is around them. An open choice
@@ -1077,13 +1075,13 @@ val recover :
     turns a failure into [Error e], as a choice does: with the collector, its
     [parser] runs without recovery. Inside an open choice, a recovery function
     fails as without the collector, so the choice goes on as without it and
-    nothing is recorded. For example,
-    [or_ (fun () -> recover errors ~sync ab hole) ac] on ["ac"] returns ["ac"]
-    and records nothing, and [optional (fun () -> recover ...)] recovers only
-    after a {!commit} or {!cut} in it. To recover inside a branch, read the
-    token that selects the branch, call {!commit}, then the recovery function.
-    Inside {!look_ahead}, {!peek_with} and an operator lookup of {!precedence},
-    the recovery functions do not recover either.
+    nothing is recorded. For example, [or_ (fun () -> recover ~sync ab hole) ac]
+    on ["ac"] returns ["ac"] and records nothing, and
+    [optional (fun () -> recover ...)] recovers only after a {!commit} or {!cut}
+    in it. To recover inside a branch, read the token that selects the branch,
+    call {!commit}, then the recovery function. Inside {!look_ahead},
+    {!peek_with} and an operator lookup of {!precedence}, the recovery functions
+    do not recover either.
 
     When a recovery happened and a branch of an enclosing {!or_}, {!one_of} or
     {!optional}, a step of a repetition or a fold, or an operand of
@@ -1101,16 +1099,16 @@ val recover :
 
     The end of a loop is not an alternative: {!many} stops where its element
     fails, and whether the input after the loop parses is not known there. In
-    [many (fun () -> recover errors ~sync statement hole)], [recover] also
-    recovers at the token after the last statement, such as the [}] of a block,
-    and [sync] or the forced progress skips it. Use {!list} with [~close] for a
-    loop, or make the loop stop at that token before [recover] runs. The same
-    holds for a step of a fold after the first element, a recovery function in
-    an operator parser of {!precedence} or {!expression}, and an operand after
-    an infix operator: the other operators of the table are not tried before the
-    operand recovers. With [+] and [++] on one level, {!expression} reads
-    ["1++"] as [1 + hole] with the collector. Make an operator token take the
-    longest match, so that [+] fails before [++].
+    [many (fun () -> recover ~sync statement hole)], [recover] also recovers at
+    the token after the last statement, such as the [}] of a block, and [sync]
+    or the forced progress skips it. Use {!list} with [~close] for a loop, or
+    make the loop stop at that token before [recover] runs. The same holds for a
+    step of a fold after the first element, a recovery function in an operator
+    parser of {!precedence} or {!expression}, and an operand after an infix
+    operator: the other operators of the table are not tried before the operand
+    recovers. With [+] and [++] on one level, {!expression} reads ["1++"] as
+    [1 + hole] with the collector. Make an operator token take the longest
+    match, so that [+] fails before [++].
 
     A {!commit} or {!cut} in [parser] reaches the frames outside [recover], as
     without the collector, and [recover] still goes back to its start when it
@@ -1130,23 +1128,23 @@ val recover :
     function keeps the input from its start, so it can need a larger window than
     the parse without the collector.
 
-    The errors that [parser] recorded in [errors] before it failed are removed,
-    as with {!capture}: only [e] stays. To keep them, give [~keep].
+    The errors that [parser] recorded before it failed are removed, as with
+    {!capture}: only [e] stays. To keep them, give [~keep].
 
     [~keep] chooses what is recorded in place of [e]: [recover] calls
     [keep entry inner], where [entry] is the entry of [e] (at [e.range.start])
     and [inner] holds the entries, errors and warnings, that [parser] recorded
-    in [errors] and that the failure removed, in the order they were recorded.
-    [recover] records the entries that [keep] returns, in that order, so they
-    are removed when a construct around [recover] goes back, as any other
-    diagnostic. The default is [fun entry _ -> [ entry ]]. With [~release:true],
-    [inner] holds only the entries recorded after the last {!commit}, {!cut} or
-    value given out by a [*_iter] function, such as {!many_iter}, that reached
-    [recover], since the entries before it stay as in {!capture}. [keep] must be
-    a pure function: no side effects and no parsing. It can run more than once
-    for the same error: a loop such as {!many} runs its element again at the
-    same position and then drops that step, so [many (fun () -> list ~keep ...)]
-    on ["a,x"] calls [keep] twice for the error at [x]. If [keep] raises, the
+    and that the failure removed, in the order they were recorded. [recover]
+    records the entries that [keep] returns, in that order, so they are removed
+    when a construct around [recover] goes back, as any other diagnostic. The
+    default is [fun entry _ -> [ entry ]]. With [~release:true], [inner] holds
+    only the entries recorded after the last {!commit}, {!cut} or value given
+    out by a [*_iter] function, such as {!many_iter}, that reached [recover],
+    since the entries before it stay as in {!capture}. [keep] must be a pure
+    function: no side effects and no parsing. It can run more than once for the
+    same error: a loop such as {!many} runs its element again at the same
+    position and then drops that step, so [many (fun () -> list ~keep ...)] on
+    ["a,x"] calls [keep] twice for the error at [x]. If [keep] raises, the
     exception leaves the parse, as an exception from a build function does. For
     example, to keep the errors of [parser], and [e] only when there are none:
     {@ocaml[
@@ -1162,18 +1160,17 @@ val recover :
     function that reached [recover], and the errors recorded before that call
     stay as in {!capture}.
 
-    [errors] must be the collector given to the runner as [~diagnostics];
-    otherwise [recover] calls [parser] directly, so the parse fails as without
-    [recover]. If [sync] consumes nothing, [recover] still consumes input, so a
-    loop around it always moves forward: it moves to the start of the error
-    range and one character past it, but never past the end of the input. To
-    continue without consuming input, use {!capture}. A failure at the end of
-    the input is not recovered: the parse fails there, as without [recover].
-    Thus an element that is cut short by the end of the input gives one error,
-    not a second one where the enclosing construct expects more input. A failure
-    is at the end when the input ends both where it was raised and where its
-    error range starts: a {!fail} [~from] an earlier position, such as
-    [number too large] for the last number of the input, is recovered.
+    When the runner got no [~diagnostics], [recover] calls [parser] directly, so
+    the parse fails as without [recover]. If [sync] consumes nothing, [recover]
+    still consumes input, so a loop around it always moves forward: it moves to
+    the start of the error range and one character past it, but never past the
+    end of the input. To continue without consuming input, use {!capture}. A
+    failure at the end of the input is not recovered: the parse fails there, as
+    without [recover]. Thus an element that is cut short by the end of the input
+    gives one error, not a second one where the enclosing construct expects more
+    input. A failure is at the end when the input ends both where it was raised
+    and where its error range starts: a {!fail} [~from] an earlier position,
+    such as [number too large] for the last number of the input, is recovered.
 
     When [sync] fails, [recover] fails with the failure of [sync]. A [sync] that
     reads a closing token fails at the end of the input when the token is
@@ -1184,7 +1181,7 @@ val recover :
 
     Example:
     {@ocaml[
-    let assignment errors () =
+    let assignment () =
       let name =
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
@@ -1192,7 +1189,7 @@ val recover :
       let _ = char '=' in
       skip_whitespace ();
       let value =
-        recover errors
+        recover
           ~sync:(fun () -> skip_while (fun c -> c <> ';'))
           integer
           (fun _ -> 0)
@@ -1202,27 +1199,28 @@ val recover :
 
     let () =
       let errors = Diagnostics.create () in
-      let r = parse ~diagnostics:errors "x = ?;" (assignment errors) in
+      let r = parse ~diagnostics:errors "x = ?;" assignment in
       assert (r = Ok ("x", 0));
       assert (Diagnostics.length errors = 1)
     ]} *)
 
-val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
-(** [require errors parser missing] runs [parser]. If the furthest failure of
-    [parser] is at the position where [require] started, [require] records the
-    error [e] in [errors], goes back to that position and returns [missing e]:
-    it inserts the missing part, consumes nothing and the parse goes on. Use it
-    for a token that the grammar needs at this point, such as [then], [;], or
-    the [)] that closes a list, and for a missing expression.
+val require : (unit -> 'a) -> (error -> 'a) -> 'a
+(** [require parser missing] runs [parser]. If the furthest failure of [parser]
+    is at the position where [require] started, [require] records the error [e]
+    in the collector that the runner got as [~diagnostics], goes back to that
+    position and returns [missing e]: it inserts the missing part, consumes
+    nothing and the parse goes on. Use it for a token that the grammar needs at
+    this point, such as [then], [;], or the [)] that closes a list, and for a
+    missing expression.
 
     The furthest failure decides, not the position where [parser] stopped. A
     branch of [parser] that read further and failed means that the construct is
     there and broken, not missing: the failure goes on, as without [require],
     and an enclosing {!recover} or {!list} handles it. On ["ax"],
-    [require errors (fun () -> ignore (optional ab ()); ignore (char ')'))
-     ignore] with [ab] reading ['a'] then ['b'] does not insert: [ab] failed at
-    1. With [capture ab] in place of [optional ab ()], the failure of [ab] is
-    not counted, and [require] inserts the [)] at 0. The same rule holds for a
+    [require (fun () -> ignore (optional ab ()); ignore (char ')')) ignore] with
+    [ab] reading ['a'] then ['b'] does not insert: [ab] failed at 1. With
+    [capture ab] in place of [optional ab ()], the failure of [ab] is not
+    counted, and [require] inserts the [)] at 0. The same rule holds for a
     failure of {!fail} or {!val-error}: it is inserted only when no branch of
     [parser] read further.
 
@@ -1244,15 +1242,14 @@ val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
     In byte mode, a token parser usually skips the whitespace after it. Then [e]
     points after that whitespace, not at the end of the previous token.
 
-    [errors] must be the collector given to the runner as [~diagnostics];
-    otherwise [require] calls [parser] directly. A traced parse gets a
-    [Captured] event for each insertion.
+    When the runner got no [~diagnostics], [require] calls [parser] directly. A
+    traced parse gets a [Captured] event for each insertion.
 
     Example:
     {@ocaml[
     type call = Call of string * int list
 
-    let call errors () =
+    let call () =
       let name =
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
@@ -1263,7 +1260,6 @@ val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
             let _ = char ',' in
             skip_whitespace ()
           )
-          errors
           ~close:(fun () -> peek_char () = Some ')')
           ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ','))
           (fun () ->
@@ -1274,12 +1270,12 @@ val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
           (fun _ -> 0)
           ()
       in
-      require errors (fun () -> ignore (char ')')) ignore;
+      require (fun () -> ignore (char ')')) ignore;
       Call (name, args)
 
     let () =
       let errors = Diagnostics.create () in
-      let r = parse ~diagnostics:errors "f(1, 2" (call errors) in
+      let r = parse ~diagnostics:errors "f(1, 2" call in
       assert (r = Ok (Call ("f", [ 1; 2 ])));
       match Diagnostics.to_list errors with
       | [ { Diagnostics.value = e; _ } ] ->
@@ -1294,15 +1290,14 @@ val list :
   ?keep:(Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
   ?sep:(unit -> unit) ->
   ?trailing:bool ->
-  Diagnostics.t ->
   close:(unit -> bool) ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
   unit ->
   'a list
-(** [list errors ~close ~sync element hole ()] parses [element] again and again,
-    as {!many} does, and recovers from each [element] that fails, except where
+(** [list ~close ~sync element hole ()] parses [element] again and again, as
+    {!many} does, and recovers from each [element] that fails, except where
     [close ()] is [true] or the input ends. It is one loop for a list of
     statements and, with [~sep], for a list with separators. It does not read
     the closing token: follow it with {!require}.
@@ -1387,15 +1382,16 @@ val list :
     {!many} and {!sep_by}, so the list ends before it, or before its separator,
     and the parser after the list reports the error. Inside {!look_ahead},
     {!peek_with} or an operator lookup of {!precedence}, [list] is the plain
-    parser. [errors] must be the collector given to the runner as
-    [~diagnostics]; otherwise [list] is the plain parser: {!many} [element]
-    without [~sep], {!sep_by} [element] [sep] with it, and with [~trailing:true]
-    also an optional separator after a list that is not empty. [close] is not
-    used then. For valid input, when [close] is [true] where the plain parser
-    ends the list, and with [~sep] the separator consumes input and fails there,
-    [list] with the collector gives the same list as the plain parser, and
-    records nothing. A separator that can succeed on no input, or that reads the
-    closing token, lets [list] try an element where {!sep_by} ends.
+    parser. [list] records its errors in the collector that the runner got as
+    [~diagnostics]. When the runner got no [~diagnostics], [list] is the plain
+    parser: {!many} [element] without [~sep], {!sep_by} [element] [sep] with it,
+    and with [~trailing:true] also an optional separator after a list that is
+    not empty. [close] is not used then. For valid input, when [close] is [true]
+    where the plain parser ends the list, and with [~sep] the separator consumes
+    input and fails there, [list] with the collector gives the same list as the
+    plain parser, and records nothing. A separator that can succeed on no input,
+    or that reads the closing token, lets [list] try an element where {!sep_by}
+    ends.
 
     As with {!look_ahead} and {!or_}, [close] and an element that runs where
     [close] is [true] or at the end of the input can give trace events for work
@@ -1423,24 +1419,24 @@ val list :
       ignore (optional (fun () -> char ';') ());
       skip_whitespace ()
 
-    let block errors () =
+    let block () =
       context ~delimited:true "block" (fun () ->
           let _ = char '{' in
           skip_whitespace ();
           let stmts =
-            list errors
+            list
               ~close:(fun () -> peek_char () = Some '}')
               ~sync:skip_statement statement
               (fun _ -> Bad)
               ()
           in
-          require errors (fun () -> ignore (char '}')) ignore;
+          require (fun () -> ignore (char '}')) ignore;
           stmts
       )
 
     let () =
       let errors = Diagnostics.create () in
-      let r = parse ~diagnostics:errors "{ x = 1; y = ; " (block errors) in
+      let r = parse ~diagnostics:errors "{ x = 1; y = ; " block in
       assert (r = Ok [ Assign ("x", 1); Bad ]);
       assert (
         List.map

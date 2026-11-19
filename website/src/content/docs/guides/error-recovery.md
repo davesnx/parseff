@@ -95,23 +95,22 @@ Ok "expected integer, found ';', back at 0"
 
 ```ocaml
 val recover :
-  Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
 ```
 
-`recover errors ~sync parser hole` runs `parser` with `capture`. On a failure `e`, it records `e` in `errors`, calls `sync ()` to skip to where parsing can continue, and returns `hole e`. Unlike `capture`, it lets the recovery functions inside `parser` recover. Pass the same collector to the runner with `~diagnostics`:
+`recover ~sync parser hole` runs `parser` with `capture`. On a failure `e`, it records `e` in the collector of the runner, calls `sync ()` to skip to where parsing can continue, and returns `hole e`. Unlike `capture`, it lets the recovery functions inside `parser` recover. Give the runner a collector with `~diagnostics`:
 
 ```ocaml
 let skip_statement () =
   Parseff.skip_while (fun c -> c <> ';');
   ignore (Parseff.optional (fun () -> Parseff.char ';') ())
 
-let statements errors =
+let statements =
   program (fun () ->
-      Parseff.recover errors ~sync:skip_statement statement (fun _ -> Hole))
+      Parseff.recover ~sync:skip_statement statement (fun _ -> Hole))
 
 let show = function
   | Let (name, value) -> Printf.sprintf "%s = %d" name value
@@ -119,7 +118,7 @@ let show = function
 
 let run parser input =
   let errors = Parseff.Diagnostics.create () in
-  (match Parseff.parse ~diagnostics:errors input (parser errors) with
+  (match Parseff.parse ~diagnostics:errors input parser with
   | Ok stmts -> print_endline (String.concat "; " (List.map show stmts))
   | Error e -> print_endline (Parseff.render_error ~source:input e));
   List.iter
@@ -151,7 +150,7 @@ x = 1; <hole>; z = 3; <hole>
 - `Parseff.commit` seals the nearest `or_`, `one_of`, `optional`, `many`, `sep_by` or fold.
 - `Parseff.cut` seals each of them that started since the nearest `Parseff.context`. If that context then fails, `cut` also seals the constructs outside the context. `cut` does not go past `look_ahead`, `peek_with` or `capture`. It goes past `recover`, as without the collector.
 
-`require errors parser hole` runs `parser`. If it fails where `require` started, `Parseff.require` records the error `e`, puts `hole e` in its place, and goes on without skipping input. Here a statement is a `let` statement or a number, and `require` inserts a value when it is missing. `let_rest` reads the statement after `let`:
+`require parser hole` runs `parser`. If it fails where `require` started, `Parseff.require` records the error `e`, puts `hole e` in its place, and goes on without skipping input. Here a statement is a `let` statement or a number, and `require` inserts a value when it is missing. `let_rest` reads the statement after `let`:
 
 ```ocaml
 let let_rest value () =
@@ -183,10 +182,10 @@ let let_narrow value () =
       Parseff.cut ());
   let_rest value ()
 
-let either let_statement errors =
+let either let_statement =
   program (fun () ->
       Parseff.or_
-        (let_statement (fun () -> Parseff.require errors integer (fun _ -> 0)))
+        (let_statement (fun () -> Parseff.require integer (fun _ -> 0)))
         number_statement ())
 ```
 
@@ -217,18 +216,18 @@ Put the rest of the construct in the context, as `let_wide` does.
 Use `commit` for a choice that a token decides. `signed` reads a number with an optional `-`, and calls `seal` after the `-`:
 
 ```ocaml
-let signed seal errors () =
+let signed seal () =
   Parseff.or_
     (fun () ->
       let _ = Parseff.char '-' in
       seal ();
-      -Parseff.require errors integer (fun _ -> 1))
+      -Parseff.require integer (fun _ -> 1))
     integer ()
 
-let signed_statements seal errors =
+let signed_statements seal =
   program (fun () ->
-      Parseff.recover errors ~sync:skip_statement
-        (let_wide (signed seal errors))
+      Parseff.recover ~sync:skip_statement
+        (let_wide (signed seal))
         (fun _ -> Hole))
 ```
 
@@ -285,7 +284,7 @@ A `cut` in place of `commit` would also seal the outer loop: it seals everything
 In a list, the `,` or `]` after an element belongs to the list, so the skip must stop before it. Use `Parseff.list` with `~sep` here, not `recover`: a hole can be empty, as in `[1, , 3]`, and `recover` always consumes input. `Parseff.skip_nested` skips up to the next `,` or to the `]` that closes the list, and counts the brackets of nested lists. `~close` tells where the list can end, so `[]` is an empty list.
 
 ```ocaml
-let array errors () =
+let array () =
   Parseff.context ~delimited:true "array" (fun () ->
       let _ = Parseff.char '[' in
       ws ();
@@ -295,7 +294,6 @@ let array errors () =
             ws ();
             let _ = Parseff.char ',' in
             ws ())
-          errors
           ~close:(fun () -> Parseff.peek_char () = Some ']')
           ~sync:(Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
           (fun () -> Some (integer ()))
@@ -308,7 +306,7 @@ let array errors () =
 
 let run_array input =
   let errors = Parseff.Diagnostics.create () in
-  (match Parseff.parse ~diagnostics:errors input (array errors) with
+  (match Parseff.parse ~diagnostics:errors input array with
   | Ok xs ->
       print_endline
         (String.concat "; "
@@ -365,9 +363,9 @@ let skip_to_semicolon () =
   Parseff.skip_while (fun c -> c <> ';');
   ignore (Parseff.char ';')
 
-let strict_statements errors =
+let strict_statements =
   program (fun () ->
-      Parseff.recover errors ~sync:skip_to_semicolon statement (fun _ -> Hole))
+      Parseff.recover ~sync:skip_to_semicolon statement (fun _ -> Hole))
 ```
 
 ```ocaml
@@ -406,11 +404,11 @@ let skip_in_block () =
   ignore (Parseff.optional (fun () -> Parseff.char ';') ());
   ws ()
 
-let block errors () =
+let block () =
   let _ = Parseff.char '{' in
   ws ();
   let stmts =
-    Parseff.list errors
+    Parseff.list
       ~close:(fun () -> Parseff.peek_char () = Some '}')
       ~sync:skip_in_block
       (fun () ->
@@ -420,7 +418,7 @@ let block errors () =
       (fun _ -> Hole)
       ()
   in
-  Parseff.require errors (fun () -> ignore (Parseff.char '}')) ignore;
+  Parseff.require (fun () -> ignore (Parseff.char '}')) ignore;
   stmts
 ```
 
@@ -462,26 +460,26 @@ let argument () =
   ws ();
   Some n
 
-let call ?(trailing = false) ?(sep = comma) ?(element = argument) errors () =
+let call ?(trailing = false) ?(sep = comma) ?(element = argument) () =
   let name = ident () in
   let _ = Parseff.char '(' in
   ws ();
   let args =
-    Parseff.list ~trailing ~sep errors
+    Parseff.list ~trailing ~sep
       ~close:(fun () -> Parseff.peek_char () = Some ')')
       ~sync:(Parseff.skip_nested [ ('(', ')') ] (fun c -> c = ','))
       element
       (fun _ -> None)
       ()
   in
-  Parseff.require errors (fun () -> ignore (Parseff.char ')')) ignore;
+  Parseff.require (fun () -> ignore (Parseff.char ')')) ignore;
   (name, args)
 
 let run_call ?trailing ?sep ?element input =
   let errors = Parseff.Diagnostics.create () in
   (match
      Parseff.parse ~diagnostics:errors input
-       (call ?trailing ?sep ?element errors)
+       (call ?trailing ?sep ?element)
    with
   | Ok (name, args) ->
       Printf.printf "%s(%s)\n" name
@@ -574,8 +572,8 @@ let rec show_expr = function
   | Bin (op, a, b) -> Printf.sprintf "(%s %s %s)" (show_expr a) op (show_expr b)
   | Missing -> "<hole>"
 
-let operand errors () =
-  Parseff.require errors
+let operand () =
+  Parseff.require
     (fun () ->
       let n = integer () in
       ws ();
@@ -587,9 +585,9 @@ let infix token name =
       token ();
       fun a b -> Bin (name, a, b))
 
-let expr ~negation ~ops errors () =
+let expr ~negation ~ops () =
   let e =
-    Parseff.expression ~operand:(operand errors) [ ops; [ negation ] ] ()
+    Parseff.expression ~operand [ ops; [ negation ] ] ()
   in
   let _ = Parseff.char ';' in
   e
@@ -597,7 +595,7 @@ let expr ~negation ~ops errors () =
 let run_expr ~negation ~ops input =
   let errors = Parseff.Diagnostics.create () in
   (match
-     Parseff.parse ~diagnostics:errors input (expr ~negation ~ops errors)
+     Parseff.parse ~diagnostics:errors input (expr ~negation ~ops)
    with
   | Ok e -> print_endline (show_expr e)
   | Error e -> print_endline (Parseff.render_error ~source:input e));
@@ -696,7 +694,7 @@ let plus_longest () =
     Parseff.parse ~diagnostics:errors "ac"
       (Parseff.or_
          (fun () ->
-           Parseff.recover errors ~sync:(fun () -> ()) (pair 'a' 'b')
+           Parseff.recover ~sync:(fun () -> ()) (pair 'a' 'b')
              (fun _ -> "hole"))
          (pair 'a' 'c'))
   in
@@ -718,7 +716,7 @@ A `commit` or `cut` decides the choice. [`cut` and `commit`](./#cut-and-commit) 
 # let errors = Parseff.Diagnostics.create () in
   Parseff.parse ~diagnostics:errors "let x = 1; let y = ; let z = 3;"
     (program (fun () ->
-         Parseff.recover errors ~sync:(fun () -> ()) statement (fun _ -> Hole)))
+         Parseff.recover ~sync:(fun () -> ()) statement (fun _ -> Hole)))
   |> Result.map (List.map show);;
 - : (string list, Parseff.error) result = Ok ["x = 1"; "<hole>"; "z = 3"]
 ```
@@ -732,7 +730,7 @@ A `commit` or `cut` decides the choice. [`cut` and `commit`](./#cut-and-commit) 
     ws ();
     let _ = Parseff.char '+' in
     ws ();
-    a + Parseff.recover errors ~sync:(fun () -> ()) integer (fun _ -> 0)
+    a + Parseff.recover ~sync:(fun () -> ()) integer (fun _ -> 0)
   in
   let r = Parseff.parse ~diagnostics:errors "1 +" sum in
   (Result.map_error Parseff.error_message r, Parseff.Diagnostics.length errors);;
@@ -743,20 +741,20 @@ A `commit` or `cut` decides the choice. [`cut` and `commit`](./#cut-and-commit) 
 **`recover` keeps only the error of the parser.** The errors that the parser recorded before it failed are removed. Here a string has no closing quote. `require` inserts the quote, and then the statement fails at the next line:
 
 ```ocaml
-let quoted errors () =
+let quoted () =
   let _ = Parseff.char '"' in
   let s = Parseff.take_while (fun c -> c <> '"' && c <> '\n') in
-  Parseff.require errors
+  Parseff.require
     (fun () -> ignore (Parseff.expect "closing quote" (fun () -> Parseff.char '"')))
     ignore;
   s
 
-let print_statement errors () =
+let print_statement () =
   Parseff.context "print" (fun () ->
       Parseff.literal "print";
       Parseff.cut ();
       ws ();
-      let s = quoted errors () in
+      let s = quoted () in
       ws ();
       let _ = Parseff.char ';' in
       s)
@@ -765,8 +763,8 @@ let prints ?keep input =
   let errors = Parseff.Diagnostics.create () in
   let parser () =
     program (fun () ->
-        Parseff.recover ?keep errors ~sync:skip_statement
-          (print_statement errors)
+        Parseff.recover ?keep ~sync:skip_statement
+          print_statement
           (fun _ -> "<hole>")) ()
   in
   (match Parseff.parse ~diagnostics:errors input parser with
@@ -810,12 +808,12 @@ To keep the removed errors, pass `~keep`. `recover` calls `keep entry inner`: `e
 **A recovered error keeps the contexts around `recover`.** Inside a `context ~delimited:true`, `Parseff.render_error` shows the whole enclosing construct for each recovered error:
 
 ```ocaml
-let braced ?contexts errors () =
+let braced ?contexts () =
   Parseff.context ~delimited:true "block" (fun () ->
       let _ = Parseff.char '{' in
       ws ();
       let stmts =
-        Parseff.list ?contexts errors
+        Parseff.list ?contexts
           ~close:(fun () -> Parseff.peek_char () = Some '}')
           ~sync:skip_in_block
           (fun () ->
@@ -825,7 +823,7 @@ let braced ?contexts errors () =
           (fun _ -> Hole)
           ()
       in
-      Parseff.require errors (fun () -> ignore (Parseff.char '}')) ignore;
+      Parseff.require (fun () -> ignore (Parseff.char '}')) ignore;
       stmts)
 ```
 
@@ -856,10 +854,10 @@ x = 1; <hole>
 - : unit = ()
 ```
 
-**Without the collector, `recover` does not recover.** When the runner did not get the collector, `recover`, `require` and `list` run as the plain parser, and `warn` records nothing. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
+**Without a collector, `recover` does not recover.** When the runner did not get a collector, `recover`, `require` and `list` run as the plain parser, and `warn` records nothing. The parse stops at the first error, as without recovery, so one parser can check an input or report all of its errors:
 
 ```ocaml
-# Parseff.parse input (statements (Parseff.Diagnostics.create ()))
+# Parseff.parse input statements
   |> Result.map_error Parseff.error_message;;
 - : (stmt list, string) result = Error "expected integer, found ';'"
 ```
@@ -872,7 +870,7 @@ x = 1; <hole>
 # let errors = Parseff.Diagnostics.create () in
   Parseff.parse ~diagnostics:errors
     ~trace:(Parseff.print_trace Format.std_formatter)
-    "let y = ;" (statements errors)
+    "let y = ;" statements
   |> Result.is_ok;;
 statement @0
 statement failed @8 (from @0)

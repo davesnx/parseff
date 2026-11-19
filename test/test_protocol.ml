@@ -328,10 +328,10 @@ let test_within_fail_range () =
 
 let test_within_recover_sync_to_end () =
   let input = "abcdefXYZ" in
-  let parser errors () =
+  let parser () =
     let v =
       Parseff.within 6 (fun () ->
-          Parseff.recover errors
+          Parseff.recover
             ~sync:(fun () -> Parseff.skip_while always)
             (fun () ->
               Parseff.literal "abX";
@@ -347,9 +347,7 @@ let test_within_recover_sync_to_end () =
     Alcotest.(check int) (name ^ " errors") 1 (Parseff.Diagnostics.length errors)
   in
   let errors = Parseff.Diagnostics.create () in
-  run "recover (string)"
-    (Parseff.parse ~diagnostics:errors input (parser errors))
-    errors;
+  run "recover (string)" (Parseff.parse ~diagnostics:errors input parser) errors;
   List.iter
     (fun chunk_size ->
       let errors = Parseff.Diagnostics.create () in
@@ -357,7 +355,7 @@ let test_within_recover_sync_to_end () =
         (Printf.sprintf "recover (chunks of %d)" chunk_size)
         (Parseff.parse_source ~diagnostics:errors
            (chunked_source ~chunk_size input)
-           (parser errors)
+           parser
         )
         errors
     )
@@ -1053,7 +1051,7 @@ let test_limit_with_a_pause_in_recover () =
   let errors = Parseff.Diagnostics.create () in
   let parser () =
     ignore (Parseff.optional (fun () -> Parseff.literal "aaaX") ());
-    Parseff.recover errors
+    Parseff.recover
       ~sync:(fun () -> Parseff.skip_while (fun _ -> true))
       (fun () -> Parseff.take_while ~at_most:1 is_a)
       (fun _ -> "hole")

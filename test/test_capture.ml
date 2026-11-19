@@ -2,7 +2,7 @@
 
 open Parseff
 
-let recovering d ~sync ~hole p () = recover d ~sync p (fun _ -> hole)
+let recovering ~sync ~hole p () = recover ~sync p (fun _ -> hole)
 
 let errors d =
   List.map
@@ -72,7 +72,7 @@ let test_grammar1 () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d input
-      (array (recovering d ~sync:skip_elem ~hole:Hole int_elem))
+      (array (recovering ~sync:skip_elem ~hole:Hole int_elem))
   in
   Alcotest.(check string)
     "value" "Ok [1; <hole>; 3; <hole>]" (show_list pp_elt r);
@@ -124,7 +124,7 @@ let test_recover_skips_delimiter () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "[1, , 3]"
-      (array (recovering d ~sync:skip_elem ~hole:Hole int_elem))
+      (array (recovering ~sync:skip_elem ~hole:Hole int_elem))
   in
   Alcotest.(check string)
     "value" "Error at 6: expected ',' or ']', found '3'" (show_list pp_elt r);
@@ -134,9 +134,9 @@ let test_recover_skips_delimiter () =
 
 let test_recover_range_after_input () =
   let input = String.init 50 (fun i -> Char.chr (Char.code 'a' + (i mod 26))) in
-  let body d ahead () =
+  let body ahead () =
     ignore (take 2);
-    recover d
+    recover
       ~sync:(fun () -> ())
       (fun () ->
         let p = position () in
@@ -159,7 +159,7 @@ let test_recover_range_after_input () =
       Alcotest.(check string)
         (Printf.sprintf "memory, ahead %d" ahead)
         expected
-        (show (parse ~diagnostics:d input (body d ahead)));
+        (show (parse ~diagnostics:d input (body ahead)));
       let d = Diagnostics.create () in
       let source =
         Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
@@ -168,9 +168,7 @@ let test_recover_range_after_input () =
         (Printf.sprintf "stream, ahead %d" ahead)
         expected
         (show
-           (parse_source ~backtrack_window:16 ~diagnostics:d source
-              (body d ahead)
-           )
+           (parse_source ~backtrack_window:16 ~diagnostics:d source (body ahead))
         )
     )
     [
@@ -249,7 +247,7 @@ let test_grammar2 () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d input
-      (program (recovering d ~sync:skip_stmt ~hole:SHole stmt))
+      (program (recovering ~sync:skip_stmt ~hole:SHole stmt))
   in
   Alcotest.(check string)
     "value" "Ok [Let(x,1); <hole>; Let(z,3); <hole>]" (show_list pp_stmt r);
@@ -265,7 +263,7 @@ let test_grammar2_streaming () =
   let d = Diagnostics.create () in
   let r =
     parse_source ~diagnostics:d (Source.of_seq chunks)
-      (program (recovering d ~sync:skip_stmt ~hole:SHole stmt))
+      (program (recovering ~sync:skip_stmt ~hole:SHole stmt))
   in
   Alcotest.(check string)
     "value" "Ok [Let(x,1); <hole>; Let(z,3); <hole>]" (show_list pp_stmt r);
@@ -287,7 +285,7 @@ let test_stale_failure () =
     let d = Diagnostics.create () in
     let r =
       parse ~diagnostics:d input
-        (array (recovering d ~sync:skip_elem ~hole:Hole any_elem))
+        (array (recovering ~sync:skip_elem ~hole:Hole any_elem))
     in
     (show_list pp_elt r, errors d)
   in
@@ -581,7 +579,7 @@ let test_default_keeps_rewind_point () =
     let d = Diagnostics.create () in
     let seen = ref [] in
     let statement () =
-      recover d
+      recover
         ~sync:(fun () ->
           seen := position () :: !seen;
           skip_while (fun c -> c <> ';');
@@ -589,7 +587,7 @@ let test_default_keeps_rewind_point () =
         )
         (fun () ->
           ignore
-            (recover d
+            (recover
                ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ';'))
                (fun () -> literal "ab")
                ignore
@@ -785,7 +783,7 @@ let test_release_recover_syncs_from_commit () =
     let seen = ref (-1) in
     let r =
       parse ~diagnostics:d ~consume:`Partial "ab?;z" (fun () ->
-          recover ?release d
+          recover ?release
             ~sync:(fun () ->
               seen := position ();
               skip_while (fun c -> c <> ';')
@@ -841,9 +839,7 @@ let test_inside_many () =
     parse ~diagnostics:d "1 ? 3"
       (many (fun () ->
            ws ();
-           recovering d
-             ~sync:(fun () -> ignore (char '?'))
-             ~hole:Hole int_elem ()
+           recovering ~sync:(fun () -> ignore (char '?')) ~hole:Hole int_elem ()
        )
       )
   in
@@ -857,7 +853,7 @@ let test_progress_in_many () =
   let r =
     parse ~diagnostics:d "1 2 x"
       (many
-         (recovering d ~sync:no_sync ~hole:Hole (fun () ->
+         (recovering ~sync:no_sync ~hole:Hole (fun () ->
               ws ();
               int_elem ()
           )
@@ -867,16 +863,16 @@ let test_progress_in_many () =
   Alcotest.(check string) "value" "Ok [1; 2; <hole>]" (show_list pp_elt r);
   Alcotest.check errs "errors" [ (4, "expected integer, found 'x'") ] (errors d)
 
-let ws_int_many d =
+let ws_int_many =
   many (fun () ->
       ws ();
-      recovering d ~sync:no_sync ~hole:Hole int_elem ()
+      recovering ~sync:no_sync ~hole:Hole int_elem ()
   )
 
 let test_progress_whole_character () =
   let input = "1 2 \xc3\xa9 3" in
   let d = Diagnostics.create () in
-  let r = parse ~diagnostics:d input (ws_int_many d) in
+  let r = parse ~diagnostics:d input ws_int_many in
   Alcotest.(check string) "value" "Ok [1; 2; <hole>; 3]" (show_list pp_elt r);
   Alcotest.check errs "errors"
     [ (4, "expected integer, found '\xc3\xa9'") ]
@@ -885,7 +881,7 @@ let test_progress_whole_character () =
   let r =
     parse_source ~diagnostics:d
       (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
-      (ws_int_many d)
+      ws_int_many
   in
   Alcotest.(check string)
     "streaming value" "Ok [1; 2; <hole>; 3]" (show_list pp_elt r);
@@ -897,7 +893,7 @@ let test_progress_invalid_byte () =
   List.iter
     (fun input ->
       let d = Diagnostics.create () in
-      let r = parse ~diagnostics:d input (ws_int_many d) in
+      let r = parse ~diagnostics:d input ws_int_many in
       Alcotest.(check string)
         (String.escaped input ^ ": value")
         "Ok [1; <hole>; 3]" (show_list pp_elt r);
@@ -912,7 +908,7 @@ let test_progress_skips_past_error () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "let x = 1; let y = ; let z = 3;"
-      (program (recovering d ~sync:no_sync ~hole:SHole stmt))
+      (program (recovering ~sync:no_sync ~hole:SHole stmt))
   in
   Alcotest.(check string)
     "value" "Ok [Let(x,1); <hole>; Let(z,3)]" (show_list pp_stmt r);
@@ -922,7 +918,7 @@ let test_progress_to_end () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "let x = 1; let y = 2"
-      (program (recovering d ~sync:no_sync ~hole:SHole stmt))
+      (program (recovering ~sync:no_sync ~hole:SHole stmt))
   in
   Alcotest.(check string)
     "value" "Error at 20: expected ';', found end of input" (show_list pp_stmt r);
@@ -932,7 +928,7 @@ let test_end_of_input () =
   let same input p_plain p_recover =
     let d = Diagnostics.create () in
     let plain = parse input p_plain in
-    let recovered = parse ~diagnostics:d input (p_recover d) in
+    let recovered = parse ~diagnostics:d input p_recover in
     Alcotest.(check string)
       (input ^ ": same result") (show_list pp_elt plain)
       (show_list pp_elt recovered);
@@ -944,27 +940,25 @@ let test_end_of_input () =
     );
     Alcotest.check errs (input ^ ": no errors") [] (errors d)
   in
-  same "[1, " (array int_elem) (fun d ->
-      array (recovering d ~sync:skip_elem ~hole:Hole int_elem)
-  );
+  same "[1, " (array int_elem)
+    (array (recovering ~sync:skip_elem ~hole:Hole int_elem));
   same "1 2 "
     (many (fun () ->
          ws ();
          int_elem ()
      )
     )
-    (fun d ->
-      many (fun () ->
-          ws ();
-          recovering d ~sync:no_sync ~hole:Hole int_elem ()
-      )
+    (many (fun () ->
+         ws ();
+         recovering ~sync:no_sync ~hole:Hole int_elem ()
+     )
     );
   let d = Diagnostics.create () in
   Alcotest.(check string)
     "parser that succeeds at the end" "Ok [7]"
     (show_list pp_elt
        (parse ~diagnostics:d "" (fun () ->
-            [ recover d ~sync:no_sync (fun () -> Int 7) (fun _ -> Hole) ]
+            [ recover ~sync:no_sync (fun () -> Int 7) (fun _ -> Hole) ]
         )
        )
     )
@@ -974,7 +968,7 @@ let test_from_before_start () =
   let r =
     parse ~diagnostics:d ~consume:`Partial "xyz!" (fun () ->
         ignore (char 'x');
-        recover d ~sync:no_sync
+        recover ~sync:no_sync
           (fun () ->
             ignore (char 'y');
             fail ~from:0 "bad"
@@ -988,10 +982,10 @@ let test_from_before_start () =
     (Result.map_error error_message r);
   Alcotest.check errs "entries" [ (0, "bad") ] (entries d)
 
-let test_wrong_collector () =
+let test_no_collector () =
   let calls = ref 0 in
-  let p d () =
-    recover d
+  let p () =
+    recover
       ~keep:(fun e _ ->
         incr calls;
         [ e ]
@@ -999,25 +993,15 @@ let test_wrong_collector () =
       ~sync:no_sync integer
       (fun _ -> 0)
   in
-  let d = Diagnostics.create () in
-  let same name run =
-    List.iter
-      (fun input ->
-        Alcotest.(check string)
-          (name ^ ", " ^ input ^ ": same as without recover")
-          (show_error (parse input integer))
-          (show_error (run input));
-        Alcotest.(check int) (name ^ ": keep not called") 0 !calls;
-        Alcotest.(check int)
-          (name ^ ": nothing recorded")
-          0 (Diagnostics.length d)
-      )
-      [ "1"; "?"; "1?" ]
-  in
-  same "no collector" (fun input -> parse input (p d));
-  same "other collector" (fun input ->
-      parse ~diagnostics:(Diagnostics.create ()) input (p d)
-  )
+  List.iter
+    (fun input ->
+      Alcotest.(check string)
+        (input ^ ": same as without recover")
+        (show_error (parse input integer))
+        (show_error (parse input p));
+      Alcotest.(check int) "keep not called" 0 !calls
+    )
+    [ "1"; "?"; "1?" ]
 
 let test_failure_at_end () =
   let paren () =
@@ -1038,7 +1022,7 @@ let test_failure_at_end () =
     let plain = parse input p in
     let recovered =
       parse ~diagnostics:d input (fun () ->
-          recover d ~sync:no_sync p (fun _ -> Hole)
+          recover ~sync:no_sync p (fun _ -> Hole)
       )
     in
     Alcotest.(check string)
@@ -1058,7 +1042,7 @@ let test_failure_at_end () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "\"abc" (fun () ->
-        recover d
+        recover
           ~sync:(fun () -> skip_while (fun _ -> true))
           unfinished
           (fun _ -> Hole)
@@ -1072,7 +1056,7 @@ let test_failure_at_end () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "(2]" (fun () ->
-        recover d ~sync:no_sync paren (fun _ -> Hole)
+        recover ~sync:no_sync paren (fun _ -> Hole)
     )
   in
   Alcotest.(check string)
@@ -1083,7 +1067,7 @@ let test_failure_in_sync_or_hole () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "?x" (fun () ->
-        recover d ~sync:(fun () -> ignore (char ';')) integer (fun _ -> 0)
+        recover ~sync:(fun () -> ignore (char ';')) integer (fun _ -> 0)
     )
   in
   Alcotest.(check string)
@@ -1094,7 +1078,7 @@ let test_failure_in_sync_or_hole () =
     (errors d);
   let r =
     parse ~diagnostics:d "?x" (fun () ->
-        recover d ~sync:skip_elem integer (fun _ -> fail "no hole")
+        recover ~sync:skip_elem integer (fun _ -> fail "no hole")
     )
   in
   Alcotest.(check string)
@@ -1107,11 +1091,7 @@ let test_failure_in_sync_or_hole () =
         or_
           (fun () ->
             string_of_int
-              (recover d
-                 ~sync:(fun () -> ignore (char ';'))
-                 integer
-                 (fun _ -> 0)
-              )
+              (recover ~sync:(fun () -> ignore (char ';')) integer (fun _ -> 0))
           )
           (fun () ->
             literal "?x";
@@ -1130,7 +1110,7 @@ let test_rollback () =
         or_
           (fun () ->
             ignore
-              (recover d ~sync:no_sync
+              (recover ~sync:no_sync
                  (fun () ->
                    ignore (char 'a');
                    char 'b'
@@ -1214,8 +1194,7 @@ let test_inner_error_removed () =
      )
     );
   Alcotest.check errs "recover keeps only the outer error" [ no_closer ]
-    (run (fun () -> recover d ~sync:to_line_end (lost_call ~pos:at_start) ignore)
-    );
+    (run (fun () -> recover ~sync:to_line_end (lost_call ~pos:at_start) ignore));
   Alcotest.check errs "capture removes the inner error" []
     (run (fun () ->
          match capture (lost_call ~pos:at_start) with
@@ -1238,7 +1217,7 @@ let test_nested_recovery_removed () =
         ws ();
         ignore (char '=');
         ws ();
-        let xs = array (recovering d ~sync:skip_elem ~hole:Hole int_elem) () in
+        let xs = array (recovering ~sync:skip_elem ~hole:Hole int_elem) () in
         ws ();
         ignore (char ';');
         xs
@@ -1246,7 +1225,7 @@ let test_nested_recovery_removed () =
   in
   let r =
     parse ~diagnostics:d input
-      (program (recovering d ~sync:skip_stmt ~hole:[ Hole ] arr_stmt))
+      (program (recovering ~sync:skip_stmt ~hole:[ Hole ] arr_stmt))
   in
   Alcotest.(check string)
     "value" "Ok [[<hole>]]"
@@ -1430,7 +1409,7 @@ let test_recover_record () =
       inner
   in
   let statement ?keep () =
-    recover ?keep d ~sync:to_line_end (lost_call ~pos:at_start) ignore
+    recover ?keep ~sync:to_line_end (lost_call ~pos:at_start) ignore
   in
   let run ?(source = false) ?keep () =
     seen := [];
@@ -1464,7 +1443,7 @@ let test_recover_record_scope () =
   let r =
     parse ~diagnostics:d "a" (fun () ->
         warn (Warning.W "before");
-        recover d
+        recover
           ~keep:(fun _ inner ->
             seen := List.map (fun x -> Warning.text x.Diagnostics.value) inner;
             []
@@ -1498,7 +1477,7 @@ let test_recover_record_order () =
   let seen = ref [] in
   let r =
     parse ~diagnostics:d ~consume:`Partial "abc?" (fun () ->
-        recover d
+        recover
           ~keep:(fun _ inner ->
             seen := show_entries inner;
             []
@@ -1526,7 +1505,7 @@ let test_recover_record_release () =
   let run ?keep () =
     let r =
       parse ~diagnostics:d ~consume:`Partial "ab?;" (fun () ->
-          recover ~release:true ?keep d
+          recover ~release:true ?keep
             ~sync:(fun () -> skip_while (fun c -> c <> ';'))
             (fun () ->
               ignore (char 'a');
@@ -1597,7 +1576,7 @@ let test_outer_false () =
       let recovered contexts =
         let r =
           parse ~consume:`Partial ~diagnostics:d "(ax" (fun () ->
-              in_outer (fun () -> recover ?contexts d ~sync:ignore p ignore) ()
+              in_outer (fun () -> recover ?contexts ~sync:ignore p ignore) ()
           )
         in
         Alcotest.(check string) (kind ^ ": value") "Ok" (show_error r);
@@ -1626,7 +1605,7 @@ let issue_62_render contexts =
       (fun () ->
         ws ();
         ignore (look_ahead (fun () -> satisfy ~label:"statement" is_letter));
-        recover ?contexts d
+        recover ?contexts
           ~sync:(fun () ->
             skip_while (fun c -> c <> ';' && c <> '}');
             ignore (optional (fun () -> char ';') ())
@@ -1685,7 +1664,7 @@ let test_recover_record_nested () =
   let seen = ref [] in
   let r =
     parse ~diagnostics:d ~consume:`Partial "a?b?" (fun () ->
-        recover d
+        recover
           ~keep:(fun _ inner ->
             seen := show_entries inner;
             []
@@ -1693,7 +1672,7 @@ let test_recover_record_nested () =
           ~sync:(fun () -> ())
           (fun () ->
             ignore (char 'a');
-            recover d ~sync:(fun () -> ()) (fun () -> ignore (char '!')) ignore;
+            recover ~sync:(fun () -> ()) (fun () -> ignore (char '!')) ignore;
             ignore (char 'b');
             ignore (char '!')
           )
@@ -1710,7 +1689,7 @@ let test_recover_record_not_called () =
   let calls = ref 0 in
   let r =
     parse ~diagnostics:d "ab" (fun () ->
-        recover d
+        recover
           ~keep:(fun e _ ->
             incr calls;
             [ e ]
@@ -1727,9 +1706,9 @@ let test_recover_record_not_called () =
   Alcotest.(check int) "not called on success" 0 !calls
 
 let test_recover_keep_entries () =
-  let item d () =
+  let item () =
     let v =
-      recover d
+      recover
         ~keep:(fun e _ -> [ e; e ])
         ~sync:ignore
         (fun () -> char 'a')
@@ -1742,7 +1721,7 @@ let test_recover_keep_entries () =
     let d = Diagnostics.create () in
     let r =
       parse ~consume:`Partial ~diagnostics:d input (fun () ->
-          String.of_seq (List.to_seq (many (item d) ()))
+          String.of_seq (List.to_seq (many item ()))
       )
     in
     ( (match r with Ok s -> "Ok " ^ s | Error e -> error_message e),
@@ -1758,7 +1737,7 @@ let test_recover_keep_entries () =
     "an exception from keep leaves the parse" "raised Exit"
     ( match
         parse ~diagnostics:d "x" (fun () ->
-            recover d
+            recover
               ~keep:(fun _ _ -> raise Exit)
               ~sync:ignore
               (fun () -> char 'a')
@@ -1802,7 +1781,7 @@ let test_outer_false_release () =
     parse ~consume:`Partial ~diagnostics:d "(ax" (fun () ->
         in_outer
           (fun () ->
-            recover ~release:true ~contexts:`Inner d ~sync:ignore parser ignore
+            recover ~release:true ~contexts:`Inner ~sync:ignore parser ignore
           )
           ()
     )
@@ -1919,10 +1898,7 @@ let test_guard_read_raises () =
   let cases =
     [
       ( "recover",
-        fun d ->
-          in_capture (fun () ->
-              recover d ~sync:ignore two_then_fail (fun _ -> ())
-          )
+        in_capture (fun () -> recover ~sync:ignore two_then_fail (fun _ -> ()))
       );
     ]
   in
@@ -1934,14 +1910,14 @@ let test_guard_read_raises () =
         "Error backtrack window of 2 bytes exceeded"
         (outcome (fun () ->
              parse_source ~backtrack_window:2 ~diagnostics:d (byte_reads "abcd")
-               (p d)
+               p
          )
         );
       Alcotest.(check string)
         (name ^ ": read raises in the guard")
         "Io"
         (outcome (fun () ->
-             parse_source ~diagnostics:d (byte_reads ~fail_at:2 "abcd") (p d)
+             parse_source ~diagnostics:d (byte_reads ~fail_at:2 "abcd") p
          )
         )
     )
@@ -1949,9 +1925,9 @@ let test_guard_read_raises () =
 
 let test_jump_read_raises () =
   let input = String.make 50 'a' in
-  let body d () =
+  let body () =
     ignore (take 2);
-    recover d ~sync:ignore
+    recover ~sync:ignore
       (fun () ->
         let p = position () in
         fail ~from:(p + 20) ~upto:(p + 21) "ahead"
@@ -1960,9 +1936,7 @@ let test_jump_read_raises () =
     position ()
   in
   let d = Diagnostics.create () in
-  ( match
-      parse_source ~diagnostics:d (byte_reads ~fail_at:10 input) (body d)
-    with
+  ( match parse_source ~diagnostics:d (byte_reads ~fail_at:10 input) body with
   | exception Io ->
       ()
   | exception exn ->
@@ -1974,7 +1948,7 @@ let test_jump_read_raises () =
   let r =
     parse_source ~diagnostics:d ~consume:`Partial (byte_reads ~fail_at:10 input)
       (fun () ->
-        let p = try body d () with Io -> -1 in
+        let p = try body () with Io -> -1 in
         (p, position ())
     )
   in
@@ -2074,7 +2048,7 @@ let test_streaming_nested_release () =
   let run ?release () =
     let d = Diagnostics.create () in
     let rec statement () =
-      recover ?release d
+      recover ?release
         ~sync:(fun () ->
           skip_while (fun c -> c <> ';' && c <> '}');
           ignore (optional (fun () -> char ';') ())
@@ -2124,7 +2098,7 @@ let release_state run =
   let cell = Ref.create 0 in
   let r =
     parse ~diagnostics:d "x" (fun () ->
-        let v = run d cell in
+        let v = run cell in
         ignore (char 'x');
         v
     )
@@ -2156,11 +2130,11 @@ let test_release_keeps_inner_rewinds () =
          ()
       )
   in
-  let plain = release_state (fun _ cell -> empty_steps cell ()) in
+  let plain = release_state (fun cell -> empty_steps cell ()) in
   Alcotest.check release_outcome "plain many undoes the empty step"
     ("Ok ", 0, 0) plain;
   Alcotest.check release_outcome "capture ~release:true" plain
-    (release_state (fun _ cell ->
+    (release_state (fun cell ->
          match capture ~release:true (empty_steps cell) with
          | Ok v ->
              v
@@ -2169,16 +2143,15 @@ let test_release_keeps_inner_rewinds () =
      )
     );
   Alcotest.check release_outcome "recover ~release:true" plain
-    (release_state (fun d cell ->
-         recover ~release:true d ~sync:ignore (empty_steps cell) (fun _ -> "H")
+    (release_state (fun cell ->
+         recover ~release:true ~sync:ignore (empty_steps cell) (fun _ -> "H")
      )
     );
   Alcotest.check release_outcome "list ~sep ~release:true" plain
-    (release_state (fun d cell ->
+    (release_state (fun cell ->
          String.concat ","
            (list ~release:true
               ~sep:(fun () -> ignore (char ','))
-              d
               ~close:(fun () -> false)
               ~sync:ignore (empty_steps cell)
               (fun _ -> "H")
@@ -2187,7 +2160,7 @@ let test_release_keeps_inner_rewinds () =
      )
     );
   let other = Ref.create 0 in
-  let set_after_cut d cell () =
+  let set_after_cut cell () =
     String.concat ""
       (many
          (fun () ->
@@ -2199,16 +2172,12 @@ let test_release_keeps_inner_rewinds () =
          ()
       )
     ^ string_of_int (Ref.get other)
-    ^
-    ( ignore d;
-      ""
-    )
   in
   Alcotest.check release_outcome
     "a Ref.set after the cut keeps the undo entries"
-    (release_state (fun d cell -> set_after_cut d cell ()))
-    (release_state (fun d cell ->
-         match capture ~release:true (set_after_cut d cell) with
+    (release_state (fun cell -> set_after_cut cell ()))
+    (release_state (fun cell ->
+         match capture ~release:true (set_after_cut cell) with
          | Ok v ->
              v
          | Error _ ->
@@ -2217,7 +2186,7 @@ let test_release_keeps_inner_rewinds () =
     );
   Alcotest.check release_outcome
     "a commit inside many seals many and does not reach the capture"
-    (release_state (fun _ cell ->
+    (release_state (fun cell ->
          String.concat ""
            (many
               (fun () ->
@@ -2230,7 +2199,7 @@ let test_release_keeps_inner_rewinds () =
            )
      )
     )
-    (release_state (fun _ cell ->
+    (release_state (fun cell ->
          match
            capture ~release:true (fun () ->
                String.concat ""
@@ -2262,7 +2231,7 @@ let test_release_keeps_effects_before_the_cut () =
   in
   Alcotest.check release_outcome "the capture keeps what came before the cut"
     ("Ok E", 1, 3)
-    (release_state (fun _ cell ->
+    (release_state (fun cell ->
          match
            capture ~release:true (fun () ->
                Ref.set cell 3;
@@ -2346,7 +2315,7 @@ let after_failure ~release ?(input = "x") body =
     parse ~diagnostics:d ~consume:`Partial input (fun () ->
         match
           capture ~release (fun () ->
-              body d cell effects;
+              body cell effects;
               (fail "after" : unit)
           )
         with
@@ -2366,11 +2335,11 @@ let test_release_clamps_the_capture () =
     Alcotest.check release_outcome name ("after", 0, 0)
       (after_failure ~release:true body)
   in
-  check "trail: a Ref.set after an empty step is undone" (fun _ cell effects ->
+  check "trail: a Ref.set after an empty step is undone" (fun cell effects ->
       ignore (many (fun () -> effects ~warns:false ()) ());
       Ref.set cell 2
   );
-  check "diagnostics: a warning after an empty step is removed" (fun _ _ _ ->
+  check "diagnostics: a warning after an empty step is removed" (fun _ _ ->
       let w = release_warning () in
       ignore
         (many
@@ -2391,9 +2360,9 @@ let test_release_construct_rewinds () =
   in
   let constructs =
     [
-      ("many", fun _ _ effects -> ignore (many (effects ~warns:true) ()));
+      ("many", fun _ effects -> ignore (many (effects ~warns:true) ()));
       ( "fold_left",
-        fun _ _ effects ->
+        fun _ effects ->
           ignore
             (fold_left num
                (fun () ->
@@ -2404,7 +2373,7 @@ let test_release_construct_rewinds () =
             )
       );
       ( "fold_right",
-        fun _ _ effects ->
+        fun _ effects ->
           ignore
             (fold_right num
                (fun () ->
@@ -2414,9 +2383,9 @@ let test_release_construct_rewinds () =
                ()
             )
       );
-      ("sep_by", fun _ _ effects -> ignore (sep_by num (effects ~warns:true) ()));
+      ("sep_by", fun _ effects -> ignore (sep_by num (effects ~warns:true) ()));
       ( "precedence",
-        fun _ _ effects ->
+        fun _ effects ->
           let seen = ref false in
           ignore
             (precedence
@@ -2436,7 +2405,7 @@ let test_release_construct_rewinds () =
             )
       );
       ( "expression",
-        fun _ _ effects ->
+        fun _ effects ->
           ignore
             (expression
                ~operand:(fun () ->
@@ -2455,7 +2424,7 @@ let test_release_construct_rewinds () =
             )
       );
       ( "one_of",
-        fun _ _ effects ->
+        fun _ effects ->
           ignore
             (one_of
                [
@@ -2469,9 +2438,9 @@ let test_release_construct_rewinds () =
             )
       );
       ( "list",
-        fun d _ effects ->
+        fun _ effects ->
           ignore
-            (list ~release:true d
+            (list ~release:true
                ~close:(fun () -> false)
                ~sync:ignore
                (fun () ->
@@ -2485,17 +2454,16 @@ let test_release_construct_rewinds () =
             )
       );
       ( "recover ~release",
-        fun d _ effects ->
-          recover ~release:true d ~sync:ignore
+        fun _ effects ->
+          recover ~release:true ~sync:ignore
             (fun () -> ignore (many (effects ~warns:true) ()))
             ignore
       );
       ( "sep_by_iter",
-        fun _ _ effects ->
-          sep_by_iter num (effects ~warns:true) (fun _ -> ()) ()
+        fun _ effects -> sep_by_iter num (effects ~warns:true) (fun _ -> ()) ()
       );
       ( "take_while_iter",
-        fun _ _ effects ->
+        fun _ effects ->
           ignore
             (many
                (fun () ->
@@ -2524,13 +2492,13 @@ let test_release_construct_rewinds () =
     )
     constructs;
   Alcotest.check release_outcome "require: under a capture, the parser alone"
-    (after_failure ~release:true (fun _ _ effects ->
+    (after_failure ~release:true (fun _ effects ->
          effects ~warns:true ();
          ignore (char 'q')
      )
     )
-    (after_failure ~release:true (fun d _ effects ->
-         require d
+    (after_failure ~release:true (fun _ effects ->
+         require
            (fun () ->
              effects ~warns:true ();
              ignore (char 'q')
@@ -2564,7 +2532,7 @@ let () =
           test_case "progress to the end" `Quick test_progress_to_end;
           test_case "end of input" `Quick test_end_of_input;
           test_case "fail ~from before the start" `Quick test_from_before_start;
-          test_case "wrong collector" `Quick test_wrong_collector;
+          test_case "no collector" `Quick test_no_collector;
           test_case "failure at the end" `Quick test_failure_at_end;
           test_case "failure in sync or hole" `Quick
             test_failure_in_sync_or_hole;

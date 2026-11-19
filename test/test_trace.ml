@@ -222,9 +222,7 @@ let recovery_events input parser =
   let r1, e1 =
     record (fun trace ->
         count
-          (Result.is_ok
-             (Parseff.parse ~diagnostics:errors ~trace input (parser errors))
-          )
+          (Result.is_ok (Parseff.parse ~diagnostics:errors ~trace input parser))
     )
   in
   let r2, e2 =
@@ -232,7 +230,7 @@ let recovery_events input parser =
         count
           (Result.is_ok
              (Parseff.parse_source ~diagnostics:errors ~trace
-                (one_byte_source input) (parser errors)
+                (one_byte_source input) parser
              )
           )
     )
@@ -248,9 +246,9 @@ let test_captured () =
     Alcotest.(check (pair bool int)) (name ^ ": result") expected_result r
   in
   check "recover in a context" "?x"
-    (fun errors () ->
+    (fun () ->
       Parseff.context "item" (fun () ->
-          Parseff.recover errors ~sync:ignore
+          Parseff.recover ~sync:ignore
             (fun () -> ignore (Parseff.char 'a'))
             ignore
       );
@@ -259,7 +257,7 @@ let test_captured () =
     (true, 1)
     [ "enter item 0"; "captured 0 0 expected 'a', found '?'"; "exit item 0 1" ];
   check "capture" "ab"
-    (fun _ () ->
+    (fun () ->
       ignore (Parseff.capture (fun () -> Parseff.char 'a'));
       ignore
         (Parseff.capture (fun () ->
@@ -272,11 +270,10 @@ let test_captured () =
     (true, 0)
     [ "captured 1 2 expected 'c', found end of input" ];
   check "list ~sep" "1,?,x,2"
-    (fun errors () ->
+    (fun () ->
       ignore
         (Parseff.list
            ~sep:(fun () -> ignore (Parseff.char ','))
-           errors
            ~close:(fun () -> false)
            ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
            Parseff.digit
@@ -290,11 +287,9 @@ let test_captured () =
       "captured 4 4 expected digit, found 'x'";
     ];
   check "not at the end of the input" "1"
-    (fun errors () ->
+    (fun () ->
       ignore (Parseff.char '1');
-      Parseff.recover errors ~sync:ignore
-        (fun () -> ignore (Parseff.char 'a'))
-        ignore
+      Parseff.recover ~sync:ignore (fun () -> ignore (Parseff.char 'a')) ignore
     )
     (false, 0) []
 
@@ -305,11 +300,11 @@ let test_captured_only_when_continued () =
     Alcotest.(check (pair bool int)) (name ^ ": result") expected_result r
   in
   check "sync fails" "xb"
-    (fun errors () ->
+    (fun () ->
       ignore
         (Parseff.or_
            (fun () ->
-             Parseff.recover errors
+             Parseff.recover
                ~sync:(fun () -> ignore (Parseff.char 'z'))
                (fun () -> Parseff.char 'a')
                (fun _ -> 'h')
@@ -321,11 +316,11 @@ let test_captured_only_when_continued () =
     )
     (true, 0) [];
   check "hole fails" "xb"
-    (fun errors () ->
+    (fun () ->
       ignore
         (Parseff.or_
            (fun () ->
-             Parseff.recover errors ~sync:ignore
+             Parseff.recover ~sync:ignore
                (fun () -> Parseff.char 'a')
                (fun _ -> Parseff.char 'z')
            )
@@ -336,12 +331,11 @@ let test_captured_only_when_continued () =
     )
     (true, 0) [];
   check "keep raises" "1,?,2"
-    (fun errors () ->
+    (fun () ->
       ( try
           ignore
             (Parseff.list
                ~sep:(fun () -> ignore (Parseff.char ','))
-               errors
                ~keep:(fun _ _ -> raise Exit)
                ~close:(fun () -> false)
                ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
@@ -355,8 +349,8 @@ let test_captured_only_when_continued () =
     )
     (true, 0) [];
   check "after sync and hole" "?x;"
-    (fun errors () ->
-      Parseff.recover errors
+    (fun () ->
+      Parseff.recover
         ~sync:(fun () ->
           ignore (Parseff.context "skip" (fun () -> Parseff.char '?'))
         )
@@ -410,7 +404,7 @@ let test_printed_captured () =
   let errors = Parseff.Diagnostics.create () in
   let item () =
     Parseff.context "item" (fun () ->
-        Parseff.recover errors ~sync:ignore
+        Parseff.recover ~sync:ignore
           (fun () -> ignore (Parseff.char 'a'))
           ignore
     );
