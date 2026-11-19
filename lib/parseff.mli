@@ -2990,3 +2990,318 @@ module Utf8 : sig
       More efficient than {!whitespace} when you don't need the matched string.
   *)
 end
+
+(** {1 Typed errors} *)
+
+(** Custom errors with a closed type that the compiler checks.
+
+    A parser is a [unit -> 'a] function, so its error type cannot be in its
+    type. A {!key} ties the two ends: the parser raises with the key, and the
+    runner that got the same key returns a ['e error], where [Custom] holds a
+    value of the type ['e] that you chose. A match on it needs no [_] case.
+
+    {@ocaml[
+    type my_error = Too_large of int | Negative of int
+
+    module P = Parseff.Typed.Make (struct
+      type t = my_error
+
+      let to_string = function
+        | Too_large n ->
+            Printf.sprintf "%d is too large" n
+        | Negative n ->
+            Printf.sprintf "%d is negative" n
+    end)
+
+    let octet () =
+      let n = Parseff.integer () in
+      if n > 255 then
+        P.error (Too_large n)
+      else
+        n
+
+    let () =
+      match P.parse "300" octet with
+      | Ok n ->
+          Printf.printf "%d\n" n
+      | Error { kind = Custom (Too_large n); _ } ->
+          Printf.printf "big %d\n" n
+      | Error { kind = Custom (Negative n); _ } ->
+          Printf.printf "neg %d\n" n
+      | Error e ->
+          print_endline (P.render_error e)
+    ]}
+
+    Rules, checked when the error is raised:
+    - A typed runner ({!parse} and the others in this module) accepts only the
+      errors of its own key. {!val:Parseff.error} or {!val:Parseff.warn}, and
+      {!val:error} or {!val:warn} with another key, raise [Invalid_argument]
+      there. [Parseff.error (Parseff.Limit_exceeded _)] is allowed and gives
+      [Limit_exceeded].
+    - An untyped runner ({!val:Parseff.parse} and the others) accepts errors of
+      every key, as [Custom c] of {!type:Parseff.custom_error}. {!get} reads the
+      value back. So a grammar written with a key also runs under the untyped
+      runners.
+    - {!capture} and the recovery functions need the runner of their key, and
+      raise [Invalid_argument] in another runner.
+
+    The [Captured] trace event still holds an untyped {!type:Parseff.error}. *)
+module Typed : sig
+  type 'e key
+  (** Ties the errors that a parser raises to the runner that returns them. Two
+      keys are never equal, even for one type ['e]. *)
+
+  val key : unit -> 'e key
+  (** [key ()] is a new key. *)
+
+  val get : 'e key -> custom_error -> 'e option
+  (** [get k c] is [Some v] when [c] is the value [v] given to {!val:error} with
+      [k] under an untyped runner. *)
+
+  type 'e kind =
+    | Expected of {
+        items : expected * expected list;
+        found : found;
+        more : int;
+      }
+    | Failed of string
+    | Custom of 'e  (** A value given to {!val:error}. *)
+    | Limit_exceeded of { limit : int }
+        (** The [Limit_exceeded] case of {!type:Parseff.custom_error}. *)
+    | Depth_limit_exceeded of { limit : int }
+    | Backtrack_window_exceeded of { limit : int; oldest : int }
+        (** The cases of {!type:Parseff.error_kind}, with [Custom of 'e]. *)
+
+  type 'e error = private {
+    severity : severity;
+    kind : 'e kind;
+    range : range;
+    location : location option;
+    contexts : context list;
+    notes : note list;
+    help : string option;
+    excerpt : excerpt;
+  }
+  (** The fields of {!type:Parseff.error}. *)
+
+  val error_message : ?custom:('e -> string) -> 'e error -> string
+  (** As {!val:Parseff.error_message}. *)
+
+  val render_error :
+    ?name:string ->
+    ?source:string ->
+    ?custom:('e -> string) ->
+    'e error ->
+    string
+  (** As {!val:Parseff.render_error}. *)
+
+  val error :
+    'e key ->
+    ?from:int ->
+    ?upto:int ->
+    ?notes:note list ->
+    ?help:string ->
+    'e ->
+    'a
+  (** As {!val:Parseff.error}, with a value of the type of the key. *)
+
+  val warn :
+    'e key ->
+    ?from:int ->
+    ?upto:int ->
+    ?notes:note list ->
+    ?help:string ->
+    'e ->
+    unit
+  (** As {!val:Parseff.warn}, with a value of the type of the key. *)
+
+  val capture :
+    'e key ->
+    ?release:bool ->
+    ?contexts:[ `All | `Inner ] ->
+    (unit -> 'a) ->
+    ('a, 'e error) result
+  (** As {!val:Parseff.capture}. *)
+
+  module Diagnostics : sig
+    type 'e entry = { pos : int; value : 'e error }
+    type 'e t
+
+    val create : 'e key -> 'e t
+    (** Give it to the runner of the same key. *)
+
+    val to_list : 'e t -> 'e entry list
+    val length : 'e t -> int
+    val is_empty : 'e t -> bool
+    val clear : 'e t -> unit
+  end
+
+  val recover :
+    ?release:bool ->
+    ?contexts:[ `All | `Inner ] ->
+    ?keep:
+      ('e Diagnostics.entry ->
+      'e Diagnostics.entry list ->
+      'e Diagnostics.entry list
+      ) ->
+    'e Diagnostics.t ->
+    sync:(unit -> unit) ->
+    (unit -> 'a) ->
+    ('e error -> 'a) ->
+    'a
+  (** As {!val:Parseff.recover}. *)
+
+  val require : 'e Diagnostics.t -> (unit -> 'a) -> ('e error -> 'a) -> 'a
+  (** As {!val:Parseff.require}. *)
+
+  val list :
+    ?release:bool ->
+    ?contexts:[ `All | `Inner ] ->
+    ?keep:
+      ('e Diagnostics.entry ->
+      'e Diagnostics.entry list ->
+      'e Diagnostics.entry list
+      ) ->
+    ?sep:(unit -> unit) ->
+    ?trailing:bool ->
+    'e Diagnostics.t ->
+    close:(unit -> bool) ->
+    sync:(unit -> unit) ->
+    (unit -> 'a) ->
+    ('e error -> 'a) ->
+    unit ->
+    'a list
+  (** As {!val:Parseff.list}. *)
+
+  val parse :
+    'e key ->
+    ?max_depth:int ->
+    ?consume:[ `All | `Partial ] ->
+    ?diagnostics:'e Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    string ->
+    (unit -> 'a) ->
+    ('a, 'e error) Stdlib.result
+  (** As {!val:Parseff.parse}. Raises [Invalid_argument] when [diagnostics] was
+      created with another key. *)
+
+  val parse_source :
+    'e key ->
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?consume:[ `All | `Partial ] ->
+    ?diagnostics:'e Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    Source.t ->
+    (unit -> 'a) ->
+    ('a, 'e error) Stdlib.result
+  (** As {!val:Parseff.parse_source}. *)
+
+  val parse_source_each :
+    'e key ->
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:'e Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    ?pending:(unit -> bool) ->
+    Source.t ->
+    (unit -> 'a) ->
+    ('a, 'e error) Stdlib.result Seq.t
+  (** As {!val:Parseff.parse_source_each}. *)
+
+  module type ERROR = sig
+    type t
+
+    val to_string : t -> string
+  end
+
+  (** The functions of this module for one new key, with the printer of [E]. *)
+  module Make (E : ERROR) : sig
+    val key : E.t key
+
+    type nonrec error = E.t error
+
+    val error :
+      ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> E.t -> 'a
+
+    val warn :
+      ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> E.t -> unit
+
+    val capture :
+      ?release:bool ->
+      ?contexts:[ `All | `Inner ] ->
+      (unit -> 'a) ->
+      ('a, error) result
+
+    module Diagnostics : sig
+      type entry = E.t Diagnostics.entry
+      type t = E.t Diagnostics.t
+
+      val create : unit -> t
+      val to_list : t -> entry list
+      val length : t -> int
+      val is_empty : t -> bool
+      val clear : t -> unit
+    end
+
+    val recover :
+      ?release:bool ->
+      ?contexts:[ `All | `Inner ] ->
+      ?keep:
+        (Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
+      Diagnostics.t ->
+      sync:(unit -> unit) ->
+      (unit -> 'a) ->
+      (error -> 'a) ->
+      'a
+
+    val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
+
+    val list :
+      ?release:bool ->
+      ?contexts:[ `All | `Inner ] ->
+      ?keep:
+        (Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
+      ?sep:(unit -> unit) ->
+      ?trailing:bool ->
+      Diagnostics.t ->
+      close:(unit -> bool) ->
+      sync:(unit -> unit) ->
+      (unit -> 'a) ->
+      (error -> 'a) ->
+      unit ->
+      'a list
+
+    val parse :
+      ?max_depth:int ->
+      ?consume:[ `All | `Partial ] ->
+      ?diagnostics:Diagnostics.t ->
+      ?trace:(trace_event -> unit) ->
+      string ->
+      (unit -> 'a) ->
+      ('a, error) Stdlib.result
+
+    val parse_source :
+      ?max_depth:int ->
+      ?backtrack_window:int ->
+      ?consume:[ `All | `Partial ] ->
+      ?diagnostics:Diagnostics.t ->
+      ?trace:(trace_event -> unit) ->
+      Source.t ->
+      (unit -> 'a) ->
+      ('a, error) Stdlib.result
+
+    val parse_source_each :
+      ?max_depth:int ->
+      ?backtrack_window:int ->
+      ?diagnostics:Diagnostics.t ->
+      ?trace:(trace_event -> unit) ->
+      ?pending:(unit -> bool) ->
+      Source.t ->
+      (unit -> 'a) ->
+      ('a, error) Stdlib.result Seq.t
+
+    val error_message : error -> string
+    val render_error : ?name:string -> ?source:string -> error -> string
+  end
+end

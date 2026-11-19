@@ -404,6 +404,7 @@ type state = {
   mutable held_far : far array;
   mutable trail : trail;
   trace : (trace_event -> unit) option;
+  mutable custom_key : int;
 }
 
 let[@inline always] imin (a : int) b =
@@ -522,6 +523,7 @@ module State = struct
       held_far = [||];
       trail = not_running;
       trace;
+      custom_key = 0;
     }
 
   let for_input ~input ~max_depth ~trace =
@@ -2761,12 +2763,27 @@ let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
   let st = get_state () in
   fail_user st st.pos (Payload_failure (msg, { from; upto; notes; help }))
 
-let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
-  let st = get_state () in
+let[@inline] raise_custom st ~from ~upto ~notes ~help e =
   if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
   else
     fail_user st st.pos (Payload_ext (e, { from; upto; notes; help }))
+
+let[@inline never] untyped_in_typed_runner name =
+  invalid_arg
+    (name
+   ^ ": this runner takes typed errors only; use the error function of its \
+      Typed key"
+    )
+
+let[@inline] check_untyped st name e =
+  if st.custom_key <> 0 then
+    match e with Limit_exceeded _ -> () | _ -> untyped_in_typed_runner name
+
+let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
+  let st = get_state () in
+  check_untyped st "Parseff.error" e;
+  raise_custom st ~from ~upto ~notes ~help e
 
 let[@inline always] record_diagnostic c st pos value =
   if st.diag == c.self then begin
@@ -6349,8 +6366,7 @@ let outer_contexts st pos =
   done;
   !acc
 
-let warn ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
-  let st = get_state () in
+let warn_in st ~from ~upto ~notes ~help e =
   match st.diag with
   | No_sink ->
       ()
@@ -6361,6 +6377,11 @@ let warn ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
           (outer_contexts st span.start)
       in
       record_diagnostic c st span.start { e with severity = `Warning }
+
+let warn ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
+  let st = get_state () in
+  check_untyped st "Parseff.warn" e;
+  warn_in st ~from ~upto ~notes ~help e
 
 let captured st start e =
   match st.trace with
@@ -7229,3 +7250,278 @@ type trace_event +=
   | Return = Trace_event.Return
   | Fail = Trace_event.Fail
   | Captured = Trace_event.Captured
+
+type error_t = error
+
+module Typed = struct
+  type 'e key = {
+    id : int;
+    inj : 'e -> custom_error;
+    prj : custom_error -> 'e option;
+  }
+
+  let next_id = Atomic.make 1
+
+  let key (type e) () : e key =
+    let module M = struct
+      type custom_error += K of e
+    end in
+    {
+      id = Atomic.fetch_and_add next_id 1;
+      inj = (fun v -> M.K v);
+      prj = (function M.K v -> Some v | _ -> None);
+    }
+
+  let get k c = k.prj c
+
+  type 'e kind =
+    | Expected of {
+        items : expected * expected list;
+        found : found;
+        more : int;
+      }
+    | Failed of string
+    | Custom of 'e
+    | Limit_exceeded of { limit : int }
+    | Depth_limit_exceeded of { limit : int }
+    | Backtrack_window_exceeded of { limit : int; oldest : int }
+
+  type 'e error = {
+    severity : severity;
+    kind : 'e kind;
+    range : range;
+    location : location option;
+    contexts : context list;
+    notes : note list;
+    help : string option;
+    excerpt : excerpt;
+  }
+
+  let of_raw k (e : error_t) : 'e error =
+    let kind =
+      match e.kind with
+      | Expected { items; found; more } ->
+          Expected { items; found; more }
+      | Failed m ->
+          Failed m
+      | Custom (Limit_exceeded { limit }) ->
+          Limit_exceeded { limit }
+      | Custom c -> (
+          match k.prj c with
+          | Some v ->
+              Custom v
+          | None ->
+              invalid_arg
+                "Parseff.Typed: an error of another key reached this runner"
+        )
+      | Depth_limit_exceeded { limit } ->
+          Depth_limit_exceeded { limit }
+      | Backtrack_window_exceeded { limit; oldest } ->
+          Backtrack_window_exceeded { limit; oldest }
+    in
+    {
+      severity = e.severity;
+      kind;
+      range = e.range;
+      location = e.location;
+      contexts = e.contexts;
+      notes = e.notes;
+      help = e.help;
+      excerpt = e.excerpt;
+    }
+
+  let to_raw custom (e : 'e error) : error_t =
+    let kind : error_kind =
+      match e.kind with
+      | Expected { items; found; more } ->
+          Expected { items; found; more }
+      | Failed m ->
+          Failed m
+      | Custom v ->
+          custom v
+      | Limit_exceeded { limit } ->
+          Custom (Limit_exceeded { limit })
+      | Depth_limit_exceeded { limit } ->
+          Depth_limit_exceeded { limit }
+      | Backtrack_window_exceeded { limit; oldest } ->
+          Backtrack_window_exceeded { limit; oldest }
+    in
+    {
+      severity = e.severity;
+      kind;
+      range = e.range;
+      location = e.location;
+      contexts = e.contexts;
+      notes = e.notes;
+      help = e.help;
+      excerpt = e.excerpt;
+    }
+
+  let printed custom v : error_kind =
+    match custom with
+    | Some f ->
+        Failed (f v)
+    | None ->
+        Failed "custom error (no ~custom printer given)"
+
+  let error_message ?custom e = error_message (to_raw (printed custom) e)
+
+  let render_error ?name ?source ?custom e =
+    render_error ?name ?source (to_raw (printed custom) e)
+
+  let[@inline never] foreign name =
+    invalid_arg (name ^ ": the runner did not get this key")
+
+  let[@inline] check_lenient st k name =
+    if st.custom_key <> 0 && st.custom_key <> k.id then foreign name
+
+  let[@inline] check_strict st k name =
+    if st.custom_key <> k.id then foreign name
+
+  let error k ?(from = -1) ?(upto = -1) ?(notes = []) ?help v =
+    let st = get_state () in
+    check_lenient st k "Parseff.Typed.error";
+    raise_custom st ~from ~upto ~notes ~help (k.inj v)
+
+  let warn k ?(from = -1) ?(upto = -1) ?(notes = []) ?help v =
+    let st = get_state () in
+    check_lenient st k "Parseff.Typed.warn";
+    warn_in st ~from ~upto ~notes ~help (k.inj v)
+
+  let capture k ?release ?contexts p =
+    check_strict (get_state ()) k "Parseff.Typed.capture";
+    match capture ?release ?contexts p with
+    | Ok v ->
+        Ok v
+    | Error e ->
+        Error (of_raw k e)
+
+  module Diagnostics = struct
+    type 'e entry = { pos : int; value : 'e error }
+    type 'e t = { raw : diagnostics; key : 'e key }
+
+    let create key = { raw = diagnostics_create (); key }
+
+    let to_list d =
+      List.map
+        (fun (x : diagnostic_entry) ->
+          { pos = x.pos; value = of_raw d.key x.value }
+        )
+        (diagnostics_to_list d.raw)
+
+    let length d = diagnostics_length d.raw
+    let is_empty d = diagnostics_is_empty d.raw
+    let clear d = diagnostics_clear d.raw
+  end
+
+  let typed_entry k (x : diagnostic_entry) : _ Diagnostics.entry =
+    { pos = x.pos; value = of_raw k x.value }
+
+  let raw_entry k (x : _ Diagnostics.entry) : diagnostic_entry =
+    { pos = x.pos; value = to_raw (fun v -> Custom (k.inj v)) x.value }
+
+  let raw_keep (d : _ Diagnostics.t) keep =
+    Option.map
+      (fun keep entry inner ->
+        List.map (raw_entry d.key)
+          (keep (typed_entry d.key entry) (List.map (typed_entry d.key) inner))
+      )
+      keep
+
+  let recover ?release ?contexts ?keep (d : _ Diagnostics.t) ~sync parser hole =
+    recover ?release ?contexts ?keep:(raw_keep d keep) d.raw ~sync parser
+      (fun e -> hole (of_raw d.key e)
+    )
+
+  let require (d : _ Diagnostics.t) parser missing =
+    require d.raw parser (fun e -> missing (of_raw d.key e))
+
+  let list ?release ?contexts ?keep ?sep ?trailing (d : _ Diagnostics.t) ~close
+      ~sync element hole =
+    list ?release ?contexts ?keep:(raw_keep d keep) ?sep ?trailing d.raw ~close
+      ~sync element (fun e -> hole (of_raw d.key e)
+    )
+
+  let raw_diagnostics k = function
+    | None ->
+        None
+    | Some (d : _ Diagnostics.t) ->
+        if d.key != k then
+          invalid_arg "Parseff.Typed: these diagnostics belong to another key";
+        Some d.raw
+
+  let keyed k p () =
+    (get_state ()).custom_key <- k.id;
+    p ()
+
+  let parse k ?max_depth ?consume ?diagnostics ?trace input p =
+    Result.map_error (of_raw k)
+      (parse ?max_depth ?consume
+         ?diagnostics:(raw_diagnostics k diagnostics)
+         ?trace input (keyed k p)
+      )
+
+  let parse_source k ?max_depth ?backtrack_window ?consume ?diagnostics ?trace
+      src p =
+    Result.map_error (of_raw k)
+      (parse_source ?max_depth ?backtrack_window ?consume
+         ?diagnostics:(raw_diagnostics k diagnostics)
+         ?trace src (keyed k p)
+      )
+
+  let parse_source_each k ?max_depth ?backtrack_window ?diagnostics ?trace
+      ?pending src p =
+    Seq.map
+      (Result.map_error (of_raw k))
+      (parse_source_each ?max_depth ?backtrack_window
+         ?diagnostics:(raw_diagnostics k diagnostics)
+         ?trace ?pending src (keyed k p)
+      )
+
+  module type ERROR = sig
+    type t
+
+    val to_string : t -> string
+  end
+
+  module Make (E : ERROR) = struct
+    let key : E.t key = key ()
+
+    type nonrec error = E.t error
+
+    let error ?from ?upto ?notes ?help v = error key ?from ?upto ?notes ?help v
+    let warn ?from ?upto ?notes ?help v = warn key ?from ?upto ?notes ?help v
+    let capture ?release ?contexts p = capture key ?release ?contexts p
+
+    module Diagnostics = struct
+      type entry = E.t Diagnostics.entry
+      type t = E.t Diagnostics.t
+
+      let create () = Diagnostics.create key
+      let to_list = Diagnostics.to_list
+      let length = Diagnostics.length
+      let is_empty = Diagnostics.is_empty
+      let clear = Diagnostics.clear
+    end
+
+    let recover = recover
+    let require = require
+    let list = list
+    let parse ?max_depth ?consume ?diagnostics ?trace input p =
+      parse key ?max_depth ?consume ?diagnostics ?trace input p
+
+    let parse_source ?max_depth ?backtrack_window ?consume ?diagnostics ?trace
+        src p =
+      parse_source key ?max_depth ?backtrack_window ?consume ?diagnostics ?trace
+        src p
+
+    let parse_source_each ?max_depth ?backtrack_window ?diagnostics ?trace
+        ?pending src p =
+      parse_source_each key ?max_depth ?backtrack_window ?diagnostics ?trace
+        ?pending src p
+    let error_message e = error_message ~custom:E.to_string e
+
+    let render_error ?name ?source e =
+      render_error ?name ?source ~custom:E.to_string e
+  end
+end

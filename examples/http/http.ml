@@ -18,17 +18,19 @@ type response = {
 
 type body = No_body | Raw of string | Form of (string * string) list
 
-type Parseff.custom_error +=
-  | Bad_framing of string
-  | Unsupported_coding of string
+type error = Bad_framing of string | Unsupported_coding of string
 
 let describe = function
   | Bad_framing m ->
       m
   | Unsupported_coding c ->
       "unsupported transfer coding " ^ c
-  | _ ->
-      "unknown error"
+
+module P = Parseff.Typed.Make (struct
+  type t = error
+
+  let to_string = describe
+end)
 
 let max_method = 32
 let max_target = 8190
@@ -357,9 +359,9 @@ let content_length headers =
       if List.for_all (String.equal v) rest then
         Some (int_of_string v)
       else
-        Parseff.error (Bad_framing "conflicting Content-Length values")
+        P.error (Bad_framing "conflicting Content-Length values")
   | _ ->
-      Parseff.error (Bad_framing "invalid Content-Length")
+      P.error (Bad_framing "invalid Content-Length")
 
 let chunked ~version headers =
   match values "transfer-encoding" headers with
@@ -367,10 +369,9 @@ let chunked ~version headers =
       false
   | te ->
       if version < (1, 1) then
-        Parseff.error (Bad_framing "Transfer-Encoding in an HTTP/1.0 message");
+        P.error (Bad_framing "Transfer-Encoding in an HTTP/1.0 message");
       if values "content-length" headers <> [] then
-        Parseff.error
-          (Bad_framing "Transfer-Encoding and Content-Length together");
+        P.error (Bad_framing "Transfer-Encoding and Content-Length together");
       let codings = List.map String.lowercase_ascii (list_elements te) in
       begin match List.rev codings with
       | "chunked" :: before when not (List.mem "chunked" before) -> (
@@ -378,11 +379,10 @@ let chunked ~version headers =
           | [] ->
               true
           | coding :: _ ->
-              Parseff.error (Unsupported_coding coding)
+              P.error (Unsupported_coding coding)
         )
       | _ ->
-          Parseff.error
-            (Bad_framing "chunked must be the final transfer coding, once")
+          P.error (Bad_framing "chunked must be the final transfer coding, once")
       end
 
 let body ~version headers =
@@ -420,18 +420,18 @@ let request () =
   let body = body ~version:head.version head.headers in
   (head, body)
 
-let status_of_error (e : Parseff.error) =
+let status_of_error (e : P.error) =
   let innermost =
     match List.rev e.contexts with c :: _ -> c.name | [] -> ""
   in
   match e.kind with
-  | Custom (Parseff.Limit_exceeded _) when innermost = "method" ->
+  | Limit_exceeded _ when innermost = "method" ->
       (501, "Not Implemented")
   | Custom (Unsupported_coding _) ->
       (501, "Not Implemented")
-  | Custom (Parseff.Limit_exceeded _) when innermost = "request target" ->
+  | Limit_exceeded _ when innermost = "request target" ->
       (414, "URI Too Long")
-  | Custom (Parseff.Limit_exceeded _)
+  | Limit_exceeded _
     when innermost = "header section" || innermost = "trailer section" ->
       (431, "Request Header Fields Too Large")
   | Backtrack_window_exceeded _

@@ -33,7 +33,8 @@
   test_recovery_property
   test_recovery_bound
   test_until
-  test_charset)
+  test_charset
+  test_typed)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest uucp))
 

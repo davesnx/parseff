@@ -9,10 +9,10 @@ let print_body = function
   | Form fields ->
       List.iter (fun (k, v) -> Printf.printf "  form: %s = %s\n" k v) fields
 
-let print_error (e : Parseff.error) =
+let print_error (e : Http.P.error) =
   let code, text = Http.status_of_error e in
   Printf.printf "error %d %s at byte %d: %s\n" code text e.range.start
-    (Parseff.error_message ~custom:Http.describe e)
+    (Http.P.error_message e)
 
 let requests ~buf_size ~window =
   let src = Parseff.Source.of_channel ~buf_size stdin in
@@ -26,12 +26,12 @@ let requests ~buf_size ~window =
       | Error e ->
           print_error e
       )
-    (Parseff.parse_source_each ~backtrack_window:window src Http.request)
+    (Http.P.parse_source_each ~backtrack_window:window src Http.request)
 
 let response ~meth =
   let input = In_channel.input_all stdin in
   match
-    Parseff.parse input (fun () ->
+    Http.P.parse input (fun () ->
         let head = Http.response_head () in
         (head, Http.response_body ~meth head)
     )
@@ -46,7 +46,7 @@ let response ~meth =
 
 let chunked () =
   let input = In_channel.input_all stdin in
-  match Parseff.parse input Http.chunked_body with
+  match Http.P.parse input Http.chunked_body with
   | Ok (body, trailers) ->
       Printf.printf "body: %S\n" body;
       print_headers trailers
