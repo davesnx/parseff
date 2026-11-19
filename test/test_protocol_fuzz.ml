@@ -187,7 +187,7 @@ let kind_of (e : Parseff.error) =
       `Expected (items, more)
   | Failed m ->
       `Failed m
-  | Custom (Parseff.Limit_exceeded { limit }) ->
+  | Parseff.Limit_exceeded { limit } ->
       `Limit limit
   | Custom _ ->
       `Custom

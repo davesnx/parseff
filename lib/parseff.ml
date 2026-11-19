@@ -55,7 +55,6 @@ type note_data = { at : range_data option; text : string }
 type endian = Big | Little
 
 type custom_error = ..
-type custom_error += Limit_exceeded of { limit : int }
 
 (* The public trace event [Fail], added at the end of this file, is an
    extension constructor too, and a structure cannot define two extension
@@ -88,6 +87,7 @@ type far_extra =
   | Payload of custom_error
   | Payload_ext of custom_error * fail_extra
   | Payload_failure of string * fail_extra
+  | Payload_limit of int * fail_extra
 type abort_frames = {
   at : int;
   mutable open_frames : (string * int * bool) list;
@@ -260,6 +260,7 @@ type error_kind =
   | Expected of { items : expected * expected list; found : found; more : int }
   | Failed of string
   | Custom of custom_error
+  | Limit_exceeded of { limit : int }
   | Depth_limit_exceeded of { limit : int }
   | Backtrack_window_exceeded of { limit : int; oldest : int }
 
@@ -2575,9 +2576,7 @@ let[@inline never] limited st stop f =
 
 let[@inline never] fail_limit st ~from ~upto limit =
   fail_user st upto
-    (Payload_ext
-       (Limit_exceeded { limit }, { from; upto; notes = []; help = None })
-    )
+    (Payload_limit (limit, { from; upto; notes = []; help = None }))
 
 let[@inline never] scan_until st ~keep_from start stop pred =
   let p = ref start in
@@ -5016,8 +5015,6 @@ let error_message ?custom e =
       "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
   | Failed m ->
       m
-  | Custom (Limit_exceeded { limit }) ->
-      Printf.sprintf "limit of %d exceeded" limit
   | Custom v -> (
       match custom with
       | Some f ->
@@ -5025,6 +5022,8 @@ let error_message ?custom e =
       | None ->
           "custom error (no ~custom printer given)"
     )
+  | Limit_exceeded { limit } ->
+      Printf.sprintf "limit of %d exceeded" limit
   | Depth_limit_exceeded { limit } ->
       Printf.sprintf "maximum nesting depth %d exceeded" limit
   | Backtrack_window_exceeded { limit; _ } ->
@@ -6317,6 +6316,9 @@ let error_of_far ~last st outer =
       let span = extras_span pos x in
       build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Failed m) span
         frames
+  | Payload_limit (limit, x) when f.special = special_user ->
+      let span = extras_span pos x in
+      build st ~last ~pos:span.start (Limit_exceeded { limit }) span frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
@@ -6517,7 +6519,7 @@ let recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
       let f = st.far in
       let at =
         match f.extra with
-        | (Payload_ext (_, x) | Payload_failure (_, x))
+        | (Payload_ext (_, x) | Payload_failure (_, x) | Payload_limit (_, x))
           when f.special = special_user ->
             imin f.pos (extras_span f.pos x).start
         | _ ->

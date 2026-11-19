@@ -14,7 +14,8 @@ A parse fails with one of two sorts of error.
 {b Built-in errors} come from Parseff itself: a primitive such as
 {!val:Parseff.char} does not match, {!val:Parseff.fail} stops with a message,
 or a limit such as [max_depth] is reached. Their [kind] is [Expected],
-[Failed], [Depth_limit_exceeded] or [Backtrack_window_exceeded]. You do not
+[Failed], [Limit_exceeded], [Depth_limit_exceeded] or
+[Backtrack_window_exceeded]. You do not
 declare them, and {!val:Parseff.render_error} prints them with a full message.
 
 {b Custom errors} are cases you add to {!type:Parseff.custom_error}. You raise
@@ -302,6 +303,9 @@ buildable, for [~notes] of {!val:Parseff.fail}.
   [fail] or [error] failures wins. Relabeling combinators
   ({!val:Parseff.expect}, {!val:Parseff.one_of_labeled}) do not relabel it.
 - [Custom e]: a value given to {!val:Parseff.error}.
+- [Limit_exceeded { limit }]: a run of {!val:Parseff.take_while} or
+  {!val:Parseff.take_until}, or a repetition of {!val:Parseff.many}, went over
+  the [~at_most] given as [limit].
 - [Depth_limit_exceeded { limit }]: a {!val:Parseff.rec_} call exceeded the
   [~max_depth] limit.
 - [Backtrack_window_exceeded { limit; oldest }]: a streaming parser needed more rewind

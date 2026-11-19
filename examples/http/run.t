@@ -234,7 +234,7 @@ request with an obs-fold is an error:
     Content-Length: 2
     body: "hi"
   $ printf 'HTTP/1.1 200 OK\r\n b\r\n\r\n' | ./main.exe response
-  error 400 Bad Request at byte 17: expected field name, found ' '
+  error 400 Bad Request at byte 17: expected field name or "\r\n", found ' '
   $ printf 'GET / HTTP/1.1\r\nX-Long: a\r\n  b\r\n\r\n' | ./main.exe requests
   error 400 Bad Request at byte 27: expected field name or "\r\n", found ' '
 

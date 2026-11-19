@@ -36,8 +36,8 @@
     stanza to find the unstable parts that you use, and write
     [[@@@alert "-unstable"]] at the top of a file to silence it there. The
     standard library uses the same alert, for example on [Domain]. The
-    [~at_most] arguments of {!val:take_while} and {!val:many} and the
-    [Limit_exceeded] error are unstable too, but have no alert.
+    [~at_most] arguments of {!val:take_while}, {!val:take_until} and {!val:many}
+    are unstable too, but have no alert.
 
     A 1.x release can add events to {!type:trace_event} and fields to some
     records; {!type:error_kind} says which types are final until 2.0. *)
@@ -118,17 +118,7 @@ type custom_error = ..
     own cases with [type Parseff.custom_error += Too_large of int] and match
     them as [Custom (Too_large n)]. *)
 
-type custom_error +=
-  | Limit_exceeded of { limit : int }
-        (** The input went over a limit given with [~at_most] to
-            {!val:take_while} or {!val:many}. [limit] is that value. The error
-            range covers the run or the item that went over it, so a server can
-            answer "header too large" and not "bad request". It is an ordinary
-            failure: when a failure is recorded farther in the input, the parse
-            reports that one; see {!val:take_while} for how {!commit} keeps the
-            limit. Unstable: this case can change in a 1.x release. *)
-
-(** What failed. These five cases are final until 2.0, so a match on all of them
+(** What failed. These six cases are final until 2.0, so a match on all of them
     needs no [_] case. A new kind of error is a {!custom_error} in [Custom].
 
     The cases of {!type:expected} and {!type:found} and the fields of
@@ -146,6 +136,14 @@ type error_kind = private
           [one_of []] is the only failure at the furthest position. Failures of
           primitives are otherwise [Expected]. *)
   | Custom of custom_error  (** A value given to {!val:error}. *)
+  | Limit_exceeded of { limit : int }
+      (** The input went over a limit given with [~at_most] to
+          {!val:take_while}, {!val:take_until} or {!val:many}. [limit] is that
+          value. The error range covers the run or the item that went over it,
+          so a server can answer "header too large" and not "bad request". It is
+          an ordinary failure: when a failure is recorded farther in the input,
+          the parse reports that one; see {!val:take_while} for how {!commit}
+          keeps the limit. *)
   | Depth_limit_exceeded of { limit : int }
       (** {!val:rec_} nested deeper than [max_depth], or a {!val:fold_right}
           chain longer than its limit. *)
@@ -188,7 +186,7 @@ val error_message : ?custom:(custom_error -> string) -> error -> string
     [expected "else", "if", or "while", found 'xyz']. A message lists at most 8
     expected items, then [, or N more alternatives]. [custom] prints [Custom]
     errors, without it the message is [custom error (no ~custom printer given)].
-    {!Limit_exceeded} always prints as [limit of N exceeded]. *)
+    [Limit_exceeded] prints as [limit of N exceeded]. *)
 
 val render_error :
   ?name:string ->
@@ -410,9 +408,10 @@ val parse :
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
     {!type:error}. [e.kind] is [Expected] for a mismatch, [Failed] for
-    {!val:fail}, [Custom] for {!val-error}, [Depth_limit_exceeded] when
-    recursion nested deeper than [max_depth], and [Backtrack_window_exceeded]
-    for streaming.
+    {!val:fail}, [Custom] for {!val-error}, [Limit_exceeded] when a run or a
+    repetition went over its [~at_most], [Depth_limit_exceeded] when recursion
+    nested deeper than [max_depth], and [Backtrack_window_exceeded] for
+    streaming.
 
     Example:
     {@ocaml[
@@ -503,8 +502,8 @@ val take_while :
 
     When [~at_most] is specified, the run may have at most that many characters.
     When character [at_most + 1] matches too, the parse fails with
-    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
-    the [at_most + 1] characters read. [take_while] reads at most [at_most + 1]
+    [Limit_exceeded { limit = at_most }], and the error range covers the
+    [at_most + 1] characters read. [take_while] reads at most [at_most + 1]
     characters. On a stream, these characters must fit in the backtrack window
     together with the input that the parser still keeps; when they do not, the
     parse fails with [Backtrack_window_exceeded] first. So keep [at_most] well
@@ -565,10 +564,10 @@ val take_until : ?at_most:int -> ?label:string -> string -> string
 
     When [~at_most] is specified, the result may have at most that many bytes.
     When [terminator] does not start within the first [at_most + 1] bytes, the
-    parse fails with [Custom (Limit_exceeded { limit = at_most })], and the
-    error range covers those [at_most + 1] bytes. [take_until] then reads at
-    most [at_most + String.length terminator] bytes. When the input ends before
-    that, the parse fails as an unterminated input instead. The limit failure is
+    parse fails with [Limit_exceeded { limit = at_most }], and the error range
+    covers those [at_most + 1] bytes. [take_until] then reads at most
+    [at_most + String.length terminator] bytes. When the input ends before that,
+    the parse fails as an unterminated input instead. The limit failure is
     recovered from and reported as described in {!take_while}.
 
     On a stream, the result must fit in the backtrack window, as with
@@ -1715,8 +1714,8 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
     When [~at_most] is specified, [many] returns at most that many results.
     After [at_most] results, it runs [parser] once more. When that run succeeds
     and consumes input, the parse fails with
-    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
-    the extra item. The limit failure follows the rule of every failure, as for
+    [Limit_exceeded { limit = at_most }], and the error range covers the extra
+    item. The limit failure follows the rule of every failure, as for
     {!take_while}: a failure recorded farther in the input is reported in its
     place, also one that the extra item records in a branch it abandons. A
     {!commit} in [parser] once it has decided forgets those. Raises

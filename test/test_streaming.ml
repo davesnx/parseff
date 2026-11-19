@@ -1235,6 +1235,8 @@ let norm : (_, Parseff.error) Result.t -> _ = function
             "Failed " ^ m
         | Custom _ ->
             "Custom"
+        | Limit_exceeded _ ->
+            "Limit_exceeded " ^ Parseff.error_message e
         | Depth_limit_exceeded _ ->
             "Depth_limit_exceeded " ^ Parseff.error_message e
         | Backtrack_window_exceeded _ ->

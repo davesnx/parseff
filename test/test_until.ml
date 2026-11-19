@@ -222,11 +222,7 @@ let test_invalid_arguments () =
 let check_limit name ~limit ~range input parser =
   let check_one source = function
     | Error
-        {
-          Parseff.kind = Custom (Parseff.Limit_exceeded { limit = l });
-          range = r;
-          _;
-        } ->
+        { Parseff.kind = Parseff.Limit_exceeded { limit = l }; range = r; _ } ->
         Alcotest.(check int) (name ^ " limit " ^ source) limit l;
         Alcotest.(check (pair int int))
           (name ^ " range " ^ source)

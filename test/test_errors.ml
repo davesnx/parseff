@@ -14,6 +14,43 @@ let check_parseff_error exn =
     "mentions parse context" true
     (contains msg "parse context")
 
+let test_limit_exceeded_kind () =
+  let byte_source input =
+    Parseff.Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
+  in
+  let check name input parser limit range =
+    List.iter
+      (fun (runner, r) ->
+        match r with
+        | Error ({ Parseff.kind = Parseff.Limit_exceeded { limit = l }; _ } as e)
+          ->
+            Alcotest.(check int) (name ^ ", " ^ runner ^ ": limit") limit l;
+            Alcotest.(check (pair int int))
+              (name ^ ", " ^ runner ^ ": range")
+              range
+              (e.range.start, e.range.stop);
+            Alcotest.(check string)
+              (name ^ ", " ^ runner ^ ": message")
+              (Printf.sprintf "limit of %d exceeded" limit)
+              (Parseff.error_message e)
+        | Error e ->
+            Alcotest.failf "%s, %s: expected Limit_exceeded, got %s" name runner
+              (Parseff.error_message e)
+        | Ok _ ->
+            Alcotest.failf "%s, %s: expected Limit_exceeded, got Ok" name runner
+      )
+      [
+        ("parse", Parseff.parse input parser);
+        ("parse_source", Parseff.parse_source (byte_source input) parser);
+      ]
+  in
+  check "take_while" "aaaa"
+    (fun () -> ignore (Parseff.take_while ~at_most:3 (fun c -> c = 'a')))
+    3 (0, 4);
+  check "many" "aaa"
+    (fun () -> ignore (Parseff.many ~at_most:2 (fun () -> Parseff.char 'a') ()))
+    2 (2, 3)
+
 let test_fold_left_user_exception () =
   let op () =
     ignore (Parseff.char '+');
@@ -2196,6 +2233,8 @@ let describe_kind (e : Parseff.error) =
       "message " ^ m
   | Parseff.Custom _ ->
       "user"
+  | Parseff.Limit_exceeded { limit } ->
+      Printf.sprintf "limit %d" limit
   | Parseff.Depth_limit_exceeded { limit } ->
       Printf.sprintf "depth %d" limit
   | Parseff.Backtrack_window_exceeded { limit; _ } ->
@@ -4788,6 +4827,7 @@ let () =
             test_char_and_one_byte_literal_print_once;
         ]
       );
+      ("limit exceeded", [ test_case "kind" `Quick test_limit_exceeded_kind ]);
       ( "fold exceptions",
         [
           test_case "fold_left user exception propagates" `Quick
