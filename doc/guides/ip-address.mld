@@ -1,152 +1,108 @@
-{0 Guide: Parsing an IP Address}
+{0 Guide: Parsing an IP address}
 
 Build a validated IPv4 address parser step by step.
 
-This walkthrough builds an IPv4 address parser from scratch. It covers digit
-matching, multi-character numbers, range validation, error reporting, and
-ensuring complete input consumption.
-
 Source:
-{{:https://github.com/davesnx/parseff/blob/main/test/test_ip.ml} [test/test_ip.ml]}
+{{:https://github.com/davesnx/parseff/blob/main/test/test_ip.ml}[test/test_ip.ml]}
 and
-{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml} [examples/better_errors/main.ml]}
+{{:https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml}[examples/better_errors/main.ml]}.
 
-{1 What we're building}
-
-An IPv4 address looks like [192.168.1.1]: four numbers from 0 to 255, separated
-by dots. Simple enough to parse by hand, but it's a perfect first example
-because it combines several core concepts:
-
-{ul
-{- Parsing individual digits and assembling multi-digit numbers}
-{- Matching literal separators}
-{- Validating parsed values against domain rules}
-{- Reporting errors at the right position}}
+An IPv4 address ([192.168.1.1]) consists of four decimal octets in [0]–[255]
+separated by ['.'].
 
 {1 The parser}
 
 {@ocaml[
-(* Parse a single octet: one or more digits, validated to 0-255 *)
-let number () =
+let octet () =
   let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
   else Parseff.fail (Printf.sprintf "number out of range: %d" n)
 
-(* Four octets separated by dots, consuming all input *)
 let ip_address () =
-  let a = number () in
-  let _ = Parseff.char '.' in
-  let b = number () in
-  let _ = Parseff.char '.' in
-  let c = number () in
-  let _ = Parseff.char '.' in
-  let d = number () in
+  let a = octet () in
+  ignore (Parseff.char '.');
+  let b = octet () in
+  ignore (Parseff.char '.');
+  let c = octet () in
+  ignore (Parseff.char '.');
+  let d = octet () in
   (a, b, c, d)
 ]}
 
-[Parseff.digit] parses a single digit and returns it as a character (['0'] to
-['9']). [many ~at_least:1] applies it one or more times, producing a list like
-[['1'; '9'; '2']]. The [fold_left] converts that to [192]. Then we validate: if
-the number isn't in range, [Parseff.fail] reports it. This is the
-parse-then-validate pattern. {!val:Parseff.integer} reads a number in one call,
-but it also accepts a leading [-], which an octet must not have.
-
-The [ip_address] parser reads like the format itself: number, dot, number, dot,
-number, dot, number. [parse] requires all input to be consumed, so
-["1.2.3.4 extra"] fails instead of silently succeeding.
-
-{1 Running it}
+[octet] parses digits and validates the range afterward (unlike
+{!val:Parseff.integer}, it rejects a leading [-]). {!val:Parseff.parse}
+requires full consumption by default, so trailing input fails:
 
 {@ocaml skip[
 match Parseff.parse "192.168.1.1" ip_address with
-| Ok (a, b, c, d) ->
-    Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
+| Ok (a, b, c, d) -> Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
 | Error e -> prerr_endline (Parseff.render_error ~name:"address" e)
 ]}
 
-On valid input, you get an [Ok] with the four octets as a tuple. On invalid
-input, the error tells you exactly where parsing failed.
+{1 Error behavior}
 
-{1 Error cases}
+- {b Out of range} (["1.2.3.256"]): fails with ["number out of range: 256"] at
+  offset 9 (pass [~from] to {!val:Parseff.fail} to underline the whole octet).
+- {b Incomplete} (["1.2.3"]): fails expecting ['.'], found end of input.
+- {b Trailing data} (["1.2.3.4 extra"]): fails at offset 7 with
+  [expected digit or end of input] because the final [many] stopped at the space
+  and furthest-failure reporting merges both expectations at offset 7.
 
-Let's look at what happens with bad input:
+{1 Clearer errors with [expect]}
 
-{b Out of range}: ["1.2.3.256"] parses [1], [.], [2], [.], [3], [.], then reads
-[256]. The [number] parser validates and fails with
-["number out of range: 256"] at position 9 (just after [256]).
-
-{b Incomplete}: ["1.2.3"] parses [1], [.], [2], [.], [3], then tries to match
-['.'] and fails because the input is exhausted.
-
-{b Trailing data}: ["1.2.3.4 extra"] parses all four octets, then [parse]
-fails because there are characters remaining. The error is at position 7 and
-says [expected digit or end of input]: the last [many] stopped at the space
-because it needed another digit, and Parseff reports every failure at the
-furthest position.
-
-{1 Improving error messages with [expect]}
-
-The basic parser's error messages are functional but terse. [expect]
-lets you replace them with something more human-readable:
+Wrap primitives with {!val:Parseff.expect} to replace raw token names with
+domain wording:
 
 {@ocaml skip[
-let digit_val () =
-  Parseff.expect "a digit (0-9)" Parseff.digit
+let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
+let dot () = Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
 
-let number_0_255 () =
+let octet () =
+  let start = Parseff.position () in
   let digits = Parseff.many ~at_least:1 digit_val in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
-  else Parseff.fail (Printf.sprintf "number %d is out of range (must be 0-255)" n)
+  else Parseff.fail ~from:start (Printf.sprintf "octet %d out of range (0-255)" n)
 
 let ip_address () =
-  let a = number_0_255 () in
-  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
-  let b = number_0_255 () in
-  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
-  let c = number_0_255 () in
-  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
-  let d = number_0_255 () in
+  let a = octet () in
+  ignore (dot ());
+  let b = octet () in
+  ignore (dot ());
+  let c = octet () in
+  ignore (dot ());
+  let d = octet () in
   (a, b, c, d)
 ]}
 
-Now on ["192.168.1.x"], instead of [expected digit], the error says
-[expected a digit (0-9)]. On ["192.168.1x"], the parser could take another digit
-or the dot, so the error lists both: [expected a digit (0-9) or a dot
-separator]. When the input ends early, as in ["192.168.1"], the error keeps
-what was expected and says [found end of input].
+On ["192.168.1.x"], this reports [expected a digit (0-9)]. On ["192.168.1x"],
+it merges both possibilities at offset 9:
+[expected a digit (0-9) or a dot separator].
 
-{1 Using typed errors}
+{1 Typed errors}
 
-For programmatic error handling, extend [Parseff.custom_error] with your own
-cases and pattern match on them:
+Extend {!type:Parseff.custom_error} when callers need to handle validation
+failures programmatically:
 
 {@ocaml skip[
 type Parseff.custom_error += Out_of_range of int
 
-let number_0_255_typed () =
+let octet_typed () =
+  let start = Parseff.position () in
   let digits = Parseff.many ~at_least:1 digit_val in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
-  else Parseff.error (Out_of_range n)
+  else Parseff.error ~from:start (Out_of_range n)
 ]}
-
-Now callers can distinguish parsing failures from validation failures:
 
 {@ocaml skip[
 match Parseff.parse "192.168.1.300" ip_address with
-| Ok (a, b, c, d) ->
-    Printf.printf "%d.%d.%d.%d\n" a b c d
+| Ok (a, b, c, d) -> Printf.printf "%d.%d.%d.%d\n" a b c d
 | Error { kind = Custom (Out_of_range n); _ } ->
     Printf.printf "Octet %d is not in 0-255\n" n
-| Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.error_message e)
+| Error e -> prerr_endline (Parseff.render_error e)
 ]}
-
-[fail] is fine for errors shown directly to users.
-[error] is better when code needs to react differently to different
-failure modes.
