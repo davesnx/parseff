@@ -13,7 +13,6 @@ let parser () =
       Parseff.literal "abcd";
       "right"
     )
-    ()
 
 let () =
   let source = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in

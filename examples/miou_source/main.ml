@@ -40,7 +40,6 @@ let parse_level () =
         Error
       );
     ]
-    ()
 
 let parse_tag () =
   let _ = Parseff.char '[' in
@@ -56,11 +55,11 @@ let entry () =
   let tag = parse_tag () in
   let _ = Parseff.char ' ' in
   let message = Parseff.take_while (fun c -> c <> '\n') in
-  ignore (Parseff.optional (fun () -> Parseff.char '\n') ());
+  ignore (Parseff.optional (fun () -> Parseff.char '\n'));
   { timestamp; level; tag; message }
 
 let parse_exn text =
-  let parser () = Parseff.many entry () in
+  let parser () = Parseff.many entry in
   match Parseff.parse text parser with Ok es -> es | Error _ -> assert false
 
 let () =

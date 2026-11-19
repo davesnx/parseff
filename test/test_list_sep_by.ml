@@ -45,7 +45,7 @@ let string_literal () =
 
 let pairs = [ ('(', ')'); ('[', ']') ]
 
-let skip_value =
+let skip_value () =
   skip_nested
     ~atom:(fun () -> ignore (string_literal ()))
     pairs
@@ -84,7 +84,6 @@ and items close =
       ~close:(fun () -> peek_char () = Some close)
       ~sync:skip_value value
       (fun _ -> Hole)
-      ()
   in
   ignore (char close);
   xs
@@ -163,7 +162,6 @@ let test_one_counter_differs () =
             ~close:(fun () -> peek_char () = Some ')')
             ~sync:skip_one_counter value
             (fun _ -> Hole)
-            ()
         in
         ignore (char ')');
         Call (name, xs)
@@ -211,8 +209,8 @@ let test_streaming () =
 
 let test_same_as_sep_by () =
   let plain () =
-    let xs = sep_by ~at_least:1 (fun () -> any_char ()) comma () in
-    ignore (optional comma ());
+    let xs = sep_by ~at_least:1 (fun () -> any_char ()) comma in
+    ignore (optional comma);
     xs
   in
   let d = Diagnostics.create () in
@@ -222,7 +220,6 @@ let test_same_as_sep_by () =
       ~sync:skip_value
       (fun () -> any_char ())
       (fun _ -> '?')
-      ()
   in
   let with_position p () =
     let v = p () in
@@ -258,9 +255,8 @@ let test_no_collector () =
       ~close:(fun () -> false)
       ~sync:skip_value value
       (fun _ -> Hole)
-      ()
   in
-  let plain () = sep_by value comma () in
+  let plain () = sep_by value comma in
   List.iter
     (fun input ->
       let expected = show_result (parse input (fun () -> List (plain ()))) in
@@ -274,12 +270,12 @@ let test_no_collector () =
 let test_rollback () =
   let d = Diagnostics.create () in
   let r =
-    parse ~diagnostics:d "[1, ?, 3}"
-      (or_ value (fun () ->
-           ignore (take_while (fun _ -> true));
-           Hole
-       )
-      )
+    parse ~diagnostics:d "[1, ?, 3}" (fun () ->
+        or_ value (fun () ->
+            ignore (take_while (fun _ -> true));
+            Hole
+        )
+    )
   in
   Alcotest.(check string)
     "the alternative runs as without a collector" "Ok _" (show_result r);
@@ -306,10 +302,9 @@ let issue_60_list ?keep ?(source = false) input =
     let xs =
       list ~sep:comma ?keep
         ~close:(fun () -> peek_char () = Some ']')
-        ~sync:(skip_nested [ ('[', ']') ] (fun c -> c = ','))
+        ~sync:(fun () -> skip_nested [ ('[', ']') ] (fun c -> c = ','))
         element
         (fun _ -> Hole)
-        ()
     in
     ignore (char ']');
     List xs
@@ -375,7 +370,6 @@ let test_record_arguments () =
           ~sync:(fun () -> skip_while (fun c -> c <> ','))
           element
           (fun _ -> Hole)
-          ()
     )
   in
   Alcotest.(check string)
@@ -411,7 +405,6 @@ let test_release () =
                )
                element
                (fun _ -> Hole)
-               ()
             )
       )
     in
@@ -453,12 +446,10 @@ let test_release () =
 let test_streaming_release () =
   let input = "[" ^ String.make 40 ' ' ^ "?, 2]" in
   let element () =
-    many
-      (fun () ->
+    many (fun () ->
         ignore (char ' ');
         cut ()
-      )
-      ()
+    )
     |> ignore;
     let v = integer () in
     ws ();
@@ -476,7 +467,6 @@ let test_streaming_release () =
               ~close:(fun () -> peek_char () = Some ']')
               ~sync:skip_value element
               (fun _ -> Hole)
-              ()
           in
           ignore (char ']');
           List xs
@@ -510,7 +500,7 @@ let test_failing_hole () =
               ~close:(fun () -> peek_char () = Some ']')
               ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ']'))
               (fun () -> Int (Char.code (digit ()) - 48))
-              hole ()
+              hole
           in
           ignore (char ']');
           List xs
@@ -556,7 +546,6 @@ let test_outer_false () =
                     )
                   )
                   (fun _ -> Hole)
-                  ()
               in
               ignore (char ']');
               xs
@@ -583,14 +572,13 @@ let run_table ?trailing input =
         let xs =
           list ~sep:comma ?trailing
             ~close:(fun () -> peek_char () = Some '}')
-            ~sync:(skip_nested [ ('{', '}') ] (fun c -> c = ','))
+            ~sync:(fun () -> skip_nested [ ('{', '}') ] (fun c -> c = ','))
             (fun () ->
               let v = integer () in
               ws ();
               v
             )
             (fun _ -> Hole)
-            ()
         in
         ignore (char '}');
         List xs
@@ -634,7 +622,6 @@ let test_record_not_called () =
                 v
               )
               (fun _ -> Hole)
-              ()
           in
           ignore (char ']');
           List xs
@@ -653,8 +640,7 @@ let skip_only ?atom input =
     parse ~consume:`Partial input (fun () ->
         skip_nested ?atom
           [ ('(', ')'); ('[', ']'); ('{', '}') ]
-          (fun c -> c = ',')
-          ();
+          (fun c -> c = ',');
         position ()
     )
   with
@@ -689,7 +675,7 @@ let test_skip_nested () =
 let test_atom_failure_forgotten () =
   let r =
     parse "ab," (fun () ->
-        skip_nested ~atom:(fun () -> literal "abc") [] (fun c -> c = ',') ();
+        skip_nested ~atom:(fun () -> literal "abc") [] (fun c -> c = ',');
         char ';'
     )
   in

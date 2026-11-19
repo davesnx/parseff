@@ -104,7 +104,6 @@ Both do the same thing. Parseff reads like sequential OCaml code. Angstrom threa
 let value () =
   Parseff.one_of
     [ null_parser; bool_parser; number_parser; string_parser ]
-    ()
 ```
 
 **Angstrom:**
@@ -129,7 +128,6 @@ let numbers () =
       Parseff.skip_whitespace ();
       int_of_string s)
     (fun () -> Parseff.char ',')
-    ()
 ```
 
 **Angstrom:**
@@ -157,7 +155,6 @@ let rec expr () =
       let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
       fun a b -> a + b)
-    ()
 
 and term () =
   Parseff.fold_left
@@ -167,7 +164,6 @@ and term () =
       let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
       fun a b -> a * b)
-    ()
 
 and factor () =
   Parseff.or_
@@ -177,7 +173,6 @@ and factor () =
       let _ = Parseff.char ')' in
       e)
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
-    ()
 ```
 
 **Angstrom:**

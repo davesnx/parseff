@@ -11,10 +11,10 @@ let entry () =
   let key = Parseff.take_while (fun c -> c <> '=') in
   let _ = Parseff.char '=' in
   let value = Parseff.take_while (fun c -> c <> '\n') in
-  ignore (Parseff.optional (fun () -> Parseff.char '\n') ());
+  ignore (Parseff.optional (fun () -> Parseff.char '\n'));
   (key, value)
 
-let config () = Parseff.many entry ()
+let config () = Parseff.many entry
 
 let () =
   Eio_main.run (fun env ->

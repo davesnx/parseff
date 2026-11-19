@@ -84,9 +84,9 @@ let test_utf8_satisfy_split () =
     (fun text ->
       check_all "satisfy" show_code_points text
         (fun () ->
-          Parseff.many
-            (fun () -> Parseff.Utf8.satisfy ~label:"any" (fun _ -> true))
-            ()
+          Parseff.many (fun () ->
+              Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
+          )
         )
         ("Ok " ^ expected_code_points text)
     )
@@ -269,7 +269,6 @@ let test_depth_restored_after_exception () =
         )
       )
       (fun () -> "none")
-      ()
   in
   match
     Parseff.parse ~max_depth:2 "" (fun () -> List.init 6 (fun _ -> attempt ()))
@@ -283,12 +282,10 @@ let test_count_zero () =
   let calls = ref 0 in
   match
     Parseff.parse ~consume:`Partial "abc" (fun () ->
-        Parseff.count 0
-          (fun () ->
+        Parseff.count 0 (fun () ->
             incr calls;
             Parseff.any_char ()
-          )
-          ()
+        )
     )
   with
   | Ok l ->

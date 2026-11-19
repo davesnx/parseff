@@ -47,7 +47,6 @@ let parse_values () =
   Parseff.sep_by
     (fun () -> int_of_string (Parseff.take_while ~at_least:1 is_digit ~label:"digit"))
     (fun () -> Parseff.char ',')
-    ()
 
 (* zero-copy: slices point into the original buffer *)
 let parse_values () =
@@ -71,9 +70,7 @@ let keyword () =
     (fun () ->
       Parseff.or_
         (fun () -> Parseff.literal "function")
-        (fun () -> Parseff.literal "let")
-        ())
-    ()
+        (fun () -> Parseff.literal "let"))
 
 let keyword () =
   (* parse then validate, no backtracking *)
@@ -99,7 +96,6 @@ let parse_list () =
   Parseff.sep_by
     (fun () -> int_of_string (Parseff.take_while ~at_least:1 is_digit ~label:"digit"))
     (fun () -> Parseff.char ',')
-    ()
 
 let parse_list () =
   (* runs the entire scan in one operation *)

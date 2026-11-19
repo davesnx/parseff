@@ -1,7 +1,7 @@
 [@@@alert "-unstable"]
 
 let number () =
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let n =
     List.fold_left
       (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
@@ -27,7 +27,7 @@ let ws () = Parseff.skip_whitespace ()
 let rec json () =
   Parseff.rec_ (fun () ->
       ws ();
-      Parseff.one_of [ array; object_; scalar; num; str ] ()
+      Parseff.one_of [ array; object_; scalar; num; str ]
   )
 
 and scalar () =
@@ -46,13 +46,12 @@ and scalar () =
         "false"
       );
     ]
-    ()
 
 and num () =
   Parseff.context "number" (fun () ->
       Parseff.recognize (fun () ->
-          ignore (Parseff.optional (fun () -> Parseff.char '-') ());
-          ignore (Parseff.many ~at_least:1 Parseff.digit ())
+          ignore (Parseff.optional (fun () -> Parseff.char '-'));
+          ignore (Parseff.many ~at_least:1 Parseff.digit)
       )
   )
 
@@ -66,12 +65,10 @@ and items open_ close item =
   let _ = Parseff.char open_ in
   ws ();
   let l =
-    Parseff.sep_by item
-      (fun () ->
+    Parseff.sep_by item (fun () ->
         ws ();
         Parseff.char ','
-      )
-      ()
+    )
   in
   ws ();
   let _ = Parseff.char close in
@@ -112,7 +109,6 @@ let request_line () =
           "PUT"
         );
       ]
-      ()
   in
   Parseff.commit ();
   let _ = Parseff.char ' ' in
@@ -297,8 +293,7 @@ let nested_frames () =
               joined (fun add -> Parseff.take_while_iter (fun _ -> true) add)
           )
         )
-        (fun s -> parts := s :: !parts)
-        ();
+        (fun s -> parts := s :: !parts);
       String.concat "|" (List.rev !parts)
   )
 
@@ -307,8 +302,7 @@ let numbers () =
   Parseff.sep_by_iter
     (fun () -> Parseff.take_while ~at_least:1 ~at_most:3 digit)
     (fun () -> Parseff.char ',')
-    (fun n -> total := !total + int_of_string n)
-    ();
+    (fun n -> total := !total + int_of_string n);
   string_of_int !total
 
 let frame_cases =
@@ -472,12 +466,10 @@ let test_require_and_list () =
           Parseff.or_
             (fun () -> Parseff.look_ahead (fun () -> Parseff.char ']') = ']')
             (fun () -> false)
-            ()
         )
         ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ',' && c <> ']'))
         (fun () -> Parseff.take_while ~at_least:1 digit)
         (fun _ -> "?")
-        ()
     in
     Parseff.require (fun () -> ignore (Parseff.char ']')) ignore;
     String.concat "," items
@@ -793,7 +785,6 @@ let test_backtrack_window () =
         Parseff.literal "a";
         "a"
       )
-      ()
   in
   match
     feed_chunks ~backtrack_window:8 p (split (fun _ -> 3) (String.make 20 'a'))

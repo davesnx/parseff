@@ -130,17 +130,18 @@ let test_within_negative () =
 
 let test_within_backtrack () =
   both "or_ after a failed frame" "abcd"
-    (Parseff.or_
-       (fun () ->
-         Parseff.within 3 (fun () ->
-             Parseff.literal "abcd";
-             "abcd"
-         )
-       )
-       (fun () ->
-         Parseff.literal "abcd";
-         "abcd"
-       )
+    (fun () ->
+      Parseff.or_
+        (fun () ->
+          Parseff.within 3 (fun () ->
+              Parseff.literal "abcd";
+              "abcd"
+          )
+        )
+        (fun () ->
+          Parseff.literal "abcd";
+          "abcd"
+        )
     )
     (fun name -> check_ok name Alcotest.string "abcd")
 
@@ -190,7 +191,6 @@ let big_frame body =
       n
     )
     (fun () -> Parseff.fail "no frame")
-    ()
 
 let test_within_larger_than_window () =
   let input = String.make 1000 'x' ^ "!" in
@@ -256,7 +256,6 @@ let test_within_or_after_refill () =
         Parseff.or_
           (fun () -> String.make 1 (fail_after_refill ()))
           (fun () -> Parseff.take_while always)
-          ()
       in
       (s, Parseff.position ())
     )
@@ -451,54 +450,51 @@ let alpha c = c >= 'a' && c <= 'z'
 let test_limit_and_farther_failures () =
   both "take_while after a farther failure" "aaaaa"
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.literal "aaaaX") ());
+      ignore (Parseff.optional (fun () -> Parseff.literal "aaaaX"));
       Parseff.take_while ~at_most:2 alpha
     )
     (check_message "expected \"X\", found 'a'");
   both "take_while after a farther failure, with commit" "aaaaa"
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.literal "aaaaX") ());
+      ignore (Parseff.optional (fun () -> Parseff.literal "aaaaX"));
       Parseff.or_
         (fun () ->
           Parseff.commit ();
           Parseff.take_while ~at_most:2 alpha
         )
         (fun () -> "other branch")
-        ()
     )
     (fun name -> check_limit name ~limit:2 ~range:(0, 3));
   both "many over a farther failure" "aaaa"
     (fun () ->
-      Parseff.many ~at_most:1
-        (Parseff.or_
-           (fun () ->
-             Parseff.literal "aaX";
-             "aaX"
-           )
-           (fun () ->
-             Parseff.literal "a";
-             "a"
-           )
-        )
-        ()
+      Parseff.many ~at_most:1 (fun () ->
+          Parseff.or_
+            (fun () ->
+              Parseff.literal "aaX";
+              "aaX"
+            )
+            (fun () ->
+              Parseff.literal "a";
+              "a"
+            )
+      )
     )
     (check_message "expected \"X\", found 'a'");
   both "many over a farther failure, with commit" "aaaa"
     (fun () ->
-      Parseff.many ~at_most:1
-        (Parseff.or_
-           (fun () ->
-             Parseff.literal "aaX";
-             "aaX"
-           )
-           (fun () ->
-             Parseff.literal "a";
-             let a = "a" in
-             Parseff.commit ();
-             a
-           )
-        )
-        ()
+      Parseff.many ~at_most:1 (fun () ->
+          Parseff.or_
+            (fun () ->
+              Parseff.literal "aaX";
+              "aaX"
+            )
+            (fun () ->
+              Parseff.literal "a";
+              let a = "a" in
+              Parseff.commit ();
+              a
+            )
+      )
     )
     (fun name -> check_limit name ~limit:1 ~range:(1, 2))
 
@@ -528,14 +524,14 @@ let test_take_while_at_most () =
 
 let test_within_keeps_outer_found_text () =
   let parser () =
-    ignore (Parseff.optional (fun () -> Parseff.literal "abX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "abX"));
     Parseff.within 3 (fun () ->
         ignore (Parseff.char 'z');
         "w"
     )
   in
   let plain () =
-    ignore (Parseff.optional (fun () -> Parseff.literal "abX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "abX"));
     ignore (Parseff.char 'z');
     "w"
   in
@@ -620,41 +616,42 @@ let header () =
 let test_many_at_most () =
   both "at the limit" "a\nb\nc\n\n"
     (fun () ->
-      let l = Parseff.many ~at_most:3 header () in
+      let l = Parseff.many ~at_most:3 header in
       let _ = Parseff.char '\n' in
       l
     )
     (fun name -> check_ok name Alcotest.(list string) [ "a"; "b"; "c" ]);
   both "over the limit" "a\nb\nc\nd\n\n"
     (fun () ->
-      let l = Parseff.many ~at_most:3 header () in
+      let l = Parseff.many ~at_most:3 header in
       let _ = Parseff.char '\n' in
       l
     )
     (fun name -> check_limit name ~limit:3 ~range:(6, 8));
   both "at_least and at_most" "a\n\n"
     (fun () ->
-      let l = Parseff.many ~at_least:2 ~at_most:3 header () in
+      let l = Parseff.many ~at_least:2 ~at_most:3 header in
       let _ = Parseff.char '\n' in
       l
     )
     (check_message "expected at least 1 character, found '\\n'");
   both "negative at_least" "1"
-    (Parseff.many ~at_least:(-1) ~at_most:0 Parseff.digit) (fun name ->
-      check_limit name ~limit:0 ~range:(0, 1)
-  );
+    (fun () -> Parseff.many ~at_least:(-1) ~at_most:0 Parseff.digit)
+    (fun name -> check_limit name ~limit:0 ~range:(0, 1));
   Alcotest.check_raises "at_most below at_least"
     (Invalid_argument
        "Parseff.many: at_most must be at least 0 and at least at_least"
     ) (fun () ->
-      ignore (Parseff.parse "" (Parseff.many ~at_least:2 ~at_most:1 header))
+      ignore
+        (Parseff.parse "" (fun () -> Parseff.many ~at_least:2 ~at_most:1 header))
   )
 
 let test_limit_recovered_by_or () =
   both "or_ tries the next branch" "aaaaa"
-    (Parseff.or_
-       (fun () -> Parseff.take_while ~at_most:2 always)
-       (fun () -> Parseff.take 5)
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.take_while ~at_most:2 always)
+        (fun () -> Parseff.take 5)
     )
     (fun name -> check_ok name Alcotest.string "aaaaa")
 
@@ -714,7 +711,6 @@ let test_found_text_shared_with_outside () =
         ignore (Parseff.take 2);
         String.make 1 (Parseff.char 'y')
       )
-      ()
   in
   same_as "or_ after a frame" "abzz"
     ~with_frame:(x_or_y (Parseff.within 2))
@@ -731,7 +727,6 @@ let test_found_text_shared_with_outside () =
         Parseff.keyword "help";
         ""
       )
-      ()
   in
   same_as "keyword" "hello world"
     ~with_frame:(help (Parseff.within 2))
@@ -748,13 +743,11 @@ let test_recovered_limit_leaves_no_trace () =
            "aaaX"
          )
          (fun () -> "")
-         ()
       );
     ignore
       (Parseff.or_
          (fun () -> Parseff.take_while ?at_most:lim is_a)
          (fun () -> Parseff.take_while is_a)
-         ()
       );
     String.make 1 (Parseff.char 'c')
   in
@@ -768,13 +761,9 @@ let test_recovered_limit_leaves_no_trace () =
            "aaaX"
          )
          (fun () -> "")
-         ()
       );
     ignore
-      (Parseff.optional
-         (fun () -> Parseff.many ~at_most:1 Parseff.any_char ())
-         ()
-      );
+      (Parseff.optional (fun () -> Parseff.many ~at_most:1 Parseff.any_char));
     String.make 1 (Parseff.char 'c')
   in
   both "optional recovers from the limit" "aaab" h
@@ -783,7 +772,7 @@ let test_recovered_limit_leaves_no_trace () =
 let test_limit_through_look_ahead () =
   both "look_ahead with a farther failure" "aaab"
     (fun () ->
-      ignore (Parseff.optional (fun () -> Parseff.literal "aaaX") ());
+      ignore (Parseff.optional (fun () -> Parseff.literal "aaaX"));
       Parseff.look_ahead (fun () -> Parseff.take_while ~at_most:1 is_a)
     )
     (check_message "expected \"X\", found 'b'");
@@ -795,13 +784,11 @@ let frame_words n =
   let input = String.concat " " (List.init n (fun _ -> "ab")) in
   let parser () =
     Parseff.within (String.length input) (fun () ->
-        Parseff.many
-          (fun () ->
+        Parseff.many (fun () ->
             let w = Parseff.take_while ~at_least:1 alpha in
-            ignore (Parseff.optional (fun () -> Parseff.char ' ') ());
+            ignore (Parseff.optional (fun () -> Parseff.char ' '));
             w
-          )
-          ()
+        )
     )
   in
   let before = Gc.allocated_bytes () in
@@ -911,7 +898,6 @@ let after_commit () =
         "left"
       )
       (fun () -> String.make 1 (Parseff.satisfy alpha))
-      ()
   in
   Parseff.skip_while always;
   v
@@ -1044,7 +1030,7 @@ let test_limit_with_a_pause_in_recover () =
   in
   let errors = Parseff.Diagnostics.create () in
   let parser () =
-    ignore (Parseff.optional (fun () -> Parseff.literal "aaaX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "aaaX"));
     Parseff.recover
       ~sync:(fun () -> Parseff.skip_while (fun _ -> true))
       (fun () -> Parseff.take_while ~at_most:1 is_a)
@@ -1106,7 +1092,7 @@ let chars k =
 
 let body k () =
   ignore (Parseff.take 2);
-  Parseff.one_of (chars k) ()
+  Parseff.one_of (chars k)
 
 let describe_error = function
   | Ok s ->
@@ -1133,19 +1119,20 @@ let test_found_text_at_capacity () =
         (Printf.sprintf "%d items, then an outside item" k)
         "[2,4) found 'zz'"
         (describe_error
-           (Parseff.parse "abzz"
-              (Parseff.or_ (fun () -> Parseff.within 2 (body k)) outside)
+           (Parseff.parse "abzz" (fun () ->
+                Parseff.or_ (fun () -> Parseff.within 2 (body k)) outside
+            )
            )
         );
       Alcotest.(check string)
         (Printf.sprintf "%d items, then a look_ahead with the same items" k)
         "[2,4) found 'zz'"
         (describe_error
-           (Parseff.parse "abzz"
-              (Parseff.or_
-                 (fun () -> Parseff.within 2 (body k))
-                 (fun () -> Parseff.look_ahead (body k))
-              )
+           (Parseff.parse "abzz" (fun () ->
+                Parseff.or_
+                  (fun () -> Parseff.within 2 (body k))
+                  (fun () -> Parseff.look_ahead (body k))
+            )
            )
         );
       Alcotest.(check string)

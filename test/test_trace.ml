@@ -66,28 +66,30 @@ let test_nested_contexts () =
 
 let test_or_abandons_failed_context () =
   check_events "xz"
-    (Parseff.or_
-       (fun () ->
-         Parseff.context "a" (fun () ->
-             ignore (Parseff.char 'x');
-             ignore (Parseff.char 'y')
-         )
-       )
-       (fun () ->
-         Parseff.context "b" (fun () ->
-             ignore (Parseff.char 'x');
-             ignore (Parseff.char 'z')
-         )
-       )
+    (fun () ->
+      Parseff.or_
+        (fun () ->
+          Parseff.context "a" (fun () ->
+              ignore (Parseff.char 'x');
+              ignore (Parseff.char 'y')
+          )
+        )
+        (fun () ->
+          Parseff.context "b" (fun () ->
+              ignore (Parseff.char 'x');
+              ignore (Parseff.char 'z')
+          )
+        )
     )
     "ok"
     [ "enter a 0"; "fail a 0 1"; "enter b 0"; "exit b 0 2" ]
 
 let test_fail_pos_ignores_earlier_failures () =
   check_events "abd"
-    (Parseff.or_
-       (fun () -> Parseff.literal "abc")
-       (fun () -> Parseff.context "z" (fun () -> ignore (Parseff.char 'z')))
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.literal "abc")
+        (fun () -> Parseff.context "z" (fun () -> ignore (Parseff.char 'z')))
     )
     "error"
     [ "enter z 0"; "fail z 0 0" ]
@@ -103,9 +105,10 @@ let test_fail_pos_is_parser_position () =
     "error"
     [ "enter kw 0"; "fail kw 0 0" ];
   check_events "ax"
-    (Parseff.or_
-       (fun () -> Parseff.literal "ab")
-       (fun () -> Parseff.context "kw" (fun () -> Parseff.literal "ab"))
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.literal "ab")
+        (fun () -> Parseff.context "kw" (fun () -> Parseff.literal "ab"))
     )
     "error"
     [ "enter kw 0"; "fail kw 0 0" ];
@@ -121,7 +124,7 @@ let test_fail_pos_is_parser_position () =
 
 let test_many_iterations () =
   check_events "12"
-    (Parseff.many (fun () -> Parseff.context "item" Parseff.digit))
+    (fun () -> Parseff.many (fun () -> Parseff.context "item" Parseff.digit))
     "ok"
     [
       "enter item 0";
@@ -278,7 +281,6 @@ let test_captured () =
            ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
            Parseff.digit
            (fun _ -> '?')
-           ()
         )
     )
     (true, 2)
@@ -310,7 +312,6 @@ let test_captured_only_when_continued () =
                (fun _ -> 'h')
            )
            (fun () -> Parseff.char 'x')
-           ()
         );
       ignore (Parseff.char 'b')
     )
@@ -325,7 +326,6 @@ let test_captured_only_when_continued () =
                (fun _ -> Parseff.char 'z')
            )
            (fun () -> Parseff.char 'x')
-           ()
         );
       ignore (Parseff.char 'b')
     )
@@ -341,7 +341,6 @@ let test_captured_only_when_continued () =
                ~sync:(fun () -> Parseff.skip_while (fun c -> c <> ','))
                Parseff.digit
                (fun _ -> '?')
-               ()
             )
         with Exit -> ()
       );
@@ -373,7 +372,7 @@ let test_printed_tree () =
   let list () =
     Parseff.context ~delimited:true "list" (fun () ->
         ignore (Parseff.char '[');
-        let xs = Parseff.sep_by number (fun () -> Parseff.char ',') () in
+        let xs = Parseff.sep_by number (fun () -> Parseff.char ',') in
         ignore (Parseff.char ']');
         xs
     )
@@ -432,15 +431,13 @@ let test_trace_keeps_the_error () =
             ignore (Parseff.char ']')
           )
           (fun () ->
-            ignore (Parseff.sep_by number (fun () -> Parseff.char ',') ());
+            ignore (Parseff.sep_by number (fun () -> Parseff.char ','));
             ignore (Parseff.char ']')
           )
-          ()
     )
   in
   let parser () =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         Parseff.or_
           (fun () ->
             Parseff.context "kw" (fun () ->
@@ -452,9 +449,7 @@ let test_trace_keeps_the_error () =
             item ();
             ""
           )
-          ()
-      )
-      ()
+    )
   in
   List.iter
     (fun input ->
@@ -481,7 +476,6 @@ let test_backtrack_window_through_context () =
             Parseff.literal "x";
             "x"
           )
-          ()
     )
   in
   let _, events =

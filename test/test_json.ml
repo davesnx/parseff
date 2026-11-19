@@ -22,7 +22,6 @@ let bool_parser () =
       Parseff.literal "false";
       Bool false
     )
-    ()
 
 let number_parser () = Number (Parseff.number ())
 
@@ -44,7 +43,6 @@ let rec json () =
           number_parser;
           string_parser;
         ]
-        ()
   )
 
 and array_parser () =
@@ -55,18 +53,15 @@ and array_parser () =
       (fun () ->
         let first = json () in
         let rest =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               let _ = ws () in
               Parseff.literal ",";
               json ()
-            )
-            ()
+          )
         in
         first :: rest
       )
       (fun () -> [])
-      ()
   in
   let _ = ws () in
   Parseff.literal "]";
@@ -80,18 +75,15 @@ and object_parser () =
       (fun () ->
         let first = key_value () in
         let rest =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               let _ = ws () in
               Parseff.literal ",";
               key_value ()
-            )
-            ()
+          )
         in
         first :: rest
       )
       (fun () -> [])
-      ()
   in
   let _ = ws () in
   Parseff.literal "}";

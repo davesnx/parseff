@@ -2985,7 +2985,7 @@ let[@inline never] or_replay st frame left right =
       State.pop_rewind_frame st frame;
       raise exn
 
-let or_ left right () =
+let or_ left right =
   let st = get_state () in
   let frame = State.push_rewind_frame st frame_alternative in
   match left () with
@@ -3290,15 +3290,14 @@ let rec many_loop at_least (p : unit -> 'a) : 'a list =
       State.pop_rewind_frame st frame;
       raise exn
 
-let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) () : 'a list =
+let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) : 'a list =
   match at_most with
   | None ->
       many_loop at_least p
   | Some at_most ->
       many_at_most (get_state ()) at_least at_most p
 
-let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list
-    =
+let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
   let st = get_state () in
   if at_least <= 0 then (
     let acc = ref [] in
@@ -3325,15 +3324,15 @@ let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list
     | exception Fail when State.frame_replayable st frame ->
         begin match !acc with
         | [] ->
-            replay st frame (sep_by p sep)
+            replay st frame (fun () -> sep_by p sep)
         | acc ->
             List.rev_append acc
-              (replay st frame
-                 (many (fun () ->
-                      let _ = sep () in
-                      p ()
-                  )
-                 )
+              (replay st frame (fun () ->
+                   many (fun () ->
+                       let _ = sep () in
+                       p ()
+                   )
+               )
               )
         end
     | exception Fail ->
@@ -3348,24 +3347,21 @@ let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list
       let _ = sep () in
       p ()
     in
-    let rest = many ~at_least:(at_least - 1) sep_then_p () in
+    let rest = many ~at_least:(at_least - 1) sep_then_p in
     first :: rest
 
-let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) () : 'c
-    =
+let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) : 'c =
   let _ = open_ () in
   let value = p () in
   let _ = close_ () in
   value
 
-let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) () : 'a list =
-  many ~at_least
-    (fun () ->
+let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
+  many ~at_least (fun () ->
       let value = p () in
       let _ = sep () in
       value
-    )
-    ()
+  )
 
 let check_sealable st name =
   if State.always_rewinding_frame_open st then
@@ -3423,13 +3419,13 @@ let rec iter_elements st ~at_least ~progress_first first next f =
       State.pop_rewind_frame st frame;
       raise exn
 
-let many_iter ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) () =
+let many_iter ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) =
   let st = get_state () in
   check_sealable st "many_iter";
   iter_elements st ~at_least ~progress_first:true p p f
 
 let sep_by_iter ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b)
-    (f : 'a -> unit) () =
+    (f : 'a -> unit) =
   let st = get_state () in
   check_sealable st "sep_by_iter";
   let next () =
@@ -3567,8 +3563,7 @@ let rec fold_left_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
       State.pop_rewind_frame st frame;
       raise exn
 
-let fold_left ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
-    =
+let fold_left ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) : 'a =
   match otherwise with
   | None ->
       fold_left_one_or_more p op ()
@@ -3636,8 +3631,7 @@ let rec fold_right_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
       State.pop_rewind_frame st frame;
       raise exn
 
-let fold_right ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
-    =
+let fold_right ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) : 'a =
   match otherwise with
   | None ->
       fold_right_one_or_more p op ()
@@ -3883,7 +3877,7 @@ let prec_run st min operand operator =
       State.pop_rewind_frame st frame;
       raise exn
 
-let precedence ?(min = min_int) ~operand ~operator () =
+let precedence ?(min = min_int) ~operator operand =
   match prec_run (get_state ()) min operand operator with
   | v ->
       v
@@ -4243,7 +4237,7 @@ and expr_prefix_ops st t operand frame start level rest = function
   | _ :: ops ->
       expr_prefix_ops st t operand frame start level rest ops
 
-let expression ~operand table () =
+let expression ~operand table =
   let st = get_state () in
   let t =
     { levels = table; found = 0; binary = expr_no_build; unary = expr_no_build }
@@ -4260,7 +4254,7 @@ let expression ~operand table () =
   | exception Prec_build ->
       raise_notrace Fail
 
-let rec optional (p : unit -> 'a) () : 'a option =
+let rec optional (p : unit -> 'a) : 'a option =
   let st = get_state () in
   let frame = State.push_rewind_frame st frame_alternative in
   match p () with
@@ -4273,7 +4267,7 @@ let rec optional (p : unit -> 'a) () : 'a option =
           State.pop_rewind_frame st frame;
           raise_notrace Fail
         end else
-          replay st frame (optional p)
+          replay st frame (fun () -> optional p)
       else begin
         restore_rewind_frame st frame;
         State.pop_rewind_frame st frame;
@@ -4283,7 +4277,7 @@ let rec optional (p : unit -> 'a) () : 'a option =
       State.pop_rewind_frame st frame;
       raise exn
 
-let count n (p : unit -> 'a) () : 'a list =
+let count n (p : unit -> 'a) : 'a list =
   let rec loop acc i =
     if i <= 0 then
       List.rev acc
@@ -4363,7 +4357,7 @@ let rec one_of_loop st frame p rest =
       State.pop_rewind_frame st frame;
       raise exn
 
-let one_of parsers () =
+let one_of parsers =
   match parsers with
   | [] ->
       let st = get_state () in
@@ -4375,8 +4369,8 @@ let one_of parsers () =
       let frame = State.push_rewind_frame st frame_alternative in
       one_of_loop st frame p rest
 
-let one_of_labeled labeled_parsers () =
-  one_of (List.map (fun (label, p) () -> expect label p) labeled_parsers) ()
+let one_of_labeled labeled_parsers =
+  one_of (List.map (fun (label, p) () -> expect label p) labeled_parsers)
 
 let[@inline always] is_digit_char c = c >= '0' && c <= '9'
 let label_digit = "digit"
@@ -6598,7 +6592,7 @@ let recover ?(release = false) ?(contexts = `All) ?keep ~sync parser hole =
   | _ ->
       parser ()
 
-let skip_nested ?atom pairs stop () =
+let skip_nested ?atom pairs stop =
   let st = get_state () in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
@@ -6623,7 +6617,7 @@ let skip_nested ?atom pairs stop () =
   let rec go stack =
     if have st 1 then begin
       let start = st.pos in
-      (match atom with Some a -> ignore (optional a ()) | None -> ());
+      (match atom with Some a -> ignore (optional a) | None -> ());
       if st.pos <> start then
         go stack
       else
@@ -6847,7 +6841,7 @@ let list_on st errors ~release ~contexts ~keep ~sep ~trailing ~close ~sync
     let saved = far_from st at in
     let frame = State.push_rewind_frame st frame_step in
     if st.far == far_none then State.hold_far st frame saved;
-    match optional s () with
+    match optional s with
     | Some _ ->
         let el = st.pos in
         far_back st (State.held_of st frame);
@@ -6859,7 +6853,7 @@ let list_on st errors ~release ~contexts ~keep ~sep ~trailing ~close ~sync
         end else if trailing && guarded frame closed then
           match plain_step ~expected:false frame with
           | None ->
-              ignore (optional s ());
+              ignore (optional s);
               List.rev acc
           | Some v ->
               if st.pos <> at then (
@@ -6878,7 +6872,7 @@ let list_on st errors ~release ~contexts ~keep ~sep ~trailing ~close ~sync
           in
           begin match attempt ~again frame item with
           | None ->
-              if trailing then ignore (optional s ());
+              if trailing then ignore (optional s);
               List.rev acc
           | Some v ->
               if st.pos <> at then (
@@ -6966,7 +6960,7 @@ let list_on st errors ~release ~contexts ~keep ~sep ~trailing ~close ~sync
   match sep with None -> steps [] | Some s -> first s
 
 let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
-    ~close ~sync element hole () =
+    ~close ~sync element hole =
   let st = get_state () in
   match st.diag with
   | Sink errors when st.recovery_off = 0 && not (open_choice st) ->
@@ -6975,10 +6969,10 @@ let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
   | _ -> (
       match sep with
       | None ->
-          many element ()
+          many element
       | Some s ->
-          let xs = sep_by element s () in
-          if trailing && xs <> [] then ignore (optional s ());
+          let xs = sep_by element s in
+          if trailing && xs <> [] then ignore (optional s);
           xs
     )
 

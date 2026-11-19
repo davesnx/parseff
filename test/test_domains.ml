@@ -36,7 +36,6 @@ let bool_parser () =
       Parseff.literal "false";
       Bool false
     )
-    ()
 
 let number_parser () = Number (Parseff.number ())
 
@@ -58,7 +57,6 @@ let rec json () =
           number_parser;
           string_parser;
         ]
-        ()
   )
 
 and array_parser () =
@@ -69,18 +67,15 @@ and array_parser () =
       (fun () ->
         let first = json () in
         let rest =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               let _ = ws () in
               Parseff.literal ",";
               json ()
-            )
-            ()
+          )
         in
         first :: rest
       )
       (fun () -> [])
-      ()
   in
   let _ = ws () in
   Parseff.literal "]";
@@ -94,18 +89,15 @@ and object_parser () =
       (fun () ->
         let first = key_value () in
         let rest =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               let _ = ws () in
               Parseff.literal ",";
               key_value ()
-            )
-            ()
+          )
         in
         first :: rest
       )
       (fun () -> [])
-      ()
   in
   let _ = ws () in
   Parseff.literal "}";
@@ -150,7 +142,7 @@ let test_basic_parallel_parsing () =
 
 let test_same_parser_many_domains () =
   (* All domains run the exact same parser on different inputs. *)
-  let digit_list_parser = Parseff.many Parseff.digit in
+  let digit_list_parser () = Parseff.many Parseff.digit in
   let results =
     parallel num_domains (fun i ->
         let input = String.init (i + 1) (fun j -> Char.chr (48 + (j mod 10))) in
@@ -191,7 +183,6 @@ let test_alternation_across_domains () =
           "delta"
         );
       ]
-      ()
   in
   let choices = [| "alpha"; "beta"; "gamma"; "delta" |] in
   let results =
@@ -343,7 +334,7 @@ let test_complex_combinators_across_domains () =
   let results =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "%d,%d,%d" i (i + 1) (i + 2) in
-        let parser =
+        let parser () =
           Parseff.sep_by Parseff.integer (fun () -> Parseff.char ',')
         in
         (i, Parseff.parse input parser)
@@ -447,7 +438,7 @@ let test_context_across_domains () =
     for _ = 1 to 200 do
       let parser () =
         Parseff.context name (fun () ->
-            ignore (Parseff.many (fun () -> Parseff.literal "ab") ());
+            ignore (Parseff.many (fun () -> Parseff.literal "ab"));
             Parseff.cut ();
             Parseff.literal "!"
         )

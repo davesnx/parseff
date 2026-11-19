@@ -54,7 +54,6 @@ let test_failed_parses () =
           (fun () -> Parseff.char 'y');
           (fun () -> Parseff.char 'w');
         ]
-        ()
   )
 
 let request_line () =
@@ -84,7 +83,6 @@ let test_render_error () =
     failed_error "z" (fun () ->
         Parseff.one_of
           [ (fun () -> Parseff.char 'x'); (fun () -> Parseff.char 'y') ]
-          ()
     )
   in
   let actual = words_per_call (fun () -> Parseff.render_error error) in
@@ -94,18 +92,15 @@ let test_render_error () =
       actual
 
 let test_stopping_failures () =
-  check_words "many" 0. (fun () -> Parseff.many (fun () -> Parseff.char 'x') ());
+  check_words "many" 0. (fun () -> Parseff.many (fun () -> Parseff.char 'x'));
   check_words "sep_by" 0. (fun () ->
-      Parseff.sep_by
-        (fun () -> Parseff.char 'x')
-        (fun () -> Parseff.char ',')
-        ()
+      Parseff.sep_by (fun () -> Parseff.char 'x') (fun () -> Parseff.char ',')
   );
   check_words "optional" 4. (fun () ->
-      Parseff.optional (fun () -> Parseff.char 'x') ()
+      Parseff.optional (fun () -> Parseff.char 'x')
   );
   check_words "or_" 0. (fun () ->
-      Parseff.or_ (fun () -> Parseff.char 'x') (fun () -> 'y') ()
+      Parseff.or_ (fun () -> Parseff.char 'x') (fun () -> 'y')
   )
 
 let test_literal_success () =
@@ -378,7 +373,7 @@ let words_allocated ~window ~record size =
   let input = String.concat "" (List.init (size / 5) (fun _ -> "abcd ")) in
   let parser () =
     if record = 0 then
-      ignore (Parseff.many word_and_space ())
+      ignore (Parseff.many word_and_space)
     else
       for _ = 1 to size / record do
         match
@@ -513,23 +508,23 @@ let test_operators () =
           name input actual maximum
     )
     [
-      ("expression", 46., "1", Parseff.expression ~operand:digit table);
-      ("expression", 62., "1+2+3", Parseff.expression ~operand:digit table);
-      ("expression", 67., "1+2*3+4", Parseff.expression ~operand:digit table);
-      ( "precedence",
-        13.,
-        "1",
-        fun () -> Parseff.precedence ~operand:digit ~operator ()
-      );
-      ( "precedence",
-        39.,
+      ("expression", 46., "1", fun () -> Parseff.expression ~operand:digit table);
+      ( "expression",
+        62.,
         "1+2+3",
-        fun () -> Parseff.precedence ~operand:digit ~operator ()
+        fun () -> Parseff.expression ~operand:digit table
       );
+      ( "expression",
+        67.,
+        "1+2*3+4",
+        fun () -> Parseff.expression ~operand:digit table
+      );
+      ("precedence", 13., "1", fun () -> Parseff.precedence ~operator digit);
+      ("precedence", 39., "1+2+3", fun () -> Parseff.precedence ~operator digit);
       ( "precedence",
         49.,
         "1+2*3+4",
-        fun () -> Parseff.precedence ~operand:digit ~operator ()
+        fun () -> Parseff.precedence ~operator digit
       );
     ]
 

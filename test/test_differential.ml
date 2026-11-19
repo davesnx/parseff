@@ -220,19 +220,17 @@ let rec run cx g =
       let y = run cx b in
       Pair (x, y)
   | Or (a, b) ->
-      Parseff.or_ (fun () -> run cx a) (fun () -> run cx b) ()
+      Parseff.or_ (fun () -> run cx a) (fun () -> run cx b)
   | One_of l ->
-      Parseff.one_of (List.map (fun g () -> run cx g) l) ()
+      Parseff.one_of (List.map (fun g () -> run cx g) l)
   | Optional a ->
-      Opt (Parseff.optional (fun () -> run cx a) ())
+      Opt (Parseff.optional (fun () -> run cx a))
   | Many (n, a) ->
-      List (Parseff.many ~at_least:n (fun () -> run cx a) ())
+      List (Parseff.many ~at_least:n (fun () -> run cx a))
   | Sep_by (n, a, s) ->
-      List
-        (Parseff.sep_by ~at_least:n (fun () -> run cx a) (fun () -> run cx s) ())
+      List (Parseff.sep_by ~at_least:n (fun () -> run cx a) (fun () -> run cx s))
   | End_by (n, a, s) ->
-      List
-        (Parseff.end_by ~at_least:n (fun () -> run cx a) (fun () -> run cx s) ())
+      List (Parseff.end_by ~at_least:n (fun () -> run cx a) (fun () -> run cx s))
   | Fold_left (a, o, d) ->
       Parseff.fold_left
         (fun () -> run cx a)
@@ -243,7 +241,6 @@ let rec run cx g =
             else
               None
           )
-        ()
   | Fold_right (a, o, d) ->
       Parseff.fold_right
         (fun () -> run cx a)
@@ -254,9 +251,8 @@ let rec run cx g =
             else
               None
           )
-        ()
   | Count (n, a) ->
-      List (Parseff.count n (fun () -> run cx a) ())
+      List (Parseff.count n (fun () -> run cx a))
   | Look_ahead a ->
       Parseff.look_ahead (fun () -> run cx a)
   | Commit ->
@@ -300,7 +296,6 @@ let rec run cx g =
       Parseff.expression
         ~operand:(fun () -> run cx atom)
         (List.map (List.map op) table)
-        ()
   | Capture a -> (
       match Parseff.capture (fun () -> run cx a) with
       | Ok v ->

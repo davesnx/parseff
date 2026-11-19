@@ -28,7 +28,7 @@ module Parseff_JSON = struct
       let _ = Parseff.char ',' in
       Parseff.skip_whitespace ()
     in
-    let elements = Parseff.sep_by number comma () in
+    let elements = Parseff.sep_by number comma in
     Parseff.skip_whitespace ();
     let _ = Parseff.char ']' in
     elements

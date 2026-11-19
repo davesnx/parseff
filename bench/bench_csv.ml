@@ -56,9 +56,7 @@ module Parseff_CSV_Generic = struct
   let field () = Parseff.take_while (fun c -> c <> ',')
 
   let csv () =
-    let fields =
-      Parseff.sep_by field (fun () -> ignore (Parseff.char ',')) ()
-    in
+    let fields = Parseff.sep_by field (fun () -> ignore (Parseff.char ',')) in
     fields
 
   let parse input =

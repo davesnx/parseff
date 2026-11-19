@@ -439,7 +439,7 @@ let test_take_negative () =
 
 let test_take_negative_recovers () =
   let p () =
-    let v = Parseff.or_ (fun () -> Parseff.take (-1)) (fun () -> "x") () in
+    let v = Parseff.or_ (fun () -> Parseff.take (-1)) (fun () -> "x") in
     let rest = Parseff.take 3 in
     (v, rest)
   in
@@ -451,7 +451,7 @@ let test_take_negative_recovers () =
       Alcotest.fail (Parseff.error_message e)
 
 let test_take_negative_optional () =
-  let p () = Parseff.optional (fun () -> Parseff.take (-1)) () in
+  let p () = Parseff.optional (fun () -> Parseff.take (-1)) in
   match Parseff.parse "abc" (fun () -> (p (), Parseff.take 3)) with
   | Ok (None, "abc") ->
       ()
@@ -482,14 +482,12 @@ let test_tlv_header () =
     let version = Parseff.any_uint8 () in
     let count = Parseff.BE.any_uint16 () in
     let fields =
-      Parseff.count count
-        (fun () ->
+      Parseff.count count (fun () ->
           let tag = Parseff.any_uint8 () in
           let len = Parseff.BE.any_uint16 () in
           let value = Parseff.take len in
           (tag, value)
-        )
-        ()
+      )
     in
     Parseff.end_of_input ();
     (version, fields)
@@ -517,7 +515,6 @@ let test_backtracking () =
         let v = Parseff.BE.any_uint16 () in
         Printf.sprintf "got_%04X" v
       )
-      ()
   in
   match Parseff.parse ~consume:`Partial input parser with
   | Ok s ->
@@ -586,14 +583,12 @@ let test_streaming_composition () =
     let version = Parseff.any_uint8 () in
     let count = Parseff.BE.any_uint16 () in
     let fields =
-      Parseff.count count
-        (fun () ->
+      Parseff.count count (fun () ->
           let tag = Parseff.any_uint8 () in
           let len = Parseff.BE.any_uint16 () in
           let value = Parseff.take len in
           (tag, value)
-        )
-        ()
+      )
     in
     Parseff.end_of_input ();
     (version, fields)
@@ -704,7 +699,6 @@ let test_take_span_negative () =
       Parseff.or_
         (fun () -> Parseff.Slice.to_string (Parseff.Slice.take (-1)))
         (fun () -> "x")
-        ()
     in
     (v, Parseff.take 3)
   in
@@ -800,12 +794,12 @@ let test_any_varint_truncated () =
 let test_any_varint_combinators () =
   List.iter
     (check_ok Alcotest.(list int) "many" [ 1; 300; 0 ])
-    (both "\x01\xAC\x02\x00" (Parseff.many Parseff.any_varint));
+    (both "\x01\xAC\x02\x00" (fun () -> Parseff.many Parseff.any_varint));
   let too_large = "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x40" in
   List.iter
     (check_ok Alcotest.int "or_ rewinds" 0xFF)
     (both too_large (fun () ->
-         let v = Parseff.or_ Parseff.any_varint Parseff.any_uint8 () in
+         let v = Parseff.or_ Parseff.any_varint Parseff.any_uint8 in
          ignore (Parseff.take 8);
          v
      )

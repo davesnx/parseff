@@ -19,7 +19,7 @@ Combinators compose simple parsers into more complex ones. They handle alternati
 `Parseff.or_` tries the left parser. If it fails, backtracks (resets the cursor) and tries the right parser.
 
 ```ocaml
-val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
+val or_ : (unit -> 'a) -> (unit -> 'a) -> 'a
 ```
 ```ocaml
 let bool_parser () =
@@ -30,7 +30,6 @@ let bool_parser () =
     (fun () ->
       Parseff.literal "false";
       false)
-    ()
 (* "true"  -> Ok true  *)
 (* "false" -> Ok false *)
 (* "maybe" -> Error: expected "false" or "true", found 'maybe' *)
@@ -50,9 +49,7 @@ let keyword_with_or () =
     (fun () ->
       Parseff.or_
         (fun () -> Parseff.literal "const")
-        (fun () -> Parseff.literal "var")
-        ())
-    ()
+        (fun () -> Parseff.literal "var"))
 
 let keyword_with_one_of () =
   Parseff.one_of
@@ -61,7 +58,6 @@ let keyword_with_one_of () =
       (fun () -> Parseff.literal "const");
       (fun () -> Parseff.literal "var");
     ]
-    ()
 ```
 
 ### `one_of`
@@ -69,7 +65,7 @@ let keyword_with_one_of () =
 `Parseff.one_of` tries each parser in order until one succeeds. Equivalent to chaining `or_`, but cleaner for more than two alternatives.
 
 ```ocaml
-val one_of : (unit -> 'a) list -> unit -> 'a
+val one_of : (unit -> 'a) list -> 'a
 ```
 ```ocaml
 let json_value () =
@@ -82,7 +78,6 @@ let json_value () =
       array_parser;
       object_parser;
     ]
-    ()
 ```
 Error composition follows the same rules as `or_`: if all parsers fail at the same position, what they expected is merged into one sorted list without duplicates: `expected "else", "if", or "while"`. With three or more items the list ends with `", or"`. If they fail at different positions, the failure that progressed furthest wins.
 
@@ -92,7 +87,7 @@ Error composition follows the same rules as `or_`: if all parsers fail at the sa
 `Parseff.one_of_labeled` is like `Parseff.one_of`, but each parser has a label. On failure, the error message reports all labels, sorted:
 
 ```ocaml
-val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
+val one_of_labeled : (string * (unit -> 'a)) list -> 'a
 ```
 ```ocaml
 let scalar () =
@@ -102,7 +97,6 @@ let scalar () =
       ("string", string_parser);
       ("boolean", bool_parser);
     ]
-    ()
 (* On failure: "expected boolean, number, or string" *)
 ```
 This gives users a clear picture of what was expected at a given position, without exposing internal parser details.
@@ -115,11 +109,11 @@ Each branch is wrapped by `expect`: only failures at the position where `one_of_
 `Parseff.optional` tries the parser. Returns `Some result` on success, `None` on failure (without consuming input).
 
 ```ocaml
-val optional : (unit -> 'a) -> unit -> 'a option
+val optional : (unit -> 'a) -> 'a option
 ```
 ```ocaml
 let signed_number () =
-  let sign = Parseff.optional (fun () -> Parseff.char '-') () in
+  let sign = Parseff.optional (fun () -> Parseff.char '-') in
   let n = number () in
   match sign with
   | Some _ -> -n
@@ -220,7 +214,6 @@ let array_parser value () =
           (fun () ->
             Parseff.skip_whitespace ();
             Parseff.char ',')
-          ()
       in
       Parseff.skip_whitespace ();
       let _ = Parseff.char ']' in
@@ -258,10 +251,9 @@ let statement () =
           Parseff.char ';')
         (fun () ->
           let _ = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-          Parseff.char ';')
-        ())
+          Parseff.char ';'))
 
-let statements () = Parseff.many (fun () -> Parseff.skip_whitespace (); statement ()) ()
+let statements () = Parseff.many (fun () -> Parseff.skip_whitespace (); statement ())
 (* "let x = 1; 2;"  -> Ok [';'; ';'] *)
 (* "let x = ;"      -> Error at 8: expected expression *)
 ```
@@ -282,7 +274,7 @@ let number () =
 let list () =
   Parseff.context ~delimited:true "list" (fun () ->
       let _ = Parseff.char '[' in
-      let xs = Parseff.sep_by number (fun () -> Parseff.char ',') () in
+      let xs = Parseff.sep_by number (fun () -> Parseff.char ',') in
       let _ = Parseff.char ']' in
       xs)
 
@@ -322,7 +314,6 @@ let rec json () =
         number_parser;
         string_parser;
       ]
-      ()
   )
 
 and array_parser () =

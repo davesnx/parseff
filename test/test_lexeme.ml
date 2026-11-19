@@ -70,9 +70,10 @@ let test_keyword_reports_at_start () =
 
 let test_keyword_merges_alternatives () =
   both show_unit "inx"
-    (Parseff.or_
-       (fun () -> Parseff.keyword "let")
-       (fun () -> Parseff.keyword "in")
+    (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.keyword "let")
+        (fun () -> Parseff.keyword "in")
     )
     "Error@0 expected \"in\" or \"let\", found 'inx'"
 
@@ -88,7 +89,7 @@ let test_keyword_falls_back_to_identifier () =
         Parseff.keyword "in";
         "IN"
       )
-      letters ()
+      letters
   in
   both show_string "int" token "Ok (\"int\", 3)";
   both show_string "in" token "Ok (\"IN\", 2)"
@@ -104,9 +105,9 @@ let test_keyword_in_many_and_look_ahead () =
   both show_int "ababx"
     (fun () ->
       List.length
-        (Parseff.many
-           (fun () -> Parseff.keyword ~is_ident:(fun c -> c = 'x') "ab")
-           ()
+        (Parseff.many (fun () ->
+             Parseff.keyword ~is_ident:(fun c -> c = 'x') "ab"
+         )
         )
     )
     "Ok (1, 2)";
@@ -214,7 +215,7 @@ let test_identifier_keyword_after () =
         Parseff.keyword "let";
         "LET"
       )
-      name ()
+      name
   in
   both show_string "let" token "Ok (\"LET\", 3)";
   both show_string "letter" token "Ok (\"letter\", 6)";
@@ -223,21 +224,20 @@ let test_identifier_keyword_after () =
 
 let test_identifier_keyword_before_recovers () =
   let token () =
-    Parseff.or_ name
-      (fun () ->
+    Parseff.or_ name (fun () ->
         Parseff.keyword "let";
         "LET"
-      )
-      ()
+    )
   in
   both show_string "let" token "Ok (\"LET\", 3)";
   both show_string "letter" token "Ok (\"letter\", 6)"
 
 let test_identifier_merges_with_char () =
   both show_unit "let"
-    (Parseff.or_
-       (fun () -> ignore (name ()))
-       (fun () -> ignore (Parseff.char '('))
+    (fun () ->
+      Parseff.or_
+        (fun () -> ignore (name ()))
+        (fun () -> ignore (Parseff.char '('))
     )
     "Error@0 expected identifier or '(', found 'let'"
 

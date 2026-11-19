@@ -167,7 +167,6 @@ let parse_numbers () =
       in
       int_of_string s)
     (fun () -> Parseff.char ',')
-    ()
 
 (* no allocations until conversion *)
 let parse_numbers_fast () =

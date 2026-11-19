@@ -53,28 +53,28 @@ let rec parse_lambda () =
       abstr parse_lambda;
       (fun () -> Var (atom ()));
     ]
-    ()
 
 (* Sugared: some parenthesis could be omitted *)
 let parse_lambda_sugared () =
   let open Parseff in
   let rec longapp () =
     sep_by ~at_least:1
-      (one_of
-         [
-           (fun () ->
-             literal "(";
-             let _ = ws () in
-             let l = longapp () in
-             let _ = ws () in
-             literal ")";
-             l
-           );
-           (fun () -> abstr longapp ());
-           (fun () -> Var (atom ()));
-         ]
+      (fun () ->
+        one_of
+          [
+            (fun () ->
+              literal "(";
+              let _ = ws () in
+              let l = longapp () in
+              let _ = ws () in
+              literal ")";
+              l
+            );
+            (fun () -> abstr longapp ());
+            (fun () -> Var (atom ()));
+          ]
       )
-      ws ()
+      ws
     |> function
     | h :: tl ->
         List.fold_left (fun acc x -> App (acc, x)) h tl

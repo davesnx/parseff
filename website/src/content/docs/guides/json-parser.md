@@ -55,7 +55,6 @@ let bool_parser () =
     (fun () ->
       Parseff.literal "false";
       Bool false)
-    ()
 ```
 
 `null_parser` matches the literal `"null"` and returns the `Null` constructor. `bool_parser` uses `or_` to try `"true"` first, backtracking to `"false"` if that fails.
@@ -99,7 +98,6 @@ let rec json () =
         number_parser;
         string_parser;
       ]
-      ()
   )
 ```
 
@@ -125,11 +123,9 @@ and array_parser () =
               Parseff.skip_whitespace ();
               let _ = Parseff.char ',' in
               json ())
-            ()
         in
         first :: rest)
       (fun () -> [])
-      ()
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in
@@ -159,11 +155,9 @@ and object_parser () =
               Parseff.skip_whitespace ();
               let _ = Parseff.char ',' in
               key_value ())
-            ()
         in
         first :: rest)
       (fun () -> [])
-      ()
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char '}' in

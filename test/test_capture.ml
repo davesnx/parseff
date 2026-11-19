@@ -58,7 +58,7 @@ let array elem () =
         if peek_char () = Some ']' then
           []
         else
-          sep_by elem comma ()
+          sep_by elem comma
       in
       ws ();
       ignore (char ']');
@@ -213,12 +213,10 @@ let skip_stmt () =
 
 let program body () =
   let xs =
-    many
-      (fun () ->
+    many (fun () ->
         ws ();
         body ()
-      )
-      ()
+    )
   in
   ws ();
   xs
@@ -271,14 +269,12 @@ let test_grammar2_streaming () =
   Alcotest.(check (list string)) "rendered" grammar2_renders (renders ~input d)
 
 let any_elem () =
-  or_ int_elem
-    (fun () ->
+  or_ int_elem (fun () ->
       ignore (char '"');
       let s = take_while (fun c -> c <> '"') in
       ignore (char '"');
       Str s
-    )
-    ()
+  )
 
 let test_stale_failure () =
   let run input =
@@ -328,7 +324,6 @@ let test_error_value () =
           literal "abd";
           "abd"
         )
-        ()
   );
   same_error "[1, x]" (array int_elem);
   same_error grammar2_input (program stmt);
@@ -392,7 +387,7 @@ let test_success () =
       Alcotest.fail "expected Ok \"ab\" at position 2"
 
 let test_success_keeps_failures () =
-  let digits () = many (fun () -> satisfy ~label:"digit" is_digit) () in
+  let digits () = many (fun () -> satisfy ~label:"digit" is_digit) in
   let direct () =
     ignore (digits ());
     char ','
@@ -456,12 +451,10 @@ let test_failure_forgotten () =
     (show_error
        (parse "ab" (fun () ->
             ignore
-              (optional
-                 (fun () ->
+              (optional (fun () ->
                    ignore (char 'a');
                    char 'z'
-                 )
-                 ()
+               )
               );
             ignore (capture (fun () -> char 'q'));
             ignore (char 'a');
@@ -488,7 +481,6 @@ let test_cut_does_not_escape () =
         literal "ax";
         "ax"
       )
-      ()
   in
   Alcotest.(check (result string string))
     "outer or_ backtracks" (Ok "ax")
@@ -511,7 +503,6 @@ let test_cut_does_not_escape () =
             literal "ax";
             "ax"
           )
-          ()
     )
   in
   Alcotest.(check (result string string))
@@ -538,7 +529,6 @@ let test_default_keeps_rewind_point () =
                literal "ax";
                "ax"
              )
-             ()
        )
       )
   in
@@ -583,7 +573,7 @@ let test_default_keeps_rewind_point () =
         ~sync:(fun () ->
           seen := position () :: !seen;
           skip_while (fun c -> c <> ';');
-          ignore (optional (fun () -> char ';') ())
+          ignore (optional (fun () -> char ';'))
         )
         (fun () ->
           ignore
@@ -601,7 +591,7 @@ let test_default_keeps_rewind_point () =
     in
     let r =
       parse ~diagnostics:d "ab,cd;xx,cd?ab,cd;ab,c;" (fun () ->
-          List.length (many statement ())
+          List.length (many statement)
       )
     in
     (Result.map_error error_message r, List.rev !seen, errors d)
@@ -639,7 +629,6 @@ let test_release_cut_in_context_does_not_escape () =
         literal "ax";
         "ax"
       )
-      ()
   in
   Alcotest.(check (result string string))
     "outer or_ backtracks" (Ok "ax")
@@ -661,7 +650,6 @@ let test_release_cut_in_context_does_not_escape () =
         literal "ax";
         "ax"
       )
-      ()
   in
   Alcotest.(check (result string string))
     "commit does not seal the outer or_" (Ok "ax")
@@ -685,7 +673,6 @@ let test_release_cut_passes_capture () =
         literal "ax";
         "ax"
       )
-      ()
   in
   let run inner = Result.map_error error_message (parse "ax" (p inner)) in
   Alcotest.(check (result string string))
@@ -737,9 +724,9 @@ let test_release_moves_rewind_point () =
   Alcotest.check outcome "cut inside look_ahead" start
     (run (fun () -> look_ahead cut));
   Alcotest.check outcome "commit seals an inner or_ only" start
-    (run (fun () -> or_ commit ignore ()));
+    (run (fun () -> or_ commit ignore));
   Alcotest.check outcome "cut reaches through an inner or_" moved
-    (run (fun () -> or_ cut ignore ()));
+    (run (fun () -> or_ cut ignore));
   Alcotest.check outcome "a default capture inside stops the cut" start
     (run (fun () -> ignore (capture cut)));
   Alcotest.check outcome "a default capture inside stops the commit" start
@@ -826,7 +813,6 @@ let test_inside_or () =
             char 'z'
           )
           (fun () -> char 'y')
-          ()
     )
   in
   Alcotest.(check string)
@@ -836,12 +822,14 @@ let test_inside_or () =
 let test_inside_many () =
   let d = Diagnostics.create () in
   let r =
-    parse ~diagnostics:d "1 ? 3"
-      (many (fun () ->
-           ws ();
-           recovering ~sync:(fun () -> ignore (char '?')) ~hole:Hole int_elem ()
-       )
-      )
+    parse ~diagnostics:d "1 ? 3" (fun () ->
+        many (fun () ->
+            ws ();
+            recovering
+              ~sync:(fun () -> ignore (char '?'))
+              ~hole:Hole int_elem ()
+        )
+    )
   in
   Alcotest.(check string) "value" "Ok [1; <hole>; 3]" (show_list pp_elt r);
   Alcotest.check errs "errors" [ (2, "expected integer, found '?'") ] (errors d)
@@ -851,19 +839,19 @@ let no_sync () = ()
 let test_progress_in_many () =
   let d = Diagnostics.create () in
   let r =
-    parse ~diagnostics:d "1 2 x"
-      (many
-         (recovering ~sync:no_sync ~hole:Hole (fun () ->
-              ws ();
-              int_elem ()
+    parse ~diagnostics:d "1 2 x" (fun () ->
+        many
+          (recovering ~sync:no_sync ~hole:Hole (fun () ->
+               ws ();
+               int_elem ()
+           )
           )
-         )
-      )
+    )
   in
   Alcotest.(check string) "value" "Ok [1; 2; <hole>]" (show_list pp_elt r);
   Alcotest.check errs "errors" [ (4, "expected integer, found 'x'") ] (errors d)
 
-let ws_int_many =
+let ws_int_many () =
   many (fun () ->
       ws ();
       recovering ~sync:no_sync ~hole:Hole int_elem ()
@@ -943,15 +931,17 @@ let test_end_of_input () =
   same "[1, " (array int_elem)
     (array (recovering ~sync:skip_elem ~hole:Hole int_elem));
   same "1 2 "
-    (many (fun () ->
-         ws ();
-         int_elem ()
-     )
+    (fun () ->
+      many (fun () ->
+          ws ();
+          int_elem ()
+      )
     )
-    (many (fun () ->
-         ws ();
-         recovering ~sync:no_sync ~hole:Hole int_elem ()
-     )
+    (fun () ->
+      many (fun () ->
+          ws ();
+          recovering ~sync:no_sync ~hole:Hole int_elem ()
+      )
     );
   let d = Diagnostics.create () in
   Alcotest.(check string)
@@ -1097,7 +1087,6 @@ let test_failure_in_sync_or_hole () =
             literal "?x";
             "?x"
           )
-          ()
     )
   in
   Alcotest.(check string) "other branch" "Ok" (show_error r);
@@ -1125,7 +1114,6 @@ let test_rollback () =
             )
             |> fun _ -> 'y'
           )
-          ()
     )
   in
   Alcotest.(check string)
@@ -1452,12 +1440,10 @@ let test_recover_record_scope () =
           (fun () ->
             warn (Warning.W "inside");
             ignore
-              (optional
-                 (fun () ->
+              (optional (fun () ->
                    warn (Warning.W "branch");
                    char 'b'
-                 )
-                 ()
+               )
               );
             warn (Warning.W "inside 2");
             ignore (char 'b')
@@ -1601,19 +1587,17 @@ let issue_62_render contexts =
     ignore (char ';')
   in
   let body () =
-    many
-      (fun () ->
+    many (fun () ->
         ws ();
         ignore (look_ahead (fun () -> satisfy ~label:"statement" is_letter));
         recover ?contexts
           ~sync:(fun () ->
             skip_while (fun c -> c <> ';' && c <> '}');
-            ignore (optional (fun () -> char ';') ())
+            ignore (optional (fun () -> char ';'))
           )
           statement
           (fun _ -> ())
-      )
-      ()
+    )
   in
   let call () =
     literal "call";
@@ -1721,7 +1705,7 @@ let test_recover_keep_entries () =
     let d = Diagnostics.create () in
     let r =
       parse ~consume:`Partial ~diagnostics:d input (fun () ->
-          String.of_seq (List.to_seq (many item ()))
+          String.of_seq (List.to_seq (many item))
       )
     in
     ( (match r with Ok s -> "Ok " ^ s | Error e -> error_message e),
@@ -1971,12 +1955,10 @@ let test_streaming_release () =
   let stepwise () =
     literal "let";
     ignore
-      (many
-         (fun () ->
+      (many (fun () ->
            ignore (char ' ');
            cut ()
-         )
-         ()
+       )
       );
     char '!'
   in
@@ -2051,12 +2033,12 @@ let test_streaming_nested_release () =
       recover ?release
         ~sync:(fun () ->
           skip_while (fun c -> c <> ';' && c <> '}');
-          ignore (optional (fun () -> char ';') ())
+          ignore (optional (fun () -> char ';'))
         )
         (fun () ->
           ( match any_char () with
           | '{' ->
-              ignore (many item ());
+              ignore (many item);
               ignore (char '}')
           | 'x' ->
               skip_while (fun c -> c = 'x')
@@ -2080,7 +2062,7 @@ let test_streaming_nested_release () =
       (String.length input > 4 * 1024);
     let r =
       parse_source ~backtrack_window:1024 ~diagnostics:d (chunks 64 input)
-        (fun () -> List.length (many statement ())
+        (fun () -> List.length (many statement)
       )
     in
     (Result.map_error (fun e -> kind_name (Error e)) r, errors d)
@@ -2120,14 +2102,12 @@ let test_release_keeps_inner_rewinds () =
   in
   let empty_steps cell () =
     String.concat ""
-      (many
-         (fun () ->
+      (many (fun () ->
            Ref.set cell 2;
            warn (Warning.Recorded warning);
            cut ();
            ""
-         )
-         ()
+       )
       )
   in
   let plain = release_state (fun cell -> empty_steps cell ()) in
@@ -2155,21 +2135,18 @@ let test_release_keeps_inner_rewinds () =
               ~close:(fun () -> false)
               ~sync:ignore (empty_steps cell)
               (fun _ -> "H")
-              ()
            )
      )
     );
   let other = Ref.create 0 in
   let set_after_cut cell () =
     String.concat ""
-      (many
-         (fun () ->
+      (many (fun () ->
            Ref.set cell 2;
            cut ();
            Ref.set other 5;
            ""
-         )
-         ()
+       )
       )
     ^ string_of_int (Ref.get other)
   in
@@ -2188,14 +2165,12 @@ let test_release_keeps_inner_rewinds () =
     "a commit inside many seals many and does not reach the capture"
     (release_state (fun cell ->
          String.concat ""
-           (many
-              (fun () ->
+           (many (fun () ->
                 Ref.set cell 2;
                 warn (Warning.Recorded warning);
                 commit ();
                 ""
-              )
-              ()
+            )
            )
      )
     )
@@ -2203,14 +2178,12 @@ let test_release_keeps_inner_rewinds () =
          match
            capture ~release:true (fun () ->
                String.concat ""
-                 (many
-                    (fun () ->
+                 (many (fun () ->
                       Ref.set cell 2;
                       warn (Warning.Recorded warning);
                       commit ();
                       ""
-                    )
-                    ()
+                  )
                  )
            )
          with
@@ -2271,7 +2244,6 @@ let release_live_words elements =
                       1
                     )
                     (fun () -> ( + ))
-                    ()
                   : int
                   )
           )
@@ -2336,63 +2308,53 @@ let test_release_clamps_the_capture () =
       (after_failure ~release:true body)
   in
   check "trail: a Ref.set after an empty step is undone" (fun cell effects ->
-      ignore (many (fun () -> effects ~warns:false ()) ());
+      ignore (many (fun () -> effects ~warns:false ()));
       Ref.set cell 2
   );
   check "diagnostics: a warning after an empty step is removed" (fun _ _ ->
       let w = release_warning () in
       ignore
-        (many
-           (fun () ->
+        (many (fun () ->
              warn (Warning.Recorded w);
              cut ()
-           )
-           ()
+         )
         );
       warn (Warning.Recorded w)
   )
 
 let test_release_construct_rewinds () =
-  let x () = ignore (optional (fun () -> char 'x') ()) in
+  let x () = ignore (optional (fun () -> char 'x')) in
   let num () =
     x ();
     1
   in
   let constructs =
     [
-      ("many", fun _ effects -> ignore (many (effects ~warns:true) ()));
+      ("many", fun _ effects -> ignore (many (effects ~warns:true)));
       ( "fold_left",
         fun _ effects ->
           ignore
-            (fold_left num
-               (fun () ->
+            (fold_left num (fun () ->
                  effects ~warns:true ();
                  ( + )
-               )
-               ()
+             )
             )
       );
       ( "fold_right",
         fun _ effects ->
           ignore
-            (fold_right num
-               (fun () ->
+            (fold_right num (fun () ->
                  effects ~warns:true ();
                  ( + )
-               )
-               ()
+             )
             )
       );
-      ("sep_by", fun _ effects -> ignore (sep_by num (effects ~warns:true) ()));
+      ("sep_by", fun _ effects -> ignore (sep_by num (effects ~warns:true)));
       ( "precedence",
         fun _ effects ->
           let seen = ref false in
           ignore
             (precedence
-               ~operand:(fun () ->
-                 if !seen then effects ~warns:true ();
-                 num ()
-               )
                ~operator:(fun () ->
                  if !seen then
                    None
@@ -2401,7 +2363,10 @@ let test_release_construct_rewinds () =
                    Some (1, infix_left (fun () -> ( + )))
                  end
                )
-               ()
+               (fun () ->
+                 if !seen then effects ~warns:true ();
+                 num ()
+               )
             )
       );
       ( "expression",
@@ -2420,7 +2385,6 @@ let test_release_construct_rewinds () =
                    );
                  ];
                ]
-               ()
             )
       );
       ( "one_of",
@@ -2429,12 +2393,11 @@ let test_release_construct_rewinds () =
             (one_of
                [
                  (fun () ->
-                   ignore (many (effects ~warns:true) ());
+                   ignore (many (effects ~warns:true));
                    char 'x'
                  );
                  (fun () -> char 'z');
                ]
-               ()
             )
       );
       ( "list",
@@ -2450,27 +2413,25 @@ let test_release_construct_rewinds () =
                  | None ->
                      effects ~warns:false ()
                )
-               ignore ()
+               ignore
             )
       );
       ( "recover ~release",
         fun _ effects ->
           recover ~release:true ~sync:ignore
-            (fun () -> ignore (many (effects ~warns:true) ()))
+            (fun () -> ignore (many (effects ~warns:true)))
             ignore
       );
       ( "sep_by_iter",
-        fun _ effects -> sep_by_iter num (effects ~warns:true) (fun _ -> ()) ()
+        fun _ effects -> sep_by_iter num (effects ~warns:true) (fun _ -> ())
       );
       ( "take_while_iter",
         fun _ effects ->
           ignore
-            (many
-               (fun () ->
+            (many (fun () ->
                  effects ~warns:true ();
                  take_while_iter (fun _ -> false) ignore
-               )
-               ()
+             )
             )
       );
     ]

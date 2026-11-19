@@ -106,14 +106,13 @@ let test_recognize_longer_than_window_fails () =
   Alcotest.(check string)
     "unwrapped" "Ok 20"
     (run (fun () ->
-         string_of_int
-           (List.length (Parseff.many (fun () -> Parseff.char 'a') ()))
+         string_of_int (List.length (Parseff.many (fun () -> Parseff.char 'a')))
      )
     );
   Alcotest.(check string)
     "recognize" "Error 8-8 window limit 8 oldest 0"
     (run (fun () ->
-         Parseff.recognize (Parseff.many (fun () -> Parseff.char 'a'))
+         Parseff.recognize (fun () -> Parseff.many (fun () -> Parseff.char 'a'))
      )
     )
 
@@ -123,11 +122,11 @@ let test_recognize_tokens_in_small_window () =
   in
   match
     Parseff.parse_source ~backtrack_window:8
-      (chunked_source ~chunk_size:1 input)
-      (Parseff.sep_by
-         (fun () -> Parseff.recognize key_value)
-         (fun () -> Parseff.char ',')
-      )
+      (chunked_source ~chunk_size:1 input) (fun () ->
+        Parseff.sep_by
+          (fun () -> Parseff.recognize key_value)
+          (fun () -> Parseff.char ',')
+    )
   with
   | Ok l ->
       Alcotest.(check int) "count" 50 (List.length l);
@@ -142,17 +141,20 @@ let ab_committed () =
 
 let test_commit_inside_recognize () =
   check_all "commit" Fun.id "ac" ~consume:`Partial
-    (Parseff.or_ (fun () -> Parseff.recognize ab_committed) (fun () -> "alt"))
+    (fun () ->
+      Parseff.or_ (fun () -> Parseff.recognize ab_committed) (fun () -> "alt")
+    )
     "Error 1-2 expected 'b', found 'c'";
   check_all "no commit" Fun.id "ac" ~consume:`Partial
-    (Parseff.or_
-       (fun () ->
-         Parseff.recognize (fun () ->
-             ignore (Parseff.char 'a');
-             ignore (Parseff.char 'b')
-         )
-       )
-       (fun () -> "alt")
+    (fun () ->
+      Parseff.or_
+        (fun () ->
+          Parseff.recognize (fun () ->
+              ignore (Parseff.char 'a');
+              ignore (Parseff.char 'b')
+          )
+        )
+        (fun () -> "alt")
     )
     "Ok alt"
 
@@ -167,7 +169,8 @@ let statement () =
 
 let test_cut_inside_recognize () =
   check_all "cut" (String.concat ",") "let;let;letx" ~consume:`Partial
-    (Parseff.many statement) "Error 11-12 expected ';', found 'x'";
+    (fun () -> Parseff.many statement)
+    "Error 11-12 expected ';', found 'x'";
   check_all "cut reaches or_ outside" Fun.id "ac" ~consume:`Partial
     (fun () ->
       Parseff.context "c" (fun () ->
@@ -180,7 +183,6 @@ let test_cut_inside_recognize () =
               )
             )
             (fun () -> "alt")
-            ()
       )
     )
     "Error 1-2 expected 'b', found 'c'"
@@ -199,7 +201,6 @@ let alternatives wrap () =
           "abd"
       )
     )
-    ()
 
 let test_failure_is_unchanged () =
   let expected = "Error 2-3 expected \"c\" or \"d\", found 'x'" in
@@ -221,17 +222,19 @@ let test_inside_look_ahead_and_many () =
     )
     "Ok ab=12 0-5";
   check_all "many" (String.concat ",") "a=1;bb=22;c=" ~consume:`Partial
-    (Parseff.many (fun () ->
-         let s = Parseff.recognize key_value in
-         ignore (Parseff.char ';');
-         s
-     )
+    (fun () ->
+      Parseff.many (fun () ->
+          let s = Parseff.recognize key_value in
+          ignore (Parseff.char ';');
+          s
+      )
     )
     "Ok a=1,bb=22";
   check_all "many with_range" (String.concat ",") "1;22;333" ~consume:`Partial
-    (Parseff.sep_by
-       (fun () -> show_range (snd (Parseff.with_range number)))
-       (fun () -> Parseff.char ';')
+    (fun () ->
+      Parseff.sep_by
+        (fun () -> show_range (snd (Parseff.with_range number)))
+        (fun () -> Parseff.char ';')
     )
     "Ok 0-1,2-4,5-8"
 

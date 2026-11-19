@@ -25,7 +25,7 @@ An IPv4 address looks like `192.168.1.1`: four numbers from 0 to 255, separated 
 ```ocaml
 (* Parse a single octet: one or more digits, validated to 0-255 *)
 let number () =
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
@@ -77,7 +77,7 @@ let digit_val () =
   Parseff.expect "a digit (0-9)" Parseff.digit
 
 let number_0_255 () =
-  let digits = Parseff.many ~at_least:1 digit_val () in
+  let digits = Parseff.many ~at_least:1 digit_val in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
@@ -104,7 +104,7 @@ For programmatic error handling, extend `Parseff.custom_error` with your own cas
 type Parseff.custom_error += Out_of_range of int
 
 let number_0_255_typed () =
-  let digits = Parseff.many ~at_least:1 digit_val () in
+  let digits = Parseff.many ~at_least:1 digit_val in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n

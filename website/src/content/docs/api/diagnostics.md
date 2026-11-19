@@ -76,7 +76,7 @@ type Parseff.custom_error += Octet_out_of_range of int
 
 let number_lenient () =
   let start = Parseff.position () in
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n > 255 then Parseff.warn ~from:start (Octet_out_of_range n);
@@ -182,7 +182,6 @@ let statement () =
       declare ();
       let _ = Parseff.char ';' in
       `Declare)
-    ()
 
 let () =
   plain := [];

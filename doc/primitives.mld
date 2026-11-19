@@ -341,8 +341,7 @@ let identifier () =
       ignore (Parseff.letter ());
       ignore
         (Parseff.many
-           (fun () -> Parseff.or_ Parseff.alphanum (fun () -> Parseff.char '_') ())
-           ()))
+           (fun () -> Parseff.or_ Parseff.alphanum (fun () -> Parseff.char '_'))))
 
 let () =
   match Parseff.parse ~consume:`Partial "foo_1 = 2" identifier with
@@ -380,7 +379,7 @@ type expr =
 
 let number () =
   let loc = Parseff.location () in
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   Num (n, loc)

@@ -17,7 +17,7 @@ let post s () =
   tok s ();
   fun a -> "(" ^ a ^ s ^ ")"
 
-let rec expr table () = Parseff.expression ~operand:(operand table) table ()
+let rec expr table () = Parseff.expression ~operand:(operand table) table
 
 and operand table () =
   ws ();
@@ -29,7 +29,6 @@ and operand table () =
       e
     )
     (fun () -> String.make 1 (Parseff.digit ()))
-    ()
 
 let chunked_source input =
   let pos = ref 0 in
@@ -123,9 +122,9 @@ let test_postfix () =
   check low "1+2!" "Ok (1+(2!))";
   check low "1+2!+3" "Ok ((1+(2!))+3)"
 
-let rec hand_expr () = Parseff.fold_left hand_term (bin "+") ()
+let rec hand_expr () = Parseff.fold_left hand_term (bin "+")
 
-and hand_term () = Parseff.fold_left hand_atom (bin "*") ()
+and hand_term () = Parseff.fold_left hand_atom (bin "*")
 
 and hand_atom () =
   ws ();
@@ -137,7 +136,6 @@ and hand_atom () =
       e
     )
     (fun () -> String.make 1 (Parseff.digit ()))
-    ()
 
 let mul_add = Parseff.[ [ infix_left (bin "+") ]; [ infix_left (bin "*") ] ]
 
@@ -185,13 +183,11 @@ let test_empty_table () =
 
 let test_inside_many () =
   let p () =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         let e = expr with_neg () in
         tok ";" ();
         e
-      )
-      ()
+    )
     |> String.concat " "
   in
   check ~parser:(fun _ -> p) [] "1+2;-3*4;" "Ok (1+2) ((-3)*4)";
@@ -221,7 +217,7 @@ let test_commit_in_operator () =
        )
       )
   in
-  let hand op () = Parseff.fold_left (operand []) op () in
+  let hand op () = Parseff.fold_left (operand []) op in
   let partial_hand op input =
     show
       (Parseff.parse ~consume:`Partial input (fun () ->
@@ -267,18 +263,17 @@ let test_commit_in_operand () =
                e
              )
              (fun () -> "ALT")
-             ()
        )
       )
   in
-  let table t () = Parseff.expression ~operand t () in
+  let table t () = Parseff.expression ~operand t in
   let plain = Parseff.[ [ infix_left (bin "+") ] ] in
   let prefixed = Parseff.[ [ infix_left (bin "+") ]; [ prefix (pre "-") ] ] in
   List.iter
     (fun (input, expected) ->
       Alcotest.(check string)
         ("fold_left " ^ input) expected
-        (run (Parseff.fold_left operand (bin "+")) input);
+        (run (fun () -> Parseff.fold_left operand (bin "+")) input);
       Alcotest.(check string)
         ("no prefix " ^ input) expected
         (run (table plain) input);
@@ -298,13 +293,13 @@ let test_prefix_no_progress () =
   check Parseff.[ [ infix_left (bin "+") ]; [ prefix empty ] ] "1+2" "Ok (1+2)"
 
 let maybe_digit () =
-  match Parseff.optional Parseff.digit () with
+  match Parseff.optional Parseff.digit with
   | Some d ->
       String.make 1 d
   | None ->
       "_"
 
-let maybe_expr table () = Parseff.expression ~operand:maybe_digit table ()
+let maybe_expr table () = Parseff.expression ~operand:maybe_digit table
 
 let test_infix_right_no_progress () =
   let empty () = fun a b -> "(" ^ a ^ "." ^ b ^ ")" in
@@ -368,13 +363,12 @@ let int_table =
       [ infix_left (int_op '*' ( * )) ];
     ]
 
-let int_expr () = Parseff.expression ~operand:digit_value int_table ()
+let int_expr () = Parseff.expression ~operand:digit_value int_table
 
 let int_hand () =
   Parseff.fold_left
-    (Parseff.fold_left digit_value (int_op '*' ( * )))
-    (fun () -> Parseff.or_ (int_op '+' ( + )) (int_op '-' ( - )) ())
-    ()
+    (fun () -> Parseff.fold_left digit_value (int_op '*' ( * )))
+    (fun () -> Parseff.or_ (int_op '+' ( + )) (int_op '-' ( - )))
 
 let test_long_flat () =
   let input = String.concat "+" (List.init 100_000 (fun _ -> "1")) in
@@ -387,7 +381,9 @@ let test_long_flat () =
 let test_long_right_chain () =
   let table = Parseff.[ [ infix_right (int_op '^' ( + )) ] ] in
   let input = String.concat "^" (List.init 100_000 (fun _ -> "1")) in
-  match Parseff.parse input (Parseff.expression ~operand:digit_value table) with
+  match
+    Parseff.parse input (fun () -> Parseff.expression ~operand:digit_value table)
+  with
   | Ok n ->
       Alcotest.(check int) "sum" 100_000 n
   | Error e ->
@@ -476,7 +472,7 @@ module Annotation_example = struct
   let expr () =
     expression
       ~operand:(fun () -> Char.code (digit ()) - Char.code '0')
-      grammar.table ()
+      grammar.table
 end
 
 let test_annotation_example () =
@@ -498,14 +494,14 @@ let test_zero_width_steps () =
   in
   let digit () = String.make 1 (Parseff.digit ()) in
   let maybe () =
-    match Parseff.optional Parseff.digit () with
+    match Parseff.optional Parseff.digit with
     | Some d ->
         String.make 1 d
     | None ->
         "_"
   in
   let run operand table input =
-    show (Parseff.parse input (Parseff.expression ~operand table))
+    show (Parseff.parse input (fun () -> Parseff.expression ~operand table))
   in
   let a = Parseff.[ [ infix_left (bin "+") ]; [ postfix (post "") ] ] in
   let b =
@@ -566,7 +562,7 @@ let test_commit_in_token_streaming () =
     ignore (Parseff.char '+');
     fun a -> "+" ^ a
   in
-  let rec expr table () = Parseff.expression ~operand:(operand table) table ()
+  let rec expr table () = Parseff.expression ~operand:(operand table) table
   and operand table () =
     Parseff.or_
       (fun () -> String.make 1 (Parseff.digit ()))
@@ -576,7 +572,6 @@ let test_commit_in_token_streaming () =
         ignore (Parseff.char ')');
         "[" ^ e ^ "]"
       )
-      ()
   in
   List.iter
     (fun (table, input, streams) ->
@@ -617,11 +612,11 @@ let test_token_runs_once () =
       fun a b -> "(" ^ a ^ "!=" ^ b ^ ")"
     in
     let r =
-      Parseff.parse ~diagnostics:notes "1!=2!=3"
-        (Parseff.expression
-           ~operand:(fun () -> String.make 1 (Parseff.digit ()))
-           Parseff.[ [ infix_left token ]; [ infix_left (bin "*") ] ]
-        )
+      Parseff.parse ~diagnostics:notes "1!=2!=3" (fun () ->
+          Parseff.expression
+            ~operand:(fun () -> String.make 1 (Parseff.digit ()))
+            Parseff.[ [ infix_left token ]; [ infix_left (bin "*") ] ]
+      )
     in
     Printf.sprintf "%s, %d calls, %d notes, ref %d" (show r) !calls
       (Parseff.Diagnostics.length notes)
@@ -703,7 +698,7 @@ module Doc_example = struct
       [ infix_right (bin '^') ];
     ]
 
-  let rec expr () = expression ~operand table ()
+  let rec expr () = expression ~operand table
 
   and operand () =
     skip_whitespace ();
@@ -715,7 +710,6 @@ module Doc_example = struct
         e
       )
       (fun () -> Num (digit_value ()))
-      ()
 end
 
 let test_doc_example () =
@@ -745,7 +739,7 @@ module Guide_example = struct
 
   let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
 
-  let rec expr () = Parseff.expression ~operand:factor table ()
+  let rec expr () = Parseff.expression ~operand:factor table
 
   and factor () =
     Parseff.skip_whitespace ();
@@ -766,7 +760,6 @@ module Guide_example = struct
         let d = Parseff.expect "a number" digit_value in
         Num d
       )
-      ()
 end
 
 let test_guide_example () =
@@ -819,8 +812,7 @@ module Precedence = struct
         ('!', (5, postfix (read "!" (fun a -> "(" ^ a ^ "!)"))));
       ]
 
-  let rec expr operator () =
-    Parseff.precedence ~operand:(operand operator) ~operator ()
+  let rec expr operator () = Parseff.precedence ~operator (operand operator)
 
   and operand operator () =
     ws ();
@@ -828,8 +820,9 @@ module Precedence = struct
     | Some '-' ->
         ignore (Parseff.any_char ());
         let e =
-          Parseff.rec_
-            (Parseff.precedence ~min:3 ~operand:(operand operator) ~operator)
+          Parseff.rec_ (fun () ->
+              Parseff.precedence ~min:3 ~operator (operand operator)
+          )
         in
         "(-" ^ e ^ ")"
     | Some '(' ->
@@ -945,7 +938,7 @@ module Precedence = struct
           | _ ->
               None
         in
-        let p = Parseff.precedence ~operand:digit_value ~operator in
+        let p () = Parseff.precedence ~operator digit_value in
         List.iter
           (fun (name, r) ->
             match r with
@@ -989,12 +982,10 @@ module Precedence = struct
     let run kind =
       show
         (Parseff.parse ~consume:`Partial "12" (fun () ->
-             Parseff.precedence
-               ~operand:(fun () ->
-                 Parseff.optional Parseff.digit ()
+             Parseff.precedence ~operator:(empty kind) (fun () ->
+                 Parseff.optional Parseff.digit
                  |> Option.fold ~none:"_" ~some:(String.make 1)
-               )
-               ~operator:(empty kind) ()
+             )
          )
         )
     in
@@ -1013,11 +1004,11 @@ module Precedence = struct
             None
       in
       show
-        (Parseff.parse input
-           (Parseff.precedence
-              ~operand:(fun () -> String.make 1 (Parseff.digit ()))
-              ~operator
-           )
+        (Parseff.parse input (fun () ->
+             Parseff.precedence ~operator (fun () ->
+                 String.make 1 (Parseff.digit ())
+             )
+         )
         )
     in
     Alcotest.(check string)
@@ -1064,8 +1055,8 @@ module Precedence = struct
       ws ();
       String.make 1 (Parseff.digit ())
     in
-    let by_table = Parseff.expression ~operand:digit table in
-    let by_lookup = Parseff.precedence ~operand:digit ~operator in
+    let by_table () = Parseff.expression ~operand:digit table in
+    let by_lookup () = Parseff.precedence ~operator digit in
     let run p input =
       show
         (Parseff.parse ~consume:`Partial input (fun () ->
@@ -1077,7 +1068,6 @@ module Precedence = struct
                  e ^ "@" ^ string_of_int stop
                )
                (fun () -> "other")
-               ()
          )
         )
     in
@@ -1124,11 +1114,11 @@ module Precedence = struct
             None
       in
       let r =
-        Parseff.parse ~diagnostics:d "1*2+3"
-          (Parseff.precedence
-             ~operand:(fun () -> String.make 1 (Parseff.digit ()))
-             ~operator
-          )
+        Parseff.parse ~diagnostics:d "1*2+3" (fun () ->
+            Parseff.precedence ~operator (fun () ->
+                String.make 1 (Parseff.digit ())
+            )
+        )
       in
       Printf.sprintf "%s, %d lookups" (show r) !count
     in
@@ -1169,9 +1159,9 @@ module Precedence = struct
       in
       let p () =
         let v =
-          Parseff.precedence ~min
-            ~operand:(fun () -> String.make 1 (Parseff.any_char ()))
-            ~operator ()
+          Parseff.precedence ~min ~operator (fun () ->
+              String.make 1 (Parseff.any_char ())
+          )
         in
         let stop = Parseff.position () in
         let b = Buffer.create 16 in
@@ -1250,9 +1240,9 @@ module Precedence = struct
       in
       let expr cell () =
         Parseff.Ref.set cell 1;
-        Parseff.precedence
-          ~operand:(fun () -> String.make 1 (Parseff.digit ()))
-          ~operator:(operator cell) ()
+        Parseff.precedence ~operator:(operator cell) (fun () ->
+            String.make 1 (Parseff.digit ())
+        )
       in
       let rest () =
         let b = Buffer.create 16 in
@@ -1274,7 +1264,6 @@ module Precedence = struct
             v
           )
           (fun () -> "other " ^ rest ())
-          ()
       in
       let report p parse =
         let cell = Parseff.Ref.create 0 in
@@ -1363,8 +1352,8 @@ module Precedence = struct
          )
         )
     in
-    let by_table = Parseff.expression ~operand:digit table in
-    let by_lookup () = Parseff.precedence ~operand:digit ~operator () in
+    let by_table () = Parseff.expression ~operand:digit table in
+    let by_lookup () = Parseff.precedence ~operator digit in
     List.iter
       (fun (name, p, input, expected) ->
         Alcotest.(check string) name expected (run p input)
@@ -1416,7 +1405,7 @@ module Precedence = struct
              let e =
                Parseff.expression
                  ~operand:(fun () -> String.make 1 (Parseff.digit ()))
-                 table ()
+                 table
              in
              e ^ "@" ^ string_of_int (Parseff.position ())
          )
@@ -1465,14 +1454,12 @@ module Precedence = struct
       in
       let r =
         Parseff.parse ~consume:`Partial ~diagnostics:d input (fun () ->
-            Parseff.precedence
-              ~operand:
-                Parseff.(
-                  fun () ->
-                    ws ();
-                    String.make 1 (digit ())
-                )
-              ~operator ()
+            Parseff.precedence ~operator
+              Parseff.(
+                fun () ->
+                  ws ();
+                  String.make 1 (digit ())
+              )
         )
       in
       show r
@@ -1555,11 +1542,9 @@ module Precedence = struct
            )
           )
       in
-      let rec by_table () =
-        Parseff.expression ~operand:(paren by_table) table ()
+      let rec by_table () = Parseff.expression ~operand:(paren by_table) table
       and by_lookup () =
-        Parseff.precedence ~operand:(paren by_lookup) ~operator:(peeked lookup)
-          ()
+        Parseff.precedence ~operator:(peeked lookup) (paren by_lookup)
       and paren e () =
         ws ();
         Parseff.or_
@@ -1570,7 +1555,6 @@ module Precedence = struct
             v
           )
           (fun () -> String.make 1 (Parseff.digit ()))
-          ()
       in
       let outcome r =
         if String.starts_with ~prefix:"Ok" r then
@@ -1607,14 +1591,14 @@ module Precedence = struct
       | _ ->
           None
 
-    let rec expr () = precedence ~operand ~operator ()
+    let rec expr () = precedence ~operator operand
 
     and operand () =
       skip_whitespace ();
       match peek_char () with
       | Some '-' ->
           ignore (any_char ());
-          -rec_ (precedence ~min:3 ~operand ~operator)
+          -rec_ (fun () -> precedence ~min:3 ~operator operand)
       | Some '(' ->
           ignore (any_char ());
           let e = rec_ expr in

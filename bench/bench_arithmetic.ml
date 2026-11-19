@@ -119,7 +119,6 @@ module Parseff_Arith_Generic = struct
         let _ = Parseff.char '/' in
         ( / )
       )
-      ()
 
   let add_op () =
     Parseff.or_
@@ -131,12 +130,11 @@ module Parseff_Arith_Generic = struct
         let _ = Parseff.char '-' in
         ( - )
       )
-      ()
 
-  let term () = Parseff.fold_left number mul_op ()
+  let term () = Parseff.fold_left number mul_op
 
   let expr () =
-    let result = Parseff.fold_left term add_op () in
+    let result = Parseff.fold_left term add_op in
     result
 
   let parse input =
@@ -151,7 +149,7 @@ module Parseff_Arith_Table = struct
   open Parseff_Arith_Generic
 
   let table = Parseff.[ [ infix_left add_op ]; [ infix_left mul_op ] ]
-  let expr () = Parseff.expression ~operand:number table ()
+  let expr () = Parseff.expression ~operand:number table
 
   let parse input =
     match Parseff.parse input expr with
@@ -175,7 +173,7 @@ module Parseff_Arith_Table_Split = struct
         [ infix_left (op '*' ( * )); infix_left (op '/' ( / )) ];
       ]
 
-  let expr () = Parseff.expression ~operand:number table ()
+  let expr () = Parseff.expression ~operand:number table
 
   let parse input =
     match Parseff.parse input expr with

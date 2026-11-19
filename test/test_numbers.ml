@@ -93,7 +93,6 @@ let int_or_text () =
   Parseff.or_
     (fun () -> string_of_int (Parseff.integer ()))
     (fun () -> "text " ^ Parseff.take_while ~at_least:1 is_digit)
-    ()
 
 let int_or_null () =
   Parseff.or_
@@ -102,7 +101,6 @@ let int_or_null () =
       Parseff.literal "null";
       None
     )
-    ()
 
 let show_option = function None -> "None" | Some n -> string_of_int n
 let show_list l = String.concat ";" (List.map string_of_int l)
@@ -113,10 +111,10 @@ let test_integer_composition () =
   check show_option "x" int_or_null
     {|Error@0 Expected expected integer or "null", found 'x'|};
   check show_list "1,-2,30"
-    (Parseff.sep_by Parseff.integer (fun () -> Parseff.char ','))
+    (fun () -> Parseff.sep_by Parseff.integer (fun () -> Parseff.char ','))
     "Ok 1;-2;30";
   check show_list "1,2,"
-    (Parseff.sep_by Parseff.integer (fun () -> Parseff.char ','))
+    (fun () -> Parseff.sep_by Parseff.integer (fun () -> Parseff.char ','))
     "Error@4 Expected expected integer, found end of input";
   check
     (fun (a, b) -> Printf.sprintf "%d %d" a b)
@@ -288,7 +286,6 @@ let float_or_null () =
       Parseff.literal "null";
       None
     )
-    ()
 
 let test_number_composition () =
   check
@@ -297,7 +294,7 @@ let test_number_composition () =
   check
     (fun l -> String.concat ";" (List.map show_float l))
     "1.5,-2e1,3"
-    (Parseff.sep_by Parseff.number (fun () -> Parseff.char ','))
+    (fun () -> Parseff.sep_by Parseff.number (fun () -> Parseff.char ','))
     "Ok 1.5;-20;3"
 
 let test_prefixed_hex () =
@@ -372,13 +369,11 @@ let windowed ~window input parser =
       Printf.sprintf "Error@%d %s" e.range.start (Parseff.error_message e)
 
 let spaced p () =
-  Parseff.many
-    (fun () ->
+  Parseff.many (fun () ->
       let v = p () in
       let _ = Parseff.char ' ' in
       v
-    )
-    ()
+  )
 
 let ints p () = String.concat ";" (List.map string_of_int (spaced p ()))
 let floats () =

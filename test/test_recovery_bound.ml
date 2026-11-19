@@ -16,7 +16,6 @@ module Nested_or = struct
       (fun () ->
         recover ~sync:ignore (fun () -> String.make 1 (digit ())) (fun _ -> "?")
       )
-      ()
   let counter = calls
 end
 
@@ -44,13 +43,11 @@ module S1 = struct
                        recover ~sync:nop (fun () -> char 'q') (fun _ -> 'H')
                      )
                      (fun () -> 'e')
-                     ()
                   );
                 fun x -> x
             );
           ];
         ]
-        ()
     in
     fun () -> ignore (capture (level 1))
   let counter = count
@@ -78,30 +75,24 @@ module S2 = struct
             (or_
                (fun () -> recover ~sync:nop (fun () -> char 'q') (fun _ -> 'H'))
                (fun () -> 'e')
-               ()
             );
           fail "x"
         )
         (fun () -> fail "y")
-        ()
     in
     fun () -> absorb (level 1)
   let by_fold_right f =
-    fold_right nop
-      (fun () ->
+    fold_right nop (fun () ->
         f ();
         fun () () -> ()
-      )
-      ()
+    )
   let by_capture f = ignore (capture f)
   let by_many f =
     ignore
-      (many
-         (fun () ->
+      (many (fun () ->
            f ();
            ignore (char 'n')
-         )
-         ()
+       )
       )
   let by_list f =
     ignore
@@ -113,7 +104,6 @@ module S2 = struct
            ignore (char 'n')
          )
          (fun _ -> ())
-         ()
       )
   let counter = count
 end
@@ -130,12 +120,10 @@ module S3 = struct
               context "d" (fun () ->
                   ignore (char '(');
                   cut ();
-                  fold_right nop
-                    (fun () ->
+                  fold_right nop (fun () ->
                       item ();
                       fun () () -> ()
-                    )
-                    ()
+                  )
               );
               ignore
                 (or_
@@ -143,21 +131,17 @@ module S3 = struct
                      recover ~sync:nop (fun () -> char 'q') (fun _ -> 'H')
                    )
                    (fun () -> 'e')
-                   ()
                 );
               fail "x"
             )
             (fun () -> fail "y")
-            ()
       )
     in
     fun () ->
-      fold_right nop
-        (fun () ->
+      fold_right nop (fun () ->
           item ();
           fun () () -> ()
-        )
-        ()
+      )
   let counter = calls
 end
 
@@ -176,11 +160,9 @@ module S4 = struct
       in
       let elem () =
         match
-          optional
-            (fun () ->
+          optional (fun () ->
               recover ~sync:ignore (fun () -> s1 (char 'a')) (fun _ -> "H")
-            )
-            ()
+          )
         with
         | Some s ->
             s
@@ -194,12 +176,11 @@ module S4 = struct
             ~close:(fun () -> peek_char () = Some 'c')
             ~sync:ignore inner
             (fun _ -> "H")
-            ()
         in
         let t = String.concat "," l in
         fun x y -> x ^ "<" ^ t ^ ">" ^ y
       in
-      fold_left elem op ()
+      fold_left elem op
     in
     level 1
   let counter = count
@@ -228,7 +209,6 @@ module S9 = struct
                  ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
                  (fun () -> s1 (char 'a'))
                  (fun _ -> "H")
-                 ()
               )
           )
           [
@@ -252,7 +232,6 @@ module S9 = struct
               );
             ];
           ]
-          ()
       in
       expression
         ~operand:(fun () ->
@@ -274,7 +253,6 @@ module S9 = struct
             );
           ];
         ]
-        ()
     in
     level 1
   let counter = count
@@ -291,7 +269,7 @@ module S11 = struct
     ) else
       or_
         (fun () ->
-          let l = sep_by (t1 (k - 1)) (fun () -> cut ()) () in
+          let l = sep_by (t1 (k - 1)) (fun () -> cut ()) in
           String.concat "" l ^ context "c" (fun () -> require a (fun _ -> "M"))
         )
         (fun () ->
@@ -300,7 +278,6 @@ module S11 = struct
               a ()
           )
         )
-        ()
   let rec t1b k () =
     if k = 0 then (
       incr calls;
@@ -308,7 +285,7 @@ module S11 = struct
     ) else
       or_
         (fun () ->
-          let l = sep_by (t1b (k - 1)) (fun () -> cut ()) () in
+          let l = sep_by (t1b (k - 1)) (fun () -> cut ()) in
           String.concat "" l ^ require a (fun _ -> "M")
         )
         (fun () ->
@@ -317,7 +294,6 @@ module S11 = struct
               a ()
           )
         )
-        ()
   let rec t2 k () =
     if k = 0 then (
       incr calls;
@@ -334,7 +310,7 @@ module S11 = struct
           in
           fun x y -> x ^ o ^ y
         )
-        ~otherwise:"O" ()
+        ~otherwise:"O"
   let counter = calls
 end
 
@@ -368,7 +344,6 @@ module S12 = struct
           );
         ];
       ]
-      ()
   let rec t ~ctx k () =
     if k = 0 then (
       incr calls;
@@ -412,7 +387,7 @@ module S13 = struct
   let sync () = skip_while (fun c -> c <> 'b')
   let lst ?sep el =
     "<"
-    ^ String.concat "," (list ?sep ~close:closed ~sync el (fun _ -> "H") ())
+    ^ String.concat "," (list ?sep ~close:closed ~sync el (fun _ -> "H"))
     ^ ">"
   let rec ta k () =
     if k = 0 then
@@ -430,7 +405,6 @@ module S13 = struct
           let t = lst ~sep:(fun () -> commit ()) (tb (k - 1)) in
           fun x y -> "{" ^ x ^ t ^ y ^ "}"
         )
-        ()
   let rec tc k () =
     if k = 0 then
       leaf ()
@@ -444,25 +418,21 @@ module S13 = struct
                 or_
                   (fun () -> require (fun () -> fail "u") (fun _ -> "M"))
                   (tc (k - 1))
-                  ()
               );
               (fun () -> s1 (char 'a'));
             ]
-            ()
         )
   let rec td k () =
     if k = 0 then
       leaf ()
     else
       match
-        optional
-          (fun () ->
+        optional (fun () ->
             fold_right
               (fun () ->
                 or_
                   (fun () -> require (fun () -> s1 (char 'a')) (fun _ -> "M"))
                   (td (k - 1))
-                  ()
               )
               (fun () ->
                 let t =
@@ -472,14 +442,11 @@ module S13 = struct
                          require (fun () -> s1 (char 'a')) (fun _ -> "M")
                        )
                        (fun () -> cut ())
-                       ()
                     )
                 in
                 fun x y -> "{" ^ x ^ t ^ y ^ "}"
               )
-              ()
-          )
-          ()
+        )
       with
       | Some v ->
           v
@@ -532,7 +499,6 @@ module S14 = struct
                            ~sync
                            (fun () -> s1 (char 'a'))
                            (fun _ -> "H")
-                           ()
                         )
                     in
                     fun x -> "(" ^ x ^ "Q" ^ t ^ ")"
@@ -542,7 +508,6 @@ module S14 = struct
           else
             []
           )
-          ()
       in
       String.concat ","
         (list
@@ -550,7 +515,6 @@ module S14 = struct
            ~close:(fun () -> peek_char () = Some 'c')
            ~sync e
            (fun _ -> "H")
-           ()
         )
   let counter = calls
 end
@@ -591,8 +555,7 @@ module U1 = struct
                     fun () -> ()
                 );
               ];
-            ]
-            ();
+            ];
           ignore (char 'a')
         )
         (fun _ -> ())
@@ -637,7 +600,6 @@ module U2 = struct
               );
             ];
           ]
-          ()
       in
       ignore
         (list ~release:true ~sep
@@ -645,7 +607,6 @@ module U2 = struct
            ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
            (fun () -> cut ())
            (fun _ -> ())
-           ()
         );
       ignore (char 'b')
     in
@@ -674,7 +635,6 @@ module T1 = struct
              )
            )
            (fun _ -> ())
-           ()
         )
     in
     level 1
@@ -720,7 +680,6 @@ module T2 = struct
                 );
               ];
             ]
-            ()
         )
         (fun _ -> ())
     in
@@ -749,7 +708,6 @@ module Z1 = struct
                ~close:(fun () -> false)
                ~sync inner
                (fun _ -> ())
-               ()
             )
         )
         [
@@ -775,8 +733,7 @@ module Z1 = struct
                 fun () -> ()
             );
           ];
-        ]
-        ();
+        ];
       ignore (char 'c')
     in
     level 0
@@ -805,7 +762,6 @@ module Z2 = struct
                ~close:(fun () -> false)
                ~sync inner
                (fun _ -> ())
-               ()
             )
         )
         (fun () ->
@@ -830,11 +786,9 @@ module Z2 = struct
                     fun () -> ()
                 );
               ];
-            ]
-            ();
+            ];
           fun () () -> ()
         )
-        ()
     in
     level 0
   let input = "bccca"
@@ -876,7 +830,6 @@ module X1 = struct
                ~sync
                (fun () -> ignore (char 'a'))
                (fun _ -> ())
-               ()
             )
         )
         [
@@ -890,7 +843,6 @@ module X1 = struct
                          ~sync
                          (fun () -> commit ())
                          (fun _ -> ())
-                         ()
                    )
                   );
                 fun () () -> ()
@@ -913,7 +865,6 @@ module X1 = struct
             );
           ];
         ]
-        ()
     in
     level 0
   let counter = count
@@ -938,16 +889,13 @@ module V1 = struct
              ignore
                ((fun () ->
                   ignore
-                    (optional
-                       (fun () ->
+                    (optional (fun () ->
                          list
                            ~close:(fun () -> peek_char () = Some 'c')
                            ~sync
                            (fun () -> ignore (char 'z'))
                            (fun _ -> ())
-                           ()
-                       )
-                       ()
+                     )
                     )
                 )
                   ()
@@ -956,7 +904,6 @@ module V1 = struct
            ~close:(fun () -> false)
            ~sync inner
            (fun _ -> ())
-           ()
         );
       ignore (char 'a')
     in
@@ -991,7 +938,7 @@ module V2 = struct
           [ infix_left (fun () -> fun () () -> ()) ];
           [
             prefix (fun () ->
-                many_iter inner (fun () -> ()) ();
+                many_iter inner (fun () -> ());
                 fun () -> ()
             );
             infix_right (fun () ->
@@ -1005,8 +952,7 @@ module V2 = struct
                 fun () -> ()
             );
           ];
-        ]
-        ();
+        ];
       one_of
         [
           (fun () ->
@@ -1022,7 +968,6 @@ module V2 = struct
           );
           (fun () -> Ref.set cell (position ()));
         ]
-        ()
     in
     level 0
   let input = "bbacab"
@@ -1047,7 +992,7 @@ module C1 = struct
            (fun () -> commit ())
            (fun () ->
              fold_right
-               (fun () -> one_of [ inner; (fun () -> ignore (char 'c')) ] ())
+               (fun () -> one_of [ inner; (fun () -> ignore (char 'c')) ])
                (fun () ->
                  ignore
                    (list
@@ -1062,13 +1007,10 @@ module C1 = struct
                         )
                       )
                       (fun _ -> ())
-                      ()
                    );
                  fun () () -> ()
                )
-               ()
            )
-           ()
         )
     in
     level 0
@@ -1116,7 +1058,6 @@ module C2 = struct
               );
             ];
           ]
-          ()
       in
       let e1 () =
         expression ~operand:inner
@@ -1141,7 +1082,6 @@ module C2 = struct
               );
             ];
           ]
-          ()
       in
       ignore
         (list
@@ -1150,7 +1090,6 @@ module C2 = struct
            ~sync
            (fun () -> fail "u")
            (fun _ -> ())
-           ()
         )
     in
     level 0

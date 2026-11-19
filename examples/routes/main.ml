@@ -26,7 +26,7 @@ let blog_article () =
   Parseff.end_of_input ();
   Blog_article slug
 
-let route () = Parseff.one_of [ home; about; terms; blog_home; blog_article ] ()
+let route () = Parseff.one_of [ home; about; terms; blog_home; blog_article ]
 
 let route_to_string = function
   | Home ->

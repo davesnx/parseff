@@ -1,6 +1,6 @@
 let parser () =
   Parseff.literal "A";
-  let b = Parseff.optional (fun () -> Parseff.literal "B") () in
+  let b = Parseff.optional (fun () -> Parseff.literal "B") in
   Parseff.literal "C";
   match b with Some () -> "[ABC]" | None -> "[AC]"
 

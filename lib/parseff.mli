@@ -273,7 +273,6 @@ end
           let _ = char ';' in
           `Declare
         )
-        ()
     (* On "abc;", names holds ["abc"] once: the set of the failed branch is
        undone. *)
     ]} *)
@@ -789,7 +788,7 @@ val recognize : (unit -> 'a) -> string
     let identifier () =
       recognize (fun () ->
           ignore (letter ());
-          ignore (many (fun () -> or_ alphanum (fun () -> char '_') ()) ())
+          ignore (many (fun () -> or_ alphanum (fun () -> char '_')))
       )
     (* "foo_1 = 2" -> "foo_1" *)
     ]} *)
@@ -843,7 +842,7 @@ val peek_char : unit -> char option
           fail "expected value"
     ]} *)
 
-val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
+val or_ : (unit -> 'a) -> (unit -> 'a) -> 'a
 (** [or_] is the alternation combinator. Tries the left parser; if it fails,
     backtracks and tries the right parser.
 
@@ -868,7 +867,6 @@ val or_ : (unit -> 'a) -> (unit -> 'a) -> unit -> 'a
           literal "false";
           false
         )
-        ()
     ]} *)
 
 val look_ahead : (unit -> 'a) -> 'a
@@ -1151,7 +1149,7 @@ val recover :
     reads a closing token fails at the end of the input when the token is
     missing: [skip_while (fun c -> c <> ';'); ignore (char ';')] fails when the
     last statement has no [;]. Make each token that [sync] reads optional, as in
-    [ignore (optional (fun () -> char ';') ())], so that [sync] does not fail
+    [ignore (optional (fun () -> char ';'))], so that [sync] does not fail
     there.
 
     Example:
@@ -1192,12 +1190,12 @@ val require : (unit -> 'a) -> (error -> 'a) -> 'a
     branch of [parser] that read further and failed means that the construct is
     there and broken, not missing: the failure goes on, as without [require],
     and an enclosing {!recover} or {!list} handles it. On ["ax"],
-    [require (fun () -> ignore (optional ab ()); ignore (char ')')) ignore] with
+    [require (fun () -> ignore (optional ab); ignore (char ')')) ignore] with
     [ab] reading ['a'] then ['b'] does not insert: [ab] failed at 1. With
-    [capture ab] in place of [optional ab ()], the failure of [ab] is not
-    counted, and [require] inserts the [)] at 0. The same rule holds for a
-    failure of {!fail} or {!val-error}: it is inserted only when no branch of
-    [parser] read further.
+    [capture ab] in place of [optional ab], the failure of [ab] is not counted,
+    and [require] inserts the [)] at 0. The same rule holds for a failure of
+    {!fail} or {!val-error}: it is inserted only when no branch of [parser] read
+    further.
 
     A failure at the end of the input is inserted too, so a missing closing
     token at the end gives one error. [e] keeps the contexts open around
@@ -1236,14 +1234,13 @@ val require : (unit -> 'a) -> (error -> 'a) -> 'a
             skip_whitespace ()
           )
           ~close:(fun () -> peek_char () = Some ')')
-          ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ','))
+          ~sync:(fun () -> skip_nested [ ('(', ')') ] (fun c -> c = ','))
           (fun () ->
             let n = integer () in
             skip_whitespace ();
             n
           )
           (fun _ -> 0)
-          ()
       in
       require (fun () -> ignore (char ')')) ignore;
       Call (name, args)
@@ -1269,9 +1266,8 @@ val list :
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
-  unit ->
   'a list
-(** [list ~close ~sync element hole ()] parses [element] again and again, as
+(** [list ~close ~sync element hole] parses [element] again and again, as
     {!many} does, and recovers from each [element] that fails, except where
     [close ()] is [true] or the input ends. It is one loop for a list of
     statements and, with [~sep], for a list with separators. It does not read
@@ -1391,7 +1387,7 @@ val list :
 
     let skip_statement () =
       skip_while (fun c -> c <> ';' && c <> '}');
-      ignore (optional (fun () -> char ';') ());
+      ignore (optional (fun () -> char ';'));
       skip_whitespace ()
 
     let block () =
@@ -1403,7 +1399,6 @@ val list :
               ~close:(fun () -> peek_char () = Some '}')
               ~sync:skip_statement statement
               (fun _ -> Bad)
-              ()
           in
           require (fun () -> ignore (char '}')) ignore;
           stmts
@@ -1422,10 +1417,10 @@ val list :
     ]} *)
 
 val skip_nested :
-  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit -> unit
-(** [skip_nested pairs stop ()] skips input up to the end of a broken list
-    element. It is made for the [~sync] of [list ~sep] and {!recover}, as in
-    [list ~sep ~sync:(skip_nested pairs stop)].
+  ?atom:(unit -> unit) -> (char * char) list -> (char -> bool) -> unit
+(** [skip_nested pairs stop] skips input up to the end of a broken list element.
+    It is made for the [~sync] of [list ~sep] and {!recover}, as in
+    [list ~sep ~sync:(fun () -> skip_nested pairs stop)].
 
     [pairs] gives the brackets of the grammar as [(opening, closing)]
     characters. The skip stops, without consuming, before the first of:
@@ -1455,7 +1450,7 @@ val skip_nested :
       skip_while (fun c -> c <> '"');
       ignore (char '"')
 
-    let skip_argument =
+    let skip_argument () =
       skip_nested ~atom:string_literal
         [ ('(', ')'); ('[', ']'); ('{', '}') ]
         (fun c -> c = ',')
@@ -1479,9 +1474,9 @@ val commit : unit -> unit
     look-ahead.
 
     [commit ()] does not seal or release outer frames. In
-    [many (fun () -> or_ a b ())], a [commit ()] inside [a] seals the [or_]
-    only. The [many] frame still rewinds to the start of the current iteration,
-    and streaming sources keep that input buffered.
+    [many (fun () -> or_ a b)], a [commit ()] inside [a] seals the [or_] only.
+    The [many] frame still rewinds to the start of the current iteration, and
+    streaming sources keep that input buffered.
 
     Example:
     {@ocaml[
@@ -1497,7 +1492,6 @@ val commit : unit -> unit
           commit ();
           `POST
         )
-        ()
     ]} *)
 
 val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
@@ -1533,7 +1527,7 @@ val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
     let array_parser () =
       context ~delimited:true "array" (fun () ->
           literal "[";
-          let xs = sep_by value comma () in
+          let xs = sep_by value comma in
           literal "]";
           xs
       )
@@ -1578,11 +1572,11 @@ val rec_ : (unit -> 'a) -> 'a
     Example:
     {@ocaml[
     let rec json () =
-      Parseff.rec_ (fun () -> Parseff.one_of [ array_parser; null_parser ] ())
+      Parseff.rec_ (fun () -> Parseff.one_of [ array_parser; null_parser ])
 
     and array_parser () =
       Parseff.literal "[";
-      let elements = Parseff.sep_by json (fun () -> Parseff.char ',') () in
+      let elements = Parseff.sep_by json (fun () -> Parseff.char ',') in
       Parseff.literal "]";
       `Array elements
 
@@ -1628,7 +1622,7 @@ val expect : string -> (unit -> 'a) -> 'a
     let digit_val () = expect "a digit (0-9)" digit
     ]} *)
 
-val one_of : (unit -> 'a) list -> unit -> 'a
+val one_of : (unit -> 'a) list -> 'a
 (** [one_of parsers] tries each parser in order until one succeeds. When every
     parser fails, the error lists what the parsers expected at the furthest
     position, as for {!or_}. [one_of []] expects nothing: alone it fails with
@@ -1644,10 +1638,9 @@ val one_of : (unit -> 'a) list -> unit -> 'a
           (fun () -> literal "else");
           (fun () -> literal "while");
         ]
-        ()
     ]} *)
 
-val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
+val one_of_labeled : (string * (unit -> 'a)) list -> 'a
 (** [one_of_labeled labeled_parsers] tries each parser in order. On failure,
     reports all labels in the error message.
 
@@ -1669,7 +1662,6 @@ val one_of_labeled : (string * (unit -> 'a)) list -> unit -> 'a
           ("string", string_parser);
           ("boolean", bool_parser);
         ]
-        ()
     (* On failure: "expected boolean, number, or string" *)
     ]} *)
 
@@ -1721,7 +1713,7 @@ end
 
 (** {1 Repetition Combinators} *)
 
-val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
+val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
 (** [many parser] applies [parser] repeatedly until it fails. Returns a list of
     all successful results. Always succeeds (returns [[]] if [parser] fails
     immediately).
@@ -1746,11 +1738,11 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
 
     Example:
     {@ocaml[
-    let digits () = many digit () (* parses "123" -> ['1'; '2'; '3'] *)
-    let non_empty_digits () = many ~at_least:1 digit ()
+    let digits () = many digit (* parses "123" -> ['1'; '2'; '3'] *)
+    let non_empty_digits () = many ~at_least:1 digit
     ]} *)
 
-val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 (** [sep_by element separator] parses zero or more occurrences of [element] with
     [separator] between each pair. Returns a list of the parsed elements.
 
@@ -1765,26 +1757,24 @@ val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
       sep_by
         (fun () -> take_while ~at_least:1 (fun c -> c <> ','))
         (fun () -> char ',')
-        ()
     let csv_line_nonempty () =
       sep_by ~at_least:1
         (fun () -> take_while ~at_least:1 (fun c -> c <> ','))
         (fun () -> char ',')
-        ()
     ]} *)
 
-val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> unit -> 'c
+val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
 (** [between open_ close_ parser] parses [open_], then [parser], then [close_],
     and returns the value produced by [parser]. *)
 
-val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 (** [end_by element separator] parses zero or more [element]s, each followed by
     [separator].
 
     When [~at_least] is specified, requires at least that many elements. The
     loop stops after an iteration that consumes no input, as in {!many}. *)
 
-val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
+val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
 [@@alert unstable "This value can change in a 1.x release."]
 (** [many_iter parser f] is {!many} that builds no list: it gives each value of
     [parser] to [f], in order, and returns [()]. The stop rules and [~at_least]
@@ -1837,21 +1827,23 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit -> unit
 
     let () =
       let r =
-        parse "1 2 3 "
-          (many_iter
-             (fun () ->
-               let n = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-               let _ = char ' ' in
-               int_of_string n
-             )
-             (fun n -> sum := !sum + n)
-          )
+        parse "1 2 3 " (fun () ->
+            many_iter
+              (fun () ->
+                let n =
+                  take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+                in
+                let _ = char ' ' in
+                int_of_string n
+              )
+              (fun n -> sum := !sum + n)
+        )
       in
       assert (Result.is_ok r && !sum = 6)
     ]} *)
 
 val sep_by_iter :
-  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit -> unit
+  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
 [@@alert unstable "This value can change in a 1.x release."]
 (** [sep_by_iter element separator f] is {!sep_by} that builds no list: it gives
     each [element] value to [f], as {!many_iter} does. The stop rules and
@@ -1874,16 +1866,14 @@ val sep_by_iter :
             sep_by_iter
               (fun () -> take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
               (fun () -> char ',')
-              (fun _ -> incr elements)
-              ();
+              (fun _ -> incr elements);
             char ']'
         )
       in
       assert (Result.is_ok r && !elements = 3)
     ]} *)
 
-val fold_left :
-  ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 (** [fold_left element op] parses one or more [element] values separated by
     [op], combining them left-associatively. Fails if there are zero [element]
     values.
@@ -1893,13 +1883,12 @@ val fold_left :
     gives [otherwise], with the position unchanged. A later failure that a
     {!commit} or {!cut} decided is the failure of the fold, as without
     [~otherwise]. To return [otherwise] on any failure, as before 0.6, write
-    [or_ (fun () -> fold_left element op ()) (fun () -> otherwise) ()].
+    [or_ (fun () -> fold_left element op) (fun () -> otherwise)].
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
 
-val fold_right :
-  ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
+val fold_right : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 (** [fold_right element op] parses one or more [element] values separated by
     [op], combining them right-associatively. Fails if there are zero [element]
     values.
@@ -1917,7 +1906,7 @@ val fold_right :
     gives [otherwise], with the position unchanged. A later failure that a
     {!commit} or {!cut} decided is the failure of the fold, as without
     [~otherwise]. To return [otherwise] on any failure, as before 0.6, write
-    [or_ (fun () -> fold_right element op ()) (fun () -> otherwise) ()].
+    [or_ (fun () -> fold_right element op) (fun () -> otherwise)].
 
     The loop stops after an [op] and [element] that together consume no input,
     and that pair is not applied. *)
@@ -1966,7 +1955,7 @@ type ('a, +'kind) operator
     let expr () =
       expression
         ~operand:(fun () -> Char.code (digit ()) - Char.code '0')
-        grammar.table ()
+        grammar.table
     ]} *)
 
 val infix_left : (unit -> 'a -> 'a -> 'a) -> ('a, [> `Infix ]) operator
@@ -1989,7 +1978,6 @@ val postfix : (unit -> 'a -> 'a) -> ('a, [> `Postfix ]) operator
 val expression :
   operand:(unit -> 'a) ->
   ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
-  unit ->
   'a
 (** [expression ~operand table] parses operands with [operand], joined by the
     operators of [table]. It is {!precedence} with a lookup made from [table]:
@@ -2059,7 +2047,7 @@ val expression :
         [ infix_right pow ];
       ]
 
-    let rec expr () = expression ~operand table ()
+    let rec expr () = expression ~operand table
 
     and operand () =
       or_
@@ -2069,17 +2057,16 @@ val expression :
           token ')' ();
           e
         )
-        number ()
+        number
     ]} *)
 
 val precedence :
   ?min:int ->
-  operand:(unit -> 'a) ->
   operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
-  unit ->
+  (unit -> 'a) ->
   'a
-(** [precedence ~operand ~operator] parses operands with [operand], joined by
-    the operators that [operator] finds. {!expression} uses the same loop. Where
+(** [precedence ~operator operand] parses operands with [operand], joined by the
+    operators that [operator] finds. {!expression} uses the same loop. Where
     {!expression} runs the token parsers of its table, [precedence] calls
     [operator] once after each operand. For a grammar with many precedence
     levels, this is faster.
@@ -2155,14 +2142,14 @@ val precedence :
       | _ ->
           None
 
-    let rec expr () = precedence ~operand ~operator ()
+    let rec expr () = precedence ~operator operand
 
     and operand () =
       skip_whitespace ();
       match peek_char () with
       | Some '-' ->
           ignore (any_char ());
-          -rec_ (precedence ~min:3 ~operand ~operator)
+          -rec_ (fun () -> precedence ~min:3 ~operator operand)
       | Some '(' ->
           ignore (any_char ());
           let e = rec_ expr in
@@ -2173,23 +2160,23 @@ val precedence :
           integer ()
     ]} *)
 
-val optional : (unit -> 'a) -> unit -> 'a option
+val optional : (unit -> 'a) -> 'a option
 (** [optional parser] tries to apply [parser]. Returns [Some result] if it
     succeeds, or [None] if it fails (without consuming input).
 
     Example:
     {@ocaml[
     let optional_sign () =
-      optional (fun () -> or_ (fun () -> char '-') (fun () -> char '+') ()) ()
+      optional (fun () -> or_ (fun () -> char '-') (fun () -> char '+'))
     ]} *)
 
-val count : int -> (unit -> 'a) -> unit -> 'a list
+val count : int -> (unit -> 'a) -> 'a list
 (** [count n parser] applies [parser] exactly [n] times. Fails if [parser]
     doesn't succeed [n] times.
 
     Example:
     {@ocaml[
-    let three_digits () = count 3 digit ()
+    let three_digits () = count 3 digit
     ]} *)
 
 (** {1 Convenience Combinators} *)

@@ -47,13 +47,12 @@ let rec value () =
                   (k, value ())
                 )
                 (fun () -> token ',')
-                ()
             in
             let _ = Parseff.char '}' in
             Object fields
         | Some '[' ->
             token '[';
-            let xs = Parseff.sep_by value (fun () -> token ',') () in
+            let xs = Parseff.sep_by value (fun () -> token ',') in
             let _ = Parseff.char ']' in
             Array xs
         | Some '"' ->
@@ -77,7 +76,7 @@ let rec value () =
 let top_array f () =
   ws ();
   token '[';
-  Parseff.sep_by_iter value (fun () -> token ',') f ();
+  Parseff.sep_by_iter value (fun () -> token ',') f;
   let _ = Parseff.char ']' in
   ws ()
 
