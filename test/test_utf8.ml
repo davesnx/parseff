@@ -367,11 +367,11 @@ let test_take_while_span () =
   match
     parse_with_pos "héllo world" (fun () ->
         let sp =
-          Parseff.Utf8.take_while_span (fun u ->
+          Parseff.Utf8.Slice.take_while (fun u ->
               not (Uucp.White.is_white_space u)
           )
         in
-        (Parseff.span_to_string sp, Parseff.span_length sp)
+        (Parseff.Slice.to_string sp, Parseff.Slice.length sp)
     )
   with
   | Ok ((s, len), pos) ->
@@ -642,7 +642,7 @@ let () =
             test_skip_while_unicode_whitespace;
         ]
       );
-      ("take_while_span", [ test_case "basic" `Quick test_take_while_span ]);
+      ("Slice.take_while", [ test_case "basic" `Quick test_take_while_span ]);
       ( "letter",
         [
           test_case "ASCII" `Quick test_letter_ascii;

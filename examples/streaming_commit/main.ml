@@ -41,7 +41,6 @@ let request_line () : request =
       Parseff.end_of_input ();
       (`POST, p)
     )
-    ()
 
 let () =
   let input = "GET /foo/bar" in

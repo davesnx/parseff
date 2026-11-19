@@ -37,7 +37,6 @@ let request_line_without_commit () =
       Parseff.end_of_input ();
       (`POST, p)
     )
-    ()
 
 let () =
   let input = "GET /foo/bar" in

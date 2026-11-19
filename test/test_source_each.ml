@@ -115,7 +115,7 @@ let test_pending_empty_source () =
 let test_error_of_each_value () =
   let parser () =
     let v = digits () in
-    ignore (Parseff.optional (fun () -> Parseff.char ' ') ());
+    ignore (Parseff.optional (fun () -> Parseff.char ' '));
     v
   in
   Alcotest.(check (list string))
@@ -165,7 +165,7 @@ let test_force_twice () =
       Alcotest.fail "first value"
 
 let test_no_progress () =
-  let parser () = Option.value ~default:"-" (Parseff.optional digits ()) in
+  let parser () = Option.value ~default:"-" (Parseff.optional digits) in
   Alcotest.(check (list string))
     "stops with an error"
     [ "ok 12"; "error 2 the parser consumed no input" ]
@@ -307,7 +307,6 @@ let test_diagnostics_per_value () =
            Parseff.char ';'
          )
          (fun () -> Parseff.char '\n')
-         ()
       );
     v
   in

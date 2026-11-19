@@ -79,11 +79,10 @@ let token () =
       );
       (fun () -> "id:" ^ identifier is_lower is_ident_char);
     ]
-    ()
 
 let test_keyword () =
   let words () =
-    let ts = sep_by token (fun () -> char ' ') () in
+    let ts = sep_by token (fun () -> char ' ') in
     String.concat "," ts
   in
   check_all "keyword" Fun.id "let letter let" "Ok kw:let,id:letter,kw:let" words;
@@ -114,13 +113,12 @@ let operator () =
         "le"
       );
     ]
-    ()
 
 let test_operators () =
-  let ops () = String.concat "," (sep_by operator (fun () -> char ' ') ()) in
+  let ops () = String.concat "," (sep_by operator (fun () -> char ' ')) in
   check_all "operators" Fun.id "! != < <= !" "Ok not,ne,lt,le,not" ops;
   check_all "operators" Fun.id "!=<=" "Ok ne,le" (fun () ->
-      String.concat "," (many operator ())
+      String.concat "," (many operator)
   )
 
 let number () =
@@ -174,7 +172,6 @@ let test_error () =
           ignore (char 'y');
           "b"
         )
-        ()
   );
   check_all "consumes nothing" Fun.id "xy" "Ok xy" (fun () ->
       not_followed_by (fun () -> char 'y');
@@ -195,7 +192,7 @@ let test_inner_failure_forgotten () =
   );
   check_all "earlier failures kept, inner ones forgotten" Fun.id "abcd"
     "Error 0: expected 'q' or 'z'" (fun () ->
-      ignore (optional (fun () -> char 'q') ());
+      ignore (optional (fun () -> char 'q'));
       not_followed_by (fun () ->
           literal "abc";
           char 'X'
@@ -215,7 +212,6 @@ let test_inner_failure_forgotten () =
           not_followed_by (fun () -> char 'a');
           "second"
         )
-        ()
   )
 
 let test_warning_removed_on_failed_parse () =
@@ -280,7 +276,6 @@ let test_state_rolled_back () =
                   -1
                 )
                 (fun () -> Ref.get r)
-                ()
             in
             ignore (char 'a');
             ignore (char 'b');
@@ -314,7 +309,6 @@ let test_commit_and_cut_stay_inside () =
           ignore (char 'a');
           "a"
         )
-        ()
   );
   check_all "cut inside" Fun.id "a" "Ok a" (fun () ->
       or_
@@ -332,7 +326,6 @@ let test_commit_and_cut_stay_inside () =
           ignore (char 'a');
           "a"
         )
-        ()
   )
 
 let test_streaming_boundary () =

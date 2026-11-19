@@ -1,5 +1,5 @@
 let number () =
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let n =
     List.fold_left
       (fun acc d -> (acc * 10) + Char.code d - Char.code '0')

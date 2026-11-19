@@ -47,10 +47,10 @@ let yielding_source ?(chunk = 2) data =
 
 let word () =
   let w = Parseff.take_while ~at_least:1 (fun c -> c <> ' ') in
-  ignore (Parseff.optional (fun () -> Parseff.char ' ') ());
+  ignore (Parseff.optional (fun () -> Parseff.char ' '));
   w
 
-let words () = String.concat "|" (Parseff.many word ())
+let words () = String.concat "|" (Parseff.many word)
 
 let run_pair first_data second_data =
   let a = ref "unset" and b = ref "unset" in
@@ -99,7 +99,7 @@ let show_failure = function
 let test_interleaved_failures_keep_separate_groups () =
   let a = ref "unset" and b = ref "unset" in
   let parser () =
-    ignore (Parseff.optional (fun () -> Parseff.literal "abd") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "abd"));
     Parseff.literal "abc";
     Parseff.literal "d"
   in
@@ -226,7 +226,6 @@ let test_window_pinned () =
             a_run ()
           )
           (fun () -> "ALT")
-          ()
     )
   in
   match r with
@@ -244,7 +243,6 @@ let pinned_parser () =
       a_run ()
     )
     (fun () -> "ALT")
-    ()
 
 let test_pinned_complete_match () =
   let data = String.make 10 'x' ^ "aabccc" in

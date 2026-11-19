@@ -80,7 +80,7 @@ let test_predicate_not_called () =
   ignore
     (run
        (fun () ->
-         Parseff.span_to_string (Parseff.take_while_span ~set:field counted)
+         Parseff.Slice.to_string (Parseff.Slice.take_while ~set:field counted)
        )
        input
     );
@@ -156,8 +156,8 @@ let test_skip_and_span () =
   let spanned =
     run
       (fun () ->
-        let sp = Parseff.take_while_span ~set:field is_field_char in
-        Parseff.span_to_string sp
+        let sp = Parseff.Slice.take_while ~set:field is_field_char in
+        Parseff.Slice.to_string sp
       )
       input
   in
@@ -169,7 +169,7 @@ let test_iter_pieces () =
     run
       (fun () ->
         Parseff.take_while_iter ~set:field is_field_char (fun piece ->
-            got := Parseff.span_to_string piece :: !got
+            got := Parseff.Slice.to_string piece :: !got
         );
         ""
       )
@@ -221,7 +221,7 @@ let test_stream () =
     Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () ->
         Parseff.take_while_iter ~set:ays is_a (fun piece ->
-            Buffer.add_string out (Parseff.span_to_string piece)
+            Buffer.add_string out (Parseff.Slice.to_string piece)
         );
         Parseff.char '\r'
     )

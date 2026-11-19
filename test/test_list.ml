@@ -89,15 +89,17 @@ let rec expr () =
 
 let expr_or_hole () =
   recover
-    ~sync:(skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ';' || c = ','))
+    ~sync:(fun () ->
+      skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ';' || c = ',')
+    )
     (fun () -> require expr (fun _ -> Hole_expr))
     (fun _ -> Hole_expr)
 
 let skip_statement () =
-  skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ';') ();
-  ignore (optional (sym ';') ())
+  skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ';');
+  ignore (optional (sym ';'))
 
-let skip_argument =
+let skip_argument () =
   skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ',' || c = ';')
 
 let let_stmt () =
@@ -129,8 +131,8 @@ and call_stmt () =
         context ~delimited:true "arguments" (fun () ->
             let args =
               list ~sep:(sym ',') ~close:(at ')') ~sync:skip_argument expr
-                (fun _ -> Hole_expr)
-                ()
+                (fun _ -> Hole_expr
+              )
             in
             require (sym ')') ignore;
             args
@@ -142,14 +144,14 @@ and call_stmt () =
 
 and statement () =
   tick ();
-  one_of [ let_stmt; if_stmt; call_stmt ] ()
+  one_of [ let_stmt; if_stmt; call_stmt ]
 
 and block () =
   context ~delimited:true "block" (fun () ->
       sym '{' ();
       cut ();
       let stmts =
-        list ~close:(at '}') ~sync:skip_statement statement (fun _ -> Bad) ()
+        list ~close:(at '}') ~sync:skip_statement statement (fun _ -> Bad)
       in
       require (sym '}') ignore;
       stmts
@@ -157,7 +159,7 @@ and block () =
 
 let program () =
   ws ();
-  list ~close:(fun () -> false) ~sync:skip_statement statement (fun _ -> Bad) ()
+  list ~close:(fun () -> false) ~sync:skip_statement statement (fun _ -> Bad)
 
 let run input =
   let d = Diagnostics.create () in
@@ -228,14 +230,14 @@ let test_separated () =
 
 let plain_program () =
   ws ();
-  many statement ()
+  many statement
 
 let braces ?trailing () =
   sym '{' ();
   let xs =
     list ~sep:(sym ',') ?trailing ~close:(at '}') ~sync:skip_argument expr
-      (fun _ -> Hole_expr)
-      ()
+      (fun _ -> Hole_expr
+    )
   in
   require (sym '}') ignore;
   xs
@@ -272,14 +274,14 @@ let test_braces () =
 
 let strict_braces () =
   sym '{' ();
-  let xs = sep_by expr (sym ',') () in
+  let xs = sep_by expr (sym ',') in
   sym '}' ();
   xs
 
 let loose_braces () =
   sym '{' ();
-  let xs = sep_by expr (sym ',') () in
-  if xs <> [] then ignore (optional (sym ',') ());
+  let xs = sep_by expr (sym ',') in
+  if xs <> [] then ignore (optional (sym ','));
   sym '}' ();
   xs
 
@@ -294,7 +296,7 @@ let test_skip_past_the_error () =
   let r =
     parse ~diagnostics:d "{ac ab}" (fun () ->
         sym '{' ();
-        let l = list ~close:(at '}') ~sync:ignore element (fun _ -> "_") () in
+        let l = list ~close:(at '}') ~sync:ignore element (fun _ -> "_") in
         require (sym '}') ignore;
         l
     )
@@ -308,16 +310,15 @@ let opt_braces ?trailing () =
   sym '{' ();
   let xs =
     list ~sep:(sym ',') ?trailing ~close:(at '}') ~sync:skip_argument
-      (fun () -> optional expr ())
+      (fun () -> optional expr)
       (fun _ -> Some Hole_expr)
-      ()
   in
   require (sym '}') ignore;
   xs
 
 let opt_strict () =
   sym '{' ();
-  let xs = sep_by (fun () -> optional expr ()) (sym ',') () in
+  let xs = sep_by (fun () -> optional expr) (sym ',') in
   sym '}' ();
   xs
 
@@ -381,8 +382,8 @@ let plain_items close () =
         '{'
     )
     ();
-  let xs = sep_by expr (sym ',') () in
-  if xs <> [] then ignore (optional (sym ',') ());
+  let xs = sep_by expr (sym ',') in
+  if xs <> [] then ignore (optional (sym ','));
   sym close ();
   xs
 
@@ -396,9 +397,8 @@ let list_items close () =
     ();
   let xs =
     list ~sep:(sym ',') ~trailing:true ~close:(at close) ~sync:skip_argument
-      expr
-      (fun _ -> Hole_expr)
-      ()
+      expr (fun _ -> Hole_expr
+    )
   in
   require (sym close) ignore;
   xs
@@ -584,7 +584,7 @@ let test_require_expected_set () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "a" (fun () ->
-        ignore (optional (fun () -> char 'b') ());
+        ignore (optional (fun () -> char 'b'));
         require (fun () -> ignore (char 'c')) ignore;
         ignore (char 'a')
     )
@@ -635,7 +635,6 @@ let test_sync_before_element () =
           ~sync:(fun () -> skip_while (fun c -> c <> '(' && c <> ','))
           element
           (fun _ -> '_')
-          ()
     )
   in
   Alcotest.(check string)
@@ -682,10 +681,9 @@ let items () =
   sym '[' ();
   let xs =
     list ~sep:(sym ',') ~close:(at ']')
-      ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
+      ~sync:(fun () -> skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
       item
       (fun _ -> Gap)
-      ()
   in
   require (sym ']') ignore;
   xs
@@ -715,7 +713,6 @@ let test_list_in_or_branch () =
         literal "[a]";
         "letter"
       )
-      ()
   in
   let run input =
     let r = parse ~diagnostics:d input parser in
@@ -741,7 +738,7 @@ let test_element_without_progress () =
     let r =
       parse ~diagnostics:d input (fun () ->
           sym '{' ();
-          let l = list ~close:(at '}') ~sync:ignore element (fun _ -> -2) () in
+          let l = list ~close:(at '}') ~sync:ignore element (fun _ -> -2) in
           require (sym '}') ignore;
           l
       )
@@ -834,7 +831,6 @@ let test_record_separator () =
             )
             ~close:(at '}') ~sync:skip_argument expr
             (fun _ -> Hole_expr)
-            ()
         in
         require (sym '}') ignore;
         xs
@@ -857,10 +853,9 @@ let paren_list () =
   sym '[' ();
   let xs =
     list ~sep:(sym ',') ~close:(at ']')
-      ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
+      ~sync:(fun () -> skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
       paren_item
       (fun _ -> -1)
-      ()
   in
   require (sym ']') ignore;
   xs
@@ -937,7 +932,6 @@ let test_require_commit () =
         ignore (char 'c');
         "right"
       )
-      ()
   in
   let d = Diagnostics.create () in
   Alcotest.(check string)
@@ -967,7 +961,6 @@ let test_require_undoes_parser () =
         ignore (char 'y');
         "R"
       )
-      ()
   in
   Alcotest.(check string)
     "a cut in require reaches the or_" "Error at 0: expected 'z', found 'y'"
@@ -1001,7 +994,7 @@ let test_dropped_element_undoes_ref () =
            ignore
              (list ?sep
                 ~close:(fun () -> false)
-                ~sync:ignore (element cell) ignore ()
+                ~sync:ignore (element cell) ignore
              );
            Ref.get cell
        )
@@ -1024,11 +1017,13 @@ let test_dropped_element_undoes_ref () =
       Ref.set cell 2
   in
   let sep () = () in
-  Alcotest.(check string) "many" "Ok 0" (plain "x" (fun c -> many (set c)));
+  Alcotest.(check string)
+    "many" "Ok 0"
+    (plain "x" (fun c -> fun () -> many (set c)));
   Alcotest.(check string) "no progress" "Ok 0" (run "x" set);
   Alcotest.(check string)
     "sep_by" "Ok 0"
-    (plain "xy" (fun c -> sep_by (second c) sep));
+    (plain "xy" (fun c -> fun () -> sep_by (second c) sep));
   Alcotest.(check string)
     "no progress after a separator" "Ok 0" (run ~sep "xy" second)
 
@@ -1046,7 +1041,7 @@ let test_require_fail_rule () =
                   ignore (char 'a');
                   ignore (char 'b')
                 )
-                p ()
+                p
             )
             ignore;
           ignore (take 2)
@@ -1072,7 +1067,7 @@ let test_raising_callbacks () =
     ws ();
     c
   in
-  let sync = skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')') in
+  let sync () = skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')') in
   let guarded name input body =
     let d = Diagnostics.create () in
     let r =
@@ -1088,7 +1083,7 @@ let test_raising_callbacks () =
             | Error _ ->
                 "error"
           in
-          let w = try or_ body (fun () -> "or") () with Stop -> "stop" in
+          let w = try or_ body (fun () -> "or") with Stop -> "stop" in
           ignore w;
           ignore (take_while (fun _ -> true));
           v
@@ -1109,7 +1104,7 @@ let test_raising_callbacks () =
   let lst ?(keep = fun e _ -> [ e ]) ?(sync = sync) ?(hole = fun _ -> '?')
       ?(close = fun () -> peek_char () = Some ')') ?(sep = sep_comma)
       ?(element = digit_ws) () =
-    String.of_seq (List.to_seq (list ~keep ~sep ~close ~sync element hole ()))
+    String.of_seq (List.to_seq (list ~keep ~sep ~close ~sync element hole))
   in
   let stop _ = raise Stop in
   guarded "keep, missing separator" "1 2)" (lst ~keep:(fun _ _ -> raise Stop));
@@ -1165,10 +1160,11 @@ let test_trace_order () =
               ws ()
             )
             ~close:(fun () -> peek_char () = Some ')')
-            ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')'))
+            ~sync:(fun () ->
+              skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')')
+            )
             element
             (fun _ -> '!')
-            ()
         in
         ignore (char ')');
         String.of_seq (List.to_seq l)
@@ -1204,7 +1200,6 @@ let test_first_element_fail () =
           ~close:(fun () -> peek_char () = Some ')')
           ~sync:ignore element
           (fun _ -> '!')
-          ()
       in
       ignore (char ')');
       String.of_seq (List.to_seq l)
@@ -1236,7 +1231,6 @@ let test_fail_at_close_ends_list () =
         ~close:(fun () -> peek_char () = Some ')')
         ~sync:ignore element
         (fun _ -> '!')
-        ()
     in
     ignore (char ')');
     String.of_seq (List.to_seq l)
@@ -1264,13 +1258,13 @@ let test_no_collector_is_plain () =
   let pieces = [| "{"; "}"; ","; ", "; "1"; "2 "; "+"; " "; "?"; "(" |] in
   let many_braces () =
     sym '{' ();
-    let xs = many expr () in
+    let xs = many expr in
     sym '}' ();
     xs
   in
   let list_many () =
     sym '{' ();
-    let xs = list ~close:(at '}') ~sync:ignore expr (fun _ -> Hole_expr) () in
+    let xs = list ~close:(at '}') ~sync:ignore expr (fun _ -> Hole_expr) in
     require (sym '}') ignore;
     xs
   in
@@ -1315,7 +1309,7 @@ let test_require_furthest_failure () =
     "a branch that read further: no insertion"
     ("Error at 1: expected 'b', found 'x'", [])
     (run (fun () ->
-         ignore (optional a_then_b ());
+         ignore (optional a_then_b);
          ignore (char ')')
      )
     );
@@ -1448,7 +1442,7 @@ let given = Buffer.create 16
 let iter_a () =
   take_while_iter
     (fun c -> c = 'a')
-    (fun sp -> Buffer.add_string given (span_to_string sp))
+    (fun sp -> Buffer.add_string given (Slice.to_string sp))
 
 let comma_only () = ignore (char ',')
 let rest () = take_while (fun _ -> true)
@@ -1517,7 +1511,6 @@ let at_closer failure () =
         "e"
       )
       (fun _ -> "H")
-      ()
   in
   String.concat "," l ^ "|" ^ rest ()
 
@@ -1565,7 +1558,6 @@ let iter_in_element ~release =
           ~close:(fun () -> false)
           ~sync:ignore iter_element
           (fun _ -> "H")
-          ()
       in
       String.concat "," l ^ "|" ^ rest ()
     )
@@ -1580,7 +1572,6 @@ let iter_in_element ~release =
           ~close:(fun () -> false)
           ~sync:ignore iter_element
           (fun _ -> "H")
-          ()
       in
       String.concat "," l ^ "|" ^ rest ()
     )
@@ -1602,7 +1593,6 @@ let test_iter_missing_separator () =
             iter_element ()
           )
           (fun _ -> "H")
-          ()
       in
       String.concat "," l ^ "|" ^ rest ()
     )
@@ -1627,7 +1617,6 @@ let test_iter_at_end () =
             "e"
           )
           (fun _ -> "H")
-          ()
       in
       String.concat "," l ^ "|" ^ rest ()
     )
@@ -1646,7 +1635,6 @@ let test_iter_close () =
           ~sync:ignore
           (fun () -> "e")
           (fun _ -> "H")
-          ()
       in
       String.concat "," l ^ "|" ^ rest ()
     )
@@ -1694,7 +1682,6 @@ let commit_at_end ~release tail () =
         end
       )
       (fun _ -> "H")
-      ()
   in
   String.concat "," l
 
@@ -1741,7 +1728,6 @@ let test_commit_at_end () =
                   ignore (rest ());
                   "ALT"
                 )
-                ()
             )
             ~collector:(Printf.sprintf "f got 0; %s; entries []" in_or)
             ~plain:(Printf.sprintf "f got 0; %s; entries []" in_or);
@@ -1749,7 +1735,7 @@ let test_commit_at_end () =
             ("commit at the end of the input, in optional, " ^ name)
             "n,"
             (fun () ->
-              match optional (fun () -> left ()) () with
+              match optional (fun () -> left ()) with
               | Some s ->
                   s
               | None ->
@@ -1789,7 +1775,6 @@ let committing_braces () =
             s
       )
       (fun _ -> "H")
-      ()
   in
   require (sym '}') ignore;
   end_of_input ();
@@ -1819,7 +1804,6 @@ let test_commit_never_reaches_the_caller () =
                   ignore (rest ());
                   "ALT"
                 )
-                ()
           )
         in
         let ok r = String.length r > 13 && String.sub r 0 12 = "f got 0; Ok " in
@@ -1855,7 +1839,6 @@ let test_commit_in_first_at_closer () =
         ~close:(fun () -> peek_char () = Some 'a')
         ~sync:ignore element
         (fun _ -> "H")
-        ()
     in
     String.concat "," l ^ "|" ^ rest ()
   in

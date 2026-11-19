@@ -134,18 +134,15 @@ let rec run env = function
           restore env s;
           check env "or_ right branch";
           run env b
-        )
-        ();
+        );
       check env "after or_"
   | Optional a ->
       let s = save env in
       if
-        optional
-          (fun () ->
+        optional (fun () ->
             restore env s;
             run env a
-          )
-          ()
+        )
         = None
       then
         restore env s;
@@ -154,8 +151,7 @@ let rec run env = function
       let s = ref (save env) in
       let pending = ref false in
       ignore
-        (many
-           (fun () ->
+        (many (fun () ->
              if !pending then
                restore env !s
              else
@@ -164,8 +160,7 @@ let rec run env = function
              check env "many iteration";
              run env a;
              pending := false
-           )
-           ()
+         )
         );
       restore env !s;
       check env "after many"

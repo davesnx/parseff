@@ -264,7 +264,6 @@ let test_inside_or () =
         s
       )
       (fun () -> "rest:" ^ Parseff.take_while (fun _ -> true))
-      ()
   in
   check "or_ recovers from take_until" (Value "rest: a * b") "/* a * b" parser;
   check "or_ takes the first branch" (Value " a ") "/* a */" parser;
@@ -276,7 +275,6 @@ let test_inside_or () =
         "comment"
       )
       (fun () -> Parseff.take_while (fun _ -> true))
-      ()
   in
   check "or_ recovers from skip_until" (Value "a * b") "a * b" skip_parser;
   check "skip_until inside or_ succeeds" (Value "comment") "a * b */"

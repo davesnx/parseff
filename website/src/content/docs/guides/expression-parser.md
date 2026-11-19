@@ -59,7 +59,6 @@ let rec expr () =
         let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
         Parseff.skip_whitespace ();
         term ())
-      ()
   in
   List.fold_left (fun acc t -> Add (acc, t)) left rest
 
@@ -73,7 +72,6 @@ and term () =
         let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
         Parseff.skip_whitespace ();
         factor ())
-      ()
   in
   List.fold_left (fun acc f -> Mul (acc, f)) left rest
 
@@ -91,7 +89,6 @@ and factor () =
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
       Num (Char.code d - Char.code '0'))
-    ()
 ```
 
 Each precedence level calls the next one for its operands. `expr` parses `term (('+' term)*)`, `term` parses `factor (('*' factor)*)`, and `factor` handles numbers and parenthesized sub-expressions. Because `term` is called from within `expr`, multiplication binds tighter than addition.
@@ -151,7 +148,6 @@ let rec expr () =
       let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
       fun a b -> Add (a, b))
-    ()
 
 and term () =
   Parseff.fold_left
@@ -161,7 +157,6 @@ and term () =
       let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
       fun a b -> Mul (a, b))
-    ()
 
 and factor () =
   Parseff.skip_whitespace ();
@@ -173,7 +168,6 @@ and factor () =
       let _ = Parseff.char ')' in
       e)
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
-    ()
 ```
 
 `fold_left element op` parses one or more `element`s separated by `op`, combining them left-to-right. The `op` parser returns the combining function. This is more concise and expresses the intent directly.
@@ -197,7 +191,7 @@ let mul () =
 
 let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
 
-let rec expr () = Parseff.expression ~operand:factor table ()
+let rec expr () = Parseff.expression ~operand:factor table
 
 and factor () =
   Parseff.skip_whitespace ();
@@ -212,7 +206,6 @@ and factor () =
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
       Num (Char.code d - Char.code '0'))
-    ()
 ```
 
 Each operator parser parses its token and returns the function that builds the node, as the `op` argument of `fold_left` does. `factor` calls `expr` again for parentheses.
@@ -231,7 +224,7 @@ let operator () =
   | Some '*' -> Some (2, Parseff.infix_left mul)
   | _ -> None
 
-let rec expr () = Parseff.precedence ~operand:factor ~operator ()
+let rec expr () = Parseff.precedence ~operator factor
 
 and factor () =
   Parseff.skip_whitespace ();
@@ -243,15 +236,14 @@ and factor () =
       let _ = Parseff.char ')' in
       e)
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
-    ()
 ```
 
 `precedence` takes infix and postfix operators only. For a prefix operator, read its token in `operand`, then parse its operand with `Parseff.precedence ~min`, where `min` is the lowest precedence that the operand can hold. A prefix operator in the lookup is a type error:
 
 ```ocaml
 # let negate () = Some (3, Parseff.prefix (fun () e -> Mul (Num (-1), e))) in
-  Parseff.precedence ~operand:factor ~operator:negate ();;
-Line 2, characters 48-54:
+  Parseff.precedence ~operator:negate factor;;
+Line 2, characters 32-38:
 Error: The value negate has type
          unit -> (int * (expr, [> `Prefix ]) Parseff.operator) option
        but an expression was expected of type

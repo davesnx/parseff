@@ -89,7 +89,6 @@ let line () =
       (fun () -> Some (entry ()));
       (fun () -> None);  (* blank line: always succeeds *)
     ]
-    ()
 ```
 
 `one_of` tries each parser in order until one succeeds. Here: try a comment, then try an entry, then fall through to `None` for blank lines. The last branch always succeeds, so `line` never fails.
@@ -103,7 +102,7 @@ let line () =
 ```ocaml
 let config () =
   let lines =
-    Parseff.sep_by line (fun () -> Parseff.char '\n') ()
+    Parseff.sep_by line (fun () -> Parseff.char '\n')
   in
   List.filter_map Fun.id lines
 ```
@@ -152,7 +151,6 @@ let bool_value () =
   Parseff.or_
     (fun () -> Parseff.literal "true"; Bool true)
     (fun () -> Parseff.literal "false"; Bool false)
-    ()
 
 let int_value () =
   let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"integer" in
@@ -163,7 +161,6 @@ let tag_list () =
     Parseff.sep_by
       (fun () -> Parseff.take_while ~at_least:1 (fun c -> c <> ',' && c <> '\n') ~label:"tag")
       (fun () -> Parseff.char ',')
-      ()
   in
   Tags tags
 
@@ -174,7 +171,6 @@ let typed_value () =
       (fun () -> int_value ());
       (fun () -> tag_list ());
     ]
-    ()
 ```
 
 `literal` matches a literal string (for multi-character matches like `"true"`). `or_` is shorthand when you have exactly two alternatives; `one_of` takes a list for three or more. Order matters: `bool_value` must come before `tag_list`, otherwise `"true"` would match as `Tags ["true"]`.

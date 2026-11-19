@@ -28,9 +28,7 @@ let field () =
   (k, v)
 
 let record () =
-  let fields =
-    Parseff.sep_by ~at_least:1 field (fun () -> Parseff.char '\n') ()
-  in
+  let fields = Parseff.sep_by ~at_least:1 field (fun () -> Parseff.char '\n') in
   fields
 
 let run input =

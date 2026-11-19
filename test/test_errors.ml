@@ -70,7 +70,7 @@ let test_limit_exceeded_kind () =
     (fun () -> ignore (Parseff.take_while ~at_most:3 (fun c -> c = 'a')))
     3 (0, 4);
   check "many" "aaa"
-    (fun () -> ignore (Parseff.many ~at_most:2 (fun () -> Parseff.char 'a') ()))
+    (fun () -> ignore (Parseff.many ~at_most:2 (fun () -> Parseff.char 'a')))
     2 (2, 3)
 
 let test_fold_left_user_exception () =
@@ -82,7 +82,9 @@ let test_fold_left_user_exception () =
       else
         a + b
   in
-  ( match Parseff.parse "1+1+1" (Parseff.fold_left Parseff.integer op) with
+  ( match
+      Parseff.parse "1+1+1" (fun () -> Parseff.fold_left Parseff.integer op)
+    with
   | _ ->
       Alcotest.fail "expected Exit"
   | exception Exit ->
@@ -118,7 +120,7 @@ let test_outside_parse_position () =
       check_parseff_error exn
 
 let test_outside_parse_many () =
-  match Parseff.many Parseff.digit () with
+  match Parseff.many Parseff.digit with
   | _ ->
       Alcotest.fail "Expected Not_in_parse_context"
   | exception exn ->
@@ -243,7 +245,6 @@ let test_or_right_commit_stops_at_or () =
             ignore (Parseff.char 'y');
             "y"
           )
-          ()
     )
   with
   | Ok _ ->
@@ -260,8 +261,7 @@ let test_or_right_commit_does_not_seal_many () =
   match
     Parseff.parse "abd" (fun () ->
         let items =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               Parseff.or_
                 (fun () ->
                   Parseff.literal "a";
@@ -273,9 +273,7 @@ let test_or_right_commit_does_not_seal_many () =
                   ignore (Parseff.char 'c');
                   "bc"
                 )
-                ()
-            )
-            ()
+          )
         in
         String.concat "|" items ^ "|"
         ^
@@ -337,21 +335,20 @@ let rec json_value () =
                   )
               );
             ]
-            ()
       )
   )
 
 and json_array () =
   ignore (Parseff.char '[');
   ws ();
-  ignore (Parseff.sep_by json_value comma ());
+  ignore (Parseff.sep_by json_value comma);
   ws ();
   ignore (Parseff.char ']')
 
 and json_object () =
   ignore (Parseff.char '{');
   ws ();
-  ignore (Parseff.sep_by json_member comma ());
+  ignore (Parseff.sep_by json_member comma);
   ws ();
   ignore (Parseff.char '}')
 
@@ -390,7 +387,7 @@ let test_unclosed_array_end_of_input () =
 
 let test_loop_exit_failure_is_furthest () =
   let parser () =
-    ignore (Parseff.sep_by (fun () -> Parseff.literal "ab") comma ());
+    ignore (Parseff.sep_by (fun () -> Parseff.literal "ab") comma);
     Parseff.end_of_input ()
   in
   both_runners show_unit "ab,ab,ax" parser
@@ -398,7 +395,7 @@ let test_loop_exit_failure_is_furthest () =
 
 let test_loop_exit_ties_with_next_item () =
   let parser () =
-    ignore (Parseff.many Parseff.digit ());
+    ignore (Parseff.many Parseff.digit);
     Parseff.end_of_input ()
   in
   both_runners show_unit "12x" parser
@@ -406,7 +403,7 @@ let test_loop_exit_ties_with_next_item () =
 
 let test_duplicate_labels_once () =
   let parser () =
-    ignore (Parseff.or_ Parseff.digit Parseff.digit ());
+    ignore (Parseff.or_ Parseff.digit Parseff.digit);
     ()
   in
   both_runners show_unit "x" parser
@@ -414,8 +411,9 @@ let test_duplicate_labels_once () =
 
 let test_alternatives_sorted () =
   let keyword k () = Parseff.literal k in
-  let order_a = Parseff.one_of [ keyword "if"; keyword "else"; keyword "while" ]
-  and order_b =
+  let order_a () =
+    Parseff.one_of [ keyword "if"; keyword "else"; keyword "while" ]
+  and order_b () =
     Parseff.one_of [ keyword "while"; keyword "if"; keyword "else" ]
   in
   let expected =
@@ -451,7 +449,7 @@ let test_one_of_labeled_relabels_at_start_only () =
     ignore (Parseff.take_while (fun c -> c <> '"'));
     ignore (Parseff.char '"')
   in
-  let parser =
+  let parser () =
     Parseff.one_of_labeled [ ("number", number); ("string", string_) ]
   in
   both_runners show_unit "?" parser
@@ -468,7 +466,6 @@ let test_commit_forgets_earlier_alternative () =
         Parseff.commit ();
         Parseff.literal "z"
       )
-      ()
   in
   both_runners show_unit "ax" parser
     {|Error@1 Expected "expected \"z\", found 'x'"|}
@@ -483,7 +480,7 @@ let show_int_option = function
 
 let test_fail_absorbed_by_or () =
   both_runners string_of_int "x"
-    (fun () -> Parseff.or_ (fun () -> Parseff.fail "x") (fun () -> 1) ())
+    (fun () -> Parseff.or_ (fun () -> Parseff.fail "x") (fun () -> 1))
     "Ok 1"
 
 let test_fail_stops_many () =
@@ -494,26 +491,27 @@ let test_fail_stops_many () =
     else
       d
   in
-  both_runners show_ints "129" (Parseff.many small_digit) "Ok 1,2"
+  both_runners show_ints "129" (fun () -> Parseff.many small_digit) "Ok 1,2"
 
 let test_fail_in_optional_is_none () =
   both_runners show_int_option "x"
-    (Parseff.optional (fun () -> Parseff.fail "x"))
+    (fun () -> Parseff.optional (fun () -> Parseff.fail "x"))
     "Ok None"
 
 let test_fail_absorbed_by_one_of_labeled () =
   both_runners
     (fun s -> s)
     "x"
-    (Parseff.one_of_labeled
-       [
-         ("a", fun () -> Parseff.fail "boom");
-         ( "b",
-           fun () ->
-             Parseff.literal "x";
-             "x"
-         );
-       ]
+    (fun () ->
+      Parseff.one_of_labeled
+        [
+          ("a", fun () -> Parseff.fail "boom");
+          ( "b",
+            fun () ->
+              Parseff.literal "x";
+              "x"
+          );
+        ]
     )
     "Ok x"
 
@@ -528,7 +526,6 @@ let test_fail_reported_when_furthest () =
         Parseff.literal "q";
         "q"
       )
-      ()
   in
   both_runners (fun s -> s) "abc" parser {|Error@2 Failed "deep"|};
   let parser () =
@@ -538,7 +535,6 @@ let test_fail_reported_when_furthest () =
         Parseff.literal "ab";
         Parseff.fail "deep"
       )
-      ()
   in
   both_runners (fun s -> s) "abc" parser {|Error@2 Failed "deep"|}
 
@@ -550,7 +546,6 @@ let test_fail_behind_furthest_ignored () =
         "left"
       )
       (fun () -> Parseff.fail "shallow")
-      ()
   in
   both_runners
     (fun s -> s)
@@ -559,19 +554,19 @@ let test_fail_behind_furthest_ignored () =
 let test_fail_ties () =
   let boom () = Parseff.fail "boom" in
   both_runners show_unit "z"
-    (fun () -> Parseff.or_ boom (fun () -> Parseff.literal "q") ())
+    (fun () -> Parseff.or_ boom (fun () -> Parseff.literal "q"))
     {|Error@0 Failed "boom"|};
   both_runners show_unit "z"
-    (fun () -> Parseff.or_ (fun () -> Parseff.literal "q") boom ())
+    (fun () -> Parseff.or_ (fun () -> Parseff.literal "q") boom)
     {|Error@0 Failed "boom"|};
   both_runners show_unit "z"
-    (fun () -> Parseff.or_ boom (fun () -> Parseff.fail "second") ())
+    (fun () -> Parseff.or_ boom (fun () -> Parseff.fail "second"))
     {|Error@0 Failed "boom"|};
   both_runners show_unit "z"
-    (fun () -> Parseff.or_ boom (fun () -> Parseff.error Cause_e) ())
+    (fun () -> Parseff.or_ boom (fun () -> Parseff.error Cause_e))
     {|Error@0 Failed "boom"|};
   both_runners show_unit "z"
-    (fun () -> Parseff.or_ (fun () -> Parseff.error Cause_e) boom ())
+    (fun () -> Parseff.or_ (fun () -> Parseff.error Cause_e) boom)
     "Error@0 E"
 
 let test_expect_keeps_failure () =
@@ -582,12 +577,12 @@ let test_expect_keeps_failure () =
   both_runners show_unit "x"
     (fun () ->
       Parseff.expect "thing" (fun () ->
-          Parseff.or_ boom (fun () -> Parseff.literal "q") ()
+          Parseff.or_ boom (fun () -> Parseff.literal "q")
       )
     )
     {|Error@0 Failed "boom"|};
   both_runners show_unit "x"
-    (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ] ()))
+    (fun () -> ignore (Parseff.one_of_labeled [ ("a", boom) ]))
     {|Error@0 Failed "boom"|}
 
 let test_cut_fail_is_final () =
@@ -597,10 +592,13 @@ let test_cut_fail_is_final () =
     Parseff.fail "bad"
   in
   both_runners string_of_int "ab"
-    (fun () -> Parseff.or_ final (fun () -> 1) ())
+    (fun () -> Parseff.or_ final (fun () -> 1))
     {|Error@1 Failed "bad"|};
-  both_runners show_ints "aab" (Parseff.many final) {|Error@1 Failed "bad"|};
-  both_runners show_int_option "ab" (Parseff.optional final)
+  both_runners show_ints "aab"
+    (fun () -> Parseff.many final)
+    {|Error@1 Failed "bad"|};
+  both_runners show_int_option "ab"
+    (fun () -> Parseff.optional final)
     {|Error@1 Failed "bad"|};
   let in_context () =
     Parseff.context "item" (fun () ->
@@ -610,11 +608,13 @@ let test_cut_fail_is_final () =
     )
   in
   both_runners string_of_int "ab"
-    (fun () -> Parseff.or_ in_context (fun () -> 1) ())
+    (fun () -> Parseff.or_ in_context (fun () -> 1))
     {|Error@1 Failed "bad"|};
-  both_runners show_ints "ab" (Parseff.many in_context) {|Error@1 Failed "bad"|};
+  both_runners show_ints "ab"
+    (fun () -> Parseff.many in_context)
+    {|Error@1 Failed "bad"|};
   both_runners show_int_option "ab"
-    (Parseff.optional in_context)
+    (fun () -> Parseff.optional in_context)
     {|Error@1 Failed "bad"|}
 
 let test_cut_fail_keeps_contexts () =
@@ -632,7 +632,6 @@ let test_cut_fail_keeps_contexts () =
             )
           )
           (fun () -> ())
-          ()
     )
   with
   | Stdlib.Error { kind = Failed "bad item"; range; contexts; help; _ } ->
@@ -646,17 +645,14 @@ let test_cut_fail_keeps_contexts () =
 
 let test_cut_keeps_the_furthest_failure () =
   let deeper_then_cut final () =
-    ignore (Parseff.optional (fun () -> Parseff.literal "abX") ());
+    ignore (Parseff.optional (fun () -> Parseff.literal "abX"));
     Parseff.literal "a";
     Parseff.cut ();
     final ()
   in
   both_runners string_of_int "abc"
     (fun () ->
-      Parseff.or_
-        (deeper_then_cut (fun () -> Parseff.fail "bad"))
-        (fun () -> 1)
-        ()
+      Parseff.or_ (deeper_then_cut (fun () -> Parseff.fail "bad")) (fun () -> 1)
     )
     {|Error@2 Expected "expected \"X\", found 'c'"|};
   both_runners string_of_int "abc"
@@ -664,7 +660,6 @@ let test_cut_keeps_the_furthest_failure () =
       Parseff.or_
         (deeper_then_cut (fun () -> Parseff.error Cause_e))
         (fun () -> 1)
-        ()
     )
     {|Error@2 Expected "expected \"X\", found 'c'"|};
   both_runners show_unit "abc"
@@ -675,7 +670,7 @@ let test_cut_keeps_failures_at_position () =
   both_runners show_unit "az"
     (fun () ->
       Parseff.literal "a";
-      ignore (Parseff.optional (fun () -> Parseff.char 'x') ());
+      ignore (Parseff.optional (fun () -> Parseff.char 'x'));
       Parseff.cut ();
       ignore (Parseff.char 'y')
     )
@@ -683,7 +678,7 @@ let test_cut_keeps_failures_at_position () =
   both_runners show_unit "az"
     (fun () ->
       Parseff.literal "a";
-      ignore (Parseff.optional (fun () -> Parseff.char 'x') ());
+      ignore (Parseff.optional (fun () -> Parseff.char 'x'));
       Parseff.cut ();
       Parseff.fail "bad"
     )
@@ -696,7 +691,6 @@ let test_cut_keeps_failures_at_position () =
           Parseff.cut ();
           Parseff.fail "second"
         )
-        ()
     )
     {|Error@0 Failed "first"|}
 
@@ -711,7 +705,6 @@ let test_custom_error_absorbed_by_or () =
           Parseff.literal "x";
           "x"
         )
-        ()
     )
     {|Ok x|}
 
@@ -726,7 +719,6 @@ let test_custom_error_reported_when_furthest () =
         Parseff.literal "q";
         "q"
       )
-      ()
   in
   both_runners (fun s -> s) "abc" parser "Error@2 E"
 
@@ -738,7 +730,6 @@ let test_custom_error_beats_expected_at_tie () =
         Parseff.literal "q";
         "q"
       )
-      ()
   in
   both_runners (fun s -> s) "z" parser "Error@0 E"
 
@@ -754,7 +745,6 @@ let test_behind_failure_ignored () =
         Parseff.literal "x";
         "x"
       )
-      ()
   in
   both_runners
     (fun s -> s)
@@ -769,7 +759,7 @@ let test_item_buffer_overflow () =
   let alternatives =
     List.init 100 (fun i () -> Parseff.literal (Printf.sprintf "item%03d" i))
   in
-  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  match Parseff.parse "zzz" (fun () -> Parseff.one_of alternatives) with
   | Error ({ kind = Expected { items = _, rest; more; _ }; _ } as e)
     when e.range.start = 0 ->
       Alcotest.(check int) "items kept" 64 (List.length rest + 1);
@@ -785,7 +775,7 @@ let test_item_buffer_overflow_counts_distinct () =
         Parseff.literal (Printf.sprintf "item%03d" (i mod 100))
     )
   in
-  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  match Parseff.parse "zzz" (fun () -> Parseff.one_of alternatives) with
   | Error e ->
       Alcotest.(check string)
         "duplicates are not counted twice" (overflow_message 100)
@@ -799,7 +789,7 @@ let test_item_buffer_dedupes_on_overflow () =
         Parseff.literal (Printf.sprintf "item%d" (i mod 3))
     )
   in
-  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  match Parseff.parse "zzz" (fun () -> Parseff.one_of alternatives) with
   | Error ({ kind = Expected { found = Text _; _ }; _ } as e)
     when e.range.start = 0 ->
       let msg = Parseff.error_message e in
@@ -836,14 +826,12 @@ let test_utf8_char_error_text () =
 let test_recorded_failures_do_not_fail_success () =
   let parser () =
     ignore
-      (Parseff.optional
-         (fun () ->
+      (Parseff.optional (fun () ->
            Parseff.look_ahead (fun () ->
                Parseff.literal "ab";
                "ab"
            )
-         )
-         ()
+       )
       );
     Parseff.literal "a"
   in
@@ -883,14 +871,13 @@ let ctx_array_parser () =
                     )
                 );
               ]
-              ()
         )
     )
   and array () =
     Parseff.context ~delimited:true "array" (fun () ->
         ignore (Parseff.char '[');
         ws ();
-        ignore (Parseff.sep_by value comma ());
+        ignore (Parseff.sep_by value comma);
         ws ();
         ignore (Parseff.char ']')
     )
@@ -914,14 +901,12 @@ let test_context_chain_after_frame_closes () =
   let parser () =
     Parseff.context "outer" (fun () ->
         ignore
-          (Parseff.optional
-             (fun () ->
+          (Parseff.optional (fun () ->
                Parseff.context "inner" (fun () ->
                    Parseff.literal "ab";
                    Parseff.literal "c"
                )
-             )
-             ()
+           )
           );
         Parseff.literal "ax"
     )
@@ -1026,7 +1011,6 @@ let test_context_tie_keeps_first_chain () =
             ignore (Parseff.char 'r')
         )
       )
-      ()
   in
   Alcotest.(check string)
     "first group's chain" "left@0" (contexts_of "az" parser)
@@ -1082,7 +1066,6 @@ let let_statement_parser () =
             );
             ident;
           ]
-          ()
     )
   in
   let let_stmt () =
@@ -1101,15 +1084,13 @@ let let_statement_parser () =
     ignore (Parseff.char ';')
   in
   let stmt () =
-    Parseff.context "statement" (fun () -> Parseff.or_ let_stmt expr_stmt ())
+    Parseff.context "statement" (fun () -> Parseff.or_ let_stmt expr_stmt)
   in
   let stmts =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         ws ();
         stmt ()
-      )
-      ()
+    )
   in
   List.length stmts
 
@@ -1134,7 +1115,6 @@ let test_cut_without_context () =
         Parseff.literal "ac";
         "ac"
       )
-      ()
   in
   both_runners
     (fun s -> s)
@@ -1156,7 +1136,6 @@ let test_cut_stops_at_look_ahead () =
         Parseff.literal "ac";
         "ac"
       )
-      ()
   in
   both_runners (fun s -> s) "ac" parser "Ok ac"
 
@@ -1175,7 +1154,6 @@ let test_cut_does_not_leave_context_on_success () =
         Parseff.literal "ac";
         "ac"
       )
-      ()
   in
   both_runners (fun s -> s) "ac" parser "Ok ac"
 
@@ -1187,7 +1165,7 @@ let test_cut_seals_outer_frames_only_on_failure () =
         Parseff.literal "v"
     )
   in
-  let parser () = List.length (Parseff.many item ()) in
+  let parser () = List.length (Parseff.many item) in
   both_runners string_of_int "kvkv" parser "Ok 2";
   both_runners string_of_int "kvkx" parser
     {|Error@3 Expected "expected \"v\", found 'x'"|}
@@ -1206,7 +1184,6 @@ let test_cut_inside_nested_context_keeps_outer_open () =
         )
       )
       (fun () -> Parseff.literal "abd")
-      ()
   in
   both_runners
     (fun _ -> "ok")
@@ -1254,14 +1231,13 @@ let ctx_json_parser =
                     )
                 );
               ]
-              ()
         )
     )
   and array () =
     Parseff.context ~delimited:true "array" (fun () ->
         ignore (Parseff.char '[');
         ws ();
-        ignore (Parseff.sep_by value comma ());
+        ignore (Parseff.sep_by value comma);
         ws ();
         ignore (Parseff.char ']')
     )
@@ -1269,7 +1245,7 @@ let ctx_json_parser =
     Parseff.context ~delimited:true "object" (fun () ->
         ignore (Parseff.char '{');
         ws ();
-        ignore (Parseff.sep_by member comma ());
+        ignore (Parseff.sep_by member comma);
         ws ();
         ignore (Parseff.char '}')
     )
@@ -1375,7 +1351,7 @@ let test_render_opener_utf8 () =
 
 let test_render_loop_exit_literal () =
   let parser () =
-    ignore (Parseff.sep_by (fun () -> Parseff.literal "ab") comma ())
+    ignore (Parseff.sep_by (fun () -> Parseff.literal "ab") comma)
   in
   check_render "D"
     (lines
@@ -1396,7 +1372,7 @@ let test_render_duplicates_and_sorting () =
     (lines
        [ "input.json:1:1: [error] expected digit, found 'x'"; "1 | x"; "  | ^" ]
     )
-    (render "x" (fun () -> ignore (Parseff.or_ Parseff.digit Parseff.digit ())));
+    (render "x" (fun () -> ignore (Parseff.or_ Parseff.digit Parseff.digit)));
   let keyword k () = Parseff.literal k in
   let expected =
     lines
@@ -1408,12 +1384,14 @@ let test_render_duplicates_and_sorting () =
       ]
   in
   check_render "E keywords" expected
-    (render "xyz"
-       (Parseff.one_of [ keyword "if"; keyword "else"; keyword "while" ])
+    (render "xyz" (fun () ->
+         Parseff.one_of [ keyword "if"; keyword "else"; keyword "while" ]
+     )
     );
   check_render "E keywords reordered" expected
-    (render "xyz"
-       (Parseff.one_of [ keyword "while"; keyword "if"; keyword "else" ])
+    (render "xyz" (fun () ->
+         Parseff.one_of [ keyword "while"; keyword "if"; keyword "else" ]
+     )
     )
 
 let test_render_relabel_at_start_only () =
@@ -1457,7 +1435,6 @@ let test_render_relabel_at_start_only () =
                ignore (Parseff.char '"')
            );
          ]
-         ()
       )
   in
   check_render "F labeled"
@@ -1795,7 +1772,7 @@ let test_render_other_kinds () =
 let streaming_list_parser () =
   Parseff.context ~delimited:true "list" (fun () ->
       Parseff.literal "[";
-      ignore (Parseff.many (fun () -> Parseff.literal "ab\n") ());
+      ignore (Parseff.many (fun () -> Parseff.literal "ab\n"));
       Parseff.literal "]"
   )
 
@@ -1969,7 +1946,6 @@ let test_error_upto_through_backtracking () =
     Parseff.or_
       (fun () -> Parseff.error ~from:2 ~upto:0 Boom)
       (fun () -> Parseff.char 'z')
-      ()
   in
   check_range "absorbed custom error keeps its range" (0, 2)
     (range_of "abc" parser);
@@ -2170,12 +2146,10 @@ let test_error_help () =
   ( match
       Parseff.parse ~consume:`Partial input (fun () ->
           Parseff.capture (fun () ->
-              Parseff.or_ parser
-                (fun () ->
+              Parseff.or_ parser (fun () ->
                   Parseff.literal "q";
                   "q"
-                )
-                ()
+              )
           )
       )
     with
@@ -2227,7 +2201,7 @@ let test_note_on_dropped_line () =
     )
   in
   let parser () =
-    ignore (Parseff.many (fun () -> Parseff.char 'a') ());
+    ignore (Parseff.many (fun () -> Parseff.char 'a'));
     Parseff.fail ~notes:[ paren_note 0 ] "stray"
   in
   match Parseff.parse_source ~backtrack_window:64 chunked parser with
@@ -2274,12 +2248,10 @@ let test_exhaustive_kind_match () =
     "expected" "expected 1 more, found x"
     (kind_of "x" (fun () ->
          ignore
-           (Parseff.or_ Parseff.digit
-              (fun () ->
+           (Parseff.or_ Parseff.digit (fun () ->
                 ignore (Parseff.char '1');
                 '0'
-              )
-              ()
+            )
            )
      )
     );
@@ -2375,7 +2347,7 @@ let test_custom_errors_by_pattern () =
   );
   ( match
       Parseff.parse "300" (fun () ->
-          Parseff.or_ number_checked (fun () -> Parseff.fail "second") ()
+          Parseff.or_ number_checked (fun () -> Parseff.fail "second")
       )
     with
   | Stdlib.Error { kind = Parseff.Custom (Too_large 300); _ } ->
@@ -2385,12 +2357,10 @@ let test_custom_errors_by_pattern () =
   );
   ( match
       Parseff.parse "300" (fun () ->
-          Parseff.or_ number_checked
-            (fun () ->
+          Parseff.or_ number_checked (fun () ->
               ignore (Parseff.char 'x');
               0
-            )
-            ()
+          )
       )
     with
   | Stdlib.Error { kind = Parseff.Custom (Too_large 300); _ } ->
@@ -2592,10 +2562,7 @@ let test_from_older_than_the_buffer () =
 let test_look_ahead_probe_does_not_leak () =
   let parser () =
     ignore
-      (Parseff.look_ahead (fun () ->
-           Parseff.many (fun () -> Parseff.char 'a') ()
-       )
-      );
+      (Parseff.look_ahead (fun () -> Parseff.many (fun () -> Parseff.char 'a')));
     ignore (Parseff.char 'b')
   in
   check_render "probe failures are forgotten"
@@ -2614,7 +2581,6 @@ let test_look_ahead_probe_does_not_leak () =
         ignore (Parseff.char 'b')
       )
       (fun () -> ignore (Parseff.char 'c'))
-      ()
   in
   check_render "a successful guard adds nothing"
     (lines
@@ -2647,7 +2613,6 @@ let test_look_ahead_probe_does_not_leak () =
          Parseff.or_
            (fun () -> ignore (Parseff.char 'q'))
            (fun () -> ignore (Parseff.look_ahead (fun () -> Parseff.char 'r')))
-           ()
      )
     )
 
@@ -2691,7 +2656,6 @@ let test_expect_with_commit_inside () =
             body ()
         )
       )
-      ()
   in
   check_render "items before the commit are forgotten, the rest is relabeled"
     (lines
@@ -2703,7 +2667,6 @@ let test_expect_with_commit_inside () =
               (Parseff.or_
                  (fun () -> Parseff.char 'x')
                  (fun () -> Parseff.char 'y')
-                 ()
               )
         )
        )
@@ -2727,7 +2690,6 @@ let test_expect_with_commit_inside () =
            (fun () ->
              Parseff.expect "thing" (fun () -> ignore (Parseff.char 'x'))
            )
-           ()
      )
     )
 
@@ -2741,7 +2703,7 @@ let test_commit_without_frame_keeps_the_group () =
        ]
     )
     (render_error "abXY" (fun () ->
-         ignore (Parseff.optional (fun () -> Parseff.literal "abcd") ());
+         ignore (Parseff.optional (fun () -> Parseff.literal "abcd"));
          Parseff.commit ();
          Parseff.literal "q"
      )
@@ -2753,16 +2715,15 @@ let test_expect_after_far_buffer_overflow () =
   in
   let parser () =
     Parseff.or_
-      (fun () -> Parseff.one_of originals ())
+      (fun () -> Parseff.one_of originals)
       (fun () ->
         Parseff.expect "thing" (fun () ->
             for _ = 1 to 20 do
-              ignore (Parseff.optional (fun () -> Parseff.char 'A') ())
+              ignore (Parseff.optional (fun () -> Parseff.char 'A'))
             done;
             ignore (Parseff.char 'A')
         )
       )
-      ()
   in
   match Parseff.parse "0" parser with
   | Error e ->
@@ -2858,7 +2819,6 @@ let test_found_with_data_left () =
       (Parseff.or_
          (fun () -> Parseff.take 5)
          (fun () -> String.make 1 (Parseff.char 'x'))
-         ()
       )
   in
   check_render "bytes remain"
@@ -2909,7 +2869,6 @@ let test_built_in_failures_are_expected_items () =
                 Parseff.literal "x";
                 "x"
               )
-              ()
            )
      )
     );
@@ -2923,13 +2882,12 @@ let test_built_in_failures_are_expected_items () =
                 'a'
               )
               (fun () -> Parseff.char 'x')
-              ()
            )
      )
     );
   Alcotest.(check string)
     "empty one_of" "no alternative matched"
-    (message "z" (Parseff.one_of []))
+    (message "z" (fun () -> Parseff.one_of []))
 
 let source_of_chunks ?(chunk = 7) input =
   let pos = ref 0 in
@@ -2968,12 +2926,10 @@ let test_unknown_line_has_byte_header () =
   let input = numbered_lines 100 in
   let line_loop () =
     ignore
-      (Parseff.many
-         (fun () ->
+      (Parseff.many (fun () ->
            ignore (Parseff.take_while (fun c -> c <> '\n') ~label:"x");
            ignore (Parseff.char '\n')
-         )
-         ()
+       )
       );
     ignore (Parseff.take_while (fun _ -> true) ~label:"x")
   in
@@ -3009,12 +2965,10 @@ let test_known_line_without_a_buffered_start () =
   let input = String.make 60 'a' ^ "!" in
   let parser () =
     ignore
-      (Parseff.many
-         (fun () ->
+      (Parseff.many (fun () ->
            ignore (Parseff.char 'a');
            Parseff.cut ()
-         )
-         ()
+       )
       );
     ignore (Parseff.char 'b')
   in
@@ -3641,15 +3595,15 @@ let test_expected_list_is_capped () =
   Alcotest.(check string)
     "eight items are all listed"
     ("expected " ^ shown 7 ^ ", or \"w08\", found 'zzz'")
-    (message_of "zzz" (Parseff.one_of (alternatives 8)));
+    (message_of "zzz" (fun () -> Parseff.one_of (alternatives 8)));
   Alcotest.(check string)
     "one more is singular"
     ("expected " ^ shown 8 ^ ", or 1 more alternative, found 'zzz'")
-    (message_of "zzz" (Parseff.one_of (alternatives 9)));
+    (message_of "zzz" (fun () -> Parseff.one_of (alternatives 9)));
   Alcotest.(check string)
     "several more are plural"
     ("expected " ^ shown 8 ^ ", or 4 more alternatives, found 'zzz'")
-    (message_of "zzz" (Parseff.one_of (alternatives 12)));
+    (message_of "zzz" (fun () -> Parseff.one_of (alternatives 12)));
   check_render "the header follows"
     (lines
        [
@@ -3659,7 +3613,7 @@ let test_expected_list_is_capped () =
          "  | ^^^";
        ]
     )
-    (render_error "zzz" (Parseff.one_of (alternatives 9)))
+    (render_error "zzz" (fun () -> Parseff.one_of (alternatives 9)))
 
 let test_excerpt_escapes () =
   let expect_char = fun () -> ignore (Parseff.char 'a') in
@@ -3826,12 +3780,10 @@ let test_no_excerpt_rows_are_indented_by_two () =
   let input = numbered_lines 100 in
   let line_loop () =
     ignore
-      (Parseff.many
-         (fun () ->
+      (Parseff.many (fun () ->
            ignore (Parseff.take_while (fun c -> c <> '\n') ~label:"x");
            ignore (Parseff.char '\n')
-         )
-         ()
+       )
       );
     ignore (Parseff.take_while (fun _ -> true) ~label:"x")
   in
@@ -4004,13 +3956,13 @@ let test_gap_row_is_in_the_gutter () =
 let test_empty_one_of_adds_no_item () =
   Alcotest.(check string)
     "alone" "no alternative matched"
-    (message_of "x" (Parseff.one_of []));
+    (message_of "x" (fun () -> Parseff.one_of []));
   check_render "alone, rendered"
     (lines
        [ "input.json:1:1: [error] no alternative matched"; "1 | x"; "  | ^" ]
     )
-    (render_error "x" (Parseff.one_of []));
-  ( match Parseff.parse ~consume:`Partial "x" (Parseff.one_of []) with
+    (render_error "x" (fun () -> Parseff.one_of []));
+  ( match Parseff.parse ~consume:`Partial "x" (fun () -> Parseff.one_of []) with
   | Stdlib.Error { kind = Failed m; _ } ->
       Alcotest.(check string) "kind" "no alternative matched" m
   | _ ->
@@ -4021,12 +3973,11 @@ let test_empty_one_of_adds_no_item () =
     (message_of "x" (fun () ->
          ignore
            (Parseff.or_
-              (fun () -> Parseff.one_of [] ())
+              (fun () -> Parseff.one_of [])
               (fun () ->
                 Parseff.literal "a";
                 "a"
               )
-              ()
            )
      )
     );
@@ -4036,11 +3987,10 @@ let test_empty_one_of_adds_no_item () =
          ignore
            (Parseff.one_of
               [
-                Parseff.one_of [];
+                (fun () -> Parseff.one_of []);
                 (fun () -> Parseff.literal "a");
                 (fun () -> ignore (Parseff.char 'b'));
               ]
-              ()
            )
      )
     );
@@ -4048,7 +3998,7 @@ let test_empty_one_of_adds_no_item () =
     "still backtracks" "ok"
     ( match
         Parseff.parse ~consume:`Partial "x" (fun () ->
-            Parseff.or_ (fun () -> Parseff.one_of [] ()) (fun () -> "ok") ()
+            Parseff.or_ (fun () -> Parseff.one_of []) (fun () -> "ok")
         )
       with
     | Stdlib.Ok s ->
@@ -4113,7 +4063,7 @@ let test_overflow_count_is_an_int () =
   let alternatives =
     List.init 100 (fun i () -> Parseff.literal (Printf.sprintf "item%03d" i))
   in
-  match Parseff.parse "zzz" (Parseff.one_of alternatives) with
+  match Parseff.parse "zzz" (fun () -> Parseff.one_of alternatives) with
   | Stdlib.Error (e : Parseff.error) -> (
       match e.kind with
       | Expected { items = _, rest; more; _ } ->
@@ -4139,7 +4089,6 @@ let test_mixed_int_widths_fall_back_to_text () =
            (Parseff.or_
               (fun () -> Parseff.BE.int16 1)
               (fun () -> Parseff.BE.int32 1l)
-              ()
            )
      )
     );
@@ -4151,7 +4100,6 @@ let test_mixed_int_widths_fall_back_to_text () =
            (Parseff.or_
               (fun () -> Parseff.BE.int16 1)
               (fun () -> Parseff.LE.int16 1)
-              ()
            )
      )
     );
@@ -4163,7 +4111,6 @@ let test_mixed_int_widths_fall_back_to_text () =
            (Parseff.or_
               (fun () -> Parseff.BE.int16 1)
               (fun () -> Parseff.BE.int16 3)
-              ()
            )
      )
     )
@@ -4312,7 +4259,7 @@ let test_window_error_points_at_the_parser () =
 let test_duplicates_do_not_hide_alternatives () =
   let parser () =
     for _ = 1 to 70 do
-      ignore (Parseff.optional (fun () -> Parseff.char 'a') ())
+      ignore (Parseff.optional (fun () -> Parseff.char 'a'))
     done;
     Parseff.one_of
       [
@@ -4320,7 +4267,6 @@ let test_duplicates_do_not_hide_alternatives () =
         (fun () -> Parseff.char 'y');
         (fun () -> Parseff.char 'z');
       ]
-      ()
   in
   Alcotest.(check string)
     "every distinct alternative is listed"
@@ -4329,7 +4275,7 @@ let test_duplicates_do_not_hide_alternatives () =
 let test_expect_relabels_after_duplicates () =
   let parser () =
     for _ = 1 to 70 do
-      ignore (Parseff.optional (fun () -> Parseff.char 'a') ())
+      ignore (Parseff.optional (fun () -> Parseff.char 'a'))
     done;
     Parseff.expect "thing" (fun () ->
         Parseff.one_of
@@ -4338,7 +4284,6 @@ let test_expect_relabels_after_duplicates () =
             (fun () -> Parseff.char 'y');
             (fun () -> Parseff.char 'z');
           ]
-          ()
     )
   in
   Alcotest.(check string)
@@ -4354,7 +4299,6 @@ let test_char_and_one_byte_literal_print_once () =
              (fun () -> ignore (Parseff.char ','));
              (fun () -> Parseff.literal ",");
            ]
-           ()
      )
     )
 

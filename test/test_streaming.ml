@@ -16,7 +16,7 @@ let parse_source_with_pos src parser =
   )
 
 let number () =
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let n =
     List.fold_left
       (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
@@ -60,7 +60,6 @@ let rec json () =
           number_parser;
           string_parser;
         ]
-        ()
   )
 
 and null_parser () =
@@ -77,7 +76,6 @@ and bool_parser () =
       Parseff.literal "false";
       Bool false
     )
-    ()
 
 and number_parser () = Number (Parseff.number ())
 
@@ -95,18 +93,15 @@ and array_parser () =
       (fun () ->
         let first = json () in
         let rest =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               let _ = ws () in
               Parseff.literal ",";
               json ()
-            )
-            ()
+          )
         in
         first :: rest
       )
       (fun () -> [])
-      ()
   in
   let _ = ws () in
   Parseff.literal "]";
@@ -120,18 +115,15 @@ and object_parser () =
       (fun () ->
         let first = key_value () in
         let rest =
-          Parseff.many
-            (fun () ->
+          Parseff.many (fun () ->
               let _ = ws () in
               Parseff.literal ",";
               key_value ()
-            )
-            ()
+          )
         in
         first :: rest
       )
       (fun () -> [])
-      ()
   in
   let _ = ws () in
   Parseff.literal "}";
@@ -184,7 +176,6 @@ let test_of_string_alternation () =
         Parseff.literal "bar";
         "bar"
       )
-      ()
   in
   let src = Parseff.Source.of_string "bar" in
   match Parseff.parse_source src parser with
@@ -195,7 +186,7 @@ let test_of_string_alternation () =
 
 let test_of_string_many () =
   let src = Parseff.Source.of_string "123" in
-  match parse_source_with_pos src (Parseff.many Parseff.digit) with
+  match parse_source_with_pos src (fun () -> Parseff.many Parseff.digit) with
   | Ok (lst, pos) ->
       Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst;
       Alcotest.(check int) "pos" 3 pos
@@ -283,8 +274,9 @@ let test_of_string_end_of_input () =
 let test_of_string_sep_by () =
   let src = Parseff.Source.of_string "1,2,3" in
   match
-    Parseff.parse_source src
-      (Parseff.sep_by Parseff.digit (fun () -> Parseff.char ','))
+    Parseff.parse_source src (fun () ->
+        Parseff.sep_by Parseff.digit (fun () -> Parseff.char ',')
+    )
   with
   | Ok lst ->
       Alcotest.(check (list char)) "digits" [ '1'; '2'; '3' ] lst
@@ -389,7 +381,6 @@ let test_chunked_alternation () =
         Parseff.literal "foobaz";
         "foobaz"
       )
-      ()
   in
   let src = chunked_source ~chunk_size:2 "foobaz" in
   match Parseff.parse_source src parser with
@@ -453,7 +444,6 @@ let test_backtrack_across_chunk () =
         Parseff.literal "xyz";
         "abcxyz"
       )
-      ()
   in
   let src = chunked_source ~chunk_size:2 "abcxyz" in
   match Parseff.parse_source src parser with
@@ -475,7 +465,6 @@ let test_streaming_commit_blocks_backtrack () =
         Parseff.literal "abcd";
         "abcd"
       )
-      ()
   in
   let src = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in
   match Parseff.parse_source src parser with
@@ -500,7 +489,6 @@ let test_backtrack_window_exceeded () =
         Parseff.literal "abcd";
         "abcd"
       )
-      ()
   in
   let src = chunked_source ~chunk_size:2 "abcd" in
   match Parseff.parse_source ~backtrack_window:2 src parser with
@@ -520,7 +508,7 @@ let test_commit_releases_backtrack_window () =
       (fun () ->
         Parseff.literal "ab";
         Parseff.commit ();
-        let chars = Parseff.many (fun () -> Parseff.char 'c') () in
+        let chars = Parseff.many (fun () -> Parseff.char 'c') in
         Parseff.end_of_input ();
         List.length chars
       )
@@ -528,7 +516,6 @@ let test_commit_releases_backtrack_window () =
         Parseff.literal "ax";
         0
       )
-      ()
   in
   let src = chunked_source ~chunk_size:1 "abcccc" in
   match Parseff.parse_source ~backtrack_window:2 src parser with
@@ -540,10 +527,10 @@ let test_commit_releases_backtrack_window () =
 let test_or_right_branch_releases_window () =
   let input = String.make 5000 'a' in
   let src = chunked_source ~chunk_size:64 input in
-  let parser =
+  let parser () =
     Parseff.or_
       (fun () -> [ Parseff.char 'x' ])
-      (Parseff.many (fun () -> Parseff.char 'a'))
+      (fun () -> Parseff.many (fun () -> Parseff.char 'a'))
   in
   match Parseff.parse_source ~backtrack_window:100 src parser with
   | Ok l ->
@@ -572,7 +559,7 @@ let test_look_ahead_across_chunk () =
 
 let test_many_across_chunks () =
   let src = chunked_source ~chunk_size:1 "12345" in
-  match Parseff.parse_source src (Parseff.many Parseff.digit) with
+  match Parseff.parse_source src (fun () -> Parseff.many Parseff.digit) with
   | Ok lst ->
       Alcotest.(check (list char)) "digits" [ '1'; '2'; '3'; '4'; '5' ] lst
   | Error _ ->
@@ -618,8 +605,8 @@ let test_take_while_span_streaming () =
   let src = chunked_source ~chunk_size:2 "aaabbb" in
   match
     parse_source_with_pos src (fun () ->
-        let sp = Parseff.take_while_span (fun c -> c = 'a') in
-        Parseff.span_to_string sp
+        let sp = Parseff.Slice.take_while (fun c -> c = 'a') in
+        Parseff.Slice.to_string sp
     )
   with
   | Ok (s, pos) ->
@@ -854,7 +841,6 @@ let test_of_chunks_backtrack () =
         Parseff.literal "foobaz";
         "foobaz"
       )
-      ()
   in
   match Parseff.parse_source src parser with
   | Ok s ->
@@ -968,7 +954,6 @@ let test_bigstring_partial_and_backtrack () =
           Parseff.literal "foobaz";
           "foobaz"
         )
-        ()
     in
     (s, Parseff.position ())
   in
@@ -1281,12 +1266,11 @@ let runs () =
   Parseff.or_
     (fun () -> Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'c'))
     (fun () -> Parseff.take_while ~at_least:1 is_digit)
-    ()
 
 let opt_tail () =
   Parseff.recognize (fun () ->
       ignore (Parseff.char 'a');
-      ignore (Parseff.optional (fun () -> Parseff.literal "bc") ())
+      ignore (Parseff.optional (fun () -> Parseff.literal "bc"))
   )
 
 let windows = List.init 19 (fun i -> i + 2)
@@ -1426,10 +1410,10 @@ let test_token_in_or_and_many () =
     [
       Parseff.or_
         (then_semi (fun () -> Parseff.take_while ~at_least:1 is_digit))
-        (then_semi token) ();
+        (then_semi token);
     ]
   in
-  let many_parser () = Parseff.many (then_semi token) () in
+  let many_parser () = Parseff.many (then_semi token) in
   List.iter
     (fun window ->
       List.iter
@@ -1471,15 +1455,13 @@ let test_window_differential () =
   in
   let parsers p =
     [
-      (fun () -> Parseff.many (then_semi p) ());
+      (fun () -> Parseff.many (then_semi p));
       (fun () ->
-        Parseff.many
-          (fun () ->
-            Parseff.or_ (then_semi p)
-              (fun () -> String.make 1 (Parseff.any_char ()))
-              ()
-          )
-          ()
+        Parseff.many (fun () ->
+            Parseff.or_ (then_semi p) (fun () ->
+                String.make 1 (Parseff.any_char ())
+            )
+        )
       );
     ]
   in
@@ -1524,7 +1506,6 @@ let test_location_after_backtrack () =
         let l2 = Parseff.location () in
         Printf.sprintf "%d:%d %d:%d" l1.line l1.byte_col l2.line l2.byte_col
       )
-      ()
   in
   ( match Parseff.parse input parser with
   | Ok s ->
@@ -1554,25 +1535,25 @@ let sep_take_position_take () =
   (l, pos, rest)
 
 let sep_take_span_position_take () =
-  let l = Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower in
+  let l = Parseff.Slice.sep_by_take ~ws:is_space ~sep:',' is_lower in
   let pos = Parseff.position () in
   let rest = Parseff.take 3 in
-  (List.map Parseff.span_to_string l, pos, rest)
+  (List.map Parseff.Slice.to_string l, pos, rest)
 
 let test_sep_by_take_long_whitespace () =
   let input = "a" ^ String.make 5000 ' ' ^ "b" in
   check_matches_parse ~chunk_sizes:[ 4096 ] "sep_by_take" input
     sep_take_position_take;
-  check_matches_parse ~chunk_sizes:[ 4096 ] "sep_by_take_span" input
+  check_matches_parse ~chunk_sizes:[ 4096 ] "Slice.sep_by_take" input
     sep_take_span_position_take
 
 let test_sep_by_take_leading_whitespace () =
   let with_pos l = (l, Parseff.position ()) in
   let take () = with_pos (Parseff.sep_by_take ~ws:is_space ~sep:',' is_lower) in
-  let take_span () =
+  let slices () =
     with_pos
-      (List.map Parseff.span_to_string
-         (Parseff.sep_by_take_span ~ws:is_space ~sep:',' is_lower)
+      (List.map Parseff.Slice.to_string
+         (Parseff.Slice.sep_by_take ~ws:is_space ~sep:',' is_lower)
       )
   in
   let expect name input expected parser =
@@ -1586,9 +1567,9 @@ let test_sep_by_take_leading_whitespace () =
     check_matches_parse name input parser
   in
   expect "sep_by_take leading" "  a,b" ([], 0) take;
-  expect "sep_by_take_span leading" "  a,b" ([], 0) take_span;
+  expect "Slice.sep_by_take leading" "  a,b" ([], 0) slices;
   expect "sep_by_take around separator" "a , b" ([ "a"; "b" ], 5) take;
-  expect "sep_by_take_span around separator" "a , b" ([ "a"; "b" ], 5) take_span
+  expect "Slice.sep_by_take around separator" "a , b" ([ "a"; "b" ], 5) slices
 
 let test_utf8_truncated_at_eof () =
   let rejects name parser =
@@ -1602,9 +1583,9 @@ let test_utf8_truncated_at_eof () =
   rejects "Utf8.take_while" (fun () ->
       ignore (Parseff.Utf8.take_while (fun _ -> true))
   );
-  rejects "Utf8.take_while_span" (fun () ->
+  rejects "Utf8.Slice.take_while" (fun () ->
       ignore
-        (Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true)))
+        (Parseff.Slice.to_string (Parseff.Utf8.Slice.take_while (fun _ -> true)))
   );
   rejects "Utf8.skip_while" (fun () -> Parseff.Utf8.skip_while (fun _ -> true));
   List.iter
@@ -1682,7 +1663,6 @@ let test_streaming_matches_parse () =
               Parseff.literal "aby";
               "aby"
             )
-            ()
       );
       ( "skip_while then char",
         "   ;x",
@@ -1789,7 +1769,7 @@ let test_error_position_after_compaction () =
       let r =
         Parseff.parse_source ~backtrack_window:64
           (chunked_source ~chunk_size input) (fun () ->
-            ignore (Parseff.many (fun () -> Parseff.literal item) ());
+            ignore (Parseff.many (fun () -> Parseff.literal item));
             Parseff.end_of_input ()
         )
       in
@@ -1805,7 +1785,7 @@ let test_error_at_end_of_input_after_compaction () =
   let r =
     Parseff.parse_source ~backtrack_window:64
       (chunked_source ~chunk_size:100 input) (fun () ->
-        ignore (Parseff.many (fun () -> Parseff.char 'a') ());
+        ignore (Parseff.many (fun () -> Parseff.char 'a'));
         ignore (Parseff.char 'b')
     )
   in
@@ -1817,10 +1797,9 @@ let cut_window_parser ~cut () =
     (fun () ->
       Parseff.literal "x";
       if cut then Parseff.cut ();
-      List.length (Parseff.many (fun () -> Parseff.char 'a') ())
+      List.length (Parseff.many (fun () -> Parseff.char 'a'))
     )
     (fun () -> 0)
-    ()
 
 let test_cut_releases_buffer () =
   let input = "x" ^ String.make 2000 'a' in
@@ -1848,7 +1827,7 @@ let test_context_in_streaming () =
   let input = String.concat "" (List.init 3000 (fun _ -> "ab")) ^ "ax" in
   let parser () =
     Parseff.context "items" (fun () ->
-        ignore (Parseff.many (fun () -> Parseff.literal "ab") ());
+        ignore (Parseff.many (fun () -> Parseff.literal "ab"));
         Parseff.end_of_input ()
     )
   in
@@ -1900,7 +1879,7 @@ let test_error_does_not_read_more_input () =
 let test_excerpt_does_not_start_inside_a_code_point () =
   let input = "\xc3\xa9\xc3\xa9\xc3\xa9x" in
   let parser () =
-    ignore (Parseff.many (fun () -> Parseff.Utf8.char (Uchar.of_int 0xe9)) ());
+    ignore (Parseff.many (fun () -> Parseff.Utf8.char (Uchar.of_int 0xe9)));
     Parseff.char 'y'
   in
   match
@@ -1998,7 +1977,6 @@ let test_rest_of_split_chunk () =
           Parseff.literal "abc";
           "abc"
         )
-        ()
     in
     a ^ "|" ^ all_chars ()
   in
@@ -2017,7 +1995,6 @@ let test_split_chunk_keeps_the_window () =
         Parseff.literal "abcdefgh";
         "abcdefgh"
       )
-      ()
   in
   match
     Parseff.parse_source ~backtrack_window:4 (chunks_of [ "abcdefgh" ]) parser
@@ -2051,7 +2028,7 @@ let test_none_is_final () =
   let parser () =
     Parseff.literal "ab";
     let s = "ab" in
-    let c = Parseff.optional (fun () -> Parseff.char 'c') () in
+    let c = Parseff.optional (fun () -> Parseff.char 'c') in
     Parseff.end_of_input ();
     (s, c)
   in
@@ -2070,7 +2047,7 @@ let test_none_at_once () =
     )
   in
   let parser () =
-    let c = Parseff.optional Parseff.any_char () in
+    let c = Parseff.optional Parseff.any_char in
     Parseff.end_of_input ();
     c
   in
@@ -2178,7 +2155,6 @@ let test_chunk_function_suspends () =
       (Parseff.sep_by
          (fun () -> Parseff.take_while ~at_least:1 (fun c -> c <> ','))
          (fun () -> Parseff.char ',')
-         ()
       )
   in
   let a = ref (Ok "unset") and b = ref (Ok "unset") in
@@ -2233,7 +2209,6 @@ let test_backtrack_across_chunk_borders () =
         Parseff.literal "abcde";
         "abcde"
       )
-      ()
   in
   List.iter
     (fun chunks ->
@@ -2453,7 +2428,7 @@ let () =
           test_case "many across chunks" `Quick test_many_across_chunks;
           test_case "deep nesting streaming" `Quick test_deep_nesting_streaming;
           test_case "literal failure" `Quick test_literal_failure_streaming;
-          test_case "take_while_span" `Quick test_take_while_span_streaming;
+          test_case "Slice.take_while" `Quick test_take_while_span_streaming;
           test_case "parse_source_consume_all requires eof" `Quick
             test_parse_source_consume_all_requires_eof;
           test_case "parse_source_consume_all error diagnostics" `Quick

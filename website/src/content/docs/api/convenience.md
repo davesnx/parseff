@@ -57,7 +57,7 @@ val alphanum : unit -> char
 ```ocaml
 let username () =
   let first = Parseff.letter () in
-  let rest = Parseff.many Parseff.alphanum () in
+  let rest = Parseff.many Parseff.alphanum in
   String.make 1 first ^ String.of_seq (List.to_seq rest)
 
 (* Matches "user123" -> "user123" *)
@@ -152,8 +152,7 @@ let quantity () =
         Parseff.optional
           (fun () ->
             let _ = Parseff.char '.' in
-            Parseff.take_while ~at_least:1 ~label:"digit" is_digit)
-          ())
+            Parseff.take_while ~at_least:1 ~label:"digit" is_digit))
   in
   let unit_ = Parseff.take_while ~at_least:1 ~label:"unit" is_letter in
   (float_of_string text, unit_)
@@ -223,7 +222,6 @@ let words () =
         (fun c -> not (Parseff.is_whitespace c))
         ~label:"word")
     (fun () -> Parseff.whitespace ~at_least:1 ())
-    ()
 
 (* Matches "hello world" -> ["hello"; "world"] *)
 (* Fails on "helloworld" (no whitespace separator) *)
@@ -249,7 +247,6 @@ let flexible_list () =
         Parseff.skip_whitespace ();
         n)
       (fun () -> Parseff.char ',')
-      ()
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in

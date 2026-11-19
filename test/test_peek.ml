@@ -71,7 +71,6 @@ let test_failure_inside_or () =
           literal "y";
           "y"
         )
-        ()
   )
 
 let test_failure_is_reported () =
@@ -91,7 +90,6 @@ let test_failure_is_reported () =
           literal "y";
           "y"
         )
-        ()
   )
 
 let test_probe_failures_forgotten () =
@@ -105,7 +103,6 @@ let test_probe_failures_forgotten () =
         literal "a";
         "a"
       )
-      ()
   in
   check_all "peek_with" Fun.id "abx" "Error at 0: expected \"z\", found 'abx'"
     (fun () ->
@@ -124,7 +121,7 @@ let test_earlier_failure_kept () =
   check_all "failure before the peek stays" Fun.id "ab"
     "Error at 1: expected \"c\" or \"x\", found 'b'" (fun () ->
       ignore (char 'a');
-      ignore (optional (fun () -> literal "x") ());
+      ignore (optional (fun () -> literal "x"));
       ignore (peek_with (fun () -> char 'b'));
       literal "c";
       "c"
@@ -178,14 +175,12 @@ let test_ref_undone () =
   check_all "Ref.set in a failing peek" string_of_int "b" "Ok 0" (fun () ->
       let cell = Ref.create 0 in
       ignore
-        (optional
-           (fun () ->
+        (optional (fun () ->
              peek_with (fun () ->
                  Ref.set cell 1;
                  char 'a'
              )
-           )
-           ()
+         )
         );
       Ref.get cell
   )
@@ -209,7 +204,6 @@ let test_commit_stops () =
           literal "a";
           "a"
         )
-        ()
   )
 
 let test_cut_stops () =
@@ -231,7 +225,6 @@ let test_cut_stops () =
           literal "a";
           "a"
         )
-        ()
   )
 
 let test_nested () =
@@ -271,7 +264,7 @@ let test_exception_passes () =
               with Exit -> seen := position ()
             );
             let n = Ref.get cell in
-            ignore (or_ (fun () -> literal "x") (fun () -> literal "ab") ());
+            ignore (or_ (fun () -> literal "x") (fun () -> literal "ab"));
             n
         )
       in
@@ -354,7 +347,7 @@ let test_stop_after_backtrack () =
   check_all "stop stays valid after a failed branch" string_of_int "abc" "Ok 2"
     (fun () ->
       let _, stop = peek_with (fun () -> literal "ab") in
-      ignore (optional (fun () -> literal "abx") ());
+      ignore (optional (fun () -> literal "abx"));
       skip_to stop;
       position ()
   )
@@ -416,7 +409,6 @@ let test_failure_after_consuming () =
           literal "abc";
           "abc"
         )
-        ()
   )
 
 let test_rule_in_token_loop () =
@@ -461,7 +453,6 @@ let test_rule_in_token_loop () =
               "?"
             )
             (fun () -> fst (peek_with word))
-            ()
         in
         let after_cut =
           or_
@@ -477,7 +468,6 @@ let test_rule_in_token_loop () =
               "?"
             )
             (fun () -> fst (peek_with word))
-            ()
         in
         let after_failure =
           or_
@@ -491,7 +481,6 @@ let test_rule_in_token_loop () =
                 )
             )
             (fun () -> fst (peek_with word))
-            ()
         in
         ( try
             ignore

@@ -2,7 +2,7 @@
 
 # Parseff
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy slice APIs and fused operations.
 
 [Documentation](https://davesnx.github.io/parseff/)
 
@@ -20,7 +20,7 @@ $ opam install parseff -y
 type Parseff.custom_error += Out_of_range of int
 
 let number () =
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
@@ -62,7 +62,7 @@ address:1:11: [error] expected digit, found end of input
 - **Minimal dependency footprint** only `uucp` for Unicode support
 - [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)
 - **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](https://davesnx.github.io/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
-- [**Zero-copy span APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing
+- [**Zero-copy slice APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](https://davesnx.github.io/parseff/api/zero-copy/) for hot paths
 
 ## Performance

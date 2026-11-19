@@ -35,7 +35,7 @@ let frame () =
         | 0 ->
             [ ("data", Parseff.take_while (fun _ -> true)) ]
         | 1 ->
-            Parseff.many ~at_most:4 field ()
+            Parseff.many ~at_most:4 field
         | 2 ->
             let n = Parseff.LE.any_uint24 () in
             [ ("window", string_of_int n) ]
@@ -45,7 +45,7 @@ let frame () =
   in
   (kind, stream, payload)
 
-let frames () = Parseff.many frame ()
+let frames () = Parseff.many frame
 
 let words () = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z')
 
@@ -60,10 +60,9 @@ let backtracking_item seal () =
       c
     )
     (fun () ->
-      ignore (Parseff.optional words ());
+      ignore (Parseff.optional words);
       c
     )
-    ()
 
 let sealed_frame () =
   let len = Parseff.any_uint8 () in
@@ -73,7 +72,9 @@ let sealed_frame () =
     else
       Parseff.cut
   in
-  let v = Parseff.within len (Parseff.many (backtracking_item seal)) in
+  let v =
+    Parseff.within len (fun () -> Parseff.many (backtracking_item seal))
+  in
   ignore (Parseff.take_while (fun _ -> true));
   v
 

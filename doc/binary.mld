@@ -153,7 +153,7 @@ let payload () =
 let chunk_type () = Parseff.take 4
 ]}
 
-{!val:Parseff.take_span} returns a span instead, so that {!val:Parseff.parse}
+{!val:Parseff.Slice.take} returns a slice instead, so that {!val:Parseff.parse}
 does not copy the bytes. See {{!page-"zero-copy"}Zero-copy API}.
 
 {1 Mixing with text primitives}
@@ -237,7 +237,7 @@ advances the position by the number of bytes it reads:
   {!val:Parseff.BE.any_float}: 4 bytes
 - {!val:Parseff.BE.any_int64}, {!val:Parseff.BE.any_double}: 8 bytes
 - {!val:Parseff.any_varint}: 1 to 9 bytes
-- {!val:Parseff.take}, {!val:Parseff.take_span}: [n] bytes
+- {!val:Parseff.take}, {!val:Parseff.Slice.take}: [n] bytes
 
 {1 Performance}
 

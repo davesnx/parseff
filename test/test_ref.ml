@@ -11,14 +11,14 @@ let test_ref_kept_after_backtrack () =
   in
   let after_or =
     ok_exn
-      (parse ~consume:`Partial ~diagnostics:d "b"
-         (or_
-            (fun () ->
-              bump ();
-              char 'a'
-            )
-            (fun () -> char 'b')
-         )
+      (parse ~consume:`Partial ~diagnostics:d "b" (fun () ->
+           or_
+             (fun () ->
+               bump ();
+               char 'a'
+             )
+             (fun () -> char 'b')
+       )
       )
   in
   Alcotest.(check char) "or_ took right" 'b' after_or;
@@ -27,24 +27,24 @@ let test_ref_kept_after_backtrack () =
   r := 0;
   ignore
     (ok_exn
-       (parse ~consume:`Partial "aab"
-          (many (fun () ->
-               bump ();
-               char 'a'
-           )
-          )
+       (parse ~consume:`Partial "aab" (fun () ->
+            many (fun () ->
+                bump ();
+                char 'a'
+            )
+        )
        )
     );
   Alcotest.(check int) "ref kept after many" 3 !r;
   r := 0;
   ignore
     (ok_exn
-       (parse ~consume:`Partial "b"
-          (optional (fun () ->
-               bump ();
-               char 'a'
-           )
-          )
+       (parse ~consume:`Partial "b" (fun () ->
+            optional (fun () ->
+                bump ();
+                char 'a'
+            )
+        )
        )
     );
   Alcotest.(check int) "ref kept after optional" 1 !r;
@@ -65,19 +65,19 @@ let test_or_rolls_back () =
   let c = Ref.create 0 in
   let v =
     ok_exn
-      (parse "b"
-         (or_
-            (fun () ->
-              Ref.set c 1;
-              let _ = char 'a' in
-              -1
-            )
-            (fun () ->
-              let seen = Ref.get c in
-              let _ = char 'b' in
-              seen
-            )
-         )
+      (parse "b" (fun () ->
+           or_
+             (fun () ->
+               Ref.set c 1;
+               let _ = char 'a' in
+               -1
+             )
+             (fun () ->
+               let seen = Ref.get c in
+               let _ = char 'b' in
+               seen
+             )
+       )
       )
   in
   Alcotest.(check int) "right branch sees the old value" 0 v;
@@ -133,7 +133,6 @@ let test_one_of () =
                   char 'c'
                 );
               ]
-              ()
            )
      )
     )
@@ -142,24 +141,20 @@ let test_many () =
   check_final "many" "aab" "ok" 2
     (with_cell (fun c () ->
          ignore
-           (many
-              (fun () ->
+           (many (fun () ->
                 incr_cell c;
                 char 'a'
-              )
-              ()
+            )
            )
      )
     );
   check_final "many at_least" "aab" "ok" 2
     (with_cell (fun c () ->
          ignore
-           (many ~at_least:1
-              (fun () ->
+           (many ~at_least:1 (fun () ->
                 incr_cell c;
                 char 'a'
-              )
-              ()
+            )
            )
      )
     )
@@ -168,12 +163,10 @@ let test_optional () =
   check_final "optional" "b" "ok" 0
     (with_cell (fun c () ->
          ignore
-           (optional
-              (fun () ->
+           (optional (fun () ->
                 Ref.set c 1;
                 char 'a'
-              )
-              ()
+            )
            )
      )
     )
@@ -192,14 +185,12 @@ let test_look_ahead () =
   check_final "look_ahead failure" "b" "ok" 0
     (with_cell (fun c () ->
          ignore
-           (optional
-              (fun () ->
+           (optional (fun () ->
                 look_ahead (fun () ->
                     Ref.set c 1;
                     char 'a'
                 )
-              )
-              ()
+            )
            )
      )
     )
@@ -214,7 +205,6 @@ let test_sep_by () =
                 digit ()
               )
               (fun () -> char ',')
-              ()
            )
      )
     );
@@ -227,7 +217,6 @@ let test_sep_by () =
                 digit ()
               )
               (fun () -> char ',')
-              ()
            )
      )
     )
@@ -236,13 +225,11 @@ let test_fold_left () =
   check_final "fold_left" "1+2+" "ok" 1
     (with_cell (fun c () ->
          ignore
-           (fold_left integer
-              (fun () ->
+           (fold_left integer (fun () ->
                 incr_cell c;
                 let _ = char '+' in
                 ( + )
-              )
-              ()
+            )
            )
      )
     )
@@ -257,14 +244,13 @@ let test_kept_on_success () =
                 char 'a'
               )
               (fun () -> char 'b')
-              ()
            )
      )
     );
   check_final "set outside any branch" "a" "ok" 1
     (with_cell (fun c () ->
          Ref.set c 1;
-         ignore (optional (fun () -> char 'b') ());
+         ignore (optional (fun () -> char 'b'));
          ignore (char 'a')
      )
     )
@@ -281,24 +267,22 @@ let test_kept_after_commit () =
                 char 'b'
               )
               (fun () -> char 'a')
-              ()
            )
      )
     );
   check_final "commit seals one frame" "ac" "ok" 0
     (with_cell (fun c () ->
          ignore
-           (optional
-              (or_
-                 (fun () ->
-                   Ref.set c 1;
-                   let _ = char 'a' in
-                   commit ();
-                   char 'b'
-                 )
-                 (fun () -> char 'a')
-              )
-              ()
+           (optional (fun () ->
+                or_
+                  (fun () ->
+                    Ref.set c 1;
+                    let _ = char 'a' in
+                    commit ();
+                    char 'b'
+                  )
+                  (fun () -> char 'a')
+            )
            )
      )
     )
@@ -307,16 +291,14 @@ let test_kept_after_cut () =
   check_final "cut" "ac" "error expected 'b', found 'c'" 1
     (with_cell (fun c () ->
          ignore
-           (optional
-              (fun () ->
+           (optional (fun () ->
                 context "item" (fun () ->
                     Ref.set c 1;
                     let _ = char 'a' in
                     cut ();
                     char 'b'
                 )
-              )
-              ()
+            )
            )
      )
     )
@@ -336,10 +318,8 @@ let test_commit_after_set () =
                 `Inner_left
               )
               (fun () -> `Inner_right)
-              ()
           )
           (fun () -> `Outer_right)
-          ()
     )
   in
   match result with
@@ -372,7 +352,6 @@ let test_nested () =
                     seen := Ref.get c :: !seen;
                     char 'x'
                   )
-                  ()
                );
              char 'z'
            )
@@ -380,7 +359,6 @@ let test_nested () =
              seen := Ref.get c :: !seen;
              char 'a'
            )
-           ()
         )
     in
     (c, parser)
@@ -398,13 +376,11 @@ let test_two_cells () =
     let parser () =
       Ref.set names [ "kept" ];
       ignore
-        (optional
-           (fun () ->
+        (optional (fun () ->
              Ref.set names ("dropped" :: Ref.get names);
              incr_cell count;
              char 'a'
-           )
-           ()
+         )
         );
       incr_cell count
     in
@@ -418,24 +394,22 @@ let test_across_parses () =
   let set_then_backtrack v () =
     Ref.set c v;
     ignore
-      (optional
-         (fun () ->
+      (optional (fun () ->
            Ref.set c (v * 10);
            char 'a'
-         )
-         ()
+       )
       )
   in
   ignore (ok_exn (parse "" (set_then_backtrack 5)));
   Alcotest.(check int) "kept after first parse" 5 (Ref.get c);
   ignore
     (ok_exn
-       (parse ""
-          (optional (fun () ->
-               Ref.set c 7;
-               char 'a'
-           )
-          )
+       (parse "" (fun () ->
+            optional (fun () ->
+                Ref.set c 7;
+                char 'a'
+            )
+        )
        )
     );
   Alcotest.(check int) "second parse restores the first value" 5 (Ref.get c)
@@ -531,7 +505,6 @@ let test_set_while_parse_suspended () =
         char 'a'
       )
       (fun () -> char 'b')
-      ()
   in
   let suspended () =
     result :=
@@ -584,7 +557,6 @@ let test_parse_continues_after_read_raises () =
         char 'a'
       )
       (fun () -> char 'b')
-      ()
   in
   Alcotest.(check char)
     "parse after the exception" 'b'
@@ -604,17 +576,14 @@ let live_words_after_many n =
   let c = Ref.create 0 in
   let parser () =
     let items =
-      many
-        (fun () ->
+      many (fun () ->
           or_
             (fun () ->
               Ref.set c (Ref.get c + 1);
               char 'a'
             )
             (fun () -> char 'b')
-            ()
-        )
-        ()
+      )
     in
     Gc.full_major ();
     let live = (Gc.stat ()).live_words in
@@ -632,8 +601,7 @@ let test_many_after_dropped_log () =
   check_final "many after dropped log" "ax" "ok" 1
     (with_cell (fun c () ->
          ignore
-           (many
-              (fun () ->
+           (many (fun () ->
                 or_
                   (fun () ->
                     incr_cell c;
@@ -643,9 +611,7 @@ let test_many_after_dropped_log () =
                     Ref.set c 100;
                     char 'z'
                   )
-                  ()
-              )
-              ()
+            )
            )
      )
     )
@@ -695,10 +661,10 @@ let test_escaping_exceptions () =
   let check name wrap raise_it expected =
     Alcotest.(check (triple string int int)) name expected (run wrap raise_it)
   in
-  let in_or p = or_ p (fun () -> ()) () in
-  let in_optional p = ignore (optional p ()) in
-  let in_many p = ignore (many p ()) in
-  let in_sep_by p = ignore (sep_by p (fun () -> char ',') ()) in
+  let in_or p = or_ p (fun () -> ()) in
+  let in_optional p = ignore (optional p) in
+  let in_many p = ignore (many p) in
+  let in_sep_by p = ignore (sep_by p (fun () -> char ',')) in
   let in_fold_left p =
     fold_left
       (fun () -> ())
@@ -706,7 +672,6 @@ let test_escaping_exceptions () =
         p ();
         fun () () -> ()
       )
-      ()
   in
   check "or_ Exit" in_or raise_exit ("Exit", 1, 1);
   check "or_ fail" in_or call_fail ("error stop", 0, 0);

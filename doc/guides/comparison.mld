@@ -36,9 +36,9 @@ Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
 Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 v}
 
-{b Optimized} uses [sep_by_take_span] plus [List.map] over zero-copy spans.
+{b Optimized} uses [Slice.sep_by_take] plus [List.map] over zero-copy slices.
 Scanning avoids per-element [String.sub] allocation during parsing, while value
-conversion still uses the stdlib [float_of_string] via [Parseff.span_to_string].
+conversion still uses the stdlib [float_of_string] via [Parseff.Slice.to_string].
 
 {b Generic} uses the ordinary [char], [skip_while], [take_while], and [sep_by]
 combinators with the same [float_of_string] conversion as [Angstrom (generic)],
@@ -79,7 +79,7 @@ loop with character predicates.
 calling [String.sub]. Angstrom's [take_while1] allocates a
 new string per call.
 
-{b Fused operations.} {!val:Parseff.sep_by_take_span} parses an entire separated
+{b Fused operations.} {!val:Parseff.Slice.sep_by_take} parses an entire separated
 list in one fused operation. Angstrom's equivalent chains [sep_by], [char],
 [skip_while], and [take_while1] through monadic operators, each creating closures.
 
@@ -126,7 +126,6 @@ threads results through [>>=] and [return].
 let value () =
   Parseff.one_of
     [ null_parser; bool_parser; number_parser; string_parser ]
-    ()
 ]}
 
 {b Angstrom:}
@@ -152,7 +151,6 @@ let numbers () =
       Parseff.skip_whitespace ();
       int_of_string s)
     (fun () -> Parseff.char ',')
-    ()
 ]}
 
 {b Angstrom:}
@@ -182,7 +180,6 @@ let rec expr () =
       let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
       fun a b -> a + b)
-    ()
 
 and term () =
   Parseff.fold_left
@@ -192,7 +189,6 @@ and term () =
       let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
       fun a b -> a * b)
-    ()
 
 and factor () =
   Parseff.or_
@@ -202,7 +198,6 @@ and factor () =
       let _ = Parseff.char ')' in
       e)
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
-    ()
 ]}
 
 {b Angstrom:}
@@ -249,7 +244,7 @@ monadic/applicative operators.
     {td Automatic via [<|>]}}
   {tr
     {td Zero-copy}
-    {td [span] type + fused ops}
+    {td [Slice.t] type + fused ops}
     {td Limited via [Unsafe] / bigstring slices}}
   {tr
     {td Recursion safety}

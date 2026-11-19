@@ -28,7 +28,7 @@ module Parseff_JSON = struct
       let _ = Parseff.char ',' in
       Parseff.skip_whitespace ()
     in
-    let elements = Parseff.sep_by number comma () in
+    let elements = Parseff.sep_by number comma in
     Parseff.skip_whitespace ();
     let _ = Parseff.char ']' in
     elements
@@ -42,8 +42,8 @@ module Parseff_JSON = struct
 end
 
 module Parseff_JSON_Optimized = struct
-  let[@inline always] float_of_span (s : Parseff.span) =
-    float_of_string (Parseff.span_to_string s)
+  let[@inline always] float_of_span (s : Parseff.Slice.t) =
+    float_of_string (Parseff.Slice.to_string s)
 
   let[@inline always] is_num c = (c >= '0' && c <= '9') || c = '-' || c = '.'
 
@@ -51,7 +51,7 @@ module Parseff_JSON_Optimized = struct
     Parseff.skip_while Parseff.is_whitespace;
     ignore (Parseff.char '[');
     let spans =
-      Parseff.sep_by_take_span ~ws:Parseff.is_whitespace ~sep:',' is_num
+      Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_num
     in
     let elements = List.map float_of_span spans in
     Parseff.skip_while Parseff.is_whitespace;

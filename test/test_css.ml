@@ -31,7 +31,7 @@ let rule () =
   let _ = ws_may () in
   Parseff.literal "{";
   let _ = ws_may () in
-  let declarations = Parseff.many declaration () in
+  let declarations = Parseff.many declaration in
   let _ = ws_may () in
   Parseff.literal "}";
   { selector; declarations }

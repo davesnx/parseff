@@ -19,10 +19,10 @@ These combinators handle patterns that repeat: lists, separated values, delimite
 `Parseff.many` applies a parser zero or more times. Returns a list of results. Always succeeds (returns `[]` if the parser fails immediately).
 
 ```ocaml
-val many : (unit -> 'a) -> unit -> 'a list
+val many : (unit -> 'a) -> 'a list
 ```
 ```ocaml
-let digits () = Parseff.many Parseff.digit ()
+let digits () = Parseff.many Parseff.digit
 (* "123"  -> ['1'; '2'; '3'] *)
 (* ""     -> []              *)
 (* "abc"  -> []              *)
@@ -33,10 +33,10 @@ let digits () = Parseff.many Parseff.digit ()
 `Parseff.many` with `~at_least:1` requires at least one match. Fails if the parser doesn't succeed at least once.
 
 ```ocaml
-val many : ?at_least:int -> (unit -> 'a) -> unit -> 'a list
+val many : ?at_least:int -> (unit -> 'a) -> 'a list
 ```
 ```ocaml
-let digits1 () = Parseff.many ~at_least:1 Parseff.digit ()
+let digits1 () = Parseff.many ~at_least:1 Parseff.digit
 (* "123" -> ['1'; '2'; '3'] *)
 (* ""    -> Error      *)
 (* "abc" -> Error      *)
@@ -47,10 +47,10 @@ let digits1 () = Parseff.many ~at_least:1 Parseff.digit ()
 `Parseff.count` applies a parser exactly `n` times. Fails if the parser doesn't match `n` times.
 
 ```ocaml
-val count : int -> (unit -> 'a) -> unit -> 'a list
+val count : int -> (unit -> 'a) -> 'a list
 ```
 ```ocaml
-let three_digits () = Parseff.count 3 Parseff.digit ()
+let three_digits () = Parseff.count 3 Parseff.digit
 (* "123"  -> ['1'; '2'; '3'] *)
 (* "12"   -> Error           *)
 ```
@@ -66,9 +66,9 @@ let hex_digit () =
 (* Parse #RRGGBB color *)
 let hex_color () =
   let _ = Parseff.char '#' in
-  let r = Parseff.count 2 hex_digit () in
-  let g = Parseff.count 2 hex_digit () in
-  let b = Parseff.count 2 hex_digit () in
+  let r = Parseff.count 2 hex_digit in
+  let g = Parseff.count 2 hex_digit in
+  let b = Parseff.count 2 hex_digit in
   (r, g, b)
 (* "#ff00aa" -> (['f';'f'], ['0';'0'], ['a';'a']) *)
 ```
@@ -86,14 +86,13 @@ A loop ends when its parser fails. That failure is recorded, so it can become th
 `Parseff.sep_by` parses zero or more elements separated by a separator. The separator's return value is discarded. Always succeeds.
 
 ```ocaml
-val sep_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val sep_by : (unit -> 'a) -> (unit -> 'b) -> 'a list
 ```
 ```ocaml
 let csv_line () =
   Parseff.sep_by
     (fun () -> Parseff.take_while (fun c -> c <> ',' && c <> '\n'))
     (fun () -> Parseff.char ',')
-    ()
 (* "a,b,c" -> ["a"; "b"; "c"] *)
 (* ""      -> [""]             *)
 ```
@@ -103,7 +102,7 @@ let csv_line () =
 `Parseff.sep_by` with `~at_least:1` requires at least one element.
 
 ```ocaml
-val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 ```
 ```ocaml
 let csv_line1 () =
@@ -113,7 +112,6 @@ let csv_line1 () =
         (fun c -> c <> ',' && c <> '\n')
         ~label:"value")
     (fun () -> Parseff.char ',')
-    ()
 (* "a,b,c" -> ["a"; "b"; "c"] *)
 (* "a"     -> ["a"]           *)
 (* ""      -> Error            *)
@@ -127,7 +125,7 @@ let csv_line1 () =
 `Parseff.between` parses an opening delimiter, then the body, then a closing delimiter. Returns the body's value.
 
 ```ocaml
-val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> unit -> 'c
+val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
 ```
 ```ocaml
 let parens p =
@@ -143,7 +141,6 @@ let parenthesized_digit () =
       let n = Char.code (Parseff.digit ()) - Char.code '0' in
       Parseff.skip_whitespace ();
       n)
-    ()
 (* "(4)"   -> 4 *)
 (* "( 4 )" -> 4 *)
 (* "(42)"  -> Error (only parses one digit) *)
@@ -169,7 +166,7 @@ let brackets p =
 `Parseff.end_by` parses zero or more elements, each followed by a separator. Unlike `Parseff.sep_by`, the separator comes **after** each element (including the last).
 
 ```ocaml
-val end_by : (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val end_by : (unit -> 'a) -> (unit -> 'b) -> 'a list
 ```
 ```ocaml
 (* Parse semicolon-terminated statements *)
@@ -180,7 +177,6 @@ let statements () =
         (fun c -> c <> ';' && c <> '\n')
         ~label:"statement")
     (fun () -> Parseff.char ';')
-    ()
 (* "a;b;c;" -> ["a"; "b"; "c"] *)
 (* ""       -> []               *)
 ```
@@ -190,7 +186,7 @@ let statements () =
 `Parseff.end_by` with `~at_least:1` requires at least one element.
 
 ```ocaml
-val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> unit -> 'a list
+val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 ```
 
 ## Operator chains
@@ -203,7 +199,7 @@ These combinators parse sequences of values joined by operators, handling associ
 `Parseff.fold_left` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. If no elements match, use `~otherwise` to provide a fallback value.
 
 ```ocaml
-val fold_left : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 ```
 ```ocaml
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
@@ -213,7 +209,6 @@ let subtraction () =
     (fun () ->
       let _ = Parseff.char '-' in
       fun a b -> a - b)
-    ()
 (* "1-2-3" -> -4  (left-associative: (1-2)-3) *)
 ```
 With `~otherwise`, returns the fallback if zero elements match. Only a failure of the first element gives the fallback: a later failure after a `Parseff.commit` or `Parseff.cut` is the failure of the fold.
@@ -226,7 +221,6 @@ let maybe_subtract () =
       let _ = Parseff.char '-' in
       fun a b -> a - b)
     ~otherwise:0
-    ()
 (* "1-2" -> -1 *)
 (* ""    -> 0  *)
 ```
@@ -236,7 +230,7 @@ let maybe_subtract () =
 `Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Use `~otherwise` to provide a fallback value when no elements match; as for `fold_left`, only a failure of the first element gives it. The loop stops after an operator and element that together consume no input, and that pair is not applied.
 
 ```ocaml
-val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+val fold_right : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 ```
 ```ocaml
 (* Parse "2^3^2" as 2^(3^2) = 512 *)
@@ -246,7 +240,6 @@ let power () =
     (fun () ->
       let _ = Parseff.char '^' in
       fun a b -> int_of_float (float_of_int a ** float_of_int b))
-    ()
 (* "2^3^2" -> 512  (right-associative: 2^(3^2)) *)
 ```
 
@@ -260,7 +253,6 @@ As in `fold_left`, the loop stops after an infix operator and its right operand 
 val expression :
   operand:(unit -> 'a) ->
   ('a, [< `Infix | `Prefix | `Postfix ]) operator list list ->
-  unit ->
   'a
 ```
 
@@ -271,9 +263,8 @@ val expression :
 ```ocaml
 val precedence :
   ?min:int ->
-  operand:(unit -> 'a) ->
   operator:(unit -> (int * ('a, [< `Infix | `Postfix ]) operator) option) ->
-  unit ->
+  (unit -> 'a) ->
   'a
 ```
 
@@ -281,7 +272,7 @@ val precedence :
 
 ```ocaml
 let integer () =
-  let sign = Parseff.optional (fun () -> Parseff.char '-') () in
+  let sign = Parseff.optional (fun () -> Parseff.char '-') in
   let digits =
     Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
   in
@@ -299,7 +290,6 @@ let json_array () =
         Parseff.skip_whitespace ();
         n)
       (fun () -> Parseff.char ',')
-      ()
   in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ']' in

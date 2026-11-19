@@ -16,7 +16,6 @@ let simple_list () =
         atom ()
       )
       (fun () -> Parseff.skip_whitespace ())
-      ()
   in
   Parseff.skip_whitespace ();
   Parseff.literal ")";

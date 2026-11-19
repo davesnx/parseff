@@ -1181,7 +1181,7 @@ let start () =
   Dynarray.clear lines;
   Dynarray.add_last lines 0;
   first_line := 1;
-  ignore (Parseff.optional (fun () -> Parseff.literal "\xEF\xBB\xBF") ());
+  ignore (Parseff.optional (fun () -> Parseff.literal "\xEF\xBB\xBF"));
   ( match Parseff.peek_char () with
   | Some '#' ->
       Parseff.skip_while (fun c -> c <> '\n')

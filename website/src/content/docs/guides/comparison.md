@@ -34,7 +34,7 @@ Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
 Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 ```
 
-**Optimized** uses `sep_by_take_span` plus `List.map` over zero-copy spans. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.span_to_string`.
+**Optimized** uses `Slice.sep_by_take` plus `List.map` over zero-copy slices. Scanning avoids per-element `String.sub` allocation during parsing, while value conversion still uses the stdlib `float_of_string` via `Parseff.Slice.to_string`.
 
 **Generic** uses the ordinary `char`, `skip_while`, `take_while`, and `sep_by` combinators with the same `float_of_string` conversion as `Angstrom (generic)`, so it reflects the baseline direct-style API.
 
@@ -62,7 +62,7 @@ On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best result
 
 **Fewer allocations.** Span-based APIs return slices of the input string without calling `String.sub`. Angstrom's `take_while1` allocates a new string per call.
 
-**Fused operations.** `Parseff.sep_by_take_span` parses an entire separated list in one fused operation. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
+**Fused operations.** `Parseff.Slice.sep_by_take` parses an entire separated list in one fused operation. Angstrom's equivalent chains `sep_by`, `char`, `skip_while`, and `take_while1` through monadic operators, each creating closures.
 
 **No monadic overhead.** Parsers are direct function calls. No CPS, no closure allocation for sequencing.
 
@@ -104,7 +104,6 @@ Both do the same thing. Parseff reads like sequential OCaml code. Angstrom threa
 let value () =
   Parseff.one_of
     [ null_parser; bool_parser; number_parser; string_parser ]
-    ()
 ```
 
 **Angstrom:**
@@ -129,7 +128,6 @@ let numbers () =
       Parseff.skip_whitespace ();
       int_of_string s)
     (fun () -> Parseff.char ',')
-    ()
 ```
 
 **Angstrom:**
@@ -157,7 +155,6 @@ let rec expr () =
       let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
       fun a b -> a + b)
-    ()
 
 and term () =
   Parseff.fold_left
@@ -167,7 +164,6 @@ and term () =
       let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
       fun a b -> a * b)
-    ()
 
 and factor () =
   Parseff.or_
@@ -177,7 +173,6 @@ and factor () =
       let _ = Parseff.char ')' in
       e)
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
-    ()
 ```
 
 **Angstrom:**
@@ -206,7 +201,7 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | API style | Imperative (direct style) | Monadic (CPS-based) |
 | Streaming | `parse_source` with `Source.t` | Buffered / Unbuffered modules |
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
-| Zero-copy | `span` type + fused ops | Limited via `Unsafe` / bigstring slices |
+| Zero-copy | `Slice.t` type + fused ops | Limited via `Unsafe` / bigstring slices |
 | Recursion safety | `rec_` with `~max_depth` | Manual (no built-in depth limit) |
 | Custom errors | `error` with an extensible variant (`custom_error`) | Limited (string-based) |
 | Error labels | `expect`, `one_of_labeled` | `<?>` operator |

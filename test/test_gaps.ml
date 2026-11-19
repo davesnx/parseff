@@ -84,9 +84,9 @@ let test_utf8_satisfy_split () =
     (fun text ->
       check_all "satisfy" show_code_points text
         (fun () ->
-          Parseff.many
-            (fun () -> Parseff.Utf8.satisfy ~label:"any" (fun _ -> true))
-            ()
+          Parseff.many (fun () ->
+              Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
+          )
         )
         ("Ok " ^ expected_code_points text)
     )
@@ -104,9 +104,9 @@ let test_utf8_take_while_split () =
 let test_utf8_take_while_span_split () =
   List.iter
     (fun text ->
-      check_all "take_while_span" Fun.id text
+      check_all "Slice.take_while" Fun.id text
         (fun () ->
-          Parseff.span_to_string (Parseff.Utf8.take_while_span (fun _ -> true))
+          Parseff.Slice.to_string (Parseff.Utf8.Slice.take_while (fun _ -> true))
         )
         ("Ok " ^ text)
     )
@@ -269,7 +269,6 @@ let test_depth_restored_after_exception () =
         )
       )
       (fun () -> "none")
-      ()
   in
   match
     Parseff.parse ~max_depth:2 "" (fun () -> List.init 6 (fun _ -> attempt ()))
@@ -283,12 +282,10 @@ let test_count_zero () =
   let calls = ref 0 in
   match
     Parseff.parse ~consume:`Partial "abc" (fun () ->
-        Parseff.count 0
-          (fun () ->
+        Parseff.count 0 (fun () ->
             incr calls;
             Parseff.any_char ()
-          )
-          ()
+        )
     )
   with
   | Ok l ->
@@ -352,7 +349,7 @@ let () =
         [
           test_case "satisfy split" `Quick test_utf8_satisfy_split;
           test_case "take_while split" `Quick test_utf8_take_while_split;
-          test_case "take_while_span split" `Quick
+          test_case "Slice.take_while split" `Quick
             test_utf8_take_while_span_split;
           test_case "skip_while then char split" `Quick
             test_utf8_skip_while_char_split;

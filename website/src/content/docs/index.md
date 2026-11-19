@@ -1,11 +1,11 @@
 ---
 title: Quick start
-description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy slice APIs and fused operations.
 ---
 
 # Quick start
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy span APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy slice APIs and fused operations.
 
 ## Features
 
@@ -16,7 +16,7 @@ Parseff is a direct-style parser combinator library for OCaml 5 where parsers ar
 - **Minimal dependency footprint** only `uucp` for Unicode support
 - [**Streaming support**](/parseff/api/streaming/)
 - **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
-- [**Zero-copy span APIs**](/parseff/api/zero-copy/) for low-allocation parsing
+- [**Zero-copy slice APIs**](/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](/parseff/api/zero-copy/) for hot paths
 
 ## Performance
@@ -81,7 +81,7 @@ Here's a small parser that validates IPv4 addresses `192.168.1.1` or `0.0.0.0`. 
 type Parseff.custom_error += Out_of_range of int
 
 let number () =
-  let digits = Parseff.many ~at_least:1 Parseff.digit () in
+  let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
   if n >= 0 && n <= 255 then n
@@ -118,5 +118,5 @@ let () =
 | [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `render_error` |
 | [Error recovery](/parseff/guides/error-recovery) | `capture`, `recover`, `require`, `list`, `skip_nested` |
 | [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics`, `Ref` |
-| [Zero-copy and fused operations](/parseff/api/zero-copy) | `take_while_span`, `sep_by_take_span`, `sep_by_take`, `take_span`, `span_length`, `span_get` |
+| [Zero-copy and fused operations](/parseff/api/zero-copy) | `Slice.take_while`, `Slice.sep_by_take`, `sep_by_take`, `Slice.take`, `Slice.length`, `Slice.get` |
 | [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `Source.of_bigstring_chunks`, `parse_source`, `parse_source_each` |

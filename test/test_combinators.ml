@@ -62,7 +62,6 @@ let test_one_of_labeled_custom_error () =
                 ""
             );
           ]
-          ()
     )
   in
   Alcotest.(check string) "custom error kept" "Error@1 E" (show show_string r)
@@ -80,7 +79,6 @@ let test_expect_custom_error_through_or () =
                 Parseff.literal "y";
                 ""
               )
-              ()
         )
     )
   in
@@ -88,41 +86,33 @@ let test_expect_custom_error_through_or () =
 
 let test_many_non_consuming () =
   both show_ints "abc"
-    (fun () ->
-      [ List.length (Parseff.many (fun () -> Parseff.peek_char ()) ()) ]
-    )
+    (fun () -> [ List.length (Parseff.many (fun () -> Parseff.peek_char ())) ])
     "Ok ([0], 0)"
 
 let test_many_optional_digit () =
   both show_ints "abc"
     (fun () ->
-      [
-        List.length
-          (Parseff.many (fun () -> Parseff.optional Parseff.digit ()) ());
-      ]
+      [ List.length (Parseff.many (fun () -> Parseff.optional Parseff.digit)) ]
     )
     "Ok ([0], 0)"
 
 let test_many_stops_after_consuming () =
   both show_ints "12a"
     (fun () ->
-      Parseff.many
-        (fun () ->
-          match Parseff.optional Parseff.digit () with
+      Parseff.many (fun () ->
+          match Parseff.optional Parseff.digit with
           | Some d ->
               Char.code d - Char.code '0'
           | None ->
               -1
-        )
-        ()
+      )
     )
     "Ok ([1;2], 2)"
 
 let test_many_at_least_non_consuming () =
   let r =
     Parseff.parse ~consume:`Partial "abc" (fun () ->
-        List.length
-          (Parseff.many ~at_least:1 (fun () -> Parseff.peek_char ()) ())
+        List.length (Parseff.many ~at_least:1 (fun () -> Parseff.peek_char ()))
     )
   in
   Alcotest.(check string) "required element kept" "Ok 1" (show string_of_int r)
@@ -132,14 +122,14 @@ let test_sep_by_non_consuming () =
     (fun () ->
       [
         List.length
-          (Parseff.sep_by (fun () -> Parseff.peek_char ()) (fun () -> ()) ());
+          (Parseff.sep_by (fun () -> Parseff.peek_char ()) (fun () -> ()));
       ]
     )
     "Ok ([1], 0)"
 
 let test_fold_left_non_consuming () =
   both string_of_int "abc"
-    (fun () -> Parseff.fold_left (fun () -> 1) (fun () -> ( + )) ())
+    (fun () -> Parseff.fold_left (fun () -> 1) (fun () -> ( + )))
     "Ok (1, 0)"
 
 let bounded p =
@@ -152,7 +142,7 @@ let bounded p =
 let tree a b = "(" ^ a ^ "^" ^ b ^ ")"
 
 let digit_or_dash () =
-  match Parseff.optional Parseff.digit () with
+  match Parseff.optional Parseff.digit with
   | Some d ->
       String.make 1 d
   | None ->
@@ -160,31 +150,26 @@ let digit_or_dash () =
 
 let test_fold_right_non_consuming () =
   both string_of_int "abc"
-    (fun () -> Parseff.fold_right (bounded (fun () -> 1)) (fun () -> ( + )) ())
+    (fun () -> Parseff.fold_right (bounded (fun () -> 1)) (fun () -> ( + )))
     "Ok (1, 0)";
   both string_of_int "abc"
     (fun () ->
-      Parseff.fold_right
-        (bounded (fun () -> 1))
-        (fun () -> ( + ))
-        ~otherwise:0 ()
+      Parseff.fold_right (bounded (fun () -> 1)) (fun () -> ( + )) ~otherwise:0
     )
     "Ok (1, 0)"
 
 let test_fold_right_op_non_consuming () =
   both show_string "12a"
-    (fun () -> Parseff.fold_right (bounded digit_or_dash) (fun () -> tree) ())
+    (fun () -> Parseff.fold_right (bounded digit_or_dash) (fun () -> tree))
     {|Ok ("(1^2)", 2)|}
 
 let test_fold_right_element_non_consuming () =
   both show_string "1^^"
     (fun () ->
-      Parseff.fold_right (bounded digit_or_dash)
-        (fun () ->
-          ignore (Parseff.optional (fun () -> Parseff.char '^') ());
+      Parseff.fold_right (bounded digit_or_dash) (fun () ->
+          ignore (Parseff.optional (fun () -> Parseff.char '^'));
           tree
-        )
-        ()
+      )
     )
     {|Ok ("(1^(-^-))", 3)|}
 
@@ -197,7 +182,6 @@ let test_fold_right_right_assoc () =
           ignore (Parseff.char '^');
           tree
         )
-        ()
     )
     {|Ok ("(1^(2^3))", 5)|}
 
@@ -207,13 +191,11 @@ let test_fold_right_dropped_pair_rolled_back () =
   let r =
     Parseff.parse ~consume:`Partial ~diagnostics:d "12" (fun () ->
         let v =
-          Parseff.fold_right (bounded digit_or_dash)
-            (fun () ->
+          Parseff.fold_right (bounded digit_or_dash) (fun () ->
               Parseff.warn (Warning.W "op");
               Parseff.Ref.set cell (Parseff.Ref.get cell + 1);
               tree
-            )
-            ()
+          )
         in
         Printf.sprintf "%s %d" v (Parseff.Ref.get cell)
     )
@@ -328,7 +310,6 @@ let test_literal_or_mismatch () =
         Parseff.literal "false";
         "false"
       )
-      ()
   in
   let expected =
     {|Error@0 Expected "expected \"false\" or \"true\", found 'no'"|}
@@ -488,7 +469,6 @@ let test_literal_stream_or_ () =
         Parseff.literal "ac";
         "ac"
       )
-      ()
   in
   List.iter
     (fun (input, chunks) ->
@@ -515,11 +495,11 @@ let folds =
   [
     ( "fold_left",
       fun element op ->
-        Parseff.fold_left element (fun () -> op ()) ~otherwise:(-1) ()
+        Parseff.fold_left element (fun () -> op ()) ~otherwise:(-1)
     );
     ( "fold_right",
       fun element op ->
-        Parseff.fold_right element (fun () -> op ()) ~otherwise:(-1) ()
+        Parseff.fold_right element (fun () -> op ()) ~otherwise:(-1)
     );
   ]
 
@@ -583,7 +563,7 @@ let test_fold_otherwise_releases_input () =
   in
   let r =
     Parseff.parse_source ~backtrack_window:16 (chunked_source input) (fun () ->
-        Parseff.fold_left fold_digit plus ~otherwise:(-1) ()
+        Parseff.fold_left fold_digit plus ~otherwise:(-1)
     )
   in
   Alcotest.(check string)

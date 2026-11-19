@@ -159,7 +159,7 @@ let payload () =
 (* Fixed-width chunk type *)
 let chunk_type () = Parseff.take 4
 ```
-`Parseff.take_span` returns a span instead, so that `Parseff.parse` does not copy the bytes. See [Zero-copy API](./zero-copy.md).
+`Parseff.Slice.take` returns a slice instead, so that `Parseff.parse` does not copy the bytes. See [Zero-copy API](./zero-copy.md).
 
 
 ## Mixing with text primitives
@@ -230,7 +230,7 @@ Positions are byte offsets, consistent with the rest of parseff. Each parser adv
 - `Parseff.BE.any_int32`, `Parseff.BE.any_uint32`, `Parseff.BE.any_float`: 4 bytes
 - `Parseff.BE.any_int64`, `Parseff.BE.any_double`: 8 bytes
 - `Parseff.any_varint`: 1 to 9 bytes
-- `Parseff.take`, `Parseff.take_span`: `n` bytes
+- `Parseff.take`, `Parseff.Slice.take`: `n` bytes
 
 ## Performance
 

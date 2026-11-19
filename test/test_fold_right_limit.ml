@@ -3,12 +3,10 @@ let digit_value () = Char.code (Parseff.digit ()) - Char.code '0'
 let chain n = String.concat "^" (List.init n (fun _ -> "1"))
 
 let parser () =
-  Parseff.fold_right digit_value
-    (fun () ->
+  Parseff.fold_right digit_value (fun () ->
       let _ = Parseff.char '^' in
       ( + )
-    )
-    ()
+  )
 
 let parse n =
   match Parseff.parse (chain n) parser with

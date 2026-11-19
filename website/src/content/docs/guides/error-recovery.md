@@ -47,7 +47,6 @@ let program body () =
       (fun () ->
         ws ();
         body ())
-      ()
   in
   ws ();
   stmts
@@ -78,7 +77,7 @@ val capture : (unit -> 'a) -> ('a, error) result
 
 ```ocaml
 # Parseff.parse "let y = ;" (fun () ->
-    Parseff.or_ statement (fun () -> Hole) ())
+    Parseff.or_ statement (fun () -> Hole))
   |> Result.map_error Parseff.error_message;;
 - : (stmt, string) result = Error "expected integer, found ';'"
 # Parseff.parse ~consume:`Partial "let y = ;" (fun () ->
@@ -106,7 +105,7 @@ val recover :
 ```ocaml
 let skip_statement () =
   Parseff.skip_while (fun c -> c <> ';');
-  ignore (Parseff.optional (fun () -> Parseff.char ';') ())
+  ignore (Parseff.optional (fun () -> Parseff.char ';'))
 
 let statements =
   program (fun () ->
@@ -186,7 +185,7 @@ let either let_statement =
   program (fun () ->
       Parseff.or_
         (let_statement (fun () -> Parseff.require integer (fun _ -> 0)))
-        number_statement ())
+        number_statement)
 ```
 
 In `let_wide`, the context holds the whole statement. The `cut` decides the `or_` while the context runs, so `require` inserts the value:
@@ -222,7 +221,7 @@ let signed seal () =
       let _ = Parseff.char '-' in
       seal ();
       -Parseff.require integer (fun _ -> 1))
-    integer ()
+    integer
 
 let signed_statements seal =
   program (fun () ->
@@ -258,7 +257,7 @@ Without `commit`, the `or_` is open when the number is missing. `require` does n
 A `cut` in place of `commit` would also seal the outer loop: it seals everything back to the nearest context, or to the start of the parse when there is none. A loop around the choice then cannot stop before a broken `-`, and the failure is an error of the parse. `numbers` reads numbers as `signed` does, without `require`. Its `many` stops before the broken `-` with `commit`, and fails with `cut`:
 
 ```ocaml
-# let numbers seal =
+# let numbers seal () =
     Parseff.many
       (fun () ->
         ws ();
@@ -267,7 +266,7 @@ A `cut` in place of `commit` would also seal the outer loop: it seals everything
             let _ = Parseff.char '-' in
             seal ();
             -integer ())
-          integer ())
+          integer)
   in
   ( Parseff.parse ~consume:`Partial "1 -2 -" (numbers Parseff.commit)
     |> Result.map_error Parseff.error_message,
@@ -295,10 +294,9 @@ let array () =
             let _ = Parseff.char ',' in
             ws ())
           ~close:(fun () -> Parseff.peek_char () = Some ']')
-          ~sync:(Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
+          ~sync:(fun () -> Parseff.skip_nested [ ('[', ']') ] (fun c -> c = ','))
           (fun () -> Some (integer ()))
           (fun _ -> None)
-          ()
       in
       ws ();
       let _ = Parseff.char ']' in
@@ -401,7 +399,7 @@ Inside `Parseff.many`, `recover` would read the `}` of a block as a broken state
 ```ocaml
 let skip_in_block () =
   Parseff.skip_while (fun c -> c <> ';' && c <> '}');
-  ignore (Parseff.optional (fun () -> Parseff.char ';') ());
+  ignore (Parseff.optional (fun () -> Parseff.char ';'));
   ws ()
 
 let block () =
@@ -416,7 +414,6 @@ let block () =
         ws ();
         s)
       (fun _ -> Hole)
-      ()
   in
   Parseff.require (fun () -> ignore (Parseff.char '}')) ignore;
   stmts
@@ -467,10 +464,9 @@ let call ?(trailing = false) ?(sep = comma) ?(element = argument) () =
   let args =
     Parseff.list ~trailing ~sep
       ~close:(fun () -> Parseff.peek_char () = Some ')')
-      ~sync:(Parseff.skip_nested [ ('(', ')') ] (fun c -> c = ','))
+      ~sync:(fun () -> Parseff.skip_nested [ ('(', ')') ] (fun c -> c = ','))
       element
       (fun _ -> None)
-      ()
   in
   Parseff.require (fun () -> ignore (Parseff.char ')')) ignore;
   (name, args)
@@ -587,7 +583,7 @@ let infix token name =
 
 let expr ~negation ~ops () =
   let e =
-    Parseff.expression ~operand [ ops; [ negation ] ] ()
+    Parseff.expression ~operand [ ops; [ negation ] ]
   in
   let _ = Parseff.char ';' in
   e
@@ -691,12 +687,12 @@ let plus_longest () =
     Printf.sprintf "%c%c" a b
   in
   let r =
-    Parseff.parse ~diagnostics:errors "ac"
-      (Parseff.or_
-         (fun () ->
-           Parseff.recover ~sync:(fun () -> ()) (pair 'a' 'b')
-             (fun _ -> "hole"))
-         (pair 'a' 'c'))
+    Parseff.parse ~diagnostics:errors "ac" (fun () ->
+        Parseff.or_
+          (fun () ->
+            Parseff.recover ~sync:(fun () -> ()) (pair 'a' 'b')
+              (fun _ -> "hole"))
+          (pair 'a' 'c'))
   in
   (r, Parseff.Diagnostics.length errors);;
 - : (string, Parseff.error) result * int = (Ok "ac", 0)
@@ -821,7 +817,6 @@ let braced ?contexts () =
             ws ();
             s)
           (fun _ -> Hole)
-          ()
       in
       Parseff.require (fun () -> ignore (Parseff.char '}')) ignore;
       stmts)

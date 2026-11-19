@@ -1,6 +1,6 @@
 let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
 
-let digits () = Parseff.many ~at_least:1 digit_val ()
+let digits () = Parseff.many ~at_least:1 digit_val
 let accumulate_digits () =
   List.fold_left
     (fun acc d -> (acc * 10) + Char.code d - Char.code '0')
@@ -47,28 +47,24 @@ type expr = Num of int | Add of expr * expr | Mul of expr * expr
 let rec expr () =
   let left = term () in
   let rest =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         let _ = Parseff.whitespace () in
         let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
         let _ = Parseff.whitespace () in
         term ()
-      )
-      ()
+    )
   in
   List.fold_left (fun acc t -> Add (acc, t)) left rest
 
 and term () =
   let left = factor () in
   let rest =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         let _ = Parseff.whitespace () in
         let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
         let _ = Parseff.whitespace () in
         factor ()
-      )
-      ()
+    )
   in
   List.fold_left (fun acc f -> Mul (acc, f)) left rest
 
@@ -91,7 +87,6 @@ and factor () =
       let d = Parseff.expect "a number" Parseff.digit in
       Num (Char.code d - Char.code '0')
     )
-    ()
 
 let rec expr_to_string = function
   | Num n ->
@@ -117,7 +112,6 @@ let keyword () =
         "while"
       );
     ]
-    ()
 
 let scalar () =
   Parseff.one_of_labeled
@@ -134,17 +128,12 @@ let scalar () =
               Parseff.literal "false";
               Num 0
             )
-            ()
       );
     ]
-    ()
 
 let pairs () =
   let items =
-    Parseff.sep_by
-      (fun () -> Parseff.literal "ab")
-      (fun () -> Parseff.char ',')
-      ()
+    Parseff.sep_by (fun () -> Parseff.literal "ab") (fun () -> Parseff.char ',')
   in
   List.length items
 
@@ -156,7 +145,7 @@ let number () =
 
 let value () =
   Parseff.expect "expression" (fun () ->
-      Parseff.or_ (fun () -> number ()) (fun () -> ident ()) ()
+      Parseff.or_ (fun () -> number ()) (fun () -> ident ())
   )
 
 let let_statement () =
@@ -178,16 +167,14 @@ let expression_statement () =
 
 let statement () =
   Parseff.context "statement" (fun () ->
-      Parseff.or_ let_statement expression_statement ()
+      Parseff.or_ let_statement expression_statement
   )
 
 let statements () =
-  Parseff.many
-    (fun () ->
+  Parseff.many (fun () ->
       Parseff.skip_whitespace ();
       statement ()
-    )
-    ()
+  )
 
 let format_error e =
   Printf.sprintf "Error at pos %d: %s" e.Parseff.range.start
@@ -211,7 +198,6 @@ let rec json_value () =
               json_string;
               (fun () -> ignore (number ()));
             ]
-            ()
       )
   )
 
@@ -219,7 +205,7 @@ and json_array () =
   Parseff.context ~delimited:true "array" (fun () ->
       ignore (Parseff.char '[');
       ws ();
-      ignore (Parseff.sep_by json_value comma ());
+      ignore (Parseff.sep_by json_value comma);
       ws ();
       ignore (Parseff.char ']')
   )
@@ -228,7 +214,7 @@ and json_object () =
   Parseff.context ~delimited:true "object" (fun () ->
       ignore (Parseff.char '{');
       ws ();
-      ignore (Parseff.sep_by json_member comma ());
+      ignore (Parseff.sep_by json_member comma);
       ws ();
       ignore (Parseff.char '}')
   )

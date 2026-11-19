@@ -547,8 +547,7 @@ let operator () =
   | None ->
       None
 
-let rec expr () =
-  Parseff.rec_ (fun () -> Parseff.precedence ~operand ~operator ())
+let rec expr () = Parseff.rec_ (fun () -> Parseff.precedence ~operator operand)
 
 and operand () =
   match unop_of st.tok with
@@ -557,7 +556,7 @@ and operand () =
       advance ();
       let e =
         Parseff.rec_ (fun () ->
-            Parseff.precedence ~min:(unary_priority + 1) ~operand ~operator ()
+            Parseff.precedence ~min:(unary_priority + 1) ~operator operand
         )
       in
       mk_expr (Unop (op, e)) { start; stop = e.erange.stop }
@@ -1520,7 +1519,7 @@ let pending () = !started && not (is_eof ())
 let error_at source (r : range) ?notes ?help msg =
   match
     Parseff.parse ~consume:`Partial source (fun () ->
-        if r.start > 0 then ignore (Parseff.take_span r.start);
+        if r.start > 0 then ignore (Parseff.Slice.take r.start);
         (Lexer.error ~from:r.start ~upto:r.stop ?notes ?help msg : unit)
     )
   with

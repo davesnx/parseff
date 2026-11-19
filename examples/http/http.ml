@@ -125,7 +125,7 @@ let field () =
 
 let fields name () =
   Parseff.context name (fun () ->
-      let fields = Parseff.many ~at_most:max_headers field () in
+      let fields = Parseff.many ~at_most:max_headers field in
       crlf ();
       fields
   )
@@ -179,7 +179,7 @@ let folded_fields () =
         | _ ->
             `Field (field ())
       in
-      let lines = Parseff.many ~at_most:max_headers line () in
+      let lines = Parseff.many ~at_most:max_headers line in
       crlf ();
       List.rev
         (List.fold_left
@@ -290,21 +290,17 @@ let chunk_extension () =
   Parseff.skip_while ~set:ows is_ows;
   ignore (token "extension name");
   ignore
-    (Parseff.optional
-       (fun () ->
+    (Parseff.optional (fun () ->
          Parseff.skip_while ~set:ows is_ows;
          let _ = Parseff.char '=' in
          Parseff.skip_while ~set:ows is_ows;
-         Parseff.or_ quoted_string
-           (fun () -> ignore (token "extension value"))
-           ()
-       )
-       ()
+         Parseff.or_ quoted_string (fun () -> ignore (token "extension value"))
+     )
     )
 
 let chunk_line () =
   let size = chunk_size () in
-  ignore (Parseff.many ~at_most:max_chunk_extensions chunk_extension ());
+  ignore (Parseff.many ~at_most:max_chunk_extensions chunk_extension);
   crlf ();
   size
 
@@ -330,29 +326,28 @@ let form_char () =
       Parseff.or_
         (fun () -> Char.chr (Parseff.within 2 Parseff.hex_integer))
         (fun () -> '%')
-        ()
   | c ->
       c
 
 let form_decode s =
   String.of_seq
-    (List.to_seq (Result.get_ok (Parseff.parse s (Parseff.many form_char))))
+    (List.to_seq
+       (Result.get_ok (Parseff.parse s (fun () -> Parseff.many form_char)))
+    )
 
 let form_field () =
   let key =
     Parseff.take_while ~at_least:1 ~label:"form key" ~set:form_key is_form_key
   in
   let value =
-    Parseff.optional
-      (fun () ->
+    Parseff.optional (fun () ->
         let _ = Parseff.char '=' in
         Parseff.take_while ~set:form_value is_form_value
-      )
-      ()
+    )
   in
   (form_decode key, form_decode (Option.value value ~default:""))
 
-let form () = Parseff.sep_by form_field (fun () -> Parseff.char '&') ()
+let form () = Parseff.sep_by form_field (fun () -> Parseff.char '&')
 
 let content_length headers =
   match
