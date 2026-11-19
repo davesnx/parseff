@@ -1709,6 +1709,12 @@ module Slice : sig
         let len = BE.any_uint16 () in
         Slice.take len
       ]} *)
+
+  module Utf8 : sig
+    val take_while : (Uchar.t -> bool) -> t
+    (** [take_while pred] like {!Parseff.Utf8.take_while} but returns a
+        zero-copy slice. *)
+  end
 end
 
 (** {1 Repetition Combinators} *)
@@ -2947,12 +2953,6 @@ module Utf8 : sig
   val skip_while : (Uchar.t -> bool) -> unit
   (** [skip_while pred] advances past code points while [pred] returns [true].
       Like {!take_while} but returns [unit] — no string allocation. *)
-
-  module Slice : sig
-    val take_while : (Uchar.t -> bool) -> Slice.t
-    (** [take_while pred] like {!Parseff.Utf8.take_while} but returns a
-        zero-copy {!Parseff.Slice.t}. *)
-  end
 
   val is_whitespace : Uchar.t -> bool
   (** [is_whitespace u] returns [true] for Unicode whitespace characters, using

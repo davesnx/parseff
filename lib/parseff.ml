@@ -4820,10 +4820,6 @@ module Utf8 = struct
     take_while ~at_least ~label:"whitespace" is_whitespace
 
   let skip_whitespace () = skip_while is_whitespace
-
-  module Slice = struct
-    let take_while = take_while_span
-  end
 end
 
 let far_chain st =
@@ -7290,6 +7286,10 @@ module Slice = struct
   let sep_by_take = sep_by_take_span
   let recognize = recognize_span
   let take = take_span
+
+  module Utf8 = struct
+    let take_while = Utf8.take_while_span
+  end
 end
 
 type trace_event +=

@@ -1583,9 +1583,9 @@ let test_utf8_truncated_at_eof () =
   rejects "Utf8.take_while" (fun () ->
       ignore (Parseff.Utf8.take_while (fun _ -> true))
   );
-  rejects "Utf8.Slice.take_while" (fun () ->
+  rejects "Slice.Utf8.take_while" (fun () ->
       ignore
-        (Parseff.Slice.to_string (Parseff.Utf8.Slice.take_while (fun _ -> true)))
+        (Parseff.Slice.to_string (Parseff.Slice.Utf8.take_while (fun _ -> true)))
   );
   rejects "Utf8.skip_while" (fun () -> Parseff.Utf8.skip_while (fun _ -> true));
   List.iter

@@ -85,12 +85,12 @@ let word () =
 val skip_while : (Uchar.t -> bool) -> unit
 ```
 
-### `Slice.take_while`
+### `Slice.Utf8.take_while`
 
-`Parseff.Utf8.Slice.take_while` returns a zero-copy `Parseff.Slice.t` instead of allocating a new string. Use `Parseff.Slice.to_string` to materialize when needed.
+`Parseff.Slice.Utf8.take_while` returns a zero-copy `Parseff.Slice.t` instead of allocating a new string. Use `Parseff.Slice.to_string` to materialize when needed.
 
 ```ocaml
-val Slice.take_while : (Uchar.t -> bool) -> Slice.t
+val Slice.Utf8.take_while : (Uchar.t -> bool) -> Slice.t
 ```
 
 ## Convenience combinators
