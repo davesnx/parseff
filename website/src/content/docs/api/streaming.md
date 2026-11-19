@@ -1,6 +1,6 @@
 ---
 title: Streaming
-description: Parse from files, channels, and custom readers
+description: Pull and push streaming from files, channels, and chunk callbacks
 ---
 
 <!-- This file is generated from doc/streaming.mld. Do not edit directly. -->
@@ -8,12 +8,16 @@ description: Parse from files, channels, and custom readers
 
 # Streaming
 
-The streaming API lets you parse input that isn't fully available upfront: files, network sockets, pipes, or any byte source. The same parser code works with both `Parseff.parse` (strings) and `Parseff.Source.parse` (streams), with no changes needed.
+Parseff provides two streaming interfaces for input that arrives incrementally:
+
+- `Parseff.Source`: pull-based streaming (files, channels, sockets, sequences, Eio flows).
+- `Parseff.Push`: push-based streaming where your caller owns the read loop (Lwt, Async, callback APIs).
+Ordinary `unit -> 'a` parsers work unchanged with `Parseff.parse`, `Parseff.Source.parse`, and `Parseff.Push.parse`.
 
 
-## `Source.parse`
+## Pull streaming: `Source.parse`
 
-`Parseff.Source.parse` runs a parser pulling input from a `Parseff.Source.t` on demand. Behaves identically to `Parseff.parse`: same parsers, same result type, same error handling.
+`Parseff.Source.parse` runs a parser pulling bytes from a `Parseff.Source.t` on demand.
 
 ```ocaml
 val Source.parse :
@@ -27,41 +31,20 @@ val Source.parse :
   ('a, error) Stdlib.result
 ```
 ```ocaml
-  let ic = open_in "data.json" in
-  let source = Parseff.Source.of_channel ic in
-  let result = Parseff.Source.parse source json in
-  close_in ic;
-  result
+let ic = open_in "data.json" in
+let source = Parseff.Source.of_channel ic in
+let result = Parseff.Source.parse source json in
+close_in ic;
+result
 ```
-Error positions are absolute offsets from the start of the stream, also after Parseff dropped old input to keep the buffer bounded. An error does not keep the dropped input alive: failures that are older than the buffered input still count for the position of the error, but the buffer does not grow for them.
+- `~consume` defaults to `` `All ``, pulling one extra byte after the parser returns to check EOF without reading the rest of the source. Pass `` ~consume:`Partial `` to leave remaining bytes unread.
+- `~backtrack_window` bounds how much buffered history Parseff retains for backtracking (default: `65536` bytes; minimum `2`). Exceeding it fails with `Backtrack_window_exceeded`.
+- Error positions are absolute byte offsets from the start of the stream. `found` text reflects only bytes already buffered (Parseff does not pull more bytes just to lengthen a snippet).
+- `~diagnostics` collects diagnostics as in `Parseff.parse`. See [`diagnostics`](./diagnostics.md).
 
-A stream error shows the bytes read so far. The position and the expected items are the same as `Parseff.parse` gives on the whole input, but the `found` text can be shorter: Parseff does not read more input only to show it. `Parseff.literal` compares the buffered bytes first and fails at the first byte that differs, so a peer that stops sending after a wrong byte gets an error at once, not a parser that waits for the rest of the literal.
+## Streaming multiple values: `Source.parse_each`
 
-The `~max_depth` parameter works the same as in `Parseff.parse`. The `~backtrack_window` parameter bounds how much buffered input Parseff may retain for backtracking and in-flight streaming operations. It defaults to 65536 bytes.
-
-
-## Reading the whole source
-
-By default `Parseff.Source.parse` fails with `Expected End_of_input` when input remains after the parser returns, as `Parseff.end_of_input` does. The check pulls one more byte from the source. It does not read the rest of the source: it stops at the first byte that remains.
-
-To parse a leading part of the source and leave the rest unread, pass `` ~consume:`Partial ``:
-
-```ocaml
-Parseff.Source.parse ~consume:`Partial source parser
-```
-`~diagnostics` collects the diagnostics of the parse. See [`diagnostics`](./diagnostics.md).
-
-```ocaml
-  let ic = open_in "data.json" in
-  let source = Parseff.Source.of_channel ic in
-  let result = Parseff.Source.parse source json in
-  close_in ic;
-  result
-```
-
-## Many values from one source
-
-`Parseff.Source.parse_each` parses a stream of values, such as NDJSON lines or log records, from one source. Each element of the sequence runs the parser once on the rest of the source. Use it instead of one `Parseff.Source.parse` call with `Parseff.many` when the consumer must get each value as it arrives.
+`Parseff.Source.parse_each` parses a lazy sequence of values (such as NDJSON or log records) from one source, bounding memory by `~backtrack_window`.
 
 ```ocaml
 val Source.parse_each :
@@ -74,12 +57,12 @@ val Source.parse_each :
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
 ```
-The parser reads one value and the separator after it:
+Each element runs the parser like `` Source.parse ~consume:`Partial ``. The parser must consume its trailing separator (a zero-width run yields an `Error`). The sequence stops at EOF or after the first `Error`, and is ephemeral (forcing an element twice raises `Invalid_argument`). Pass `~pending` if your parser buffers lookahead tokens past its value.
 
 ```ocaml
 let record () =
   let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-  let _ = Parseff.char '\n' in
+  ignore (Parseff.char '\n');
   int_of_string id
 
 let () =
@@ -88,155 +71,77 @@ let () =
        | Ok id -> Printf.printf "%d\n" id
        | Error e -> prerr_endline (Parseff.render_error e))
 ```
-A separator parser that reads past the value, such as `Parseff.skip_whitespace`, holds that value back until more input or the end of input arrives. The sequence is ephemeral: force each element once, in order.
 
+## Source constructors
 
-## The Source module
-
-`Parseff.Source` wraps a readable byte stream behind a uniform interface. Five constructors cover the common cases, ordered here from simplest to most low-level.
+A `Parseff.Source.t` is for a single `Source.parse` or `Source.parse_each` call (only `of_string` restarts from offset 0; other sources continue where the last read stopped and drop buffered lookahead).
 
 
 ### `Source.of_string`
 
-`Parseff.Source.of_string` creates a source from a complete string. Useful for testing streaming code paths with known input:
+Wraps a string as a source (useful for testing streaming code paths).
 
 ```ocaml
 val of_string : string -> Source.t
 ```
-```ocaml
-  let source = Parseff.Source.of_string "[1, 2, 3]" in
-  Parseff.Source.parse source json_array
-```
 
 ### `Source.of_channel`
 
-`Parseff.Source.of_channel` creates a source that reads from an `in_channel`. The `~buf_size` parameter controls the internal read buffer (default: 4096 bytes).
+Reads from an `in_channel` with buffer size `~buf_size` (default `4096`; raises `Invalid_argument` if `< 1`).
 
 ```ocaml
 val of_channel : ?buf_size:int -> in_channel -> Source.t
 ```
-```ocaml
-  let ic = open_in "large_dataset.json" in
-  let source = Parseff.Source.of_channel ~buf_size:8192 ic in
-  let result = Parseff.Source.parse source json in
-  close_in ic;
-  result
-```
-A larger buffer means fewer system calls but more memory. For most files, the default 4096 is fine. For multi-megabyte files, 64KB or larger reduces overhead.
-
 
 ### `Source.of_chunks`
 
-`Parseff.Source.of_chunks` creates a source from a function that returns string chunks. Return `Some s` with a non-empty string for data, or `None` to signal EOF. Empty strings (`Some ""`) are silently skipped.
+Pulls chunks from a callback returning `Some s` for data (empty strings are skipped) or `None` for EOF. Chunks may be used without copying and must not be mutated after the callback returns (relevant only with `Bytes.unsafe_to_string`).
 
 ```ocaml
 val of_chunks : (unit -> string option) -> Source.t
 ```
-This is the recommended way to wrap stateful or callback-based data sources. The library handles buffer management internally — no manual `Bytes.blit_string`, position tracking, or `min` calculations needed.
-
-`of_chunks` has no read buffer. Parseff copies each chunk into its input. When it keeps no earlier input and takes the whole chunk, the chunk becomes the input with no copy. Thus a chunk must not change after the function returns it. This matters only for a string made with `Bytes.unsafe_to_string` from bytes that are written again.
-
 ```ocaml
-  (* Eio promise — await once, then signal EOF *)
-  let fetched = ref false in
-  let source = Parseff.Source.of_chunks (fun () ->
-      if !fetched then None
-      else begin
-        fetched := true;
-        Some (Promise.await_exn promise)
-      end) in
-  Parseff.Source.parse source json
-```
-```ocaml
-  (* HTTP body arriving in pieces *)
-  let source = Parseff.Source.of_chunks (fun () ->
+let source =
+  Parseff.Source.of_chunks (fun () ->
       match Http.Body.read body with
       | `Data chunk -> Some chunk
-      | `Eof -> None) in
-  Parseff.Source.parse source my_parser
-```
-Compare with the equivalent `Parseff.Source.of_function` version, which requires the caller to manage a position cursor, calculate byte counts, and blit into a pre-allocated buffer:
-
-```ocaml
-  (* Same Eio example with of_function — more boilerplate *)
-  let data = ref None in
-  let pos = ref 0 in
-  let source = Parseff.Source.of_function (fun buf off len ->
-      let s = match !data with
-        | Some s -> s
-        | None ->
-            let s = Promise.await_exn promise in
-            data := Some s; s
-      in
-      let remaining = String.length s - !pos in
-      let n = min len remaining in
-      Bytes.blit_string s !pos buf off n;
-      pos := !pos + n;
-      n) in
-  Parseff.Source.parse source json
+      | `Eof -> None)
+in
+Parseff.Source.parse source my_parser
 ```
 
 ### `Source.of_seq`
 
-`Parseff.Source.of_seq` creates a source from a lazy sequence of string chunks. Each element is a chunk of input; the sequence ending (`Seq.Nil`) signals EOF. It reads chunks as `of_chunks` does, so a chunk must not change after the sequence returns it.
+Reads chunks from a `string Seq.t` (same chunk-immutability rule as `of_chunks`).
 
 ```ocaml
 val of_seq : string Seq.t -> Source.t
 ```
 ```ocaml
-  (* From a list of chunks *)
-  let source = Parseff.Source.of_seq
-    (List.to_seq ["{ \"key\""; ": "; "\"value\" }"]) in
-  Parseff.Source.parse source json
-```
-`of_seq` is useful when the data is already structured as a sequence — for example, reading lines from a file or splitting a large string into fixed-size pieces:
-
-```ocaml
-  (* Fixed-size chunks from a string, useful for testing *)
-  let chunk_seq ?(chunk_size = 4096) input =
-    let len = String.length input in
-    let rec go pos () =
-      if pos >= len then Seq.Nil
-      else
-        let n = min chunk_size (len - pos) in
-        Seq.Cons (String.sub input pos n, go (pos + n))
-    in
-    go 0
-
-  let source = Parseff.Source.of_seq (chunk_seq ~chunk_size:2 "hello world")
+let source =
+  Parseff.Source.of_seq (List.to_seq [ "1\n"; "22\n"; "333\n" ])
 ```
 
 ### `Source.of_bigstring_chunks`
 
-`Parseff.Source.of_bigstring_chunks` creates a source from a function that returns slices of bigstrings. A bigstring is the stdlib type `(char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t`, the same type as `Bigstringaf.t` and the buffer of a `Cstruct.t`. Return `Some (buf, off, len)` for `len` bytes of `buf` from `off`, or `None` to signal EOF. Slices with `len = 0` are skipped.
+Pulls slices `Some (buf, off, len)` of a bigstring (`Bigstringaf.t`, `Cstruct.buffer`, `Unix.read_bigarray`) or `None` for EOF. Copies at most 2040 bytes at a time into Parseff's input buffer; slices must remain unchanged until the next callback invocation, which may reuse the same buffer.
 
 ```ocaml
+type bigstring =
+  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+
 val of_bigstring_chunks :
-  (unit -> (Source.bigstring * int * int) option) -> Source.t
+  (unit -> (bigstring * int * int) option) -> Source.t
 ```
-Use it when the I/O layer reads into a bigstring, as Eio flows and most network libraries do. Parseff parses bytes, so it copies each slice into its input, at most 2040 bytes at a time, as the parser needs them. The copy takes about 2 instructions per byte; parsing an HTTP request head takes about 40\. The bytes of a slice must not change until the function is called again, so the function can read the next chunk into the same buffer:
-
-```ocaml
-  (* Eio flow read into one Cstruct buffer *)
-  let buf = Cstruct.create 4096 in
-  let source = Parseff.Source.of_bigstring_chunks (fun () ->
-      match Eio.Flow.single_read flow buf with
-      | n -> Some (buf.buffer, buf.off, n)
-      | exception End_of_file -> None) in
-  Parseff.Source.parse source my_parser
-```
-To parse a bigstring that you already hold, give it as one slice:
-
 ```ocaml
 let parse_bigstring buf parser =
   let sent = ref false in
   let source =
     Parseff.Source.of_bigstring_chunks (fun () ->
         if !sent then None
-        else begin
+        else (
           sent := true;
-          Some (buf, 0, Bigarray.Array1.dim buf)
-        end)
+          Some (buf, 0, Bigarray.Array1.dim buf)))
   in
   Parseff.Source.parse source parser
 
@@ -248,96 +153,114 @@ let () =
   in
   let pair () =
     let key = Parseff.take_while (fun c -> c <> '=') in
-    let _ = Parseff.char '=' in
+    ignore (Parseff.char '=');
     (key, Parseff.take_while (fun _ -> true))
   in
   match parse_bigstring buf pair with
   | Ok pair -> assert (pair = ("key", "value"))
   | Error e -> failwith (Parseff.render_error e)
 ```
-With `Bigstringaf`, `Parseff.parse (Bigstringaf.substring buf ~off ~len) p` does the same with one copy.
-
 
 ### `Source.of_function`
 
-`Parseff.Source.of_function` creates a source from a low-level read function. The function signature matches POSIX `read(2)`: `read buf off len` fills `buf` starting at `off` with up to `len` bytes and returns the count actually written. Return `0` to signal EOF.
+Low-level escape hatch matching POSIX `read(2)`: `read buf off len` writes up to `len` bytes into `buf` at `off` and returns the byte count (`0` for EOF). Starts with a buffer of `~initial_buffer_size` bytes (default `2040`) and grows once to `max initial_buffer_size 4096` after a read fills it. Prefer `of_chunks` or `of_seq` unless wrapping `Unix.read`, `Unix.recv`, or similar buffer-filling APIs.
 
 ```ocaml
-val of_function : ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> Source.t
+val of_function :
+  ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> Source.t
 ```
-This is the low-level escape hatch for byte sources that natively fill a pre-allocated buffer. For most use cases, prefer `Parseff.Source.of_chunks` or `Parseff.Source.of_seq` which handle buffer management automatically.
+```ocaml
+let source =
+  Parseff.Source.of_function ~initial_buffer_size:512 (fun buf off len ->
+      Unix.read fd buf off len)
+in
+Parseff.Source.parse source my_parser
+```
+
+## Push streaming: `Push`
+
+Use `Parseff.Push` when your event loop pushes chunks into the parser (Lwt, Async, network callbacks).
 
 ```ocaml
-  let unix_file_descriptor = Parseff.Source.of_function (fun buf off len ->
-    Unix.read fd buf off len
-  ) in
-  Parseff.Source.parse source my_parser
+module Push : sig
+  type 'a t
+  type 'a step =
+    | Await
+    | Done of ('a * string, error) Stdlib.result
 
-  let decompression_stream = Parseff.Source.of_function (fun buf off len ->
-    Zlib.inflate zstream buf off len
-  )
+  val parse :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    (unit -> 'a) ->
+    'a t
+  val feed : 'a t -> string -> 'a step
+  val finish : 'a t -> ('a * string, error) Stdlib.result
 
-  let network_socket = Parseff.Source.of_function (fun buf off len ->
-    Unix.recv socket buf off len []
-  )
+  type each_step =
+    | Need_input
+    | Stopped of string
+    | Error_of of error
+    | Ended
+
+  val parse_each :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    on_value:('a -> [ `Continue | `Stop ]) ->
+    (unit -> 'a) ->
+    string option ->
+    each_step
+end
 ```
-The `~initial_buffer_size` parameter sets the first size of the read buffer, which is the `len` of the first `read` call (default: 2040 bytes). After a read that fills the buffer, the next read gets a buffer of 4096 bytes, or of `initial_buffer_size` bytes when that is larger. The larger buffer is allocated only when that read happens. A source made for one short message, such as an HTTP request head, allocates less with an `initial_buffer_size` near the size of the message:
+`Parseff.Push.parse`, `Parseff.Push.feed`, and `Parseff.Push.finish` (unstable) parse a single value and return any leftover bytes in `Done (Ok (value, leftover))`. End your parser with `Parseff.end_of_input` if you want to require full consumption. Always call `Push.finish` on an unfinished parse if you passed `~diagnostics` or mutated `Parseff.Ref` cells so those resources are released.
+
+`Parseff.Push.parse_each` parses a stream of values on a single effect fiber (the push counterpart of `Parseff.Source.parse_each`). Push `Some chunk` for data and `None` at EOF:
 
 ```ocaml
-  let request_head = Parseff.Source.of_function ~initial_buffer_size:512 (fun buf off len ->
-    Unix.read fd buf off len
-  )
+let line () =
+  let s = Parseff.take_while (fun c -> c <> '\n') in
+  ignore (Parseff.char '\n');
+  s
+
+let push_lines chunks =
+  let seen = ref [] in
+  let push =
+    Parseff.Push.parse_each
+      ~on_value:(fun s ->
+        seen := s :: !seen;
+        `Continue)
+      line
+  in
+  let rec go = function
+    | [] -> push None
+    | chunk :: rest -> (
+        match push (Some chunk) with
+        | Parseff.Push.Need_input -> go rest
+        | step -> step)
+  in
+  match go chunks with
+  | Parseff.Push.Ended -> Ok (List.rev !seen)
+  | Parseff.Push.Error_of e -> Error e
+  | Parseff.Push.Need_input | Parseff.Push.Stopped _ -> assert false
+
+let () = assert (push_lines [ "ab"; "c\nde\n" ] = Ok [ "abc"; "de" ])
 ```
 
-## Why the same parser works for both
+## Backtracking and `~backtrack_window`
 
-Parseff uses the same parser API for both in-memory and streaming input. The runner decides where bytes come from:
+Parseff retains buffered bytes from the oldest active rewind point to the newest read byte. Two things pin earlier bytes:
 
-- `Parseff.parse`: reads from a fixed string
-- `Parseff.Source.parse`: reads from a `Parseff.Source.t`, fetching more data on demand
-The parser doesn't know which one it's running under. The code is identical:
+- Open backtracking frames (`or_`, `one_of`, `look_ahead`, repetition loops).
+- Primitives building a single value across chunks (`take_while`, `recognize`).
+To stay within `~backtrack_window`:
 
-```ocaml
-  (* This parser works with both runners *)
-  let number () =
-    let s =
-      Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-    in
-    int_of_string s
-
-  (* From a string *)
-  let _ = Parseff.parse "42" number
-
-  (* From a source *)
-  let _ =
-    Parseff.Source.parse (Parseff.Source.of_string "42") number
-```
-In Parseff, streaming is transparent at the parser-function level: the same parser works against a fixed string or a streaming source. The runtime uses a bounded sliding buffer, not an append-forever buffer.
-
-
-## How backtracking works across chunks
-
-When Parseff refills a source, it keeps only the region that is still needed for backtracking. The retained window starts at the oldest active rewind point and ends at the newest buffered byte.
-
-Two things keep old bytes alive:
-
-- active backtracking frames such as `Parseff.or_`, `Parseff.look_ahead`, and the internal rewind points used by repetition combinators
-- in-flight streaming primitives that still need earlier bytes to finish building a value (for example `Parseff.take_while`)
-
-### General advice
-
-Most parsers become streaming parsers by changing only the runner: keep the same parser functions and switch from `Parseff.parse` to `Parseff.Source.parse`. Start there, then tune the streaming behavior only if the grammar needs it.
-
-In practice:
-
-- Think of `~backtrack_window` as retained undo history, not as a chunk size.
-- Prefer grammars that dispatch early, so the runtime does not need to keep a long ambiguous prefix alive.
-- Call `Parseff.commit` only when a branch has become logically certain.
-- If you hit `Backtrack_window_exceeded`, first try to commit earlier; only increase `~backtrack_window` when the ambiguity is real.
-The guides section includes a small CSV walkthrough that starts with a normal string parser and only changes the runner, plus a second guide that focuses on `commit` and `~backtrack_window` for grammars with long-lived ambiguity.
-
-A small example:
-
+- Dispatch early with `Parseff.peek_char` rather than trying long speculative branches.
+- Call `Parseff.commit` to release the nearest frame once an alternative is chosen, or `Parseff.cut` to release every frame inside the enclosing `Parseff.context` once a construct is decided.
+- Use `Parseff.many_iter`, `Parseff.sep_by_iter`, `Parseff.take_iter`, or `Parseff.take_while_iter` to stream items or large byte payloads past `~backtrack_window`.
+- Raise `~backtrack_window` only when the grammar genuinely requires longer lookahead.
 ```ocaml
 let http_method () =
   Parseff.or_
@@ -350,66 +273,9 @@ let http_method () =
       Parseff.commit ();
       `POST)
 ```
-`commit ()` acts on the innermost frame only: the nearest `Parseff.or_`, `Parseff.one_of`, `Parseff.many`, `Parseff.sep_by`, `Parseff.optional` or `fold_*` frame. It does nothing outside any frame and inside `Parseff.look_ahead`. It does not release outer frames. In `many (fun () -> or_ a b)`, a `commit ()` inside the `or_` does not let the `many` frame release older buffered input: `many` still keeps the input from the start of the current iteration. To release that input, call `commit ()` in the body of `many`, outside the `or_`.
 
-`Parseff.cut` seals every frame opened since the innermost enclosing `Parseff.context`, not only the nearest one. Use it when a whole construct becomes certain: after `cut ()`, none of those frames pins buffered input, and a failure of the construct is not retried by the frames outside it. With a small window, an `or_` whose left branch reads a long run of tokens fails with `Backtrack_window_exceeded` until the branch calls `cut ()`.
+## Concurrency and domains
 
-Before `commit ()`, Parseff must keep enough buffered input to rewind and try the other branch. After `commit ()`, that rewind point stops pinning the old prefix.
-
-If the retained region would exceed `~backtrack_window`, parsing fails with `Backtrack_window_exceeded`. This is a real contract, not a best-effort hint.
-
-
-## Thread safety
-
-`Parseff.Source.parse` (and `Parseff.parse`) are safe to call from multiple OCaml 5 domains concurrently. The state of a parse (the parser position, internal buffer, recursion depth counter) is created inside each call. While the parse runs, Parseff keeps that state in a slot that belongs to the domain, so parses on different domains do not share it.
-
-A domain runs one parse at a time. System threads (`Thread`) that share a domain also share that slot, and the runtime can switch threads at any point inside a parser. Two threads that parse at the same time on one domain can get wrong results. Run each parse on its own domain, or hold one `Mutex` around each parse call.
-
-```ocaml
-  (* Parse different files in parallel *)
-  let results =
-    List.init num_workers (fun i ->
-      Domain.spawn (fun () ->
-        let ic = open_in files.(i) in
-        let source = Parseff.Source.of_channel ic in
-        let result = Parseff.Source.parse source json in
-        close_in ic;
-        result))
-    |> List.map Domain.join
-```
-The one constraint: do not share a single `Parseff.Source.t` across domains. Each source has mutable read state (buffer position, EOF flag), so concurrent access would race. Create a separate source per domain.
-
-A source is for one call of `Parseff.Source.parse` or `Parseff.Source.parse_each`. `Parseff.Source.of_string` starts again from the beginning, but the other sources continue where the last read stopped, and bytes that the first call read ahead are lost.
-
-
-### Concurrent parses on one domain
-
-Two parses can run at the same time on one domain, for example in two Eio fibers, when the only thing that suspends is the source `read` function. The parse state is stored per domain and Parseff installs it again each time `read` returns. A suspension inside a parser callback, such as a `satisfy` predicate or a `many` body, is not supported.
-
-This is for fibers, which switch only at `read`. It does not hold for system threads, which can switch anywhere.
-
-
-## Limitations
-
-
-### Bounded backtracking
-
-The buffer no longer grows forever, but a parser can still exceed the configured `~backtrack_window` if it keeps an old rewind point alive for too long. Typical fixes are:
-
-- dispatch earlier (for example with `Parseff.peek_char`)
-- call `Parseff.commit` once the grammar has clearly committed to a branch
-- increase `~backtrack_window` for genuinely ambiguous grammars
-
-### Blocking reads
-
-`Parseff.Source.of_channel`, `Parseff.Source.of_chunks`, `Parseff.Source.of_function`, and `Parseff.Source.of_seq` all block the calling thread when waiting for data. For async/event-driven architectures, run the parse on another domain:
-
-```ocaml
-  let result = Domain.spawn (fun () ->
-    Parseff.Source.parse source json
-  ) |> Domain.join
-```
-
-### One parse returns one result
-
-`Parseff.Source.parse` runs the parser to completion and returns a single result. To get each value as it arrives, use `Parseff.Source.parse_each`.
+- **Multiple domains**: `Parseff.parse` and `Parseff.Source.parse` store active parse state per domain and can run concurrently across OCaml 5 domains. Do not share one `Parseff.Source.t` or `Parseff.Push.t` concurrently across domains.
+- **Cooperative fibers on one domain**: multiple `Parseff.Source.parse` calls (e.g., Eio fibers) and `Parseff.Push` parses can interleave on one domain, provided only the source's read function suspends (suspending inside a parser callback is not supported).
+- **System threads**: OCaml `Thread`s sharing a domain can preempt mid-parser; serialize parses on one domain with a `Mutex` or run them on separate domains.

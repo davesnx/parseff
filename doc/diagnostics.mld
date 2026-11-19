@@ -4,7 +4,8 @@ Diagnostics let a parser record warnings and recovered errors without stopping
 at the first problem.
 
 To recover from syntax errors and continue parsing, see the
-{{!page-"error-recovery"}Error recovery} guide.
+{{:https://davesnx.github.io/parseff/guides/error-recovery/}Error recovery}
+guide.
 
 {1 Types}
 
@@ -134,7 +135,8 @@ Diagnostics are transactional with backtracking:
 - {!val:Parseff.capture} / {!val:Parseff.recover}: rolled back when the inner
   parser fails ([recover] records the inner parser's error instead; pass
   [~keep] to retain earlier diagnostics, see the
-  {{!page-"error-recovery"}Error recovery} guide).
+  {{:https://davesnx.github.io/parseff/guides/error-recovery/}Error recovery}
+  guide).
 
 {1 Backtracking state ([Ref])}
 

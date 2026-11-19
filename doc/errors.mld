@@ -112,7 +112,8 @@ the enclosing [context] so a later failure becomes the parse error instead of
 retrying outer alternatives. See {!page:combinators}.
 
 To collect multiple errors and keep parsing, see the
-{{!page-"error-recovery"}Error recovery} guide.
+{{:https://davesnx.github.io/parseff/guides/error-recovery/}Error recovery}
+guide.
 
 {1 Furthest-failure selection}
 

@@ -5,8 +5,8 @@ instead of stopping at the first failure.
 
 Parseff provides five recovery primitives: {!val:Parseff.capture},
 {!val:Parseff.recover}, {!val:Parseff.require}, {!val:Parseff.list}, and
-{!val:Parseff.skip_nested}. For the exhaustive edge-case specification, see
-{!Parseff.section-recovery}.
+{!val:Parseff.skip_nested}. For the exhaustive edge-case specification, see the
+{!module:Parseff} API reference.
 
 {1 Starting grammar: a statement list}
 
@@ -355,8 +355,8 @@ let run_expr input =
 
 {1:limits Rules and options}
 
-Key behaviors to keep in mind (see {!Parseff.section-recovery} for all edge
-cases):
+Key behaviors to keep in mind (see the {!module:Parseff} API reference for all
+edge cases):
 
 - {b Open choices}: [recover], [require], and [list] do not recover inside open
   choices ([or_], [one_of], [optional], [capture], [look_ahead], [peek_with])
@@ -374,7 +374,8 @@ cases):
 - {b Collector gating and warnings}: without [~diagnostics], recovery
   combinators run their inner parser directly and stop at the first error.
   {!val:Parseff.warn} writes [`Warning] entries to the same collector alongside
-  [`Error] recovery entries (see {{!page-diagnostics}Diagnostics}).
+  [`Error] recovery entries (see
+  {{:https://davesnx.github.io/parseff/api/diagnostics/}Diagnostics}).
 - {b Tracing}: passing [~trace] emits [Captured] events for each recovered
   failure.
 - {b Streaming}: [capture] and active recovery frames retain input from their

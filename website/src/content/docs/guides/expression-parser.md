@@ -1,27 +1,21 @@
 ---
-title: "Expressions with Precedence"
+title: "Expressions with precedence"
 description: Build an arithmetic expression parser with operator precedence and an AST
 ---
 
 # Guide: Expressions with precedence
 
-This walkthrough builds an arithmetic expression parser that handles expressions like `1+2*3` or `(1+2)*3` and produces a structured tree that respects operator precedence.
+Build an arithmetic expression parser producing an AST that respects operator precedence and associativity.
 
-Along the way, we'll cover the standard recursive-descent technique for precedence, `expect` for clear error messages, and the `fold_left` combinator as a shortcut for left-associative operator chains.
+Source: [`examples/better_errors/main.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml).
 
-Source: [`examples/better_errors/main.ml`](https://github.com/davesnx/parseff/blob/main/examples/better_errors/main.ml)
+Goal:
 
-## What we're building
+- `1+2*3` parses as `1 + (2 * 3)`
+- `(1+2)*3` parses as `(1 + 2) * 3`
+- `1+2+3` parses as `(1 + 2) + 3`
 
-A parser that handles expressions like:
-
-- `1+2*3` parses as `1 + (2 * 3)` (multiplication binds tighter)
-- `(1+2)*3` parses as `(1 + 2) * 3` (parentheses override precedence)
-- `1+2+3` parses as `(1 + 2) + 3` (left-associative)
-
-The result is an AST (abstract syntax tree), not a computed value.
-
-## The AST type
+## The AST
 
 ```ocaml
 type expr =
@@ -30,131 +24,79 @@ type expr =
   | Mul of expr * expr
 ```
 
-`Num 3` is a literal number. `Add (Num 1, Num 2)` is `1 + 2`. `Mul (Add (Num 1, Num 2), Num 3)` is `(1 + 2) * 3`.
+## Recursive-descent levels
 
-## The precedence trick
-
-The standard technique for operator precedence in recursive descent is to split the grammar into levels, one per precedence tier. Lower-precedence operators are parsed at higher levels (closer to the entry point), and higher-precedence operators at lower levels (closer to the leaves).
-
-For our two operators:
+Split the grammar into one function per precedence tier, lowest precedence at the entry point and highest near the leaves:
 
 ```
-expr   = term   (('+' term)*)      ← lowest precedence: addition
-term   = factor (('*' factor)*)    ← higher precedence: multiplication
-factor = number | '(' expr ')'     ← atomic values and grouping
+expr   = term   (('+' term)*)      <- lowest precedence
+term   = factor (('*' factor)*)    <- higher precedence
+factor = number | '(' expr ')'     <- atoms and grouping
 ```
-
-Each level calls the next one for its operands. This structure guarantees that `*` binds tighter than `+` without any explicit precedence tables.
-
-## The parser
 
 ```ocaml
-(* Addition level: lowest precedence *)
 let rec expr () =
   let left = term () in
   let rest =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         Parseff.skip_whitespace ();
-        let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
+        ignore (Parseff.expect "a '+' operator" (fun () -> Parseff.char '+'));
         Parseff.skip_whitespace ();
         term ())
   in
   List.fold_left (fun acc t -> Add (acc, t)) left rest
 
-(* Multiplication level: higher precedence *)
 and term () =
   let left = factor () in
   let rest =
-    Parseff.many
-      (fun () ->
+    Parseff.many (fun () ->
         Parseff.skip_whitespace ();
-        let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
+        ignore (Parseff.expect "a '*' operator" (fun () -> Parseff.char '*'));
         Parseff.skip_whitespace ();
         factor ())
   in
   List.fold_left (fun acc f -> Mul (acc, f)) left rest
 
-(* Atoms and parenthesized groups *)
 and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      let _ = Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(') in
+      ignore
+        (Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '('));
       Parseff.skip_whitespace ();
-      let e = expr () in
+      let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      let _ = Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')') in
+      ignore
+        (Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')'));
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
       Num (Char.code d - Char.code '0'))
 ```
 
-Each precedence level calls the next one for its operands. `expr` parses `term (('+' term)*)`, `term` parses `factor (('*' factor)*)`, and `factor` handles numbers and parenthesized sub-expressions. Because `term` is called from within `expr`, multiplication binds tighter than addition.
+Because `expr` delegates each operand to `term`, `*` binds tighter than `+`. On `"1+2*3"`, `term` parses `1`, `expr` consumes `+`, and the second `term` consumes `2*3` into `Mul (Num 2, Num 3)` before returning to `expr`.
 
-`many` collects zero or more operator-operand pairs, and `fold_left` builds left-associative AST nodes: `1+2+3` becomes `Add(Add(Num 1, Num 2), Num 3)`. `or_` in `factor` tries the parenthesized path first; if the input doesn't start with `(`, it backtracks and tries a digit.
+With `expect`, error messages use grammar names instead of raw tokens:
 
-## How `expect` improves errors
+- `"1+x"`: `expected a number or an opening parenthesis` (instead of `expected digit or '('`)
+- `"(1+2x"`: `expected a '*' operator, a '+' operator, or a closing parenthesis` (instead of `expected ')', '*', or '+'`)
 
-Without `expect`, the errors name raw tokens. With `expect`, they use the words of the grammar. This matters when users see the error.
+## Shorter chains with `fold_left`
 
-Parseff reports everything that was expected at the furthest position, so the message lists each alternative that could have continued the input. The messages below come from running the parser so that all input must be consumed:
-
-```ocaml
-Parseff.parse input expr
-```
-
-Compare the error messages on `"1+x"`:
-
-- Without `expect`: `expected digit or '('`
-- With `expect`: `expected a number or an opening parenthesis`
-
-And on `"(1+2x"`, where the `)`, a `*` or another `+` could follow:
-
-- Without `expect`: `expected ')', '*', or '+'`
-- With `expect`: `expected a '*' operator, a '+' operator, or a closing parenthesis`
-
-When the input ends early, as in `"1+"` or `"(1+2"`, the error keeps the same expected set and says `found end of input`.
-
-## Tracing a parse
-
-Let's trace `1+2*3` through the parser:
-
-1. `expr()` calls `term()`
-2. `term()` calls `factor()`, which matches `1` → `Num 1`
-3. `term()` tries `many(* factor)`, but no `*` follows, so `rest = []`
-4. `term()` returns `Num 1` to `expr()`
-5. `expr()` tries `many(+ term)` and sees `+`
-6. Consumes `+`, calls `term()`
-7. `term()` calls `factor()`, which matches `2` → `Num 2`
-8. `term()` tries `many(* factor)` and sees `*`
-9. Consumes `*`, calls `factor()`, which matches `3` → `Num 3`
-10. `term()` builds `Mul(Num 2, Num 3)` via `fold_left`
-11. `expr()` builds `Add(Num 1, Mul(Num 2, Num 3))` via `fold_left`
-
-The key insight: `*` is consumed inside `term`, so by the time `expr` sees the result, `2*3` is already a single `Mul` node. That's how precedence works. Each level "claims" its operators before the level above sees them.
-
-## An alternative: using `fold_left`
-
-The `many` + `fold_left` pattern is so common that Parseff provides `fold_left` as a shortcut:
+`Parseff.fold_left` replaces the `many` + `List.fold_left` boilerplate (use `Parseff.fold_right` for right-associative operators like `^`):
 
 ```ocaml
 let rec expr () =
-  Parseff.fold_left
-    term
-    (fun () ->
+  Parseff.fold_left term (fun () ->
       Parseff.skip_whitespace ();
-      let _ = Parseff.char '+' in
+      ignore (Parseff.char '+');
       Parseff.skip_whitespace ();
       fun a b -> Add (a, b))
 
 and term () =
-  Parseff.fold_left
-    factor
-    (fun () ->
+  Parseff.fold_left factor (fun () ->
       Parseff.skip_whitespace ();
-      let _ = Parseff.char '*' in
+      ignore (Parseff.char '*');
       Parseff.skip_whitespace ();
       fun a b -> Mul (a, b))
 
@@ -162,31 +104,27 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      let _ = Parseff.char '(' in
-      let e = expr () in
+      ignore (Parseff.char '(');
+      let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      let _ = Parseff.char ')' in
+      ignore (Parseff.char ')');
       e)
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
 ```
 
-`fold_left element op` parses one or more `element`s separated by `op`, combining them left-to-right. The `op` parser returns the combining function. This is more concise and expresses the intent directly.
+## Operator tables: `expression`
 
-For right-associative operators (like exponentiation), use `fold_right` instead.
-
-## An operator table: `expression`
-
-`Parseff.expression` builds the levels from one table, listed from the lowest to the highest precedence. This is the same grammar as above:
+`Parseff.expression` builds all levels from a single precedence table ordered from lowest to highest precedence, supporting `Parseff.infix_left`, `Parseff.infix_right`, `Parseff.prefix`, and `Parseff.postfix`:
 
 ```ocaml
 let add () =
   Parseff.skip_whitespace ();
-  let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
+  ignore (Parseff.expect "a '+' operator" (fun () -> Parseff.char '+'));
   fun a b -> Add (a, b)
 
 let mul () =
   Parseff.skip_whitespace ();
-  let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
+  ignore (Parseff.expect "a '*' operator" (fun () -> Parseff.char '*'));
   fun a b -> Mul (a, b)
 
 let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
@@ -197,24 +135,24 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      let _ = Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(') in
+      ignore
+        (Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '('));
       Parseff.skip_whitespace ();
       let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      let _ = Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')') in
+      ignore
+        (Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')'));
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
       Num (Char.code d - Char.code '0'))
 ```
 
-Each operator parser parses its token and returns the function that builds the node, as the `op` argument of `fold_left` does. `factor` calls `expr` again for parentheses.
+If an operator token parser or its right operand fails, `expression` tries the next operator (so `<` can precede `<<`). Because postfix operators have no right operand, list longer postfix tokens before shorter prefixes (e.g. `!=` before `!`).
 
-A table also takes `Parseff.infix_right` operators such as `^`, `Parseff.prefix` operators such as unary `-`, and `Parseff.postfix` operators such as `!`. After each operand, `Parseff.expression` runs token parsers until one succeeds. It first tries the levels that can take that operand: every level at the first operand, and after an operator the levels above it, plus its own level when it is right-associative (`Parseff.infix_right`). It tries these levels in table order, lowest level first. When none of them matches, it moves on to the lower levels. When the operand after an operator fails, it tries the next operator, so `<` can come before `<<`. A postfix operator has no operand: when one postfix token starts another token, such as `!` and `!=`, put the longer token first.
+## Single-lookup dispatch: `precedence`
 
-## One lookup per operand: `precedence`
-
-`Parseff.precedence` takes a lookup function in place of a table. `precedence` and `expression` each have their own loop, with the same rules for build functions, depth and `commit`. After each operand, the lookup looks at the input once and returns the precedence and the operator, or `None`. Use `expression` for a table of token parsers: tokens with a shared prefix, one token in two roles, and the operator tokens in the expected set of an error. Use `precedence` when the lookup can decide from the next character or from the token of a lexer. With many precedence levels, this is faster than a table, which runs the token parsers one by one:
+For grammars with many precedence levels that can dispatch from `Parseff.peek_char` or a lexer token, `Parseff.precedence` avoids scanning a table after every operand:
 
 ```ocaml
 let operator () =
@@ -230,15 +168,15 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      let _ = Parseff.char '(' in
+      ignore (Parseff.char '(');
       let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      let _ = Parseff.char ')' in
+      ignore (Parseff.char ')');
       e)
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
 ```
 
-`precedence` takes infix and postfix operators only. For a prefix operator, read its token in `operand`, then parse its operand with `Parseff.precedence ~min`, where `min` is the lowest precedence that the operand can hold. A prefix operator in the lookup is a type error:
+`precedence` accepts only infix and postfix operators. Parse prefix operators inside `operand` by calling `Parseff.precedence ~min` inside `Parseff.rec_`. Passing a prefix operator in `~operator` is a compile-time type error:
 
 ```ocaml
 # let negate () = Some (3, Parseff.prefix (fun () e -> Mul (Num (-1), e))) in
@@ -254,11 +192,9 @@ Error: The value negate has type
 
 ## Error recovery
 
-To report every error of an expression, not only the first, see [An expression that recovers](./error-recovery.md#an-expression-that-recovers) in the error recovery guide. It shows why a `Parseff.prefix` operator calls `Parseff.commit` in its token parser, and why each operator token must take the longest match.
+To collect multiple errors in an expression rather than stopping at the first, see [An expression that recovers](./error-recovery.md#an-expression-that-recovers).
 
 ## Printing the AST
-
-For debugging, a simple `to_string` function:
 
 ```ocaml
 let rec expr_to_string = function
@@ -267,9 +203,4 @@ let rec expr_to_string = function
       Printf.sprintf "(%s + %s)" (expr_to_string l) (expr_to_string r)
   | Mul (l, r) ->
       Printf.sprintf "(%s * %s)" (expr_to_string l) (expr_to_string r)
-```
-
-```ocaml
-(* "1+2*3"   -> "(1 + (2 * 3))" *)
-(* "(1+2)*3" -> "((1 + 2) * 3)" *)
 ```
