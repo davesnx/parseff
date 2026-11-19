@@ -3045,6 +3045,30 @@ let peek_with p =
       far_merge st saved;
       raise exn
 
+let label_not_followed_by = "something else"
+
+let not_followed_by ?(label = label_not_followed_by) p =
+  let st = get_state () in
+  let start = st.pos in
+  let frame = State.push_rewind_frame st frame_barrier in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  match without_recovery st p with
+  | _ ->
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      st.far <- saved;
+      fail_str_cold st start tag_label label
+  | exception Fail ->
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      st.far <- saved
+  | exception exn ->
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      far_merge st saved;
+      raise exn
+
 let skip_to target =
   let st = get_state () in
   if target < st.pos || target > st.input_len then

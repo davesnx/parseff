@@ -167,6 +167,21 @@ let keyword_or_name () =
   end
 ```
 
+### `not_followed_by`
+
+`Parseff.not_followed_by` is the negative of `Parseff.look_ahead`: it succeeds when the parser fails, fails where it started when the parser succeeds, and consumes no input. The failure is `expected <label>`, and the failures inside the parser are forgotten.
+
+```ocaml
+val not_followed_by : ?label:string -> (unit -> 'a) -> unit
+```
+```ocaml
+let less_than () =
+  Parseff.literal "<";
+  Parseff.not_followed_by ~label:"'<' alone" (fun () -> Parseff.char '=')
+(* "<1"  -> ()                              *)
+(* "<=1" -> Error: expected '<' alone at 1  *)
+```
+
 ## Error labeling
 
 
