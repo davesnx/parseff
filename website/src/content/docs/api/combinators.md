@@ -265,9 +265,58 @@ let statements () = Parseff.many (fun () -> Parseff.skip_whitespace (); statemen
 (* "let x = 1; 2;"  -> Ok [';'; ';'] *)
 (* "let x = ;"      -> Error at 8: expected expression *)
 ```
-With `commit ()` in place of `cut ()`, only the `or_` is sealed, `many` stops and `statements` returns `[]` without reading the rest of the input. With `cut ()`, the failure of `let x = ;` is the error of the parse.
-
 `cut` also helps streaming: sealed frames no longer pin buffered input. See [`streaming`](./streaming.md).
+
+
+### `commit` or `cut`
+
+`Parseff.commit` and `Parseff.cut` both stop backtracking, but over different parts of the parser.
+
+Use `commit` when this alternative is chosen: the token that selects a branch of `or_` or `one_of` was read, and no other branch can match. Use `cut` when this construct is decided: the token that starts a statement or a declaration was read, and a later failure inside it must be the error of the parse, not the end of a loop around it.
+
+|  | `commit ()` | `cut ()` |
+| --- | --- | --- |
+| Frames it seals | The nearest `or_`, `one_of`, `many`, `sep_by`, `optional` or `fold_*` frame, also when that frame is outside the innermost `context`. | Every such frame opened since the innermost `context`, or since the start of the parse when there is no `context`. |
+| When the enclosing `context` fails | Nothing more is sealed. The frames outside the sealed one backtrack as usual, so an enclosing `many` can stop and return. | The frames outside the `context` are sealed too. The failure is the error of the parse. When the `context` returns, the outer frames stay as they were. |
+| Failures recorded before the call | Forgets those at or beyond the current position, so the error reports only what the committed branch expected. | Keeps them. |
+| Streaming memory | Releases the input that the nearest frame kept. An enclosing `many` still keeps the input from the start of its current iteration. | Releases the input that all the sealed frames kept. |
+| Inside `look_ahead`, `peek_with` or `capture` | Seals no frame outside them. With `capture ~release:true`, moves the rewind point of the `capture` and stops there. | Seals no frame outside them. With `capture ~release:true`, moves the rewind point of the `capture` and continues to the frames outside it. |
+
+#### Example
+
+In this example, `decide` is `Parseff.commit` or `Parseff.cut`. The rest of the parser is the same:
+
+```ocaml
+let decided_statement decide () =
+  Parseff.context "statement" (fun () ->
+      Parseff.or_
+        (fun () ->
+          Parseff.literal "let ";
+          decide ();
+          let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
+          Parseff.literal " = ";
+          let _ = Parseff.take_while ~at_least:1 ~label:"expression" (fun c -> c >= '0' && c <= '9') in
+          Parseff.char ';')
+        (fun () ->
+          let _ = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+          Parseff.char ';')
+        ())
+
+let read_statements decide input =
+  Parseff.parse ~consume:`Partial input (fun () ->
+      let xs =
+        Parseff.many (fun () -> Parseff.skip_whitespace (); decided_statement decide ()) ()
+      in
+      (List.length xs, Parseff.position ()))
+  |> Result.map_error Parseff.error_message
+```
+```ocaml
+# read_statements Parseff.commit "1; let x = ;";;
+- : (int * int, string) result = Ok (1, 2)
+# read_statements Parseff.cut "1; let x = ;";;
+- : (int * int, string) result = Error "expected expression, found ';'"
+```
+With `commit`, only the `or_` is sealed. The failure at offset 11 ends the `many`, which goes back to offset 2 and returns one statement. With `cut`, the `or_` and the `many` are sealed, and the failure of `let x = ;` is the error of the parse. With the default `` ~consume:`All ``, both parses fail with this error, because the parse then reports the furthest failure.
 
 
 ### Tracing

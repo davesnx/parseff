@@ -1512,6 +1512,9 @@ val commit : unit -> unit
     only. The [many] frame still rewinds to the start of the current iteration,
     and streaming sources keep that input buffered.
 
+    To decide a whole construct, so that an enclosing loop cannot stop at its
+    failure, use {!cut}; see {{!page-combinators.commit_or_cut}commit or cut}.
+
     Example:
     {@ocaml[
     let http_method () =
@@ -1585,6 +1588,10 @@ val cut : unit -> unit
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
     kept alive.
+
+    To select one branch of an {!or_} or {!one_of} and keep the frames around it
+    as they are, use {!commit}; see
+    {{!page-combinators.commit_or_cut}commit or cut}.
 
     Example:
     {@ocaml[
