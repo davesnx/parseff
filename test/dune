@@ -34,6 +34,7 @@
   test_recovery_bound
   test_until
   test_charset
+  test_chunks_each
   test_not_followed_by)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest uucp))

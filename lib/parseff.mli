@@ -1538,6 +1538,9 @@ val commit : unit -> unit
     only. The [many] frame still rewinds to the start of the current iteration,
     and streaming sources keep that input buffered.
 
+    To decide a whole construct, so that an enclosing loop cannot stop at its
+    failure, use {!cut}; see {{!page-combinators.commit_or_cut}commit or cut}.
+
     Example:
     {@ocaml[
     let http_method () =
@@ -1611,6 +1614,10 @@ val cut : unit -> unit
     Unlike {!commit}, which seals only the nearest frame, [cut] covers a whole
     construct. It also lets streaming sources drop the input that those frames
     kept alive.
+
+    To select one branch of an {!or_} or {!one_of} and keep the frames around it
+    as they are, use {!commit}; see
+    {{!page-combinators.commit_or_cut}commit or cut}.
 
     Example:
     {@ocaml[
@@ -2001,8 +2008,11 @@ val expression :
   unit ->
   'a
 (** [expression ~operand table] parses operands with [operand], joined by the
-    operators of [table]. It is {!precedence} with a lookup made from [table]:
-    the operators of level [i] have the precedence [i].
+    operators of [table]. The operators of level [i] have the precedence [i].
+    [expression] and {!precedence} each have their own loop, with the same rules
+    for build functions, depth and {!commit}. Use [expression] for a table of
+    token parsers: tokens with a shared prefix, one token in two roles, and the
+    operator tokens in the expected set of an error.
 
     [table] lists the precedence levels from the lowest to the highest
     precedence. [operand] parses an operand; for parentheses, it calls the
@@ -2088,10 +2098,12 @@ val precedence :
   unit ->
   'a
 (** [precedence ~operand ~operator] parses operands with [operand], joined by
-    the operators that [operator] finds. {!expression} uses the same loop. Where
-    {!expression} runs the token parsers of its table, [precedence] calls
-    [operator] once after each operand. For a grammar with many precedence
-    levels, this is faster.
+    the operators that [operator] finds. [precedence] and {!expression} each
+    have their own loop, with the same rules for build functions, depth and
+    {!commit}. Where {!expression} runs the token parsers of its table,
+    [precedence] calls [operator] once after each operand. Use [precedence] when
+    [operator] can decide from the next character or from the token of a lexer.
+    For a grammar with many precedence levels, this is faster.
 
     [operator] looks at the input and returns [Some (prec, op)], or [None] when
     no operator is next. A higher [prec] binds tighter, and each [int] is a
@@ -2676,6 +2688,91 @@ val parse_source_each :
       |> List.of_seq
     ]}
     Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
+
+(** The result of a push to {!parse_chunks_each}. *)
+type chunks_step =
+  | Need_input
+      (** All the given input is parsed: push the next chunk, or [None] at the
+          end of the input. *)
+  | Stopped of string
+      (** [on_value] returned [`Stop]. The string has the bytes after that value
+          in the chunks given so far. Give it to the next parse, before its next
+          chunk. *)
+  | Error_of of error  (** A run of the parser failed, and the stream ended. *)
+  | Ended  (** [None] was pushed and no input remained. *)
+
+val parse_chunks_each :
+  ?max_depth:int ->
+  ?backtrack_window:int ->
+  ?diagnostics:Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
+  on_value:('a -> [ `Continue | `Stop ]) ->
+  (unit -> 'a) ->
+  string option ->
+  chunks_step
+(** [parse_chunks_each ~on_value parser] returns [push], which parses a stream
+    of values from chunks that the caller gives, such as the requests of a
+    pipelined HTTP/1.1 connection. It is the push counterpart of
+    {!parse_source_each}.
+
+    [push (Some chunk)] runs [parser] on the input given so far. Each value goes
+    to [on_value], and [parser] runs again on the bytes after that value. When
+    [parser] needs bytes that were not given, [push] returns [Need_input]. An
+    empty [chunk] gives no input. [push None] ends the input: a parser that
+    waits then succeeds or fails as {!parse_source_each} does at the end of its
+    source.
+
+    All the values run in one effect fiber. {!parse_partial} starts a new fiber
+    for each value, and its stack grows again each time. A 103-byte HTTP request
+    head takes about 5,942 instructions when 1,000 heads come in one chunk,
+    6,786 when each head comes in its own chunk, 6,862 with {!parse_partial} and
+    5,442 with {!parse}.
+
+    Each run follows the rules of {!parse_source_each}: a run that consumes no
+    input gives [Error_of], positions count from the first byte of the first
+    chunk, and [diagnostics] is emptied before each run, so read it in
+    [on_value]. After [Ended] it is empty, because the last run that finds no
+    input empties it too. The arguments are those of {!parse_partial}.
+
+    Between two values the parse holds no {!Ref} cells and not its [diagnostics]
+    collector, as a finished {!parse_source}. When it waits inside a value, it
+    holds them as a {!parse_partial} that waits does.
+
+    A [chunk] must not change while the parse uses it, as for {!feed}. An
+    exception that [parser] or [on_value] raises comes out of [push], and the
+    stream ends. [push] raises [Invalid_argument] after [Stopped], [Error_of] or
+    [Ended], when called from inside a parser, and when called from [on_value].
+
+    Example:
+    {@ocaml[
+    let line () =
+      let s = take_while (fun c -> c <> '\n') in
+      let _ = char '\n' in
+      s
+
+    let lines chunks =
+      let seen = ref [] in
+      let on_value s =
+        seen := s :: !seen;
+        `Continue
+      in
+      let push = parse_chunks_each ~on_value line in
+      let rec go = function
+        | [] ->
+            push None
+        | chunk :: rest -> (
+            match push (Some chunk) with Need_input -> go rest | step -> step
+          )
+      in
+      match go chunks with
+      | Ended ->
+          Ok (List.rev !seen)
+      | Error_of e ->
+          Error e
+      | Need_input | Stopped _ ->
+          assert false
+    ]}
+    Here [lines [ "ab"; "c\nde\n" ]] is [Ok [ "abc"; "de" ]]. *)
 
 type 'a partial
 (** A parse that takes its input in chunks: push input. The caller gives the
