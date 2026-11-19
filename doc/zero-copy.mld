@@ -1,76 +1,55 @@
 {0 Zero-copy API}
 
-The zero-copy API allows you to parse without allocating intermediate strings,
-significantly improving performance and reducing memory usage.
+{!module:Parseff.Slice} and {!val:Parseff.sep_by_take} avoid intermediate
+string allocations when scanning hot paths or converting bytes directly into
+values.
 
-{1 Slice type}
+{1 [Slice]}
 
-{@ocaml skip[module Slice : sig type t end]}
-
-A {!type:Parseff.Slice.t} is a zero-copy slice of the input string. It refers to
-the input instead of copying it, so no string is allocated until you call
-{!val:Parseff.Slice.to_string}. The type is abstract: read a slice with
-{!val:Parseff.Slice.length} and {!val:Parseff.Slice.get}.
-
-For parsers run with {!val:Parseff.Source.parse}, slices may be materialized into
-owned strings internally so the streaming runtime can reclaim older buffer
-prefixes. In-memory {!val:Parseff.parse} still keeps the zero-copy behavior.
+A {!type:Parseff.Slice.t} borrows a byte range from the input string without
+copying under {!val:Parseff.parse}. Under {!val:Parseff.Source.parse} (or inside
+{!val:Parseff.within}), slices may be materialized into owned copies so the
+streaming buffer can reclaim older prefixes.
 
 {@ocaml skip[
-val Slice.to_string : Slice.t -> string
-val Slice.length : Slice.t -> int
-val Slice.get : Slice.t -> int -> char
+module Slice : sig
+  type t
+  val to_string : t -> string
+  val length : t -> int
+  val get : t -> int -> char
+  val take_while : ?set:Charset.t -> (char -> bool) -> t
+  val take : int -> t
+  val recognize : (unit -> 'a) -> t
+  val sep_by_take :
+    ws:(char -> bool) -> sep:char -> (char -> bool) -> t list
+end
 ]}
 
-{!val:Parseff.Slice.get} counts the index from the start of the slice. It raises
-[Invalid_argument] if the index is not in [0 .. Slice.length s - 1].
-
-{1 Slice operations}
+{!val:Parseff.Slice.get} indexes relative to the start of the slice and raises
+[Invalid_argument] outside [0 .. Slice.length s - 1].
 
 {2 [Slice.take_while]}
 
-{!val:Parseff.Slice.take_while} is like {!val:Parseff.take_while} but returns a
-zero-copy {!type:Parseff.Slice.t} instead of allocating a string. No memory
-allocation until you call {!val:Parseff.Slice.to_string}. Under
-{!val:Parseff.Source.parse}, the returned slice may be backed by an owned copy
-instead of the live streaming buffer.
-
-{@ocaml skip[val Slice.take_while : (char -> bool) -> Slice.t]}
-
-{@ocaml skip[
-(* no allocation until you need it *)
-let digits_span =
-  Parseff.Slice.take_while (fun c -> c >= '0' && c <= '9')
-let n = int_of_span digits_span
-]}
-
-Real-world usage:
+Zero-copy counterpart of {!val:Parseff.take_while}.
 
 {@ocaml[
-(* Parse integers efficiently *)
-let int_of_span span =
+let int_of_slice slice =
   let rec loop i acc =
-    if i >= Parseff.Slice.length span then acc
+    if i >= Parseff.Slice.length slice then acc
     else
-      let c = Parseff.Slice.get span i in
-      loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
+      let c = Parseff.Slice.get slice i in
+      loop (i + 1) ((acc * 10) + (Char.code c - Char.code '0'))
   in
   loop 0 0
 
-let fast_integer () =
-  let digits =
-    Parseff.Slice.take_while (fun c -> c >= '0' && c <= '9')
-  in
-  int_of_span digits
+let fast_uint () =
+  int_of_slice (Parseff.Slice.take_while (fun c -> c >= '0' && c <= '9'))
 ]}
 
 {2 [Slice.take]}
 
-{!val:Parseff.Slice.take} reads exactly [n] bytes like {!val:Parseff.take} and
-returns a {!type:Parseff.Slice.t}. Use it for a length-prefixed payload that you
-pass on without changing it.
-
-{@ocaml skip[val Slice.take : int -> Slice.t]}
+Reads exactly [n] bytes like {!val:Parseff.take} and returns a
+{!type:Parseff.Slice.t}.
 
 {@ocaml[
 let payload () =
@@ -79,146 +58,57 @@ let payload () =
 
 let () =
   match Parseff.parse "\x00\x03abc" payload with
-  | Ok span -> assert (Parseff.Slice.to_string span = "abc")
+  | Ok slice -> assert (Parseff.Slice.to_string slice = "abc")
   | Error e -> prerr_endline (Parseff.render_error ~name:"payload" e)
 ]}
 
 {2 [Slice.recognize]}
 
-{!val:Parseff.Slice.recognize} returns the input text that a parser consumed, as
-a {!type:Parseff.Slice.t}. See {!val:Parseff.recognize}.
-
-{@ocaml skip[val Slice.recognize : (unit -> 'a) -> Slice.t]}
+Runs a parser, discards its return value, and returns the consumed bytes as a
+{!type:Parseff.Slice.t}. See {!val:Parseff.recognize}.
 
 {2 [Slice.sep_by_take]}
 
-{!val:Parseff.Slice.sep_by_take} is like {!val:Parseff.sep_by_take} but returns
-zero-copy {!type:Parseff.Slice.t}s. No [String.sub] allocations per element in the
-in-memory runner. Under {!val:Parseff.Source.parse}, slices may be copied so the
-runtime can discard older chunks safely.
-
-{@ocaml skip[val Slice.sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> Slice.t list]}
+Fused separated-list scanner returning {!type:Parseff.Slice.t} elements. [~ws]
+skips surrounding bytes around [~sep], and the final predicate matches each
+element's bytes.
 
 {@ocaml[
-let int_of_span span =
-  let rec loop i acc =
-    if i >= Parseff.Slice.length span then acc
-    else
-      let c = Parseff.Slice.get span i in
-      loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
-  in
-  loop 0 0
-
-(* Parse CSV line with zero-copy *)
-let csv_line () =
-  let spans =
-    Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:','
-      (fun c -> c <> ',' && c <> '\n')
-  in
-  (* Only allocate strings when needed *)
-  List.map Parseff.Slice.to_string spans
-
-(* or process slices directly, avoiding string allocation entirely *)
 let csv_to_ints () =
-  let spans =
-    Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:','
-      (fun c -> c >= '0' && c <= '9')
-  in
-  List.map int_of_span spans
-]}
+  Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' (fun c ->
+      c >= '0' && c <= '9')
+  |> List.map int_of_slice
 
-{1 Fused operations}
-
-{2 [sep_by_take]}
-
-{!val:Parseff.sep_by_take} parses zero or more separated values in one pass.
-[~ws] selects the characters to skip around each [~sep]; the last predicate
-selects the characters of each value. Returns a list of matched strings with
-no intermediate parser round-trips.
-
-{@ocaml skip[val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> string list]}
-
-{@ocaml[
-(* Parse array values efficiently *)
-let array_values () =
-  let _ = Parseff.char '[' in
-  let values =
-    Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:','
-      (fun c -> c >= '0' && c <= '9')
-  in
-  let _ = Parseff.char ']' in
-  List.map int_of_string values
-
-(* Matches "[1, 2, 3]" -> [1; 2; 3] *)
-]}
-
-{1 Performance comparison}
-
-String allocation:
-
-{@ocaml skip[
-(* allocates intermediate strings *)
-let parse_numbers () =
-  Parseff.sep_by
-    (fun () ->
-      Parseff.skip_whitespace ();
-      let s =
-        Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
-      in
-      int_of_string s)
-    (fun () -> Parseff.char ',')
-
-(* no allocations until conversion *)
-let parse_numbers_fast () =
-  let spans =
-    Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:','
-      (fun c -> c >= '0' && c <= '9')
-  in
-  List.map int_of_span spans
-]}
-
-{1 Complete example: high-performance JSON array}
-
-{@ocaml[
-let int_of_span span =
-  let rec loop i acc =
-    if i >= Parseff.Slice.length span then acc
-    else
-      let c = Parseff.Slice.get span i in
-      loop (i + 1) (acc * 10 + (Char.code c - Char.code '0'))
-  in
-  loop 0 0
-
-let json_array () =
-  let _ = Parseff.char '[' in
-  let spans =
-    Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:','
-      (fun c -> c >= '0' && c <= '9')
-  in
-  let _ = Parseff.char ']' in
-  List.map int_of_span spans
+let json_int_array () =
+  ignore (Parseff.char '[');
+  let nums = csv_to_ints () in
+  ignore (Parseff.char ']');
+  nums
 
 let () =
-  match Parseff.parse "[1, 2, 3, 4, 5]" json_array with
-  | Ok nums ->
-      Printf.printf "Sum: %d\n" (List.fold_left ( + ) 0 nums)
+  match Parseff.parse "[1, 2, 3, 4, 5]" json_int_array with
+  | Ok nums -> assert (List.fold_left ( + ) 0 nums = 15)
   | Error e -> prerr_endline (Parseff.render_error ~name:"array" e)
 ]}
 
-The zero-copy version is roughly 2.5x faster than the standard API and uses 3x
-less memory.
+{1 Fused string scanner: [sep_by_take]}
 
-{1 When to use zero-copy}
+{!val:Parseff.sep_by_take} runs the same fused loop as
+{!val:Parseff.Slice.sep_by_take} and returns [string list] directly without
+intermediate combinator frames.
 
-{b Use zero-copy when:}
+{@ocaml skip[
+val sep_by_take :
+  ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
+]}
 
-- Parsing large inputs
-- Performance is critical
-- You can process slices directly (e.g., custom number parsing)
-- Parsing hot paths (inner loops)
-
-{b Skip zero-copy when:}
-
-- Readability is more important than performance
-- You need to store parsed strings long-term (just use the regular API)
-- The performance difference doesn't matter for your use case
+{@ocaml[
+let array_values () =
+  ignore (Parseff.char '[');
+  let values =
+    Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' (fun c ->
+        c >= '0' && c <= '9')
+  in
+  ignore (Parseff.char ']');
+  List.map int_of_string values
+]}

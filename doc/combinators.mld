@@ -1,14 +1,14 @@
 {0 Combinators}
 
-Combinators compose simple parsers into more complex ones. They handle
-alternation, error labeling, lookahead, and recursion.
+Combinators compose parsers for alternation, lookahead, error labeling,
+backtracking control, and bounded recursion.
 
 {1 Alternation}
 
 {2 [or_]}
 
-{!val:Parseff.or_} tries the left parser. If it fails, backtracks (resets the
-cursor) and tries the right parser.
+{!val:Parseff.or_} tries the first parser; if it fails (and did not commit),
+rewinds and tries the second.
 
 {@ocaml skip[val or_ : (unit -> 'a) -> (unit -> 'a) -> 'a]}
 
@@ -21,160 +21,93 @@ let bool_parser () =
     (fun () ->
       Parseff.literal "false";
       false)
-(* "true"  -> Ok true  *)
-(* "false" -> Ok false *)
-(* "maybe" -> Error: expected "false" or "true", found 'maybe' *)
 ]}
 
-On ["maybe"], both branches fail at the same position (position 0). Parseff
-merges what each branch expected into one sorted list: {b expected "false" or
-"true"}. The order of the branches does not change the message.
+When both branches fail at the same position (such as ["maybe"] at offset 0),
+Parseff merges their expectations into a sorted list:
+[expected "false" or "true", found 'maybe']. When they fail at different
+positions, the furthest failure wins: on ["tr"], the first branch reaches
+offset 2 and reports [expected "ue", found end of input].
 
-If the branches fail at {e different} positions, the parse reports the failure
-that reached the furthest position. On ["tr"] the left branch fails at the end
-of the input, which is further than the mismatch of the right branch, so the
-error says [expected "ue", found end of input] at position 2.
+{2 [one_of] and [one_of_labeled]}
 
-A failure is recorded when it happens, not when the parse gives up. A branch that
-fails and is abandoned still counts if it went further than anything else, even
-when a later alternative succeeds.
+{!val:Parseff.one_of} tries a list of parsers in order, merging expectations
+with the same rules as [or_]. {!val:Parseff.one_of_labeled} attaches a label to
+each branch (wrapping each branch in {!val:Parseff.expect}) so failures at the
+start position report the labels instead of inner primitive expectations.
 
-[or_] is ideal for two alternatives. When you have more, use
-{!val:Parseff.one_of}, which takes a list and avoids nested [or_] calls:
+{@ocaml skip[
+val one_of : (unit -> 'a) list -> 'a
+val one_of_labeled : (string * (unit -> 'a)) list -> 'a
+]}
 
 {@ocaml[
-let keyword_with_or () =
-  Parseff.or_
-    (fun () -> Parseff.literal "let")
-    (fun () ->
-      Parseff.or_
-        (fun () -> Parseff.literal "const")
-        (fun () -> Parseff.literal "var"))
-
-let keyword_with_one_of () =
+let keyword_parser () =
   Parseff.one_of
     [
       (fun () -> Parseff.literal "let");
       (fun () -> Parseff.literal "const");
       (fun () -> Parseff.literal "var");
     ]
-]}
 
-{2 [one_of]}
-
-{!val:Parseff.one_of} tries each parser in order until one succeeds. Equivalent
-to chaining [or_], but cleaner for more than two alternatives.
-
-{@ocaml skip[val one_of : (unit -> 'a) list -> 'a]}
-
-{@ocaml skip[
-let json_value () =
-  Parseff.one_of
-    [
-      null_parser;
-      bool_parser;
-      number_parser;
-      string_parser;
-      array_parser;
-      object_parser;
-    ]
-]}
-
-Error composition follows the same rules as [or_]: if all parsers fail at the
-same position, what they expected is merged into one sorted list without
-duplicates: [expected "else", "if", or "while"]. With three or more items the
-list ends with [", or"]. If they fail at different positions, the failure that
-progressed furthest wins.
-
-{2 [one_of_labeled]}
-
-{!val:Parseff.one_of_labeled} is like {!val:Parseff.one_of}, but each parser has
-a label. On failure, the error message reports all labels, sorted:
-
-{@ocaml skip[val one_of_labeled : (string * (unit -> 'a)) list -> 'a]}
-
-{@ocaml skip[
 let scalar () =
   Parseff.one_of_labeled
     [
-      ("number", fun () -> Number (Char.code (Parseff.digit ()) - Char.code '0'));
-      ("string", string_parser);
-      ("boolean", bool_parser);
+      ("number", fun () -> `Num (Parseff.integer ()));
+      ("boolean", fun () -> `Bool (bool_parser ()));
     ]
-(* On failure: "expected boolean, number, or string" *)
 ]}
 
-This gives users a clear picture of what was expected at a given position,
-without exposing internal parser details.
-
-Each branch is wrapped by [expect]: only failures at the position where
-[one_of_labeled] started are replaced by the label. If a branch fails further
-in, for example an unterminated string, its own message is kept, because it
-describes the problem better than ["string"].
+If a branch of [one_of_labeled] fails past its starting position, its inner
+error is preserved rather than replaced by the branch label.
 
 {2 [optional]}
 
-{!val:Parseff.optional} tries the parser. Returns [Some result] on success,
-[None] on failure (without consuming input).
+{!val:Parseff.optional} returns [Some v] if the parser succeeds, or [None]
+without consuming input if it fails.
 
 {@ocaml skip[val optional : (unit -> 'a) -> 'a option]}
 
-{@ocaml skip[
-let signed_number () =
-  let sign = Parseff.optional (fun () -> Parseff.char '-') in
-  let n = number () in
-  match sign with
-  | Some _ -> -n
-  | None -> n
-(* "42"  -> 42  *)
-(* "-42" -> -42 *)
+{@ocaml[
+let optional_sign () =
+  Parseff.optional (fun () ->
+      Parseff.or_ (fun () -> Parseff.char '-') (fun () -> Parseff.char '+'))
 ]}
 
 {1 Lookahead}
 
 {2 [look_ahead]}
 
-{!val:Parseff.look_ahead} runs a parser without consuming input. The cursor
-stays where it was before the call. Fails if the parser fails.
+{!val:Parseff.look_ahead} runs a parser and rewinds the cursor on both success
+and failure.
 
 {@ocaml skip[val look_ahead : (unit -> 'a) -> 'a]}
 
-{@ocaml skip[
-let peek_open_paren () =
-  let _ = Parseff.look_ahead (fun () -> Parseff.char '(') in
-  (* cursor hasn't moved, '(' is still the next character *)
-  parse_parenthesized_expr ()
-]}
-
-Useful for context-sensitive decisions: peek at what's coming, then choose which
-parser to run.
-
 {2 [peek_with] and [skip_to]}
 
-{!val:Parseff.peek_with} is {!val:Parseff.look_ahead} that also returns the
-position where the parser stopped. {!val:Parseff.skip_to} moves the cursor
-forward to that position, so the input is not read a second time.
+{!val:Parseff.peek_with} behaves like {!val:Parseff.look_ahead} and also returns
+the byte offset where the parser stopped. {!val:Parseff.skip_to} advances to
+that offset without re-parsing the bytes.
 
-{@ocaml skip[val peek_with : (unit -> 'a) -> 'a * int]}
-
-{@ocaml skip[val skip_to : int -> unit]}
+{@ocaml skip[
+val peek_with : (unit -> 'a) -> 'a * int
+val skip_to : int -> unit
+]}
 
 {@ocaml skip[
 let keyword_or_name () =
   let word, stop = Parseff.peek_with name in
   if is_keyword word then Parseff.fail "expected a name"
-  else begin
+  else (
     Parseff.skip_to stop;
-    word
-  end
+    word)
 ]}
 
 {2 [not_followed_by]}
 
-{!val:Parseff.not_followed_by} is the negative of
-{!val:Parseff.look_ahead}: it succeeds when the parser fails, fails where it
-started when the parser succeeds, and consumes no input. The failure is
-[expected <label>], and the failures inside the parser are forgotten.
+{!val:Parseff.not_followed_by} succeeds when the inner parser fails and fails at
+its starting position with [expected <label>] when it succeeds, consuming no
+input. Failures inside the inner parser are discarded.
 
 {@ocaml skip[val not_followed_by : ?label:string -> (unit -> 'a) -> unit]}
 
@@ -182,100 +115,68 @@ started when the parser succeeds, and consumes no input. The failure is
 let less_than () =
   Parseff.literal "<";
   Parseff.not_followed_by ~label:"'<' alone" (fun () -> Parseff.char '=')
-(* "<1"  -> ()                              *)
-(* "<=1" -> Error: expected '<' alone at 1  *)
 ]}
 
 {1 Error labeling}
 
 {2 [expect]}
 
-{!val:Parseff.expect} runs a parser and relabels its failure with a clearer
-message. The error reads [expected <description>].
+{!val:Parseff.expect} replaces [Expected] failures at the parser's starting
+position with [expected <label>]. Failures strictly past the starting position
+(and {!val:Parseff.fail}/{!val:Parseff.error}) are left unchanged.
 
 {@ocaml skip[val expect : string -> (unit -> 'a) -> 'a]}
 
 {@ocaml[
-let dot () =
-  Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
-
-let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
+let dot () = Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
 ]}
 
-Use [expect] at grammar boundaries where user-facing wording is better than raw
-token names:
-
-{@ocaml skip[
-let ip_address () =
-  let a = number () in
-  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
-  let b = number () in
-  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
-  let c = number () in
-  let _ = Parseff.expect "a dot separator" (fun () -> Parseff.char '.') in
-  let d = number () in
-  (a, b, c, d)
-]}
-
-Without [expect], a failed [char '.'] reports [expected '.']. With [expect], it
-reports [expected a dot separator].
-
-[expect] relabels only failures at the position where the parser started. In
-[expect "key" (fun () -> literal "id:"; digit ())], the input ["foo"] reports
-[expected key], but ["id:x"] reports [expected digit] at offset 3, because the
-parser got past ["id:"] and the digit message is more precise.
-
-{1 Naming constructs}
+{1 Naming constructs and controlling backtracking}
 
 {2 [context]}
 
-{!val:Parseff.context} runs a parser inside a named construct. The name does not
-change what the parser accepts. A failure that happens inside it remembers which
-constructs were open, outermost first, so an error report can say
-"while parsing array".
+{!val:Parseff.context} attaches a construct name to failures strictly past its
+starting position, reported outermost first in [error.contexts] and printed as
+[* while parsing <name>] by {!val:Parseff.render_error}. Pass [~delimited:true]
+for constructs with an opening token (such as arrays or blocks) so multi-line
+error reports draw a bracket from the opener to the failure.
 
 {@ocaml skip[val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a]}
 
 {@ocaml[
 let array_parser value () =
   Parseff.context ~delimited:true "array" (fun () ->
-      let _ = Parseff.char '[' in
+      ignore (Parseff.char '[');
       let xs =
-        Parseff.sep_by value
-          (fun () ->
+        Parseff.sep_by value (fun () ->
             Parseff.skip_whitespace ();
             Parseff.char ',')
       in
       Parseff.skip_whitespace ();
-      let _ = Parseff.char ']' in
+      ignore (Parseff.char ']');
       xs)
 ]}
 
-Use [~delimited:true] for constructs that have an opening token, such as an
-array or a block. A parser that never calls [context] pays nothing for it. Each
-call costs about 100 instructions, so name constructs, not single tokens.
+Name grammar constructs (statements, objects, declarations), not single tokens.
+If two failures tie at the furthest position, the first construct stack is kept.
 
-A construct is reported only when the failure is strictly past the place where
-it started. An alternative that fails at its first byte, such as an array tried
-where there is no opening bracket, does not appear in the list.
+{2 [commit]}
 
-If two failures tie at the furthest position, the construct list of the first
-one is kept.
+{!val:Parseff.commit} seals the nearest enclosing backtracking frame ([or_],
+[one_of], [many], [sep_by], [optional], [fold_left], or [fold_right]), prevents
+it from backtracking, forgets failures recorded at or beyond the current
+position, and releases buffered streaming input held by that frame.
+
+{@ocaml skip[val commit : unit -> unit]}
 
 {2 [cut]}
 
-{!val:Parseff.cut} declares that the construct that is running is decided.
-{!val:Parseff.commit} seals the nearest frame only. [cut] seals every [or_],
-[one_of], [many], [sep_by], [optional] and [fold_*] frame that was opened since
-the innermost enclosing [context]. It stops at {!val:Parseff.look_ahead},
-{!val:Parseff.peek_with} or {!val:Parseff.capture}. With
-[capture ~release:true], it moves the rewind point of the [capture] to the
-position of the cut and continues.
+{!val:Parseff.cut} seals every backtracking frame opened since the innermost
+enclosing {!val:Parseff.context} (or since the start of the parse if none). If
+that [context] later fails, frames outside it are sealed as well so enclosing
+[or_], [many], or [sep_by] cannot swallow the error.
 
 {@ocaml skip[val cut : unit -> unit]}
-
-If the enclosing [context] then fails, the frames outside it are sealed too, so
-an enclosing [or_], [many] or [sep_by] cannot swallow the failure:
 
 {@ocaml[
 let statement () =
@@ -285,34 +186,27 @@ let statement () =
           Parseff.literal "let";
           Parseff.cut ();
           Parseff.skip_whitespace ();
-          let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
+          ignore
+            (Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
+                 c >= 'a' && c <= 'z'));
           Parseff.skip_whitespace ();
-          let _ = Parseff.char '=' in
+          ignore (Parseff.char '=');
           Parseff.skip_whitespace ();
-          let _ = Parseff.take_while ~at_least:1 ~label:"expression" (fun c -> c >= '0' && c <= '9') in
+          ignore
+            (Parseff.take_while ~at_least:1 ~label:"expression" (fun c ->
+                 c >= '0' && c <= '9'));
           Parseff.char ';')
         (fun () ->
-          let _ = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+          ignore
+            (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'));
           Parseff.char ';'))
-
-let statements () = Parseff.many (fun () -> Parseff.skip_whitespace (); statement ())
-(* "let x = 1; 2;"  -> Ok [';'; ';'] *)
-(* "let x = ;"      -> Error at 8: expected expression *)
 ]}
-
-[cut] also helps streaming: sealed frames no longer pin buffered input. See
-{!page:streaming}.
 
 {2:commit_or_cut [commit] or [cut]}
 
-{!val:Parseff.commit} and {!val:Parseff.cut} both stop backtracking, but over
-different parts of the parser.
-
-Use [commit] when this alternative is chosen: the token that selects a branch
-of [or_] or [one_of] was read, and no other branch can match. Use [cut] when
-this construct is decided: the token that starts a statement or a declaration
-was read, and a later failure inside it must be the error of the parse, not
-the end of a loop around it.
+Use [commit] when an alternative in [or_]/[one_of] is chosen. Use [cut] when an
+entire construct is decided and any later failure inside it should become a
+parse error rather than ending an enclosing loop.
 
 {table
   {tr
@@ -320,39 +214,27 @@ the end of a loop around it.
     {th [commit ()]}
     {th [cut ()]}}
   {tr
-    {td Frames it seals}
-    {td The nearest [or_], [one_of], [many], [sep_by], [optional] or [fold_*]
-        frame, also when that frame is outside the innermost [context].}
-    {td Every such frame opened since the innermost [context], or since the
-        start of the parse when there is no [context].}}
+    {td Frames sealed}
+    {td Nearest backtracking frame (even if outside the innermost [context]).}
+    {td Every backtracking frame since the innermost [context] (or start of parse).}}
   {tr
-    {td When the enclosing [context] fails}
-    {td Nothing more is sealed. The frames outside the sealed one backtrack as
-        usual, so an enclosing [many] can stop and return.}
-    {td The frames outside the [context] are sealed too. The failure is the
-        error of the parse. When the [context] returns, the outer frames stay
-        as they were.}}
+    {td When enclosing [context] fails}
+    {td Outer frames backtrack as usual, so an enclosing [many] can stop.}
+    {td Outer frames are sealed too; the failure becomes the parse error.}}
   {tr
-    {td Failures recorded before the call}
-    {td Forgets those at or beyond the current position, so the error reports
-        only what the committed branch expected.}
-    {td Keeps them.}}
+    {td Prior failures at/past cursor}
+    {td Forgotten, so errors report only what the committed branch expected.}
+    {td Kept.}}
   {tr
     {td Streaming memory}
-    {td Releases the input that the nearest frame kept. An enclosing [many]
-        still keeps the input from the start of its current iteration.}
-    {td Releases the input that all the sealed frames kept.}}
+    {td Releases input pinned by the nearest frame only.}
+    {td Releases input pinned by all sealed frames.}}
   {tr
-    {td Inside [look_ahead], [peek_with] or [capture]}
-    {td Seals no frame outside them. With [capture ~release:true], moves the
-        rewind point of the [capture] and stops there.}
-    {td Seals no frame outside them. With [capture ~release:true], moves the
-        rewind point of the [capture] and continues to the frames outside it.}}}
-
-{3 Example}
-
-In this example, [decide] is {!val:Parseff.commit} or {!val:Parseff.cut}. The
-rest of the parser is the same:
+    {td Inside [look_ahead], [peek_with], or [capture]}
+    {td Does not cross the boundary. With [capture ~release:true], moves the
+        rewind point and stops.}
+    {td Does not cross the boundary. With [capture ~release:true], moves the
+        rewind point and continues outward.}}}
 
 {@ocaml[
 let decided_statement decide () =
@@ -361,18 +243,25 @@ let decided_statement decide () =
         (fun () ->
           Parseff.literal "let ";
           decide ();
-          let _ = Parseff.take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z') in
+          ignore
+            (Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
+                 c >= 'a' && c <= 'z'));
           Parseff.literal " = ";
-          let _ = Parseff.take_while ~at_least:1 ~label:"expression" (fun c -> c >= '0' && c <= '9') in
+          ignore
+            (Parseff.take_while ~at_least:1 ~label:"expression" (fun c ->
+                 c >= '0' && c <= '9'));
           Parseff.char ';')
         (fun () ->
-          let _ = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+          ignore
+            (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'));
           Parseff.char ';'))
 
 let read_statements decide input =
   Parseff.parse ~consume:`Partial input (fun () ->
       let xs =
-        Parseff.many (fun () -> Parseff.skip_whitespace (); decided_statement decide ())
+        Parseff.many (fun () ->
+            Parseff.skip_whitespace ();
+            decided_statement decide ())
       in
       (List.length xs, Parseff.position ()))
   |> Result.map_error Parseff.error_message
@@ -385,31 +274,33 @@ let read_statements decide input =
 - : (int * int, string) result = Error "expected expression, found ';'"
 ]}
 
-With [commit], only the [or_] is sealed. The failure at offset 11 ends the
-[many], which goes back to offset 2 and returns one statement. With [cut], the [or_] and
-the [many] are sealed, and the failure of [let x = ;] is the error of the parse.
-With the default [~consume:`All], both parses fail with this error, because the
-parse then reports the furthest failure.
+With [commit], only [or_] is sealed, so [many] rewinds to offset 2 and returns
+the first statement. With [cut], [many] is sealed too, so the broken [let]
+fails the parse. (With the default [~consume:`All], both fail because furthest
+failure still reports the missing expression.)
 
 {2 Tracing}
 
-Pass [~trace] to {!val:Parseff.parse} or {!val:Parseff.Source.parse} to see
-which [context] constructs the parser entered, and where each one returned or
-failed. {!val:Parseff.print_trace} prints the events as an indented tree:
+Pass [~trace] to {!val:Parseff.parse}, {!val:Parseff.Source.parse}, or
+{!val:Parseff.Push.parse} to observe {!type:Parseff.trace_event}s from
+[context] and recovery combinators. {!val:Parseff.print_trace} prints an
+indented tree:
 
 {@ocaml[
 let number () =
   Parseff.context "number" (fun () ->
       Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
 
-let list () =
+let list_parser () =
   Parseff.context ~delimited:true "list" (fun () ->
-      let _ = Parseff.char '[' in
+      ignore (Parseff.char '[');
       let xs = Parseff.sep_by number (fun () -> Parseff.char ',') in
-      let _ = Parseff.char ']' in
+      ignore (Parseff.char ']');
       xs)
 
-let _ = Parseff.parse ~trace:(Parseff.print_trace Format.std_formatter) "[1,x]" list
+let _ =
+  Parseff.parse ~trace:(Parseff.print_trace Format.std_formatter) "[1,x]"
+    list_parser
 ]}
 
 {v
@@ -421,52 +312,25 @@ list @0
 list failed @2 (from @0)
 v}
 
-A [failed] line shows the parser position, not the error: here [list] fails at
-[@2], and the error is at offset 3.
+A [failed] line prints the parser position where the construct failed, not the
+furthest error offset (here [list] failed at [@2], while the error is at
+offset 3).
 
 {1 Recursion}
 
 {2 [rec_]}
 
-{!val:Parseff.rec_} marks a recursive entry point for depth tracking. Wrap the
-body of recursive parsers with [rec_] so that {!val:Parseff.parse} can enforce
-[max_depth] and fail cleanly instead of overflowing the stack.
+{!val:Parseff.rec_} tracks nesting depth against [~max_depth] (default [128]),
+failing with [Depth_limit_exceeded { limit }] instead of overflowing the stack.
+Wrap the entry point of a recursive grammar rule (you do not need [rec_] on
+every mutually recursive helper).
 
 {@ocaml skip[val rec_ : (unit -> 'a) -> 'a]}
 
 {@ocaml skip[
 let rec json () =
   Parseff.rec_ (fun () ->
-    Parseff.skip_whitespace ();
-    Parseff.one_of
-      [
-        array_parser;
-        object_parser;
-        null_parser;
-        bool_parser;
-        number_parser;
-        string_parser;
-      ]
-  )
-
-and array_parser () =
-  Parseff.literal "[";
-  (* ... calls json () recursively ... *)
-  Parseff.literal "]";
-  Array elements
+      Parseff.skip_whitespace ();
+      Parseff.one_of
+        [ array_parser; object_parser; null_parser; bool_parser; number_parser; string_parser ])
 ]}
-
-The [~max_depth] parameter on {!val:Parseff.parse} controls the limit (default:
-128):
-
-{@ocaml skip[
-(* Reject inputs nested deeper than 64 levels *)
-Parseff.parse ~max_depth:64 input json
-]}
-
-When the limit is exceeded, parsing fails with
-["maximum nesting depth N exceeded"] rather than a stack overflow.
-
-{b Tip:} Only wrap the top-level recursive entry point with [rec_]. You don't
-need it on every mutually recursive function, just the one that represents
-"entering a new nesting level".
