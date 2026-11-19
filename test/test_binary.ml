@@ -538,7 +538,7 @@ let byte_at_a_time s =
 
 let test_streaming_be_int32 () =
   let src = byte_at_a_time "\x01\x02\x03\x04" in
-  match Parseff.parse_source src (fun () -> Parseff.BE.any_int32 ()) with
+  match Parseff.Source.parse src (fun () -> Parseff.BE.any_int32 ()) with
   | Ok v ->
       Alcotest.(check int32_testable) "0x01020304" 0x01020304l v
   | Error _ ->
@@ -546,7 +546,7 @@ let test_streaming_be_int32 () =
 
 let test_streaming_le_int64 () =
   let src = byte_at_a_time "\x01\x02\x03\x04\x05\x06\x07\x08" in
-  match Parseff.parse_source src (fun () -> Parseff.LE.any_int64 ()) with
+  match Parseff.Source.parse src (fun () -> Parseff.LE.any_int64 ()) with
   | Ok v ->
       Alcotest.(check int64_testable) "0x0807060504030201" 0x0807060504030201L v
   | Error _ ->
@@ -555,7 +555,7 @@ let test_streaming_le_int64 () =
 let test_streaming_take () =
   let src = byte_at_a_time "hello world" in
   match
-    Parseff.parse_source ~consume:`Partial src (fun () -> Parseff.take 5)
+    Parseff.Source.parse ~consume:`Partial src (fun () -> Parseff.take 5)
   with
   | Ok v ->
       Alcotest.(check string) "taken" "hello" v
@@ -564,7 +564,7 @@ let test_streaming_take () =
 
 let test_streaming_eof () =
   let src = byte_at_a_time "\x01" in
-  match Parseff.parse_source src (fun () -> Parseff.BE.any_int16 ()) with
+  match Parseff.Source.parse src (fun () -> Parseff.BE.any_int16 ()) with
   | Ok _ ->
       Alcotest.fail "Expected failure"
   | Error ({ kind = Expected { found = Short _; _ }; _ } as e) ->
@@ -593,7 +593,7 @@ let test_streaming_composition () =
     Parseff.end_of_input ();
     (version, fields)
   in
-  match Parseff.parse_source src parser with
+  match Parseff.Source.parse src parser with
   | Ok (version, fields) ->
       Alcotest.(check int) "version" 1 version;
       let tag, value = List.hd fields in
@@ -624,7 +624,7 @@ let check_failure ~pos msg (result : (_, Parseff.error) Stdlib.result) =
 let both input parser =
   [
     Parseff.parse input parser;
-    Parseff.parse_source (byte_at_a_time input) parser;
+    Parseff.Source.parse (byte_at_a_time input) parser;
   ]
 
 let test_any_uint32 () =
@@ -664,7 +664,7 @@ let test_take_span_in_parse () =
 
 let test_take_span_streaming () =
   match
-    Parseff.parse_source ~consume:`Partial (byte_at_a_time "abcdef") (fun () ->
+    Parseff.Source.parse ~consume:`Partial (byte_at_a_time "abcdef") (fun () ->
         ignore (Parseff.take 1);
         let s = Parseff.Slice.take 3 in
         (s, Parseff.position ())
@@ -724,11 +724,11 @@ let test_take_span_like_take () =
   same_as_take "huge" (Parseff.parse "abc") max_int
     "expected 4611686018427387903 bytes, found only 3 (end of input)";
   same_as_take "huge streaming"
-    (fun p -> Parseff.parse_source (byte_at_a_time "abc") p)
+    (fun p -> Parseff.Source.parse (byte_at_a_time "abc") p)
     max_int "expected 4611686018427387903 bytes, found only 3 (end of input)";
   same_as_take "past the window"
     (fun p ->
-      Parseff.parse_source ~backtrack_window:16
+      Parseff.Source.parse ~backtrack_window:16
         (byte_at_a_time (String.make 64 'a'))
         p
     )
@@ -922,7 +922,7 @@ let () =
       ( "Slice.take",
         [
           Alcotest.test_case "in parse" `Quick test_take_span_in_parse;
-          Alcotest.test_case "owned copy in parse_source" `Quick
+          Alcotest.test_case "owned copy in Source.parse" `Quick
             test_take_span_streaming;
           Alcotest.test_case "zero length" `Quick test_take_span_zero;
           Alcotest.test_case "truncated" `Quick test_take_span_truncated;

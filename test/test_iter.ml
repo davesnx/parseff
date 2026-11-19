@@ -161,7 +161,7 @@ let count = 20_000
 let test_array_in_small_window () =
   let n = ref 0 in
   let r =
-    Parseff.parse_source ~backtrack_window:64 (array_source count)
+    Parseff.Source.parse ~backtrack_window:64 (array_source count)
       (value (fun () -> Parseff.sep_by_iter number comma (fun _ -> incr n)))
   in
   Alcotest.(check string) "result" "ok" (show r);
@@ -169,7 +169,7 @@ let test_array_in_small_window () =
 
 let test_many_fails_in_small_window () =
   let r =
-    Parseff.parse_source ~backtrack_window:64 (array_source count)
+    Parseff.Source.parse ~backtrack_window:64 (array_source count)
       (value (fun () -> ignore (Parseff.sep_by number comma)))
   in
   Alcotest.(check bool) "window exceeded" true (window_exceeded r)
@@ -182,7 +182,7 @@ let live_after elements =
   let at = ref 0 in
   let n = ref 0 in
   let r =
-    Parseff.parse_source ~backtrack_window:4096 (array_source elements)
+    Parseff.Source.parse ~backtrack_window:4096 (array_source elements)
       (value (fun () ->
            Parseff.sep_by_iter number comma (fun _ ->
                incr n;
@@ -212,7 +212,7 @@ let live_with_ref wrap elements =
   let r = Parseff.Ref.create 0 in
   let at = ref 0 and n = ref 0 in
   let result =
-    Parseff.parse_source ~backtrack_window:64
+    Parseff.Source.parse ~backtrack_window:64
       (Parseff.Source.of_seq (Seq.init elements (fun _ -> "a")))
       (wrap (fun () ->
            Parseff.many_iter
@@ -285,7 +285,7 @@ let test_ref_undone_by_released_capture () =
 let test_recognize_pins () =
   let got = ref 0 in
   let result =
-    Parseff.parse_source ~backtrack_window:64
+    Parseff.Source.parse ~backtrack_window:64
       (body_source ~prefix:"" ~len:1000 ~suffix:"") (fun () ->
         ignore
           (Parseff.recognize (fun () ->
@@ -304,7 +304,7 @@ let test_recognize_pins () =
 let test_with_range_does_not_pin () =
   let got = ref 0 in
   let result =
-    Parseff.parse_source ~backtrack_window:64
+    Parseff.Source.parse ~backtrack_window:64
       (body_source ~prefix:"" ~len:1000 ~suffix:"") (fun () ->
         ignore
           (Parseff.with_range (fun () ->
@@ -341,7 +341,7 @@ let test_take_iter_pieces () =
   let out = Buffer.create body_len in
   let largest = ref 0 in
   let r =
-    Parseff.parse_source ~backtrack_window:64
+    Parseff.Source.parse ~backtrack_window:64
       (body_source ~prefix:"len:" ~len:body_len ~suffix:"!") (fun () ->
         Parseff.or_
           (fun () ->
@@ -363,7 +363,7 @@ let test_take_iter_pieces () =
 
 let test_take_fails_in_small_window () =
   let r =
-    Parseff.parse_source ~backtrack_window:64
+    Parseff.Source.parse ~backtrack_window:64
       (body_source ~prefix:"len:" ~len:body_len ~suffix:"!") (fun () ->
         Parseff.literal "len:";
         ignore (Parseff.take body_len)
@@ -374,7 +374,7 @@ let test_take_fails_in_small_window () =
 let test_take_while_iter_pieces () =
   let out = Buffer.create body_len in
   let r =
-    Parseff.parse_source ~backtrack_window:64
+    Parseff.Source.parse ~backtrack_window:64
       (body_source ~prefix:"" ~len:body_len ~suffix:"0") (fun () ->
         Parseff.take_while_iter
           (fun c -> c >= 'a' && c <= 'z')
@@ -655,7 +655,7 @@ let test_released_recover () =
 let test_callback_raises () =
   let calls = ref 0 in
   ( match
-      Parseff.parse_source ~backtrack_window:64 (array_source 100)
+      Parseff.Source.parse ~backtrack_window:64 (array_source 100)
         (value (fun () ->
              Parseff.sep_by_iter number comma (fun _ ->
                  incr calls;

@@ -56,18 +56,18 @@ let pull chunks () =
             Some chunk
     )
   in
-  check (Parseff.parse_source ~consume:`Partial source parser)
+  check (Parseff.Source.parse ~consume:`Partial source parser)
 
 let push chunks () =
-  let t = Parseff.parse_partial parser in
+  let t = Parseff.Push.parse parser in
   let rec go = function
     | [] ->
-        Parseff.finish t
+        Parseff.Push.finish t
     | chunk :: tail -> (
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             go tail
-        | Parseff.Done r ->
+        | Parseff.Push.Done r ->
             r
       )
   in
@@ -75,10 +75,10 @@ let push chunks () =
 
 let cases =
   [
-    ("parse_source, one chunk", pull one_chunk);
-    ("parse_partial, one chunk", push one_chunk);
-    ("parse_source, 64-byte chunks", pull small_chunks);
-    ("parse_partial, 64-byte chunks", push small_chunks);
+    ("Source.parse, one chunk", pull one_chunk);
+    ("Push.parse, one chunk", push one_chunk);
+    ("Source.parse, 64-byte chunks", pull small_chunks);
+    ("Push.parse, 64-byte chunks", push small_chunks);
   ]
 
 let iterations = 500_000L
@@ -106,7 +106,7 @@ let () =
         run ()
       done
   | None ->
-      Bench_style.print_banner "parse_partial Benchmark";
+      Bench_style.print_banner "Push.parse Benchmark";
       Bench_style.print_label_value "Request head"
         (Printf.sprintf "%d bytes" (String.length head));
       Bench_style.print_section "Minor words per parse";
@@ -132,7 +132,7 @@ let () =
           benches
       in
       Bench_report.write_gc_quick_artifacts ~artifact_name:"bench_partial"
-        ~bench_name:"parse_partial Benchmark"
+        ~bench_name:"Push.parse Benchmark"
         [ { section with title = "Request head" } ];
       Bench_style.print_notice "Tip"
         "set PARSEFF_PARTIAL_CASE to a case name and \

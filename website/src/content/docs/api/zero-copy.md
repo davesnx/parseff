@@ -18,7 +18,7 @@ module Slice : sig type t end
 ```
 A `Parseff.Slice.t` is a zero-copy slice of the input string. It refers to the input instead of copying it, so no string is allocated until you call `Parseff.Slice.to_string`. The type is abstract: read a slice with `Parseff.Slice.length` and `Parseff.Slice.get`.
 
-For parsers run with `Parseff.parse_source`, slices may be materialized into owned strings internally so the streaming runtime can reclaim older buffer prefixes. In-memory `Parseff.parse` still keeps the zero-copy behavior.
+For parsers run with `Parseff.Source.parse`, slices may be materialized into owned strings internally so the streaming runtime can reclaim older buffer prefixes. In-memory `Parseff.parse` still keeps the zero-copy behavior.
 
 ```ocaml
 val Slice.to_string : Slice.t -> string
@@ -33,7 +33,7 @@ val Slice.get : Slice.t -> int -> char
 
 ### `Slice.take_while`
 
-`Parseff.Slice.take_while` is like `Parseff.take_while` but returns a zero-copy `Parseff.Slice.t` instead of allocating a string. No memory allocation until you call `Parseff.Slice.to_string`. Under `Parseff.parse_source`, the returned slice may be backed by an owned copy instead of the live streaming buffer.
+`Parseff.Slice.take_while` is like `Parseff.take_while` but returns a zero-copy `Parseff.Slice.t` instead of allocating a string. No memory allocation until you call `Parseff.Slice.to_string`. Under `Parseff.Source.parse`, the returned slice may be backed by an owned copy instead of the live streaming buffer.
 
 ```ocaml
 val Slice.take_while : (char -> bool) -> Slice.t
@@ -92,7 +92,7 @@ val Slice.recognize : (unit -> 'a) -> Slice.t
 
 ### `Slice.sep_by_take`
 
-`Parseff.Slice.sep_by_take` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.Slice.t`s. No `String.sub` allocations per element in the in-memory runner. Under `Parseff.parse_source`, slices may be copied so the runtime can discard older chunks safely.
+`Parseff.Slice.sep_by_take` is like `Parseff.sep_by_take` but returns zero-copy `Parseff.Slice.t`s. No `String.sub` allocations per element in the in-memory runner. Under `Parseff.Source.parse`, slices may be copied so the runtime can discard older chunks safely.
 
 ```ocaml
 val Slice.sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> Slice.t list

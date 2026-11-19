@@ -425,11 +425,11 @@ let max_young_wosize = 256
 let young_buf_size = (max_young_wosize - 1) * (Sys.word_size / 8)
 let default_backtrack_window = 65_536
 
-let check_backtrack_window ?(name = "parse_source") w =
+let check_backtrack_window ?(name = "Source.parse") w =
   if w < 2 then
     invalid_arg ("Parseff." ^ name ^ ": backtrack_window must be at least 2")
 
-module Source = struct
+module Byte_source = struct
   type t = source
   type nonrec bigstring = bigstring
 
@@ -959,8 +959,8 @@ let () =
         Some
           "Parseff: parser called outside of a parse context. Parser \
            combinators and warn can only be used inside a function passed to \
-           Parseff.parse or Parseff.parse_source, not in a function given to a \
-           *_iter function or to ~trace."
+           Parseff.parse, Parseff.Source.parse or Parseff.Push.parse, not in a \
+           function given to a *_iter function or to ~trace."
     | _ ->
         None
     )
@@ -7057,13 +7057,13 @@ let run st ~consume ~diagnostics parser =
   | Some c ->
       with_diagnostics st ~all parser c
 
-let parse ?(max_depth = 128) ?(consume = `All) ?diagnostics ?trace input
+let parse ?(max_depth = 128) ?diagnostics ?trace ?(consume = `All) input
     (parser : unit -> 'a) =
   run (State.for_input ~input ~max_depth ~trace) ~consume ~diagnostics parser
 
 let parse_source ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?(consume = `All)
-    ?diagnostics ?trace (src : Source.t) (parser : unit -> 'a) =
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    ?(consume = `All) (src : Byte_source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
   run
     (State.for_source ~src ~max_depth ~backtrack_window ~trace)
@@ -7071,8 +7071,8 @@ let parse_source ?(max_depth = 128)
 
 let parse_source_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
-    (src : Source.t) (parser : unit -> 'a) =
-  check_backtrack_window ~name:"parse_source_each" backtrack_window;
+    (src : Byte_source.t) (parser : unit -> 'a) =
+  check_backtrack_window ~name:"Source.parse_each" backtrack_window;
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   let held = ref false in
   let element () =
@@ -7092,9 +7092,9 @@ let parse_source_each ?(max_depth = 128)
   let rec node i () =
     if !raised then
       invalid_arg
-        "Parseff.parse_source_each: the sequence stopped after an exception";
+        "Parseff.Source.parse_each: the sequence stopped after an exception";
     if !forced <> i then
-      invalid_arg "Parseff.parse_source_each: a node was forced twice";
+      invalid_arg "Parseff.Source.parse_each: a node was forced twice";
     forced := i + 1;
     if !ended then begin
       Option.iter diagnostics_clear diagnostics;
@@ -7201,10 +7201,10 @@ let pushed_chunks t =
 let parse_partial ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
     (parser : unit -> 'a) : 'a partial =
-  check_backtrack_window ~name:"parse_partial" backtrack_window;
+  check_backtrack_window ~name:"Push.parse" backtrack_window;
   let t = { status = Ended; first = None; closed = false } in
   let c = pushed_chunks t in
-  let src = Source.make ~initial:"" ~eof:false (Chunks c) in
+  let src = Byte_source.make ~initial:"" ~eof:false (Chunks c) in
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   t.status <-
     Fresh
@@ -7253,24 +7253,28 @@ let step name t chunk =
       Printexc.raise_with_backtrace exn bt
 
 let feed t chunk =
-  match step "feed" t (Some chunk) with
+  match step "Push.feed" t (Some chunk) with
   | Paused _ ->
       Await
   | Finished r ->
       Done r
 
 let finish t =
-  match step "finish" t None with Finished r -> r | Paused _ -> assert false
+  match step "Push.finish" t None with
+  | Finished r ->
+      r
+  | Paused _ ->
+      assert false
 
 type chunks_step = Need_input | Stopped of string | Error_of of error | Ended
 
 let parse_chunks_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ~on_value
     (parser : unit -> 'a) =
-  check_backtrack_window ~name:"parse_chunks_each" backtrack_window;
+  check_backtrack_window ~name:"Push.parse_each" backtrack_window;
   let t = { status = Ended; first = None; closed = false } in
   let c = pushed_chunks t in
-  let src = Source.make ~initial:"" ~eof:false (Chunks c) in
+  let src = Byte_source.make ~initial:"" ~eof:false (Chunks c) in
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   let in_on_value = ref false in
   let element () =
@@ -7321,8 +7325,8 @@ let parse_chunks_each ?(max_depth = 128)
   t.status <- Fresh loop;
   fun chunk ->
     if !in_on_value then
-      invalid_arg "Parseff.parse_chunks_each: called from on_value";
-    match step "parse_chunks_each" t chunk with
+      invalid_arg "Parseff.Push.parse_each: called from on_value";
+    match step "Push.parse_each" t chunk with
     | Paused _ ->
         Need_input
     | Finished r ->
@@ -7390,6 +7394,32 @@ module Slice = struct
   let sep_by_take = sep_by_take_span
   let recognize = recognize_span
   let take = take_span
+end
+
+module Source = struct
+  include Byte_source
+
+  let parse = parse_source
+  let parse_each = parse_source_each
+end
+
+module Push = struct
+  type nonrec 'a t = 'a partial
+
+  type nonrec 'a step = 'a step =
+    | Await
+    | Done of ('a * string, error) Stdlib.result
+
+  type each_step = chunks_step =
+    | Need_input
+    | Stopped of string
+    | Error_of of error
+    | Ended
+
+  let parse = parse_partial
+  let feed = feed
+  let finish = finish
+  let parse_each = parse_chunks_each
 end
 
 type trace_event +=

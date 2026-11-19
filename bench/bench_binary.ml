@@ -89,7 +89,7 @@ let bench_tlv_10x () =
 let bench_streaming_be_any_int32 () =
   let src = streaming_source_of_string ~chunk_size:1 four_bytes in
   match
-    Parseff.parse_source src (fun () -> ignore (Parseff.BE.any_int32 ()))
+    Parseff.Source.parse src (fun () -> ignore (Parseff.BE.any_int32 ()))
   with
   | Ok _ ->
       ()

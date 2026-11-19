@@ -61,7 +61,7 @@ let parse_repeated_record ~repetitions record () =
 let run_streaming_case () =
   let source = source_of_repeated_record ~chunk_size ~repetitions record in
   match
-    Parseff.parse_source source (parse_repeated_record ~repetitions record)
+    Parseff.Source.parse source (parse_repeated_record ~repetitions record)
   with
   | Ok parsed when parsed = repetitions ->
       ()

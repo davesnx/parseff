@@ -42,7 +42,7 @@ let () =
             )
           in
 
-          match Parseff.parse_source source config with
+          match Parseff.Source.parse source config with
           | Ok pairs ->
               List.iter (fun (k, v) -> Printf.printf "%s=%s\n" k v) pairs
           | Error _ ->

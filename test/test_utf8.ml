@@ -552,7 +552,7 @@ let test_streaming_satisfy () =
     )
   in
   match
-    Parseff.parse_source source (fun () ->
+    Parseff.Source.parse source (fun () ->
         Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
     )
   with
@@ -578,7 +578,7 @@ let test_streaming_take_while () =
     )
   in
   match
-    Parseff.parse_source source (fun () ->
+    Parseff.Source.parse source (fun () ->
         Parseff.Utf8.take_while Uucp.Alpha.is_alphabetic
     )
   with

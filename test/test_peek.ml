@@ -22,7 +22,7 @@ let run ?diagnostics ?backtrack_window mode input p =
   | None ->
       parse ?diagnostics ~consume:`Partial input p
   | Some chunk_size ->
-      parse_source ?diagnostics ?backtrack_window ~consume:`Partial
+      Source.parse ?diagnostics ?backtrack_window ~consume:`Partial
         (chunked ~chunk_size input)
         p
 
@@ -587,7 +587,7 @@ let test_skip_to_rejects () =
 
 let test_skip_to_unread_stream () =
   let result =
-    parse_source ~consume:`Partial (chunked ~chunk_size:1 "abc") (fun () ->
+    Source.parse ~consume:`Partial (chunked ~chunk_size:1 "abc") (fun () ->
         ignore (char 'a');
         invalid "not read yet" (fun () -> skip_to 3);
         let _, stop = peek_with (fun () -> literal "bc") in

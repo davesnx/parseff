@@ -50,7 +50,7 @@ module Parseff_http = struct
           Some c
     in
     match
-      Parseff.parse_source ~consume:`Partial
+      Parseff.Source.parse ~consume:`Partial
         (Parseff.Source.of_chunks next)
         Http.request_head
     with

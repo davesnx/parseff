@@ -193,7 +193,7 @@ let test_stream () =
   let input = String.make 200 'a' ^ "\r" in
   let src () = chunked input in
   let skipped =
-    Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
+    Parseff.Source.parse ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () ->
         Parseff.skip_while ~set:ays is_a;
         Parseff.position ()
@@ -203,7 +203,7 @@ let test_stream () =
     "skip past the window" (Ok 200)
     (Result.map_error Parseff.error_message skipped);
   let taken =
-    Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
+    Parseff.Source.parse ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () -> Parseff.take_while ~set:ays is_a
     )
   in
@@ -218,7 +218,7 @@ let test_stream () =
   );
   let out = Buffer.create 200 in
   let walked =
-    Parseff.parse_source ~backtrack_window:32 ~consume:`Partial (src ())
+    Parseff.Source.parse ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () ->
         Parseff.take_while_iter ~set:ays is_a (fun piece ->
             Buffer.add_string out (Parseff.Slice.to_string piece)

@@ -56,9 +56,9 @@ The result of the parse is the usual `Parseff.error` result. Read the diagnostic
 ```ocaml
 val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Partial ] ->
   ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
+  ?consume:[ `All | `Partial ] ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
@@ -66,7 +66,7 @@ val parse :
 ```ocaml
 Parseff.parse input parser
 ```
-By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `` ~consume:`Partial `` to let the parse stop before the end of the input. `Parseff.parse_source` takes the same arguments.
+By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `` ~consume:`Partial `` to let the parse stop before the end of the input. `Parseff.Source.parse` takes the same arguments.
 
 
 ## Example

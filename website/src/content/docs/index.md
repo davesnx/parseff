@@ -15,7 +15,7 @@ Parseff is a direct-style parser combinator library for OCaml 5 where parsers ar
 - **Automatic backtracking** with [`Parseff.or_`](/parseff/api/combinators/#or_)
 - **Minimal dependency footprint** only `uucp` for Unicode support
 - [**Streaming support**](/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.parse_source`](/parseff/api/streaming/#parse_source) call keeps its state per domain, so independent parses can run in parallel across domains
+- **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.Source.parse`](/parseff/api/streaming/#sourceparse) call keeps its state per domain, so independent parses can run in parallel across domains
 - [**Zero-copy slice APIs**](/parseff/api/zero-copy/) for low-allocation parsing
 - [**Fused operations**](/parseff/api/zero-copy/) for hot paths
 
@@ -119,4 +119,4 @@ let () =
 | [Error recovery](/parseff/guides/error-recovery) | `capture`, `recover`, `require`, `list`, `skip_nested` |
 | [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics`, `Ref` |
 | [Zero-copy and fused operations](/parseff/api/zero-copy) | `Slice.take_while`, `Slice.sep_by_take`, `sep_by_take`, `Slice.take`, `Slice.length`, `Slice.get` |
-| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `Source.of_bigstring_chunks`, `parse_source`, `parse_source_each` |
+| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `Source.of_bigstring_chunks`, `Source.parse`, `Source.parse_each` |

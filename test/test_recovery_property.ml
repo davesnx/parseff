@@ -20,10 +20,10 @@ let run ?(consume = `All) ?(stream = false) ~collector input p =
     | false, false ->
         parse ~consume input p
     | true, true ->
-        parse_source ~consume ~backtrack_window:16 ~diagnostics:d
+        Source.parse ~consume ~backtrack_window:16 ~diagnostics:d
           (byte_source input) p
     | true, false ->
-        parse_source ~consume ~backtrack_window:16 (byte_source input) p
+        Source.parse ~consume ~backtrack_window:16 (byte_source input) p
   in
   (show r, Diagnostics.length d)
 
@@ -1309,7 +1309,7 @@ let on_all_sources ?(consume = `Partial) ?(window = 65536) name input p =
     (fun n ->
       let d = Diagnostics.create () in
       let r =
-        parse_source ~consume ~backtrack_window:window ~diagnostics:d
+        Source.parse ~consume ~backtrack_window:window ~diagnostics:d
           (chunk_source input n) p
       in
       let r = show r in
@@ -2995,9 +2995,9 @@ let stream_outcome ~collector g input =
   let source = byte_source input in
   let r =
     if collector then
-      parse_source ~backtrack_window:64 ~diagnostics:d source p
+      Source.parse ~backtrack_window:64 ~diagnostics:d source p
     else
-      parse_source ~backtrack_window:64 source p
+      Source.parse ~backtrack_window:64 source p
   in
   (r, Diagnostics.length d)
 

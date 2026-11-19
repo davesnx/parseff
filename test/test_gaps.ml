@@ -45,7 +45,7 @@ let check_all ?(chunk_sizes = [ 1; 2; 3 ]) name show_v input parser expected =
         expected
         (show_result show_v
            (norm
-              (Parseff.parse_source ~consume:`Partial
+              (Parseff.Source.parse ~consume:`Partial
                  (chunked_source ~chunk_size input)
                  parser
               )
@@ -249,7 +249,7 @@ let test_depth_limit () =
   let streaming =
     show_result string_of_int
       (norm
-         (Parseff.parse_source ~max_depth:3 (chunked_source ~chunk_size:1 "")
+         (Parseff.Source.parse ~max_depth:3 (chunked_source ~chunk_size:1 "")
             (fun () -> nest 4 ()
           )
          )

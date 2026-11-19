@@ -27,7 +27,7 @@ let check ?(chunk_sizes = [ 1; 2; 3 ]) show input parser expected =
         (Printf.sprintf "%s chunk %d" input chunk_size)
         expected
         (show_result show
-           (Parseff.parse_source (chunked_source ~chunk_size input) parser)
+           (Parseff.Source.parse (chunked_source ~chunk_size input) parser)
         )
     )
     chunk_sizes
@@ -225,12 +225,16 @@ let chunks_source chunks =
   )
 
 let feed_chunks parser chunks =
-  let t = Parseff.parse_partial parser in
+  let t = Parseff.Push.parse parser in
   let rec go = function
     | [] ->
-        Parseff.finish t
+        Parseff.Push.finish t
     | chunk :: rest -> (
-        match Parseff.feed t chunk with Parseff.Await -> go rest | Done r -> r
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
+            go rest
+        | Done r ->
+            r
       )
   in
   go chunks
@@ -242,7 +246,7 @@ let test_number_split () =
       Alcotest.(check string)
         (name ^ " source") expected
         (show_result show_number_rest
-           (Parseff.parse_source (chunks_source chunks) number_rest)
+           (Parseff.Source.parse (chunks_source chunks) number_rest)
         );
       Alcotest.(check string)
         (name ^ " feed") expected
@@ -357,7 +361,7 @@ let test_no_allocation () =
 
 let windowed ~window input parser =
   match
-    Parseff.parse_source ~backtrack_window:window
+    Parseff.Source.parse ~backtrack_window:window
       (chunked_source ~chunk_size:3 input)
       parser
   with

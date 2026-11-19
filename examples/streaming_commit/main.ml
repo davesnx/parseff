@@ -45,7 +45,7 @@ let request_line () : request =
 let () =
   let input = "GET /foo/bar" in
   let source = Parseff.Source.of_seq (chunked_seq ~chunk_size:2 input) in
-  match Parseff.parse_source ~backtrack_window:8 source request_line with
+  match Parseff.Source.parse ~backtrack_window:8 source request_line with
   | Ok (`GET, p) ->
       Printf.printf "method=GET path=%s\n" p
   | Ok (`POST, p) ->

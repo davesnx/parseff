@@ -61,9 +61,9 @@ diagnostics from the collector after the parse. They are there for [Ok] and for
 
 {@ocaml skip[val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Partial ] ->
   ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
+  ?consume:[ `All | `Partial ] ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result]}
@@ -75,7 +75,7 @@ calling {!val:Parseff.end_of_input} once more at the end of your parser. It does
 not change how explicit {!val:Parseff.end_of_input} calls behave inside your
 parser. Pass [~consume:`Partial] to let the parse stop before the end of the
 input.
-{!val:Parseff.parse_source} takes the same arguments.
+{!val:Parseff.Source.parse} takes the same arguments.
 
 {1 Example}
 

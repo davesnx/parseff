@@ -199,7 +199,7 @@ Angstrom is denser. Parseff is more readable for people who aren't fluent in mon
 | --- | --- | --- |
 | OCaml version | 5\.3+ | 4\.x+ |
 | API style | Imperative (direct style) | Monadic (CPS-based) |
-| Streaming | `parse_source` with `Source.t` | Buffered / Unbuffered modules |
+| Streaming | `Source.parse` with `Source.t` | Buffered / Unbuffered modules |
 | Backtracking | Automatic via `or_` | Automatic via `<|>` |
 | Zero-copy | `Slice.t` type + fused ops | Limited via `Unsafe` / bigstring slices |
 | Recursion safety | `rec_` with `~max_depth` | Manual (no built-in depth limit) |

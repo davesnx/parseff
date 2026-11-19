@@ -137,30 +137,30 @@ let show_start = function
       Printf.sprintf "error at %d" e.Parseff.range.start
 
 let feed_chunks ?backtrack_window ?diagnostics ?trace parser chunks =
-  let t = Parseff.parse_partial ?backtrack_window ?diagnostics ?trace parser in
+  let t = Parseff.Push.parse ?backtrack_window ?diagnostics ?trace parser in
   let rec go = function
     | [] ->
-        Parseff.finish t
+        Parseff.Push.finish t
     | chunk :: rest -> (
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             go rest
-        | Parseff.Done r ->
+        | Parseff.Push.Done r ->
             r
       )
   in
   go chunks
 
 let feed_rest ?backtrack_window parser chunks =
-  let t = Parseff.parse_partial ?backtrack_window parser in
+  let t = Parseff.Push.parse ?backtrack_window parser in
   let rec go = function
     | [] ->
-        Parseff.finish t
+        Parseff.Push.finish t
     | chunk :: rest -> (
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             go rest
-        | Parseff.Done r ->
+        | Parseff.Push.Done r ->
             Result.map (fun (v, left) -> (v, left ^ String.concat "" rest)) r
       )
   in
@@ -229,7 +229,7 @@ let check_like_parse ?(cases = cases) name chunking =
               Alcotest.(check string)
                 (label ^ ", rendered")
                 (show_rendered
-                   (Parseff.parse_source ~consume
+                   (Parseff.Source.parse ~consume
                       (Parseff.Source.of_seq (List.to_seq chunks))
                       parser
                    )
@@ -374,29 +374,29 @@ let test_leftover_after_frame () =
       let chunks = split (fun _ -> size) input in
       let rec go t values = function
         | [] -> (
-            match Parseff.finish t with
+            match Parseff.Push.finish t with
             | Ok (v, rest) ->
                 List.rev ((v, rest) :: values)
             | Error e ->
                 Alcotest.fail (Parseff.render_error e)
           )
         | chunk :: chunks -> (
-            match Parseff.feed t chunk with
-            | Parseff.Await ->
+            match Parseff.Push.feed t chunk with
+            | Parseff.Push.Await ->
                 go t values chunks
-            | Parseff.Done (Ok (v, rest)) ->
+            | Parseff.Push.Done (Ok (v, rest)) ->
                 if List.length values = 0 then
                   go
-                    (Parseff.parse_partial frame_payload)
+                    (Parseff.Push.parse frame_payload)
                     ((v, rest) :: values) (rest :: chunks)
                 else
                   List.rev ((v, rest ^ String.concat "" chunks) :: values)
-            | Parseff.Done (Error e) ->
+            | Parseff.Push.Done (Error e) ->
                 Alcotest.fail (Parseff.render_error e)
           )
       in
       let label = Printf.sprintf "chunks of %d" size in
-      match go (Parseff.parse_partial frame_payload) [] chunks with
+      match go (Parseff.Push.parse frame_payload) [] chunks with
       | [ (a, _); (b, rest) ] ->
           Alcotest.(check (list string)) label [ "hello"; "ab" ] [ a; b ];
           Alcotest.(check string) (label ^ ", leftover") "rest" rest
@@ -406,17 +406,17 @@ let test_leftover_after_frame () =
     [ 1; 3; 8; 9; 10; 11; 100 ]
 
 let test_dropped_in_frame () =
-  let t = Parseff.parse_partial frame_payload in
+  let t = Parseff.Push.parse frame_payload in
   Alcotest.(check bool)
     "waits inside the frame" true
-    (Parseff.feed t "\005he" = Parseff.Await);
+    (Parseff.Push.feed t "\005he" = Parseff.Push.Await);
   Alcotest.(check string)
     "parse after" "ok 1.2.3.4"
     (show (Parseff.parse "1.2.3.4" ip_address));
   Alcotest.(check string)
-    "parse_source after" "ok xy"
+    "Source.parse after" "ok xy"
     (show
-       (Parseff.parse_source
+       (Parseff.Source.parse
           (Parseff.Source.of_seq (List.to_seq [ "\002"; "x"; "y;" ]))
           frame_payload
        )
@@ -429,31 +429,31 @@ let call_from_iter target =
   let raised = ref "" in
   let p self () =
     Parseff.take_iter 2 (fun _ ->
-        try ignore (Parseff.feed (target self) "1.2.3.4")
+        try ignore (Parseff.Push.feed (target self) "1.2.3.4")
         with Invalid_argument msg -> raised := msg
     );
     ""
   in
-  let rec t = lazy (Parseff.parse_partial (p (fun () -> Lazy.force t))) in
+  let rec t = lazy (Parseff.Push.parse (p (fun () -> Lazy.force t))) in
   (Lazy.force t, raised)
 
 let test_feed_from_iter () =
-  let other = Parseff.parse_partial ip_address in
+  let other = Parseff.Push.parse ip_address in
   let t, raised = call_from_iter (fun _ -> other) in
   Alcotest.(check bool)
     "outer done" true
-    (Parseff.feed t "ab" = Parseff.Done (Ok ("", "")));
+    (Parseff.Push.feed t "ab" = Parseff.Push.Done (Ok ("", "")));
   Alcotest.(check string) "no error" "" !raised;
   Alcotest.(check bool)
     "other fed from the iter function" true
-    (Parseff.finish other = Ok ("1.2.3.4", ""));
+    (Parseff.Push.finish other = Ok ("1.2.3.4", ""));
   let t, raised = call_from_iter (fun self -> self ()) in
   Alcotest.(check bool)
     "own feed done" true
-    (Parseff.feed t "ab" = Parseff.Done (Ok ("", "")));
+    (Parseff.Push.feed t "ab" = Parseff.Push.Done (Ok ("", "")));
   Alcotest.(check string)
-    "own feed from the iter function" "Parseff.feed: called from its own parser"
-    !raised
+    "own feed from the iter function"
+    "Parseff.Push.feed: called from its own parser" !raised
 
 let test_require_and_list () =
   let errors = Parseff.Diagnostics.create () in
@@ -513,9 +513,9 @@ let two_requests =
   "GET /a HTTP/1.1\r\nPOST /bb HTTP/1.1\r\nPUT /ccc HTTP/1.1\r\n"
 
 let test_leftover_one_chunk () =
-  let t = Parseff.parse_partial request_line in
-  match Parseff.feed t two_requests with
-  | Parseff.Done (Ok (v, rest)) ->
+  let t = Parseff.Push.parse request_line in
+  match Parseff.Push.feed t two_requests with
+  | Parseff.Push.Done (Ok (v, rest)) ->
       Alcotest.(check string) "value" "GET /a" v;
       Alcotest.(check string)
         "leftover" "POST /bb HTTP/1.1\r\nPUT /ccc HTTP/1.1\r\n" rest
@@ -526,22 +526,22 @@ let test_leftover_across_chunks () =
   List.iter
     (fun size ->
       let chunks = split (fun _ -> size) two_requests in
-      let t = Parseff.parse_partial request_line in
+      let t = Parseff.Push.parse request_line in
       let rec go fed = function
         | [] ->
             Alcotest.fail "expected Done before the end"
         | chunk :: rest -> (
             let fed = fed ^ chunk in
-            match Parseff.feed t chunk with
-            | Parseff.Await ->
+            match Parseff.Push.feed t chunk with
+            | Parseff.Push.Await ->
                 go fed rest
-            | Parseff.Done (Ok (v, leftover)) ->
+            | Parseff.Push.Done (Ok (v, leftover)) ->
                 Alcotest.(check string) "value" "GET /a" v;
                 Alcotest.(check string)
                   (Printf.sprintf "leftover, chunks of %d" size)
                   (String.sub fed 17 (String.length fed - 17))
                   leftover
-            | Parseff.Done (Error e) ->
+            | Parseff.Push.Done (Error e) ->
                 Alcotest.fail (Parseff.render_error e)
           )
       in
@@ -566,59 +566,59 @@ let test_leftover_large_chunk () =
   check "small window" ~backtrack_window:64 [ "GET /a HTTP/1.1\r\n" ^ tail ]
 
 let test_leftover_not_read () =
-  let t = Parseff.parse_partial (fun () -> 42) in
-  match Parseff.feed t "abc" with
-  | Parseff.Done (Ok (42, "abc")) ->
+  let t = Parseff.Push.parse (fun () -> 42) in
+  match Parseff.Push.feed t "abc" with
+  | Parseff.Push.Done (Ok (42, "abc")) ->
       ()
   | _ ->
       Alcotest.fail "expected Done (Ok (42, \"abc\"))"
 
 let test_leftover_whole_input () =
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.look_ahead (fun () -> Parseff.literal "abc")
     )
   in
-  ( match Parseff.feed t "abc" with
-  | Parseff.Done (Ok ((), "abc")) ->
+  ( match Parseff.Push.feed t "abc" with
+  | Parseff.Push.Done (Ok ((), "abc")) ->
       ()
   | _ ->
       Alcotest.fail "feed: expected Done (Ok ((), \"abc\"))"
   );
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.look_ahead (fun () -> Parseff.take_while (fun _ -> true))
     )
   in
-  ( match Parseff.feed t "abc" with
-  | Parseff.Await ->
+  ( match Parseff.Push.feed t "abc" with
+  | Parseff.Push.Await ->
       ()
-  | Parseff.Done _ ->
+  | Parseff.Push.Done _ ->
       Alcotest.fail "feed: expected Await"
   );
-  match Parseff.finish t with
+  match Parseff.Push.finish t with
   | Ok ("abc", "abc") ->
       ()
   | _ ->
       Alcotest.fail "finish: expected Ok (\"abc\", \"abc\")"
 
 let values_of_stream chunks =
-  let start () = Parseff.parse_partial request_line in
+  let start () = Parseff.Push.parse request_line in
   let rec drive t values = function
     | [] -> (
-        match Parseff.finish t with
+        match Parseff.Push.finish t with
         | Ok (v, rest) ->
             restart (v :: values) rest []
         | Error e ->
             (List.rev values, Some e)
       )
     | chunk :: chunks -> (
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             drive t values chunks
-        | Parseff.Done (Ok (v, rest)) ->
+        | Parseff.Push.Done (Ok (v, rest)) ->
             restart (v :: values) rest chunks
-        | Parseff.Done (Error e) ->
+        | Parseff.Push.Done (Error e) ->
             (List.rev values, Some e)
       )
   and restart values rest chunks =
@@ -659,32 +659,34 @@ let test_many_values_error () =
 
 let test_finish () =
   let digits () = Parseff.take_while (fun c -> c >= '0' && c <= '9') in
-  let t = Parseff.parse_partial digits in
-  Alcotest.(check bool) "await" true (Parseff.feed t "12" = Parseff.Await);
+  let t = Parseff.Push.parse digits in
+  Alcotest.(check bool)
+    "await" true
+    (Parseff.Push.feed t "12" = Parseff.Push.Await);
   Alcotest.(check bool)
     "await at the end of the value" true
-    (Parseff.feed t "34" = Parseff.Await);
-  Alcotest.(check bool) "finish" true (Parseff.finish t = Ok ("1234", ""));
+    (Parseff.Push.feed t "34" = Parseff.Push.Await);
+  Alcotest.(check bool) "finish" true (Parseff.Push.finish t = Ok ("1234", ""));
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.literal "abc";
         "abc"
     )
   in
-  ignore (Parseff.feed t "ab");
+  ignore (Parseff.Push.feed t "ab");
   Alcotest.(check string)
     "short input"
     (show
-       (Parseff.parse_source (Parseff.Source.of_string "ab") (fun () ->
+       (Parseff.Source.parse (Parseff.Source.of_string "ab") (fun () ->
             Parseff.literal "abc";
             "abc"
         )
        )
     )
-    (show (Result.map fst (Parseff.finish t)));
+    (show (Result.map fst (Parseff.Push.finish t)));
   Alcotest.(check string)
     "finish with no chunk" "ok "
-    (show (Result.map fst (Parseff.finish (Parseff.parse_partial digits))))
+    (show (Result.map fst (Parseff.Push.finish (Parseff.Push.parse digits))))
 
 let whole parser () =
   let v = parser () in
@@ -693,16 +695,16 @@ let whole parser () =
 
 let test_end_of_input_waits_for_finish () =
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.literal "ab";
         "ab"
     )
   in
   Alcotest.(check bool)
     "done at the value" true
-    (Parseff.feed t "abc" = Parseff.Done (Ok ("ab", "c")));
+    (Parseff.Push.feed t "abc" = Parseff.Push.Done (Ok ("ab", "c")));
   let t =
-    Parseff.parse_partial
+    Parseff.Push.parse
       (whole (fun () ->
            Parseff.literal "ab";
            "ab"
@@ -711,23 +713,25 @@ let test_end_of_input_waits_for_finish () =
   in
   Alcotest.(check bool)
     "await after the value" true
-    (Parseff.feed t "ab" = Parseff.Await);
-  match Parseff.feed t "c" with
-  | Parseff.Done (Error e) ->
+    (Parseff.Push.feed t "ab" = Parseff.Push.Await);
+  match Parseff.Push.feed t "c" with
+  | Parseff.Push.Done (Error e) ->
       Alcotest.(check int) "error at the extra byte" 2 e.range.start
   | _ ->
       Alcotest.fail "expected Done (Error _)"
 
 let test_interleaved_feeds () =
-  let a = Parseff.parse_partial ip_address in
-  let b = Parseff.parse_partial (whole json) in
+  let a = Parseff.Push.parse ip_address in
+  let b = Parseff.Push.parse (whole json) in
   let ip = split (fun _ -> 1) "10.0.0.1" in
   let js = split (fun _ -> 1) {|[1, {"x": 2}]|} in
   let step t = function
     | [] ->
         []
     | c :: rest ->
-        Alcotest.(check bool) "waits" true (Parseff.feed t c = Parseff.Await);
+        Alcotest.(check bool)
+          "waits" true
+          (Parseff.Push.feed t c = Parseff.Push.Await);
         rest
   in
   let rec go ip js =
@@ -738,40 +742,48 @@ let test_interleaved_feeds () =
     end
   in
   go ip js;
-  Alcotest.(check bool) "a" true (Parseff.finish a = Ok ("10.0.0.1", ""));
-  Alcotest.(check bool) "b" true (Parseff.finish b = Ok ({|[1,{"x":2}]|}, ""))
+  Alcotest.(check bool) "a" true (Parseff.Push.finish a = Ok ("10.0.0.1", ""));
+  Alcotest.(check bool)
+    "b" true
+    (Parseff.Push.finish b = Ok ({|[1,{"x":2}]|}, ""))
 
 let test_parse_between_feeds () =
-  let t = Parseff.parse_partial ip_address in
-  ignore (Parseff.feed t "127.0");
+  let t = Parseff.Push.parse ip_address in
+  ignore (Parseff.Push.feed t "127.0");
   Alcotest.(check string)
     "parse" "ok 1.2.3.4"
     (show (Parseff.parse "1.2.3.4" ip_address));
   Alcotest.(check string)
-    "parse_source" "ok [1]"
-    (show (Parseff.parse_source (Parseff.Source.of_string "[1]") json));
-  ignore (Parseff.feed t ".0.1");
-  Alcotest.(check bool) "feed" true (Parseff.finish t = Ok ("127.0.0.1", ""))
+    "Source.parse" "ok [1]"
+    (show (Parseff.Source.parse (Parseff.Source.of_string "[1]") json));
+  ignore (Parseff.Push.feed t ".0.1");
+  Alcotest.(check bool)
+    "feed" true
+    (Parseff.Push.finish t = Ok ("127.0.0.1", ""))
 
 let test_other_domain () =
-  let t = Parseff.parse_partial ip_address in
-  ignore (Parseff.feed t "8.8");
+  let t = Parseff.Push.parse ip_address in
+  ignore (Parseff.Push.feed t "8.8");
   let r =
     Domain.join
       (Domain.spawn (fun () ->
-           ignore (Parseff.feed t ".4");
-           let other = Parseff.parse_partial (whole json) in
-           ignore (Parseff.feed other "[true,");
-           let other = Parseff.feed other " null]" in
-           (other, Parseff.feed t ".4")
+           ignore (Parseff.Push.feed t ".4");
+           let other = Parseff.Push.parse (whole json) in
+           ignore (Parseff.Push.feed other "[true,");
+           let other = Parseff.Push.feed other " null]" in
+           (other, Parseff.Push.feed t ".4")
        )
       )
   in
-  Alcotest.(check bool) "feed started on the domain" true (fst r = Parseff.Await);
-  Alcotest.(check bool) "feed moved to the domain" true (snd r = Parseff.Await);
+  Alcotest.(check bool)
+    "feed started on the domain" true
+    (fst r = Parseff.Push.Await);
+  Alcotest.(check bool)
+    "feed moved to the domain" true
+    (snd r = Parseff.Push.Await);
   Alcotest.(check bool)
     "finish on the first domain" true
-    (Parseff.finish t = Ok ("8.8.4.4", ""))
+    (Parseff.Push.finish t = Ok ("8.8.4.4", ""))
 
 let test_backtrack_window () =
   let p () =
@@ -800,18 +812,20 @@ exception Boom
 
 let test_exception () =
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.literal "ab";
         raise Boom
     )
   in
-  Alcotest.(check bool) "await" true (Parseff.feed t "a" = Parseff.Await);
+  Alcotest.(check bool)
+    "await" true
+    (Parseff.Push.feed t "a" = Parseff.Push.Await);
   Alcotest.check_raises "raised from feed" Boom (fun () ->
-      ignore (Parseff.feed t "b")
+      ignore (Parseff.Push.feed t "b")
   );
   Alcotest.check_raises "feed after the exception"
-    (Invalid_argument "Parseff.feed: the parse is done") (fun () ->
-      ignore (Parseff.feed t "c")
+    (Invalid_argument "Parseff.Push.feed: the parse is done") (fun () ->
+      ignore (Parseff.Push.feed t "c")
   );
   Alcotest.(check string)
     "parse after the exception" "ok 1.1.1.1"
@@ -821,20 +835,20 @@ let[@inline never] deep_raise () = raise Boom
 
 let backtrace_of chunks =
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.literal "ab";
         deep_raise ()
     )
   in
   let rec go = function
     | [] ->
-        ignore (Parseff.finish t);
+        ignore (Parseff.Push.finish t);
         ""
     | chunk :: rest -> (
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             go rest
-        | Parseff.Done _ ->
+        | Parseff.Push.Done _ ->
             ""
         | exception Boom ->
             Printexc.get_backtrace ()
@@ -863,23 +877,23 @@ let test_exception_backtrace () =
     (mentions "deep_raise" later)
 
 let test_after_done () =
-  let t = Parseff.parse_partial (fun () -> Parseff.char 'a') in
-  ignore (Parseff.feed t "ab");
+  let t = Parseff.Push.parse (fun () -> Parseff.char 'a') in
+  ignore (Parseff.Push.feed t "ab");
   Alcotest.check_raises "feed"
-    (Invalid_argument "Parseff.feed: the parse is done") (fun () ->
-      ignore (Parseff.feed t "c")
+    (Invalid_argument "Parseff.Push.feed: the parse is done") (fun () ->
+      ignore (Parseff.Push.feed t "c")
   );
   Alcotest.check_raises "finish"
-    (Invalid_argument "Parseff.finish: the parse is done") (fun () ->
-      ignore (Parseff.finish t)
+    (Invalid_argument "Parseff.Push.finish: the parse is done") (fun () ->
+      ignore (Parseff.Push.finish t)
   )
 
 let test_from_inside_parser () =
-  let other = Parseff.parse_partial ip_address in
+  let other = Parseff.Push.parse ip_address in
   let raised = ref "" in
   let p () =
     let _ = Parseff.char 'x' in
-    ( try ignore (Parseff.feed other "1.2.3.4")
+    ( try ignore (Parseff.Push.feed other "1.2.3.4")
       with Invalid_argument msg -> raised := msg
     );
     Parseff.char 'y'
@@ -888,13 +902,13 @@ let test_from_inside_parser () =
     "parse" "ok y"
     (show (Result.map (String.make 1) (Parseff.parse "xy" p)));
   Alcotest.(check string)
-    "feed from a parse" "Parseff.feed: called from inside a parser" !raised;
+    "feed from a parse" "Parseff.Push.feed: called from inside a parser" !raised;
   raised := "";
   let rec self =
     lazy
-      (Parseff.parse_partial (fun () ->
+      (Parseff.Push.parse (fun () ->
            let _ = Parseff.char 'x' in
-           ( try ignore (Parseff.feed (Lazy.force self) "y")
+           ( try ignore (Parseff.Push.feed (Lazy.force self) "y")
              with Invalid_argument msg -> raised := msg
            );
            Parseff.char 'y'
@@ -904,25 +918,31 @@ let test_from_inside_parser () =
   let self = Lazy.force self in
   Alcotest.(check bool)
     "own feed waits" true
-    (Parseff.feed self "x" = Parseff.Await);
+    (Parseff.Push.feed self "x" = Parseff.Push.Await);
   Alcotest.(check string)
-    "feed from its own parser" "Parseff.feed: called from its own parser"
+    "feed from its own parser" "Parseff.Push.feed: called from its own parser"
     !raised;
   Alcotest.(check bool)
     "own feed" true
-    (Parseff.feed self "y" = Parseff.Done (Ok ('y', "")));
-  ignore (Parseff.feed other "1.2.3.4");
+    (Parseff.Push.feed self "y" = Parseff.Push.Done (Ok ('y', "")));
+  ignore (Parseff.Push.feed other "1.2.3.4");
   Alcotest.(check bool)
     "other feed" true
-    (Parseff.finish other = Ok ("1.2.3.4", ""))
+    (Parseff.Push.finish other = Ok ("1.2.3.4", ""))
 
 let test_empty_chunk () =
-  let t = Parseff.parse_partial ip_address in
-  Alcotest.(check bool) "fresh" true (Parseff.feed t "" = Parseff.Await);
-  ignore (Parseff.feed t "1.2");
-  Alcotest.(check bool) "waiting" true (Parseff.feed t "" = Parseff.Await);
-  ignore (Parseff.feed t ".3.4");
-  Alcotest.(check bool) "result" true (Parseff.finish t = Ok ("1.2.3.4", ""))
+  let t = Parseff.Push.parse ip_address in
+  Alcotest.(check bool)
+    "fresh" true
+    (Parseff.Push.feed t "" = Parseff.Push.Await);
+  ignore (Parseff.Push.feed t "1.2");
+  Alcotest.(check bool)
+    "waiting" true
+    (Parseff.Push.feed t "" = Parseff.Push.Await);
+  ignore (Parseff.Push.feed t ".3.4");
+  Alcotest.(check bool)
+    "result" true
+    (Parseff.Push.finish t = Ok ("1.2.3.4", ""))
 
 let test_dropped_feed () =
   let diagnostics = Parseff.Diagnostics.create () in
@@ -933,8 +953,8 @@ let test_dropped_feed () =
     Parseff.literal "abc";
     "abc"
   in
-  let t = Parseff.parse_partial ~diagnostics p in
-  ignore (Parseff.feed t "a");
+  let t = Parseff.Push.parse ~diagnostics p in
+  ignore (Parseff.Push.feed t "a");
   Alcotest.check_raises "diagnostics in use"
     (Invalid_argument "Parseff: these diagnostics are in use by another parse")
     (fun () -> ignore (Parseff.parse ~diagnostics "abc" p)
@@ -947,7 +967,7 @@ let test_dropped_feed () =
     | exception Invalid_argument _ ->
         true
     );
-  ignore (Parseff.finish t);
+  ignore (Parseff.Push.finish t);
   Alcotest.(check string)
     "after finish" "ok abc"
     (show (Parseff.parse ~diagnostics "abc" p))
@@ -956,14 +976,14 @@ let[@inline never] start_dropped finalised =
   let marker = ref 0 in
   Gc.finalise_last (fun () -> finalised := true) marker;
   let t =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         Parseff.literal "abc";
         let s = "abc" in
         incr marker;
         s
     )
   in
-  ignore (Parseff.feed t "a")
+  ignore (Parseff.Push.feed t "a")
 
 let test_dropped_feed_collected () =
   let finalised = ref false in
@@ -992,15 +1012,16 @@ let test_options () =
   Alcotest.(check bool) "result" true (r = Ok ("ab", ""));
   Alcotest.(check int) "trace events" 2 !events;
   Alcotest.(check int) "diagnostics" 1 (Parseff.Diagnostics.length diagnostics);
-  let t = Parseff.parse_partial ~max_depth:1 p in
-  match Parseff.feed t "a" with
-  | Parseff.Done (Error { kind = Depth_limit_exceeded { limit = 1 }; _ }) ->
+  let t = Parseff.Push.parse ~max_depth:1 p in
+  match Parseff.Push.feed t "a" with
+  | Parseff.Push.Done (Error { kind = Depth_limit_exceeded { limit = 1 }; _ })
+    ->
       ()
   | _ ->
       Alcotest.fail "expected Depth_limit_exceeded"
 
 let () =
-  Alcotest.run "parse_partial"
+  Alcotest.run "Push.parse"
     [
       ( "like parse",
         [

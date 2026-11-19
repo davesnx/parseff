@@ -16,7 +16,7 @@ let parser () =
 
 let () =
   let source = Parseff.Source.of_seq (List.to_seq [ "ab"; "cd" ]) in
-  match Parseff.parse_source source parser with
+  match Parseff.Source.parse source parser with
   | Ok branch ->
       Printf.printf "matched %s branch\n" branch
   | Error error ->

@@ -327,7 +327,7 @@ With `commit`, only the `or_` is sealed. The failure at offset 11 ends the `many
 
 ### Tracing
 
-Pass `~trace` to `Parseff.parse` or `Parseff.parse_source` to see which `context` constructs the parser entered, and where each one returned or failed. `Parseff.print_trace` prints the events as an indented tree:
+Pass `~trace` to `Parseff.parse` or `Parseff.Source.parse` to see which `context` constructs the parser entered, and where each one returned or failed. `Parseff.print_trace` prints the events as an indented tree:
 
 ```ocaml
 let number () =

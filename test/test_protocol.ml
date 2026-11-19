@@ -42,7 +42,7 @@ let both name input parser k =
     (fun chunk_size ->
       k
         (Printf.sprintf "%s (chunks of %d)" name chunk_size)
-        (Parseff.parse_source (chunked_source ~chunk_size input) parser)
+        (Parseff.Source.parse (chunked_source ~chunk_size input) parser)
     )
     chunk_sizes
 
@@ -96,7 +96,7 @@ let test_within_found_stops_at_end () =
     (fun (chunk_size, found) ->
       let name = Printf.sprintf "found text (chunks of %d)" chunk_size in
       let result =
-        Parseff.parse_source (chunked_source ~chunk_size "abcdefgh") parser
+        Parseff.Source.parse (chunked_source ~chunk_size "abcdefgh") parser
       in
       match (Buf_size_env.buf_size, result) with
       | None, _ ->
@@ -198,13 +198,13 @@ let test_within_larger_than_window () =
     (fun chunk_size ->
       let name = Printf.sprintf "chunks of %d" chunk_size in
       check_ok name Alcotest.int 1000
-        (Parseff.parse_source ~backtrack_window:16
+        (Parseff.Source.parse ~backtrack_window:16
            (chunked_source ~chunk_size input) (fun () ->
              big_frame count_with_commit
          )
         );
       match
-        Parseff.parse_source ~backtrack_window:16
+        Parseff.Source.parse ~backtrack_window:16
           (chunked_source ~chunk_size input) (fun () ->
             big_frame (fun () -> String.length (Parseff.take 1000))
         )
@@ -236,7 +236,7 @@ let test_within_bigstring () =
       check_ok
         (Printf.sprintf "chunks of %d" chunk_size)
         Alcotest.string "hello"
-        (Parseff.parse_source
+        (Parseff.Source.parse
            (bigstring_source ~chunk_size "\x00\x00\x05hello!")
            frame
         )
@@ -348,7 +348,7 @@ let test_within_recover_sync_to_end () =
       let errors = Parseff.Diagnostics.create () in
       run
         (Printf.sprintf "recover (chunks of %d)" chunk_size)
-        (Parseff.parse_source ~diagnostics:errors
+        (Parseff.Source.parse ~diagnostics:errors
            (chunked_source ~chunk_size input)
            parser
         )
@@ -376,7 +376,7 @@ let test_within_read_raises () =
   check_ok "caught inside the frame"
     Alcotest.(pair string string)
     ("cdef", "!")
-    (Parseff.parse_source (raising_source ~raise_at:3 input) (fun () ->
+    (Parseff.Source.parse (raising_source ~raise_at:3 input) (fun () ->
          let frame =
            Parseff.within 6 (fun () ->
                let _ = Parseff.take 2 in
@@ -389,17 +389,17 @@ let test_within_read_raises () =
     );
   let src = raising_source ~raise_at:3 input in
   ( match
-      Parseff.parse_source src (fun () ->
+      Parseff.Source.parse src (fun () ->
           Parseff.within 6 (fun () -> Parseff.take_while always)
       )
     with
   | _ ->
-      Alcotest.fail "the read exception should leave parse_source"
+      Alcotest.fail "the read exception should leave Source.parse"
   | exception Read_failed ->
       ()
   );
   check_ok "the same source after the exception" Alcotest.string "def!"
-    (Parseff.parse_source src (fun () -> Parseff.take_while always))
+    (Parseff.Source.parse src (fun () -> Parseff.take_while always))
 
 type _ Effect.t += Pause : unit Effect.t
 
@@ -418,7 +418,7 @@ let test_within_read_suspends () =
   let other = ref 0 in
   let result =
     Effect.Deep.match_with
-      (fun () -> Parseff.parse_source src frame)
+      (fun () -> Parseff.Source.parse src frame)
       ()
       {
         retc = Fun.id;
@@ -549,10 +549,10 @@ let test_within_keeps_outer_found_text () =
   Alcotest.(check string)
     "stream"
     (describe
-       (Parseff.parse_source (chunked_source ~chunk_size:4096 "abcdef") plain)
+       (Parseff.Source.parse (chunked_source ~chunk_size:4096 "abcdef") plain)
     )
     (describe
-       (Parseff.parse_source (chunked_source ~chunk_size:4096 "abcdef") parser)
+       (Parseff.Source.parse (chunked_source ~chunk_size:4096 "abcdef") parser)
     )
 
 let test_take_while_at_most_window () =
@@ -562,7 +562,7 @@ let test_take_while_at_most_window () =
       check_limit
         (Printf.sprintf "chunks of %d" chunk_size)
         ~limit:8 ~range:(0, 9)
-        (Parseff.parse_source ~backtrack_window:16
+        (Parseff.Source.parse ~backtrack_window:16
            (chunked_source ~chunk_size input) (fun () ->
              Parseff.take_while ~at_most:8 always
          )
@@ -577,7 +577,7 @@ let test_take_while_at_most_not_below_window () =
   List.iter
     (fun chunk_size ->
       match
-        Parseff.parse_source ~backtrack_window:8
+        Parseff.Source.parse ~backtrack_window:8
           (chunked_source ~chunk_size input)
           parser
       with
@@ -686,13 +686,13 @@ let same_as name input ~with_frame ~without =
   Alcotest.(check string)
     (name ^ " (stream)")
     (describe
-       (Parseff.parse_source ~consume:`Partial
+       (Parseff.Source.parse ~consume:`Partial
           (chunked_source ~chunk_size:4096 input)
           without
        )
     )
     (describe
-       (Parseff.parse_source ~consume:`Partial
+       (Parseff.Source.parse ~consume:`Partial
           (chunked_source ~chunk_size:4096 input)
           with_frame
        )
@@ -819,7 +819,7 @@ let stepping_back ~stream n =
   let before = Gc.allocated_bytes () in
   ( match
       if stream then
-        Parseff.parse_source (chunked_source ~chunk_size:7 input) parser
+        Parseff.Source.parse (chunked_source ~chunk_size:7 input) parser
       else
         Parseff.parse input parser
     with
@@ -842,7 +842,7 @@ let reads_in_frame ~window n =
   Gc.full_major ();
   let before = Gc.allocated_bytes () in
   ( match
-      Parseff.parse_source ~backtrack_window:window
+      Parseff.Source.parse ~backtrack_window:window
         (chunked_source ~chunk_size:1 input)
         parser
     with
@@ -911,7 +911,7 @@ let test_commit_before_a_dropped_frame_start () =
     (fun (window, chunk_size) ->
       let name = Printf.sprintf "window %d, reads of %d" window chunk_size in
       match
-        Parseff.parse_source ~consume:`Partial ~backtrack_window:window
+        Parseff.Source.parse ~consume:`Partial ~backtrack_window:window
           (chunked_source ~chunk_size input)
           parser
       with
@@ -1039,7 +1039,7 @@ let test_limit_with_a_pause_in_recover () =
   let others = ref 0 in
   let result =
     Effect.Deep.match_with
-      (fun () -> Parseff.parse_source ~diagnostics:errors src parser)
+      (fun () -> Parseff.Source.parse ~diagnostics:errors src parser)
       ()
       {
         retc = Fun.id;

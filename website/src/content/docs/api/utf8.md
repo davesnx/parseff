@@ -167,4 +167,4 @@ Here `location.byte_col` is 7\. `location` is `None` when the line is not known.
 
 ## Streaming support
 
-All UTF-8 primitives work with streaming input (`Parseff.parse_source`). Multi-byte UTF-8 sequences that span chunk boundaries are handled correctly, the streaming runtime ensures enough bytes are available before decoding each code point.
+All UTF-8 primitives work with streaming input (`Parseff.Source.parse`). Multi-byte UTF-8 sequences that span chunk boundaries are handled correctly, the streaming runtime ensures enough bytes are available before decoding each code point.
