@@ -458,8 +458,8 @@ let test_feed_from_iter () =
     "own feed done" true
     (Parseff.feed t "ab" = Parseff.Done (Ok ("", "")));
   Alcotest.(check string)
-    "own feed from the iter function" "Parseff.feed: called from its own parser"
-    !raised
+    "own feed from the iter function"
+    "Parseff.feed: called from its own parser or callback" !raised
 
 let test_require_and_list () =
   let errors = Parseff.Diagnostics.create () in
@@ -915,8 +915,8 @@ let test_from_inside_parser () =
     "own feed waits" true
     (Parseff.feed self "x" = Parseff.Await);
   Alcotest.(check string)
-    "feed from its own parser" "Parseff.feed: called from its own parser"
-    !raised;
+    "feed from its own parser"
+    "Parseff.feed: called from its own parser or callback" !raised;
   Alcotest.(check bool)
     "own feed" true
     (Parseff.feed self "y" = Parseff.Done (Ok ('y', "")));

@@ -2651,6 +2651,95 @@ val parse_source_each :
     ]}
     Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
 
+(** The result of a push to {!parse_chunks_each}. Unstable: this type can change
+    in a 1.x release. *)
+type chunks_step =
+  | Need_input
+      (** All the given input is parsed: push the next chunk, or [None] at the
+          end of the input. *)
+  | Stopped of string
+      (** [on_value] returned [`Stop]. The string has the bytes after that value
+          in the chunks given so far. Give it to the next parse, before its next
+          chunk. *)
+  | Parse_error of error
+      (** A run of the parser failed, and the stream ended. *)
+  | Ended  (** [None] was pushed and no input remained. *)
+
+val parse_chunks_each :
+  ?max_depth:int ->
+  ?backtrack_window:int ->
+  ?diagnostics:Diagnostics.t ->
+  ?trace:(trace_event -> unit) ->
+  on_value:('a -> [ `Continue | `Stop ]) ->
+  (unit -> 'a) ->
+  string option ->
+  chunks_step
+[@@alert unstable "This value can change in a 1.x release."]
+(** [parse_chunks_each ~on_value parser] returns [push], which parses a stream
+    of values from chunks that the caller gives, such as the requests of a
+    pipelined HTTP/1.1 connection. It is the push counterpart of
+    {!parse_source_each}.
+
+    [push (Some chunk)] runs [parser] on the input given so far. Each value goes
+    to [on_value], and [parser] runs again on the bytes after that value. When
+    [parser] needs bytes that were not given, [push] returns [Need_input]. An
+    empty [chunk] gives no input. [push None] ends the input: a parser that
+    waits then succeeds or fails as {!parse_source_each} does at the end of its
+    source.
+
+    All the values run in one effect fiber. {!parse_partial} starts a new fiber
+    for each value, and its stack grows again each time. A 103-byte HTTP request
+    head takes about 5,915 instructions when 1,000 heads come in one chunk,
+    6,800 when each head comes in its own chunk, 6,850 with {!parse_partial} and
+    5,430 with {!parse}.
+
+    Each run follows the rules of {!parse_source_each}: a run that consumes no
+    input gives [Parse_error], positions count from the first byte of the first
+    chunk, and [diagnostics] is emptied before each run, so read it in
+    [on_value]. After [Ended] it is empty, because the last run that finds no
+    input empties it too. The arguments are those of {!parse_partial}.
+
+    Between two values the parse holds no {!Ref} cells and not its [diagnostics]
+    collector, as a finished {!parse_source}. When it waits inside a value, it
+    holds them as a {!parse_partial} that waits does.
+
+    A [chunk] must not change while the parse uses it, as for {!feed}. An
+    exception that [parser] or [on_value] raises comes out of [push], and the
+    stream ends. [push] raises [Invalid_argument] after [Stopped], [Parse_error]
+    or [Ended], when called from inside a parser, and when called from
+    [on_value].
+
+    Example:
+    {@ocaml[
+    let line () =
+      let s = take_while (fun c -> c <> '\n') in
+      let _ = char '\n' in
+      s
+
+    let lines chunks =
+      let seen = ref [] in
+      let on_value s =
+        seen := s :: !seen;
+        `Continue
+      in
+      let push = parse_chunks_each ~on_value line in
+      let rec go = function
+        | [] ->
+            push None
+        | chunk :: rest -> (
+            match push (Some chunk) with Need_input -> go rest | step -> step
+          )
+      in
+      match go chunks with
+      | Ended ->
+          Ok (List.rev !seen)
+      | Parse_error e ->
+          Error e
+      | Need_input | Stopped _ ->
+          assert false
+    ]}
+    Here [lines [ "ab"; "c\nde\n" ]] is [Ok [ "abc"; "de" ]]. *)
+
 type 'a partial
 (** A parse that takes its input in chunks: push input. The caller gives the
     input with {!feed}, and each call returns [Await] when the parser needs more

@@ -7051,21 +7051,23 @@ let parse_source_each ?(max_depth = 128)
 type _ Effect.t += Need : string option Effect.t
 type 'a step = Await | Done of ('a * string, error) Stdlib.result
 
-type 'a outcome =
-  | Finished of ('a * string, error) Stdlib.result
-  | Paused of (string option, 'a outcome) Effect.Deep.continuation
+type 'r outcome =
+  | Finished of 'r
+  | Paused of (string option, 'r outcome) Effect.Deep.continuation
 
-type 'a status =
-  | Fresh of (unit -> ('a * string, error) Stdlib.result)
-  | Waiting of (string option, 'a outcome) Effect.Deep.continuation
+type 'r status =
+  | Fresh of (unit -> 'r)
+  | Waiting of (string option, 'r outcome) Effect.Deep.continuation
   | Running
   | Ended
 
-type 'a partial = {
-  mutable status : 'a status;
+type 'r pushed = {
+  mutable status : 'r status;
   mutable first : string option;
   mutable closed : bool;
 }
+
+type 'a partial = ('a * string, error) Stdlib.result pushed
 
 let pause_handler =
   {
@@ -7100,11 +7102,7 @@ let leftover t st c =
   | None ->
       pending
 
-let parse_partial ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
-    (parser : unit -> 'a) : 'a partial =
-  check_backtrack_window ~name:"parse_partial" backtrack_window;
-  let t = { status = Ended; first = None; closed = false } in
+let pushed_chunks t =
   let next () =
     match t.first with
     | Some _ as chunk ->
@@ -7118,7 +7116,14 @@ let parse_partial ?(max_depth = 128)
           Effect.perform Need
         end
   in
-  let c = { next; pending = ""; pending_pos = 0 } in
+  { next; pending = ""; pending_pos = 0 }
+
+let parse_partial ?(max_depth = 128)
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
+    (parser : unit -> 'a) : 'a partial =
+  check_backtrack_window ~name:"parse_partial" backtrack_window;
+  let t = { status = Ended; first = None; closed = false } in
+  let c = pushed_chunks t in
   let src = Source.make ~initial:"" ~eof:false (Chunks c) in
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   t.status <-
@@ -7138,7 +7143,8 @@ let step name t chunk =
   | Fresh _ | Waiting _ ->
       ()
   | Running ->
-      invalid_arg ("Parseff." ^ name ^ ": called from its own parser")
+      invalid_arg
+        ("Parseff." ^ name ^ ": called from its own parser or callback")
   | Ended ->
       invalid_arg ("Parseff." ^ name ^ ": the parse is done")
   );
@@ -7156,21 +7162,86 @@ let step name t chunk =
     | Running | Ended ->
         assert false
   with
-  | Paused k ->
+  | Paused k as r ->
       t.status <- Waiting k;
-      Await
-  | Finished r ->
+      r
+  | Finished _ as r ->
       t.status <- Ended;
-      Done r
+      r
   | exception exn ->
       let bt = Printexc.get_raw_backtrace () in
       t.status <- Ended;
       Printexc.raise_with_backtrace exn bt
 
-let feed t chunk = step "feed" t (Some chunk)
+let feed t chunk =
+  match step "feed" t (Some chunk) with
+  | Paused _ ->
+      Await
+  | Finished r ->
+      Done r
 
 let finish t =
-  match step "finish" t None with Done r -> r | Await -> assert false
+  match step "finish" t None with Finished r -> r | Paused _ -> assert false
+
+type chunks_step =
+  | Need_input
+  | Stopped of string
+  | Parse_error of error
+  | Ended
+
+let parse_chunks_each ?(max_depth = 128)
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ~on_value
+    (parser : unit -> 'a) =
+  check_backtrack_window ~name:"parse_chunks_each" backtrack_window;
+  let t = { status = Ended; first = None; closed = false } in
+  let c = pushed_chunks t in
+  let src = Source.make ~initial:"" ~eof:false (Chunks c) in
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let element () =
+    if have st 1 then
+      Some (parser ())
+    else
+      None
+  in
+  let rec wait () =
+    if st.pos = st.input_len && c.pending_pos = String.length c.pending then
+      match c.next () with
+      | Some chunk ->
+          c.pending <- chunk;
+          c.pending_pos <- 0;
+          wait ()
+      | None ->
+          ()
+  in
+  let rec loop () =
+    wait ();
+    st.far <- far_none;
+    let start = st.pos in
+    match run st ~consume:`Partial ~diagnostics element with
+    | Ok None ->
+        Ended
+    | Ok (Some _) when st.pos = start ->
+        Parse_error
+          (error_plain ~last:false st start
+             (Failed "the parser consumed no input") []
+          )
+    | Ok (Some v) -> (
+        match on_value v with
+        | `Continue ->
+            loop ()
+        | `Stop ->
+            Stopped (leftover t st c)
+      )
+    | Error e ->
+        Parse_error e
+  in
+  t.status <- Fresh loop;
+  fun chunk ->
+    match step "parse_chunks_each" t chunk with
+    | Paused _ ->
+        Need_input
+    | Finished r ->
+        r
 
 module Ref = struct
   type 'a t = 'a cell
