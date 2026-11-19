@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Add `?case_sensitive` to `literal`.** `literal ~case_sensitive:false "content-length"` matches `Content-Length` and `CONTENT-LENGTH`: the letters `A`-`Z` and `a`-`z` match their other case, and every other byte must be equal. A mismatch fails as with the default, at the first byte that differs and with the string as given in the error, and a stream reads more input only while the bytes match. The default is `true`, and the default path costs the same as before.
 - **Breaking: spans move into the module `Slice`.** The type `span` is now `Slice.t`, still abstract, and the functions that read or return one move into `Slice` without the `_span` suffix. Arguments and behavior do not change. `take_iter` and `take_while_iter` keep their names; their callbacks now take a `Slice.t`. There are no aliases for the old names.
 
   | Before | After |

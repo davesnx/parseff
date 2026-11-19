@@ -11,7 +11,7 @@ input directly and form the foundation of more complex parsers.
 mismatch it fails with an [Expected] error whose item is [Literal r], where [r]
 is the rest of the string from the first byte that differs.
 
-{@ocaml skip[val literal : string -> unit]}
+{@ocaml skip[val literal : ?case_sensitive:bool -> string -> unit]}
 
 {@ocaml[
 let parser () =
@@ -31,6 +31,10 @@ On a stream, [literal] compares the buffered bytes first and reads more input
 only while they match the start of the literal, so a wrong byte fails at once.
 The error shows the bytes read so far: its [found] text can be shorter than on
 the whole input.
+
+[~case_sensitive:false] ignores ASCII case, so
+[literal ~case_sensitive:false "content-length"] matches [Content-Length] and
+[CONTENT-LENGTH]. Only [A]-[Z] and [a]-[z] fold; other bytes must be equal.
 
 {b Performance:} [literal] is optimized for literal string matching.
 

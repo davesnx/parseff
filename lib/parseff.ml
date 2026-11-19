@@ -1856,6 +1856,33 @@ let[@inline never] literal_refilling st s =
   else
     fail_literal st pos !i s
 
+let[@inline always] ascii_lower c =
+  if c >= 'A' && c <= 'Z' then
+    Char.unsafe_chr (Char.code c + 32)
+  else
+    c
+
+let[@inline never] literal_caseless st s =
+  let len = String.length s in
+  let pos = st.pos in
+  let i = ref 0 in
+  let reading = ref true in
+  while !reading do
+    let avail = imin len (st.input_len - pos) in
+    while
+      !i < avail
+      && ascii_lower (char_at st (pos + !i))
+         = ascii_lower (String.unsafe_get s !i)
+    do
+      incr i
+    done;
+    if !i < avail || !i = len || not (have st (!i + 1)) then reading := false
+  done;
+  if !i = len then
+    st.pos <- pos + len
+  else
+    fail_literal st pos !i s
+
 let[@inline never] literal_mismatch st s =
   let pos = st.pos in
   let i = ref 0 in
@@ -1890,16 +1917,26 @@ let[@inline always] literal_at_offset input off s len =
     !i = len
   end
 
-let[@inline] handle_literal st s =
+let[@inline] handle_literal st s case_sensitive =
   let len = String.length s in
   let pos = st.pos in
   if len <= st.input_len - pos then
     if len = 0 || literal_at_offset st.input (pos - st.base) s len then
       st.pos <- pos + len
     else
-      literal_mismatch st s
+      begin match case_sensitive with
+      | Some false ->
+          literal_caseless st s
+      | _ ->
+          literal_mismatch st s
+    end
   else
-    literal_refilling st s
+    begin match case_sensitive with
+    | Some false ->
+        literal_caseless st s
+    | _ ->
+        literal_refilling st s
+  end
 
 let[@inline never] satisfy_slow st pred label =
   if have st 1 then
@@ -2447,9 +2484,9 @@ let[@inline never] handle_skip_while_uchar st pred =
 let[@inline always] restore_rewind_frame st frame =
   State.restore_rewind_frame st frame
 
-let[@inline] literal s =
+let[@inline] literal ?case_sensitive s =
   let st = get_state () in
-  handle_literal st s
+  handle_literal st s case_sensitive
 
 let label_satisfy = "matching character"
 

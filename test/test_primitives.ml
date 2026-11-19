@@ -26,6 +26,133 @@ let test_literal_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
+let caseless_outcome ?(stream = false) input parser =
+  let r =
+    if stream then
+      Parseff.parse_source
+        (Parseff.Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
+        parser
+    else
+      Parseff.parse input parser
+  in
+  match r with
+  | Ok v ->
+      "Ok " ^ v
+  | Error e ->
+      Printf.sprintf "Error at %d: %s" e.range.start (Parseff.error_message e)
+
+let header () =
+  Parseff.literal ~case_sensitive:false "content-length";
+  Parseff.take_while (fun _ -> true)
+
+let test_literal_caseless () =
+  List.iter
+    (fun stream ->
+      let check ?stream_expected name input expected =
+        let expected =
+          match stream_expected with Some e when stream -> e | _ -> expected
+        in
+        Alcotest.(check string)
+          (Printf.sprintf "%s%s" name
+             ( if stream then
+                 ", stream"
+               else
+                 ""
+             )
+          )
+          expected
+          (caseless_outcome ~stream input header)
+      in
+      check "lower" "content-length: 1" "Ok : 1";
+      check "title" "Content-Length: 1" "Ok : 1";
+      check "upper" "CONTENT-LENGTH: 1" "Ok : 1";
+      check "mixed" "cOnTeNt-LeNgTh" "Ok ";
+      check "mismatch in the middle" "Content-Lenxth"
+        "Error at 11: expected \"gth\", found 'xth'"
+        ~stream_expected:"Error at 11: expected \"gth\", found 'x'";
+      check "a non-letter must be equal" "Content_Length"
+        "Error at 7: expected \"-length\", found '_Length'"
+        ~stream_expected:"Error at 7: expected \"-length\", found '_'";
+      check "end of input inside the word" "CONTENT-"
+        "Error at 8: expected \"length\", found end of input"
+    )
+    [ false; true ];
+  List.iter
+    (fun (stream, input) ->
+      let run case_sensitive =
+        caseless_outcome ~stream input (fun () ->
+            Parseff.literal ~case_sensitive "content-length";
+            Parseff.take_while (fun _ -> true)
+        )
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "%S%s: as the default on lowercase input" input
+           ( if stream then
+               ", stream"
+             else
+               ""
+           )
+        )
+        (run true) (run false)
+    )
+    (List.concat_map
+       (fun input -> [ (false, input); (true, input) ])
+       [
+         "content-length: 1";
+         "content-lenxth";
+         "content_length";
+         "content-";
+         "";
+         "x";
+         "content-length\195\169";
+         "content-l\195\169ngth";
+       ]
+    );
+  let exact input lit =
+    caseless_outcome input (fun () ->
+        Parseff.literal ~case_sensitive:false lit;
+        "matched"
+    )
+  in
+  Alcotest.(check (list string))
+    "only A-Z and a-z fold"
+    [
+      "Error at 0: expected \"@\", found '`'";
+      "Error at 0: expected \"[\", found '{'";
+      "Error at 0: expected \"^\", found '~'";
+      "Ok matched";
+    ]
+    [ exact "`" "@"; exact "{" "["; exact "~" "^"; exact "Zz" "zZ" ]
+
+let test_literal_caseless_or () =
+  let meth () =
+    Parseff.or_
+      (fun () ->
+        Parseff.literal ~case_sensitive:false "get";
+        "GET"
+      )
+      (fun () ->
+        Parseff.literal ~case_sensitive:false "post";
+        "POST"
+      )
+      ()
+  in
+  List.iter
+    (fun (input, expected, stream_expected) ->
+      Alcotest.(check string) input expected (caseless_outcome input meth);
+      Alcotest.(check string)
+        (input ^ ", stream") stream_expected
+        (caseless_outcome ~stream:true input meth)
+    )
+    [
+      ("Get", "Ok GET", "Ok GET");
+      ("pOsT", "Ok POST", "Ok POST");
+      ( "Put",
+        "Error at 1: expected \"ost\", found 'ut'",
+        "Error at 1: expected \"ost\", found 'u'"
+      );
+    ]
+
 let test_char_success () =
   match parse_with_pos "a" (fun () -> Parseff.char 'a') with
   | Ok (c, pos) ->
@@ -2071,6 +2198,9 @@ let () =
         [
           test_case "literal success" `Quick test_literal_success;
           test_case "literal failure" `Quick test_literal_failure;
+          test_case "literal, case insensitive" `Quick test_literal_caseless;
+          test_case "literal, case insensitive, in or_" `Quick
+            test_literal_caseless_or;
           test_case "char success" `Quick test_char_success;
           test_case "char failure" `Quick test_char_failure;
           test_case "satisfy" `Quick test_satisfy;

@@ -19,7 +19,7 @@ Primitives are the building blocks of all parsers. These operations match input 
 `Parseff.literal` matches the exact text of a string and returns `()`. On a mismatch it fails with an `Expected` error whose item is `Literal r`, where `r` is the rest of the string from the first byte that differs.
 
 ```ocaml
-val literal : string -> unit
+val literal : ?case_sensitive:bool -> string -> unit
 ```
 ```ocaml
 let parser () =
@@ -31,6 +31,8 @@ let parser () =
 When the input differs from the literal, the error sits at the first byte that differs and expects the rest of the literal. `literal "ab"` on `"ax"` fails at offset 1 with `expected "b"`, not at offset 0\. When the input ends inside the literal, the error says `found end of input` at the end of the input. A mismatch inside a multi-byte character is reported at the start of that character.
 
 On a stream, `literal` compares the buffered bytes first and reads more input only while they match the start of the literal, so a wrong byte fails at once. The error shows the bytes read so far: its `found` text can be shorter than on the whole input.
+
+`~case_sensitive:false` ignores ASCII case, so `literal ~case_sensitive:false "content-length"` matches `Content-Length` and `CONTENT-LENGTH`. Only `A`\-`Z` and `a`\-`z` fold; other bytes must be equal.
 
 **Performance:** `literal` is optimized for literal string matching.
 

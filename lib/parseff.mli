@@ -407,7 +407,7 @@ val parse :
 
 (** {1 Primitive Combinators} *)
 
-val literal : string -> unit
+val literal : ?case_sensitive:bool -> string -> unit
 (** [literal s] matches the exact text [s]. On a mismatch, it fails with an
     [Expected] error whose item is [Literal r], where [r] is the rest of [s]
     from the first byte that differs. The failure position is the mismatch, not
@@ -421,12 +421,22 @@ val literal : string -> unit
     once, without a wait for more input. The error shows the bytes read so far:
     its [found] text can be shorter than {!parse} gives on the whole input.
 
+    With [~case_sensitive:false], [literal] ignores ASCII case: the letters
+    [A]-[Z] and [a]-[z] match their other case, and every other byte must be
+    equal. A mismatch fails as with the default, with [s] as given in the error.
+    The default is [true].
+
     Example:
     {@ocaml[
     let parser () =
       literal "hello";
       literal " ";
       literal "world"
+
+    let () =
+      let header () = literal ~case_sensitive:false "content-length" in
+      assert (parse "Content-Length" header = Ok ());
+      assert (parse "CONTENT-LENGTH" header = Ok ())
     ]} *)
 
 val satisfy : ?label:string -> (char -> bool) -> char
