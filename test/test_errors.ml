@@ -63,7 +63,7 @@ let test_limit_exceeded_kind () =
       )
       [
         ("parse", Parseff.parse input parser);
-        ("parse_source", Parseff.parse_source (byte_source input) parser);
+        ("Source.parse", Parseff.Source.parse (byte_source input) parser);
       ]
   in
   check "take_while" "aaaa"
@@ -150,8 +150,8 @@ let test_outside_parse_message_content () =
         "mentions Parseff.parse" true
         (contains msg "Parseff.parse");
       Alcotest.(check bool)
-        "mentions parse_source" true
-        (contains msg "Parseff.parse_source")
+        "mentions Source.parse" true
+        (contains msg "Parseff.Source.parse")
 
 let check_outside_parse () =
   match Parseff.position () with
@@ -177,7 +177,7 @@ let test_escaping_exception_leaves_context () =
 let test_escaping_exception_leaves_context_source () =
   let src = Parseff.Source.of_string "abc" in
   ( match
-      Parseff.parse_source src (fun () ->
+      Parseff.Source.parse src (fun () ->
           ignore (Parseff.char 'a');
           failwith "boom"
       )
@@ -216,7 +216,7 @@ let test_nested_parse_source_exception_keeps_outer_state () =
         ignore (Parseff.char 'a');
         ( try
             ignore
-              (Parseff.parse_source (Parseff.Source.of_string "zzzzzz")
+              (Parseff.Source.parse (Parseff.Source.of_string "zzzzzz")
                  (fun () ->
                    ignore (Parseff.take 4);
                    failwith "x"
@@ -365,9 +365,9 @@ let both_runners show_v input parser expected =
     "parse" expected
     (show_result show_v (Parseff.parse ~consume:`Partial input parser));
   Alcotest.(check string)
-    "parse_source" expected
+    "Source.parse" expected
     (show_result show_v
-       (Parseff.parse_source ~consume:`Partial
+       (Parseff.Source.parse ~consume:`Partial
           (Parseff.Source.of_string input)
           parser
        )
@@ -1788,7 +1788,7 @@ let test_render_streaming_opener_dropped () =
     )
   in
   match
-    Parseff.parse_source ~backtrack_window:64 chunked streaming_list_parser
+    Parseff.Source.parse ~backtrack_window:64 chunked streaming_list_parser
   with
   | Stdlib.Error (e : Parseff.error) ->
       let out = Parseff.render_error ~name:"stream" e in
@@ -2204,7 +2204,7 @@ let test_note_on_dropped_line () =
     ignore (Parseff.many (fun () -> Parseff.char 'a'));
     Parseff.fail ~notes:[ paren_note 0 ] "stray"
   in
-  match Parseff.parse_source ~backtrack_window:64 chunked parser with
+  match Parseff.Source.parse ~backtrack_window:64 chunked parser with
   | Stdlib.Error (e : Parseff.error) ->
       let out = Parseff.render_error e in
       Alcotest.(check bool)
@@ -2284,7 +2284,7 @@ let test_exhaustive_kind_match () =
     )
   in
   match
-    Parseff.parse_source ~backtrack_window:16 chunked (fun () ->
+    Parseff.Source.parse ~backtrack_window:16 chunked (fun () ->
         ignore (Parseff.take_while (fun c -> c = 'a'))
     )
   with
@@ -2434,7 +2434,7 @@ let test_backtrack_window_error_renders () =
   let long = String.make 5000 'a' in
   let check label input =
     match
-      Parseff.parse_source ~backtrack_window:1000 (chunk_source input)
+      Parseff.Source.parse ~backtrack_window:1000 (chunk_source input)
         (fun () -> ignore (Parseff.take 5000)
       )
     with
@@ -2446,7 +2446,7 @@ let test_backtrack_window_error_renders () =
   check "one long line" long;
   check "long second line" (String.make 100 'a' ^ "\n" ^ String.make 5000 'b');
   match
-    Parseff.parse_source ~backtrack_window:1000 (chunk_source long) (fun () ->
+    Parseff.Source.parse ~backtrack_window:1000 (chunk_source long) (fun () ->
         ignore (Parseff.take 5000);
         Parseff.fail
           ~notes:
@@ -2519,7 +2519,7 @@ let test_from_older_than_the_buffer () =
       Alcotest.fail "expected an error"
   );
   let streaming kind =
-    Parseff.parse_source ~backtrack_window:200
+    Parseff.Source.parse ~backtrack_window:200
       (chunk_source ~chunk:64 lines_text)
       (from_before_the_buffer_parser kind)
   in
@@ -2907,7 +2907,7 @@ let numbered_lines n =
 
 let render_stream ?name ?source ?(window = 16) input parser =
   match
-    Parseff.parse_source ~backtrack_window:window (source_of_chunks input)
+    Parseff.Source.parse ~backtrack_window:window (source_of_chunks input)
       parser
   with
   | Stdlib.Ok _ ->
@@ -2973,7 +2973,7 @@ let test_known_line_without_a_buffered_start () =
     ignore (Parseff.char 'b')
   in
   match
-    Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
+    Parseff.Source.parse ~backtrack_window:16 (source_of_chunks input) parser
   with
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
@@ -3011,7 +3011,7 @@ let test_cut_line_keeps_line_and_column () =
   in
   let input = "x = 1 y = = 2\n" in
   let headers source =
-    Parseff.parse_source_each source statement
+    Parseff.Source.parse_each source statement
     |> Seq.filter_map (function
       | Stdlib.Ok () ->
           None
@@ -3077,7 +3077,7 @@ let test_cut_line_column_counts_characters () =
                       prefix chunk backtrack_window
                   in
                   match
-                    Parseff.parse_source ~backtrack_window
+                    Parseff.Source.parse ~backtrack_window
                       (source_of_chunks ~chunk input)
                       parser
                   with
@@ -3158,7 +3158,7 @@ let test_cut_line_column_random_bytes () =
         64 + Random.State.int state 200
     in
     match
-      Parseff.parse_source ~backtrack_window
+      Parseff.Source.parse ~backtrack_window
         (source_of_chunks ~chunk input)
         parser
     with
@@ -3185,7 +3185,7 @@ let test_cut_line_context_column () =
     )
   in
   match
-    Parseff.parse_source ~backtrack_window:8
+    Parseff.Source.parse ~backtrack_window:8
       (source_of_chunks ~chunk:3 input)
       parser
   with
@@ -3233,7 +3233,7 @@ let test_error_start_in_dropped_input () =
       | None ->
           Parseff.Source.of_string input
     in
-    match Parseff.parse_source ~consume:`Partial s parser with
+    match Parseff.Source.parse ~consume:`Partial s parser with
     | Stdlib.Ok () ->
         Alcotest.fail "expected an error"
     | Stdlib.Error (e : Parseff.error) ->
@@ -3313,7 +3313,7 @@ let test_error_start_in_dropped_input () =
 let test_excerpt_contains_error () =
   let render ?source input =
     match
-      Parseff.parse_source ~consume:`Partial (Parseff.Source.of_string input)
+      Parseff.Source.parse ~consume:`Partial (Parseff.Source.of_string input)
         (fun () ->
           ignore (Parseff.take 100);
           Parseff.fail "here"
@@ -3358,7 +3358,7 @@ let render_after_stale ?backtrack_window ~read stale input parser =
     ignore (Sys.opaque_identity (Bytes.make 1000 stale))
   done;
   Gc.minor ();
-  match Parseff.parse_source ?backtrack_window source parser with
+  match Parseff.Source.parse ?backtrack_window source parser with
   | Stdlib.Ok () ->
       Alcotest.fail "expected an error"
   | Stdlib.Error (e : Parseff.error) ->
@@ -3432,7 +3432,7 @@ let test_location_after_dropped_lines () =
     (l.line, l.byte_col)
   in
   match
-    Parseff.parse_source ~backtrack_window:4
+    Parseff.Source.parse ~backtrack_window:4
       (source_of_chunks ~chunk:3 input)
       parser
   with
@@ -3505,7 +3505,7 @@ let test_take_reports_what_is_left () =
   );
   Alcotest.(check string)
     "streaming" "expected 5 bytes, found only 3 (end of input)"
-    ( match Parseff.parse_source (source_of_chunks "abc") (take 5) with
+    ( match Parseff.Source.parse (source_of_chunks "abc") (take 5) with
     | Stdlib.Error (e : Parseff.error) ->
         Parseff.error_message e
     | Stdlib.Ok _ ->
@@ -3818,7 +3818,7 @@ let test_upto_past_the_buffer () =
     Parseff.fail ~upto:20 "ahead"
   in
   ( match
-      Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
+      Parseff.Source.parse ~backtrack_window:16 (source_of_chunks input) parser
     with
   | Stdlib.Error (e : Parseff.error) ->
       Alcotest.(check (pair int int))
@@ -4030,7 +4030,7 @@ let test_position_is_known_or_absent () =
       Alcotest.fail "expected an error"
   );
   ( match
-      Parseff.parse_source ~backtrack_window:200
+      Parseff.Source.parse ~backtrack_window:200
         (chunk_source ~chunk:64 lines_text)
         (from_before_the_buffer_parser `Fail)
     with
@@ -4041,7 +4041,7 @@ let test_position_is_known_or_absent () =
       Alcotest.fail "expected an error"
   );
   match
-    Parseff.parse_source ~backtrack_window:4096 (source_of_chunks "ab\ncd")
+    Parseff.Source.parse ~backtrack_window:4096 (source_of_chunks "ab\ncd")
       (fun () ->
         ignore (Parseff.take 4);
         ignore (Parseff.char 'q')
@@ -4245,7 +4245,7 @@ let test_window_error_points_at_the_parser () =
     )
   in
   match
-    Parseff.parse_source ~backtrack_window:16 (source_of_chunks input) parser
+    Parseff.Source.parse ~backtrack_window:16 (source_of_chunks input) parser
   with
   | Stdlib.Error (e : Parseff.error) ->
       Alcotest.(check int) "position is the parser's" 14 e.range.start;
@@ -4390,7 +4390,7 @@ let test_stream_render_after_reuse () =
   in
   let error =
     match
-      Parseff.parse_source ~backtrack_window:16
+      Parseff.Source.parse ~backtrack_window:16
         (reused_source scratch "key: value\nnext: x\n")
         parser
     with
@@ -4401,7 +4401,7 @@ let test_stream_render_after_reuse () =
   in
   Bytes.fill scratch 0 (Bytes.length scratch) '#';
   ignore
-    (Parseff.parse_source ~backtrack_window:16
+    (Parseff.Source.parse ~backtrack_window:16
        (reused_source scratch "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz") (fun () ->
          Parseff.char 'a'
      )

@@ -57,7 +57,7 @@ let run_pair first_data second_data =
   let go r data =
     spawn (fun () ->
         r :=
-          match Parseff.parse_source (yielding_source data) words with
+          match Parseff.Source.parse (yielding_source data) words with
           | Ok s ->
               s
           | Error _ ->
@@ -107,7 +107,7 @@ let test_interleaved_failures_keep_separate_groups () =
     spawn (fun () ->
         r :=
           show_failure
-            (Parseff.parse_source (yielding_source ~chunk:1 data) parser)
+            (Parseff.Source.parse (yielding_source ~chunk:1 data) parser)
     )
   in
   go a "abcx";
@@ -142,7 +142,7 @@ let count_lines () =
 
 let test_bounded_heap () =
   let before = (Gc.quick_stat ()).Gc.top_heap_words in
-  let r = Parseff.parse_source (chunk_source 20_000_000 "ab\n") count_lines in
+  let r = Parseff.Source.parse (chunk_source 20_000_000 "ab\n") count_lines in
   ( match r with
   | Ok n ->
       Alcotest.(check bool) "lines" true (n > 6_000_000)
@@ -190,7 +190,7 @@ let test_location_after_compaction () =
         n
     )
   in
-  match Parseff.parse_source ~backtrack_window:256 chunked parser with
+  match Parseff.Source.parse ~backtrack_window:256 chunked parser with
   | Ok s ->
       Alcotest.(check string) "locations" expected s
   | Error _ ->
@@ -219,7 +219,7 @@ let contains text needle =
 let test_window_pinned () =
   let data = String.make 16 'x' ^ String.make 8 'a' in
   let r =
-    Parseff.parse_source ~backtrack_window:16 (fn_src data 4) (fun () ->
+    Parseff.Source.parse ~backtrack_window:16 (fn_src data 4) (fun () ->
         Parseff.or_
           (fun () ->
             ignore (Parseff.take 16);
@@ -257,7 +257,7 @@ let test_pinned_complete_match () =
   List.iter
     (fun chunk ->
       match
-        Parseff.parse_source ~consume:`Partial ~backtrack_window:16
+        Parseff.Source.parse ~consume:`Partial ~backtrack_window:16
           (fn_src data chunk) pinned_parser
       with
       | Ok s ->
@@ -270,7 +270,7 @@ let test_pinned_complete_match () =
 let test_pinned_match_at_buffer_end () =
   let data = String.make 10 'x' ^ "aaaaaab" in
   match
-    Parseff.parse_source ~backtrack_window:16 (fn_src data 4096) pinned_parser
+    Parseff.Source.parse ~backtrack_window:16 (fn_src data 4096) pinned_parser
   with
   | Error { kind = Backtrack_window_exceeded _; _ } ->
       ()
@@ -302,13 +302,13 @@ let letters () = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z')
 
 let test_feed_stops_after_value () =
   let feed =
-    Parseff.parse_partial (fun () ->
+    Parseff.Push.parse (fun () ->
         let s = letters () in
         ignore (Parseff.char ';');
         s
     )
   in
-  match Parseff.feed feed "abc;def" with
+  match Parseff.Push.feed feed "abc;def" with
   | Done (Ok (s, rest)) ->
       Alcotest.(check (pair string string)) "value" ("abc", "def") (s, rest)
   | Done (Error e) ->
@@ -320,7 +320,7 @@ let test_no_read_past_decided_value () =
   List.iter
     (fun (name, parts, expected) ->
       match
-        Parseff.parse_source ~consume:`Partial (blocking_src parts) letters
+        Parseff.Source.parse ~consume:`Partial (blocking_src parts) letters
       with
       | Ok s ->
           Alcotest.(check string) name expected s
@@ -339,7 +339,7 @@ let test_small_window_rejected () =
   List.iter
     (fun w ->
       match
-        Parseff.parse_source ~consume:`Partial ~backtrack_window:w
+        Parseff.Source.parse ~consume:`Partial ~backtrack_window:w
           (fn_src "hello" 5) (fun () -> Parseff.take_while ~at_least:1 is_alpha
         )
       with
@@ -350,7 +350,7 @@ let test_small_window_rejected () =
     )
     [ -5; 0; 1 ];
   match
-    Parseff.parse_source ~consume:`Partial ~backtrack_window:2 (fn_src "hello" 5)
+    Parseff.Source.parse ~consume:`Partial ~backtrack_window:2 (fn_src "hello" 5)
       (fun () -> Parseff.take_while ~at_least:1 is_alpha
     )
   with
@@ -378,7 +378,7 @@ let test_bad_read_result () =
   List.iter
     (fun bad ->
       let src = Parseff.Source.of_function (fun _ _ _ -> bad) in
-      match Parseff.parse_source src (fun () -> Parseff.any_char ()) with
+      match Parseff.Source.parse src (fun () -> Parseff.any_char ()) with
       | _ ->
           Alcotest.failf "read result %d accepted" bad
       | exception Invalid_argument msg ->

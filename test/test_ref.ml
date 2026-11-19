@@ -104,8 +104,8 @@ let check_final name input expected_outcome expected make =
     Alcotest.(check int) (name ^ " " ^ label ^ " value") expected (Ref.get cell)
   in
   run "parse" (fun p -> parse ~consume:`Partial input p);
-  run "parse_source" (fun p ->
-      parse_source ~consume:`Partial (chunked_source input) p
+  run "Source.parse" (fun p ->
+      Source.parse ~consume:`Partial (chunked_source input) p
   )
 
 let incr_cell c = Ref.set c (Ref.get c + 1)
@@ -472,7 +472,7 @@ let test_concurrent_parses () =
   let go r v () =
     r :=
       match
-        parse_source (yielding_source "xx") (fun () ->
+        Source.parse (yielding_source "xx") (fun () ->
             let _ = char 'x' in
             Ref.set c v;
             char 'x'
@@ -508,7 +508,7 @@ let test_set_while_parse_suspended () =
   in
   let suspended () =
     result :=
-      match parse_source (yielding_source "b") parser with
+      match Source.parse (yielding_source "b") parser with
       | Ok _ ->
           "ok"
       | Error e ->
@@ -560,7 +560,7 @@ let test_parse_continues_after_read_raises () =
   in
   Alcotest.(check char)
     "parse after the exception" 'b'
-    (ok_exn (parse_source ~consume:`Partial src parser));
+    (ok_exn (Source.parse ~consume:`Partial src parser));
   Alcotest.(check int) "set rolled back" 0 (Ref.get c)
 
 let a_source n =
@@ -590,7 +590,7 @@ let live_words_after_many n =
     ignore (Sys.opaque_identity items);
     live
   in
-  match parse_source ~backtrack_window:64 (a_source n) parser with
+  match Source.parse ~backtrack_window:64 (a_source n) parser with
   | Ok live ->
       Alcotest.(check int) "every set kept" n (Ref.get c);
       live

@@ -29,7 +29,7 @@ let test_literal_failure () =
 let caseless_outcome ?(stream = false) input parser =
   let r =
     if stream then
-      Parseff.parse_source
+      Parseff.Source.parse
         (Parseff.Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
         parser
     else
@@ -1333,9 +1333,9 @@ let test_consume_default_and_partial () =
   let source () =
     Parseff.Source.of_seq (List.to_seq [ "a"; "bc"; "X"; "YZ" ])
   in
-  check_trailing_rejected ~found:"X" "parse_source"
-    (Parseff.parse_source (source ()) parser);
-  match Parseff.parse_source ~consume:`Partial (source ()) parser with
+  check_trailing_rejected ~found:"X" "Source.parse"
+    (Parseff.Source.parse (source ()) parser);
+  match Parseff.Source.parse ~consume:`Partial (source ()) parser with
   | Ok s ->
       Alcotest.(check string) "partial streaming" "abc" s
   | Error _ ->
@@ -1781,11 +1781,11 @@ let test_take_while_at_least_produces_expected () =
   | _ ->
       Alcotest.fail "take_while ~at_least failure should produce `Expected"
 
-(* Failed works with parse_source (streaming) *)
+(* Failed works with Source.parse (streaming) *)
 let test_failure_with_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
-    Parseff.parse_source src (fun () ->
+    Parseff.Source.parse src (fun () ->
         Parseff.literal "abc";
         Parseff.fail "stream fail"
     )
@@ -1801,7 +1801,7 @@ let test_failure_with_streaming () =
 let test_failure_punches_through_or_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
-    Parseff.parse_source src (fun () ->
+    Parseff.Source.parse src (fun () ->
         Parseff.or_
           (fun () ->
             Parseff.literal "abc";

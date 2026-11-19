@@ -83,7 +83,7 @@ let peek () = Parseff.look_ahead Parseff.any_char
 
 ## Numbers
 
-The number parsers read a number at the current position. They stop at the first byte that does not fit, and they work across chunk boundaries in `Parseff.parse_source`.
+The number parsers read a number at the current position. They stop at the first byte that does not fit, and they work across chunk boundaries in `Parseff.Source.parse`.
 
 
 ### `integer`

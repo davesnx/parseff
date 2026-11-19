@@ -38,11 +38,11 @@ let events_of ?(consume = `All) input parser =
   in
   let r2, e2 =
     record (fun trace ->
-        ok (Parseff.parse_source ~consume ~trace (one_byte_source input) parser)
+        ok (Parseff.Source.parse ~consume ~trace (one_byte_source input) parser)
     )
   in
-  Alcotest.(check (list string)) "parse_source gives the same events" e1 e2;
-  Alcotest.(check string) "parse_source gives the same result" r1 r2;
+  Alcotest.(check (list string)) "Source.parse gives the same events" e1 e2;
+  Alcotest.(check string) "Source.parse gives the same result" r1 r2;
   (r1, e1)
 
 let check_events ?consume input parser expected_result expected =
@@ -182,9 +182,9 @@ let test_callback_exception_propagates () =
   | exception Exit ->
       ()
   );
-  ( match Parseff.parse_source ~trace:raising (one_byte_source "a") simple with
+  ( match Parseff.Source.parse ~trace:raising (one_byte_source "a") simple with
   | _ ->
-      Alcotest.fail "expected Exit from parse_source"
+      Alcotest.fail "expected Exit from Source.parse"
   | exception Exit ->
       ()
   );
@@ -232,14 +232,14 @@ let recovery_events input parser =
     record (fun trace ->
         count
           (Result.is_ok
-             (Parseff.parse_source ~diagnostics:errors ~trace
+             (Parseff.Source.parse ~diagnostics:errors ~trace
                 (one_byte_source input) parser
              )
           )
     )
   in
-  Alcotest.(check (list string)) "parse_source gives the same events" e1 e2;
-  Alcotest.(check (pair bool int)) "parse_source gives the same result" r1 r2;
+  Alcotest.(check (list string)) "Source.parse gives the same events" e1 e2;
+  Alcotest.(check (pair bool int)) "Source.parse gives the same result" r1 r2;
   (r1, e1)
 
 let test_captured () =
@@ -393,9 +393,9 @@ let test_printed_tree () =
     "parse" expected
     (printed (fun trace -> Parseff.parse ~trace "[1,x]" list));
   Alcotest.(check string)
-    "parse_source" expected
+    "Source.parse" expected
     (printed (fun trace ->
-         Parseff.parse_source ~trace (one_byte_source "[1,x]") list
+         Parseff.Source.parse ~trace (one_byte_source "[1,x]") list
      )
     )
 
@@ -457,10 +457,10 @@ let test_trace_keeps_the_error () =
       let traced = rendered (Parseff.parse ~trace:ignore input parser) in
       Alcotest.(check string) ("parse " ^ input) plain traced;
       let streamed trace =
-        rendered (Parseff.parse_source ?trace (one_byte_source input) parser)
+        rendered (Parseff.Source.parse ?trace (one_byte_source input) parser)
       in
       Alcotest.(check string)
-        ("parse_source " ^ input) (streamed None) (streamed (Some ignore))
+        ("Source.parse " ^ input) (streamed None) (streamed (Some ignore))
     )
     [ "ax"; "[1,x]"; "ab[ab["; "[ab"; "[1,2"; "ab[1]ax"; "[1]]"; "" ]
 
@@ -480,13 +480,13 @@ let test_backtrack_window_through_context () =
   in
   let _, events =
     record (fun trace ->
-        Parseff.parse_source ~backtrack_window:2 ~trace
+        Parseff.Source.parse ~backtrack_window:2 ~trace
           (one_byte_source "abcdeg") parser
     )
   in
   Alcotest.(check (list string)) "events" [ "enter w 0"; "fail w 0 0" ] events;
   match
-    Parseff.parse_source ~backtrack_window:2 ~trace:ignore
+    Parseff.Source.parse ~backtrack_window:2 ~trace:ignore
       (one_byte_source "abcdeg") parser
   with
   | Stdlib.Error { kind = Backtrack_window_exceeded _; _ } ->

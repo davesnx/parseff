@@ -50,8 +50,8 @@ let check ?(parser = expr) table input expected =
     ("parse " ^ input) expected
     (show (Parseff.parse input (parser table)));
   Alcotest.(check string)
-    ("parse_source " ^ input) expected
-    (show (Parseff.parse_source (chunked_source input) (parser table)))
+    ("Source.parse " ^ input) expected
+    (show (Parseff.Source.parse (chunked_source input) (parser table)))
 
 let arith =
   Parseff.
@@ -582,7 +582,7 @@ let test_commit_in_token_streaming () =
             (Printf.sprintf "%s, reads of %d, window %d" input size window)
             expected
             (show
-               (Parseff.parse_source ~backtrack_window:window
+               (Parseff.Source.parse ~backtrack_window:window
                   (sized_source size input) (expr table)
                )
             )
@@ -652,7 +652,7 @@ let test_streaming_window () =
   let input = Buffer.contents b in
   let stream p =
     match
-      Parseff.parse_source ~backtrack_window:64 (chunked_source input) p
+      Parseff.Source.parse ~backtrack_window:64 (chunked_source input) p
     with
     | Ok n ->
         string_of_int n
@@ -949,8 +949,8 @@ module Precedence = struct
           )
           [
             ("parse", Parseff.parse input p);
-            ( "parse_source",
-              Parseff.parse_source ~backtrack_window:64 (chunked_source input) p
+            ( "Source.parse",
+              Parseff.Source.parse ~backtrack_window:64 (chunked_source input) p
             );
           ]
       )
@@ -1172,7 +1172,7 @@ module Precedence = struct
       in
       ( show (Parseff.parse ~diagnostics:d input p),
         show
-          (Parseff.parse_source ~diagnostics:d ~backtrack_window:16
+          (Parseff.Source.parse ~diagnostics:d ~backtrack_window:16
              (chunked_source input) p
           )
       )
@@ -1185,7 +1185,7 @@ module Precedence = struct
             let name = seal_name ^ ", " ^ name in
             Alcotest.(check string) (name ^ ", parse") expected from_string;
             Alcotest.(check string)
-              (name ^ ", parse_source") expected from_source
+              (name ^ ", Source.parse") expected from_source
           )
           [
             ("below min", `Low, 2, false, "1<<<<<<<<2", "Ok 1@1 <<<<<<<<2");
@@ -1277,7 +1277,7 @@ module Precedence = struct
           [
             report p (Parseff.parse ~diagnostics:d input);
             report p
-              (Parseff.parse_source ~diagnostics:d ~backtrack_window:16
+              (Parseff.Source.parse ~diagnostics:d ~backtrack_window:16
                  (chunked_source input)
               );
           ]

@@ -289,7 +289,7 @@ let complete_number () =
    checks inside a parser, or when parsing with ~consume:`Partial *)
 ]}
 
-{b Note:} {!val:Parseff.parse} and {!val:Parseff.parse_source} fail with
+{b Note:} {!val:Parseff.parse} and {!val:Parseff.Source.parse} fail with
 [Expected End_of_input] when input remains, so a top-level parser does not need
 a final [end_of_input]. With [~consume:`Partial], leftover input is ignored.
 

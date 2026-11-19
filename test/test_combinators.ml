@@ -38,9 +38,9 @@ let both show_v input parser expected =
     "parse" expected
     (show show_vp (Parseff.parse ~consume:`Partial input with_pos));
   Alcotest.(check string)
-    "parse_source" expected
+    "Source.parse" expected
     (show show_vp
-       (Parseff.parse_source ~consume:`Partial (chunked_source input) with_pos)
+       (Parseff.Source.parse ~consume:`Partial (chunked_source input) with_pos)
     )
 
 let show_string s = Printf.sprintf "%S" s
@@ -217,7 +217,7 @@ let test_take_max_int () =
 
 let test_take_max_int_streaming () =
   let r =
-    Parseff.parse_source (chunked_source "abc") (fun () ->
+    Parseff.Source.parse (chunked_source "abc") (fun () ->
         ignore (Parseff.any_char ());
         Parseff.take max_int
     )
@@ -318,12 +318,12 @@ let test_literal_or_mismatch () =
     "parse" expected
     (show show_string (Parseff.parse "no" p));
   Alcotest.(check string)
-    "parse_source, chunks of 2" expected
-    (show show_string (Parseff.parse_source (sized_source 2 "no") p));
+    "Source.parse, chunks of 2" expected
+    (show show_string (Parseff.Source.parse (sized_source 2 "no") p));
   Alcotest.(check string)
-    "parse_source, chunks of 1"
+    "Source.parse, chunks of 1"
     {|Error@0 Expected "expected \"false\" or \"true\", found 'n'"|}
-    (show show_string (Parseff.parse_source (chunked_source "no") p))
+    (show show_string (Parseff.Source.parse (chunked_source "no") p))
 
 let test_literal_each_length_and_offset () =
   for len = 1 to 10 do
@@ -336,17 +336,17 @@ let test_literal_each_length_and_offset () =
       [
         show show_string (Parseff.parse ~consume:`Partial input p);
         show show_string
-          (Parseff.parse_source ~consume:`Partial
+          (Parseff.Source.parse ~consume:`Partial
              (Parseff.Source.of_string input)
              p
           );
         show show_string
-          (Parseff.parse_source ~consume:`Partial (sized_source 64 input) p);
+          (Parseff.Source.parse ~consume:`Partial (sized_source 64 input) p);
       ]
     in
     let one_byte_chunks input =
       show show_string
-        (Parseff.parse_source ~consume:`Partial (chunked_source input) p)
+        (Parseff.Source.parse ~consume:`Partial (chunked_source input) p)
     in
     let ok = show show_string (Ok text) in
     Alcotest.(check (list string))
@@ -414,7 +414,7 @@ let blocking_source chunks =
 let check_stream name chunks parser expected expected_reads =
   let source, reads = blocking_source chunks in
   let result =
-    match Parseff.parse_source ~consume:`Partial source parser with
+    match Parseff.Source.parse ~consume:`Partial source parser with
     | r ->
         show show_string r
     | exception Would_block ->
@@ -476,13 +476,13 @@ let test_literal_stream_or_ () =
       Alcotest.(check string)
         ("or_ on " ^ input)
         (show show_string (Parseff.parse ~consume:`Partial input p))
-        (show show_string (Parseff.parse_source ~consume:`Partial source p))
+        (show show_string (Parseff.Source.parse ~consume:`Partial source p))
     )
     [ ("ac", [ "a"; "c" ]); ("ad", [ "a"; "d" ]); ("x", [ "x" ]) ]
 
 let test_literal_streaming_slow_source () =
   let r =
-    Parseff.parse_source (chunked_source "true") (fun () ->
+    Parseff.Source.parse (chunked_source "true") (fun () ->
         Parseff.literal "true";
         "true"
     )
@@ -548,7 +548,7 @@ let test_fold_otherwise_releases_input () =
         ( + )
       in
       let r =
-        Parseff.parse_source ~backtrack_window:16 (chunked_source input)
+        Parseff.Source.parse ~backtrack_window:16 (chunked_source input)
           (fun () -> fold fold_digit plus
         )
       in
@@ -562,7 +562,7 @@ let test_fold_otherwise_releases_input () =
     ( + )
   in
   let r =
-    Parseff.parse_source ~backtrack_window:16 (chunked_source input) (fun () ->
+    Parseff.Source.parse ~backtrack_window:16 (chunked_source input) (fun () ->
         Parseff.fold_left fold_digit plus ~otherwise:(-1)
     )
   in

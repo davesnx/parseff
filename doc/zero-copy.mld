@@ -12,7 +12,7 @@ the input instead of copying it, so no string is allocated until you call
 {!val:Parseff.Slice.to_string}. The type is abstract: read a slice with
 {!val:Parseff.Slice.length} and {!val:Parseff.Slice.get}.
 
-For parsers run with {!val:Parseff.parse_source}, slices may be materialized into
+For parsers run with {!val:Parseff.Source.parse}, slices may be materialized into
 owned strings internally so the streaming runtime can reclaim older buffer
 prefixes. In-memory {!val:Parseff.parse} still keeps the zero-copy behavior.
 
@@ -32,7 +32,7 @@ val Slice.get : Slice.t -> int -> char
 {!val:Parseff.Slice.take_while} is like {!val:Parseff.take_while} but returns a
 zero-copy {!type:Parseff.Slice.t} instead of allocating a string. No memory
 allocation until you call {!val:Parseff.Slice.to_string}. Under
-{!val:Parseff.parse_source}, the returned slice may be backed by an owned copy
+{!val:Parseff.Source.parse}, the returned slice may be backed by an owned copy
 instead of the live streaming buffer.
 
 {@ocaml skip[val Slice.take_while : (char -> bool) -> Slice.t]}
@@ -94,7 +94,7 @@ a {!type:Parseff.Slice.t}. See {!val:Parseff.recognize}.
 
 {!val:Parseff.Slice.sep_by_take} is like {!val:Parseff.sep_by_take} but returns
 zero-copy {!type:Parseff.Slice.t}s. No [String.sub] allocations per element in the
-in-memory runner. Under {!val:Parseff.parse_source}, slices may be copied so the
+in-memory runner. Under {!val:Parseff.Source.parse}, slices may be copied so the
 runtime can discard older chunks safely.
 
 {@ocaml skip[val Slice.sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> Slice.t list]}

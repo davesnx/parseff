@@ -124,7 +124,7 @@ let () =
         failwith "unexpected element"
   in
   match
-    Parseff.parse_source ~backtrack_window:4096 source (top_array on_element)
+    Parseff.Source.parse ~backtrack_window:4096 source (top_array on_element)
   with
   | Ok () ->
       Printf.printf "elements=%d sum_of_ids=%d\n" !elements !ids

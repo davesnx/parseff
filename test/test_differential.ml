@@ -413,7 +413,7 @@ let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
     v
   in
   let t =
-    Parseff.parse_partial ~max_depth ~backtrack_window ~diagnostics ?trace p
+    Parseff.Push.parse ~max_depth ~backtrack_window ~diagnostics ?trace p
   in
   let len = String.length input in
   let check fed = function
@@ -427,9 +427,8 @@ let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
         in
         if leftover <> String.sub input stop (fed - stop) then
           failwith
-            (Printf.sprintf
-               "parse_partial: leftover %S after %d of %d fed bytes" leftover
-               stop fed
+            (Printf.sprintf "Push.parse: leftover %S after %d of %d fed bytes"
+               leftover stop fed
             );
         Ok v
     | Error e ->
@@ -437,14 +436,14 @@ let pushed ~backtrack_window ~consume ~diagnostics ?trace input sizes p =
   in
   let rec go pos turn =
     if pos >= len then
-      check pos (Parseff.finish t)
+      check pos (Parseff.Push.finish t)
     else
       let size = List.nth sizes (turn mod List.length sizes) in
       let n = min size (len - pos) in
-      match Parseff.feed t (String.sub input pos n) with
-      | Parseff.Await ->
+      match Parseff.Push.feed t (String.sub input pos n) with
+      | Parseff.Push.Await ->
           go (pos + n) (turn + 1)
-      | Parseff.Done r ->
+      | Parseff.Push.Done r ->
           check (pos + n) r
   in
   go 0 0
@@ -486,7 +485,7 @@ let run_real ?(traced = false) ~partial runner g input =
           pushed ~backtrack_window ~consume ~diagnostics:cx.diags ?trace input
             sizes p
       | Stream (feed, sizes, backtrack_window) ->
-          Parseff.parse_source ~max_depth ~backtrack_window ~consume
+          Parseff.Source.parse ~max_depth ~backtrack_window ~consume
             ~diagnostics:cx.diags ?trace (chunked feed input sizes) p
     with
     | Ok v ->
@@ -607,7 +606,7 @@ let seal ?captures frames n =
   in
   go [] frames n
 
-(* [parse_source] must keep the bytes from the oldest position that a frame
+(* [Source.parse] must keep the bytes from the oldest position that a frame
    can still rewind to. A read that needs the bytes up to [need] checks the
    window while fewer than [need] bytes are buffered, so it fails only if
    [need - 1 - oldest] reaches the window. *)
@@ -1286,13 +1285,13 @@ let show_stream (feed, sizes, window) =
   Printf.sprintf "%s, chunks [%s], backtrack_window %d"
     ( match feed with
     | Function ->
-        "parse_source, of_function"
+        "Source.parse, of_function"
     | Seq ->
-        "parse_source, of_seq"
+        "Source.parse, of_seq"
     | Bigstring ->
-        "parse_source, of_bigstring_chunks"
+        "Source.parse, of_bigstring_chunks"
     | Push ->
-        "parse_partial"
+        "Push.parse"
     )
     (String.concat "; " (List.map string_of_int sizes))
     window
@@ -1395,9 +1394,8 @@ let () =
     [
       ( "random grammars",
         [
-          Alcotest.test_case
-            "model, parse, parse_source and parse_partial agree" `Quick
-            test_random_grammars;
+          Alcotest.test_case "model, parse, Source.parse and Push.parse agree"
+            `Quick test_random_grammars;
         ]
       );
     ]

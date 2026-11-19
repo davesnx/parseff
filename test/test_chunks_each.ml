@@ -6,15 +6,15 @@ let line () =
   ignore (Parseff.char '\n');
   v
 
-let show : Parseff.chunks_step -> string = function
-  | Parseff.Need_input ->
+let show : Parseff.Push.each_step -> string = function
+  | Parseff.Push.Need_input ->
       "await"
-  | Parseff.Stopped rest ->
+  | Parseff.Push.Stopped rest ->
       Printf.sprintf "stopped %S" rest
-  | Parseff.Error_of e ->
+  | Parseff.Push.Error_of e ->
       Printf.sprintf "failed %d %s" e.Parseff.range.start
         (Parseff.error_message e)
-  | Parseff.Ended ->
+  | Parseff.Push.Ended ->
       "ended"
 
 let collecting ?(stop_at = "") () =
@@ -30,7 +30,7 @@ let collecting ?(stop_at = "") () =
 
 let test_one_value_then_end () =
   let seen, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   let first = show (push (Some "12\n")) in
   let last = show (push None) in
   Alcotest.(check (list string)) "steps" [ "await"; "ended" ] [ first; last ];
@@ -38,13 +38,13 @@ let test_one_value_then_end () =
 
 let test_two_values_one_chunk () =
   let seen, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   Alcotest.(check string) "step" "await" (show (push (Some "1\n22\n")));
   Alcotest.(check (list string)) "values" [ "1"; "22" ] (List.rev !seen)
 
 let test_value_split_byte_by_byte () =
   let seen, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   let steps =
     List.map
       (fun c ->
@@ -61,7 +61,7 @@ let test_value_split_byte_by_byte () =
 
 let test_stop_leftover () =
   let seen, on_value = collecting ~stop_at:"22" () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   Alcotest.(check string)
     "step" "stopped \"333\\n4\""
     (show (push (Some "1\n22\n333\n4")));
@@ -69,12 +69,12 @@ let test_stop_leftover () =
 
 let test_stop_empty_leftover () =
   let _, on_value = collecting ~stop_at:"1" () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   Alcotest.(check string) "step" "stopped \"\"" (show (push (Some "1\n")))
 
 let test_stop_leftover_across_chunks () =
   let _, on_value = collecting ~stop_at:"22" () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   let first = show (push (Some "1\n2")) in
   let last = show (push (Some "2\n33")) in
   Alcotest.(check (list string))
@@ -83,14 +83,14 @@ let test_stop_leftover_across_chunks () =
     [ first; last ]
 
 let source_each_error text =
-  Parseff.parse_source_each (Parseff.Source.of_string text) line
+  Parseff.Source.parse_each (Parseff.Source.of_string text) line
   |> List.of_seq
   |> List.find_map (function Ok _ -> None | Error e -> Some e)
   |> Option.get
 
 let test_error_position_from_first_chunk () =
   let seen, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   let first = show (push (Some "1\n2")) in
   let last = show (push (Some "2\nx\n")) in
   let e = source_each_error "1\n22\nx\n" in
@@ -112,10 +112,10 @@ let test_no_progress_fails () =
     else
       `Continue
   in
-  let push = Parseff.parse_chunks_each ~on_value letters in
+  let push = Parseff.Push.parse_each ~on_value letters in
   let step = show (push (Some "ab1")) in
   let expected =
-    Parseff.parse_source_each (Parseff.Source.of_string "ab1") letters
+    Parseff.Source.parse_each (Parseff.Source.of_string "ab1") letters
     |> List.of_seq
     |> List.map (function
       | Ok v ->
@@ -126,7 +126,7 @@ let test_no_progress_fails () =
       )
   in
   Alcotest.(check (list string))
-    "parse_source_each"
+    "Source.parse_each"
     [ "ok ab"; "failed 2 the parser consumed no input" ]
     expected;
   Alcotest.(check string) "step" (List.nth expected 1) step;
@@ -134,7 +134,7 @@ let test_no_progress_fails () =
 
 let test_end_inside_value () =
   let seen, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   let first = show (push (Some "1\n22")) in
   let last = show (push None) in
   let e = source_each_error "1\n22" in
@@ -149,24 +149,24 @@ let test_end_inside_value () =
   Alcotest.(check int) "at end" 4 e.Parseff.range.start;
   Alcotest.(check (list string)) "values" [ "1" ] (List.rev !seen)
 
-let done_msg = "Parseff.parse_chunks_each: the parse is done"
-let own_msg = "Parseff.parse_chunks_each: called from its own parser"
-let on_value_msg = "Parseff.parse_chunks_each: called from on_value"
+let done_msg = "Parseff.Push.parse_each: the parse is done"
+let own_msg = "Parseff.Push.parse_each: called from its own parser"
+let on_value_msg = "Parseff.Push.parse_each: called from on_value"
 
 let ended_push last =
   let _, on_value = collecting ~stop_at:"1" () in
-  let push = Parseff.parse_chunks_each ~on_value line in
-  ignore (push (Some last) : Parseff.chunks_step);
+  let push = Parseff.Push.parse_each ~on_value line in
+  ignore (push (Some last) : Parseff.Push.each_step);
   push
 
 let test_push_after_end () =
   List.iter
     (fun (name, push) ->
       Alcotest.check_raises name (Invalid_argument done_msg) (fun () ->
-          ignore (push (Some "2\n") : Parseff.chunks_step)
+          ignore (push (Some "2\n") : Parseff.Push.each_step)
       );
       Alcotest.check_raises (name ^ ", None") (Invalid_argument done_msg)
-        (fun () -> ignore (push None : Parseff.chunks_step)
+        (fun () -> ignore (push None : Parseff.Push.each_step)
       )
     )
     [
@@ -174,13 +174,13 @@ let test_push_after_end () =
       ("failed", ended_push "x");
       ( "ended",
         let push = ended_push "" in
-        ignore (push None : Parseff.chunks_step);
+        ignore (push None : Parseff.Push.each_step);
         push
       );
     ]
 
 let test_push_from_on_value () =
-  let push = ref (fun _ -> Parseff.Ended) in
+  let push = ref (fun _ -> Parseff.Push.Ended) in
   let raised = ref None in
   let on_value _ =
     ( match !push (Some "2\n") with
@@ -191,12 +191,12 @@ let test_push_from_on_value () =
     );
     `Continue
   in
-  push := Parseff.parse_chunks_each ~on_value line;
+  push := Parseff.Push.parse_each ~on_value line;
   Alcotest.(check string) "step" "await" (show (!push (Some "1\n")));
   Alcotest.(check (option string)) "raised" (Some on_value_msg) !raised
 
 let test_push_from_parser () =
-  let push = ref (fun _ -> Parseff.Ended) in
+  let push = ref (fun _ -> Parseff.Push.Ended) in
   let parser () =
     match !push (Some "2\n") with
     | _ ->
@@ -206,13 +206,13 @@ let test_push_from_parser () =
         m
   in
   let seen, on_value = collecting ~stop_at:own_msg () in
-  push := Parseff.parse_chunks_each ~on_value parser;
+  push := Parseff.Push.parse_each ~on_value parser;
   Alcotest.(check string) "step" "stopped \"\"" (show (!push (Some "1\n")));
   Alcotest.(check (list string)) "values" [ own_msg ] !seen
 
 let test_push_from_other_parser () =
   let _, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   let r =
     Parseff.parse "" (fun () ->
         match push (Some "1\n") with
@@ -223,7 +223,7 @@ let test_push_from_other_parser () =
     )
   in
   Alcotest.(check (result string reject))
-    "raised" (Ok "Parseff.parse_chunks_each: called from inside a parser")
+    "raised" (Ok "Parseff.Push.parse_each: called from inside a parser")
     (Result.map_error ignore r);
   Alcotest.(check string) "still usable" "await" (show (push (Some "1\n")))
 
@@ -236,13 +236,13 @@ let test_parser_raises () =
     if v = "22" then raise (Boom v);
     v
   in
-  let push = Parseff.parse_chunks_each ~on_value parser in
+  let push = Parseff.Push.parse_each ~on_value parser in
   Alcotest.(check string) "first" "await" (show (push (Some "1\n2")));
   Alcotest.check_raises "raised" (Boom "22") (fun () ->
-      ignore (push (Some "2\n3\n") : Parseff.chunks_step)
+      ignore (push (Some "2\n3\n") : Parseff.Push.each_step)
   );
   Alcotest.check_raises "after" (Invalid_argument done_msg) (fun () ->
-      ignore (push None : Parseff.chunks_step)
+      ignore (push None : Parseff.Push.each_step)
   );
   Alcotest.(check (list string)) "values" [ "1" ] (List.rev !seen)
 
@@ -253,12 +253,12 @@ let test_on_value_raises () =
     else
       `Continue
   in
-  let push = Parseff.parse_chunks_each ~on_value line in
+  let push = Parseff.Push.parse_each ~on_value line in
   Alcotest.check_raises "raised" (Boom "22") (fun () ->
-      ignore (push (Some "1\n22\n3\n") : Parseff.chunks_step)
+      ignore (push (Some "1\n22\n3\n") : Parseff.Push.each_step)
   );
   Alcotest.check_raises "after" (Invalid_argument done_msg) (fun () ->
-      ignore (push (Some "4\n") : Parseff.chunks_step)
+      ignore (push (Some "4\n") : Parseff.Push.each_step)
   );
   Alcotest.(check string)
     "another parse runs" "ok"
@@ -285,7 +285,7 @@ let test_diagnostics_per_value () =
     `Continue
   in
   let push =
-    Parseff.parse_chunks_each ~diagnostics:diags ~on_value warning_line
+    Parseff.Push.parse_each ~diagnostics:diags ~on_value warning_line
   in
   Alcotest.(check string) "await" "await" (show (push (Some "1\n22\n333\n")));
   Alcotest.(check string) "ended" "ended" (show (push None));
@@ -299,7 +299,7 @@ let test_diagnostics_free_between_values () =
   let diags = Parseff.Diagnostics.create () in
   let seen, on_value = collecting () in
   let push =
-    Parseff.parse_chunks_each ~diagnostics:diags ~on_value warning_line
+    Parseff.Push.parse_each ~diagnostics:diags ~on_value warning_line
   in
   Alcotest.(check string) "await" "await" (show (push (Some "1\n")));
   let other = Parseff.parse ~diagnostics:diags "77\n" warning_line in
@@ -319,7 +319,7 @@ let test_ref_free_between_values () =
     v
   in
   let seen, on_value = collecting () in
-  let push = Parseff.parse_chunks_each ~on_value parser in
+  let push = Parseff.Push.parse_each ~on_value parser in
   Alcotest.(check string) "await" "await" (show (push (Some "1\n")));
   let other = Parseff.parse "" (fun () -> Parseff.Ref.set cell "other") in
   Alcotest.(check (result unit reject))
@@ -341,7 +341,7 @@ let render (r : Http.request) =
   Printf.sprintf "%s %s %d" r.meth r.target (List.length r.headers)
 
 let reference text =
-  Parseff.parse_source_each (Parseff.Source.of_string text) Http.request_head
+  Parseff.Source.parse_each (Parseff.Source.of_string text) Http.request_head
   |> List.of_seq
   |> List.map (function
     | Ok r ->
@@ -360,14 +360,14 @@ let push_pieces ?stop_at pieces =
     else
       `Continue
   in
-  let push = Parseff.parse_chunks_each ~on_value Http.request_head in
+  let push = Parseff.Push.parse_each ~on_value Http.request_head in
   let rec go given = function
     | [] ->
         (List.rev !seen @ [ show (push None) ], given)
     | piece :: rest -> (
         let given = given + String.length piece in
         match push (Some piece) with
-        | Parseff.Need_input ->
+        | Parseff.Push.Need_input ->
             go given rest
         | step ->
             (List.rev !seen @ [ show step ], given)
@@ -395,7 +395,7 @@ let every_split text = List.init (String.length text + 1) (fun p -> [ p ])
 
 let test_reference () =
   Alcotest.(check (list string))
-    "parse_source_each"
+    "Source.parse_each"
     [
       "GET /plaintext 2";
       "GET /json 2";
@@ -569,7 +569,7 @@ let () =
       ( "equivalence",
         [
           test_case "reference" `Quick test_reference;
-          test_case "parse_source_each on every split" `Quick
+          test_case "Source.parse_each on every split" `Quick
             test_equivalent_to_source_each;
           test_case "stop on every split" `Quick test_stop_equivalent;
           test_case "chunk larger than the buffer" `Quick

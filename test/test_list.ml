@@ -459,31 +459,31 @@ let test_runner_collector () =
   in
   let stopped = ("Error at 12: expected integer, found '*'", []) in
   let partial diagnostics =
-    let t = parse_partial ?diagnostics program in
-    match feed t input with
+    let t = Push.parse ?diagnostics program in
+    match Push.feed t input with
     | Done r ->
         Result.map fst r
     | Await ->
-        Result.map fst (finish t)
+        Result.map fst (Push.finish t)
   in
   let first_of_each diagnostics =
     match
-      Seq.uncons (parse_source_each ?diagnostics (bytes_source input) program)
+      Seq.uncons (Source.parse_each ?diagnostics (bytes_source input) program)
     with
     | Some (r, _) ->
         r
     | None ->
-        Alcotest.fail "parse_source_each gave no value"
+        Alcotest.fail "Source.parse_each gave no value"
   in
   let runners =
     [
       ("parse", fun diagnostics -> parse ?diagnostics input program);
-      ( "parse_source",
+      ( "Source.parse",
         fun diagnostics ->
-          parse_source ?diagnostics (bytes_source input) program
+          Source.parse ?diagnostics (bytes_source input) program
       );
-      ("parse_source_each", first_of_each);
-      ("parse_partial", partial);
+      ("Source.parse_each", first_of_each);
+      ("Push.parse", partial);
     ]
   in
   List.iter
@@ -881,7 +881,7 @@ let test_failed_step_leaves_nothing () =
     !events;
   let d = Diagnostics.create () in
   let r =
-    parse_source ~backtrack_window:3 ~diagnostics:d
+    Source.parse ~backtrack_window:3 ~diagnostics:d
       (bytes_source "[1 (2 3) 4]")
       paren_list
   in
@@ -1398,7 +1398,7 @@ let test_streaming () =
     (fun input ->
       let d = Diagnostics.create () in
       let r =
-        parse_source ~backtrack_window:64 ~diagnostics:d (bytes_source input)
+        Source.parse ~backtrack_window:64 ~diagnostics:d (bytes_source input)
           program
       in
       let value, expected = run input in
@@ -1429,7 +1429,7 @@ let test_streaming () =
   in
   let d = Diagnostics.create () in
   match
-    parse_source ~backtrack_window:32 ~diagnostics:d (bytes_source long) program
+    Source.parse ~backtrack_window:32 ~diagnostics:d (bytes_source long) program
   with
   | Ok l ->
       Alcotest.(check int) "long input in a small window" 2000 (List.length l);
@@ -1458,10 +1458,10 @@ let run_iter ?(window = 4) ~collector ~stream input p =
       | false, false ->
           parse input p
       | true, true ->
-          parse_source ~backtrack_window:window ~diagnostics:d
+          Source.parse ~backtrack_window:window ~diagnostics:d
             (bytes_source input) p
       | true, false ->
-          parse_source ~backtrack_window:window (bytes_source input) p
+          Source.parse ~backtrack_window:window (bytes_source input) p
     with
     | Ok s ->
         "Ok " ^ s

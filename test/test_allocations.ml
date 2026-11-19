@@ -160,7 +160,7 @@ let one_byte_source () =
   )
 
 let skip_source () =
-  Parseff.parse_source ~consume:`Partial (one_byte_source ()) (fun () ->
+  Parseff.Source.parse ~consume:`Partial (one_byte_source ()) (fun () ->
       Parseff.skip_while (fun _ -> true)
   )
 
@@ -177,7 +177,7 @@ let test_source_reads () =
   let actual = (Gc.minor_words () -. before) /. Float.of_int reads in
   if actual > 3. then
     Alcotest.failf
-      "parse_source allocated %.6f minor words per read, expected at most 3"
+      "Source.parse allocated %.6f minor words per read, expected at most 3"
       actual
 
 let head =
@@ -204,7 +204,7 @@ let rec head_lines count =
 
 let parse_head source =
   match
-    Parseff.parse_source ~consume:`Partial source (fun () -> head_lines 0)
+    Parseff.Source.parse ~consume:`Partial source (fun () -> head_lines 0)
   with
   | Ok 11 ->
       ()
@@ -248,15 +248,15 @@ let test_one_chunk_head () =
       (String.length head) seq fn
 
 let feed_head chunks =
-  let t = Parseff.parse_partial (fun () -> head_lines 0) in
+  let t = Parseff.Push.parse (fun () -> head_lines 0) in
   let rec go = function
     | [] ->
-        Parseff.finish t
+        Parseff.Push.finish t
     | chunk :: rest -> (
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             go rest
-        | Parseff.Done r ->
+        | Parseff.Push.Done r ->
             r
       )
   in
@@ -274,7 +274,7 @@ let test_partial_head () =
     let actual = words_per_head (fun () -> feed_head chunks) in
     if actual > maximum then
       Alcotest.failf
-        "parse_partial with the %d-byte head %s allocated %.1f minor words per \
+        "Push.parse with the %d-byte head %s allocated %.1f minor words per \
          parse, expected at most %.0f"
         (String.length head) name actual maximum
   in
@@ -299,15 +299,15 @@ let chunks_each_heads chunk =
     incr count;
     `Continue
   in
-  let push = Parseff.parse_chunks_each ~on_value (fun () -> head_lines 0) in
+  let push = Parseff.Push.parse_each ~on_value (fun () -> head_lines 0) in
   ( match push (Some chunk) with
-  | Parseff.Need_input ->
+  | Parseff.Push.Need_input ->
       ()
   | _ ->
       Alcotest.fail "expected Need_input after the chunk"
   );
   ( match push None with
-  | Parseff.Ended ->
+  | Parseff.Push.Ended ->
       ()
   | _ ->
       Alcotest.fail "expected Ended"
@@ -330,14 +330,13 @@ let test_chunks_each_heads () =
   let each = (Gc.minor_words () -. before) /. Float.of_int (runs * pipelined) in
   if partial <= 80. then
     Alcotest.failf
-      "parse_partial allocated %.1f minor words per head, so the bound of 80 \
-       does not show the cost of a fiber per head"
+      "Push.parse allocated %.1f minor words per head, so the bound of 80 does \
+       not show the cost of a fiber per head"
       partial;
   if each > 80. then
     Alcotest.failf
-      "parse_chunks_each with %d pipelined %d-byte heads in one chunk \
-       allocated %.1f minor words per head, parse_partial %.1f; expected at \
-       most 80"
+      "Push.parse_each with %d pipelined %d-byte heads in one chunk allocated \
+       %.1f minor words per head, Push.parse %.1f; expected at most 80"
       pipelined (String.length head) each partial
 
 let test_head_in_large_chunk () =
@@ -454,7 +453,7 @@ let words_allocated ~window ~record size =
   Gc.full_major ();
   let before = Gc.allocated_bytes () in
   ( match
-      Parseff.parse_source ~backtrack_window:window source (fun () ->
+      Parseff.Source.parse ~backtrack_window:window source (fun () ->
           parser ();
           Parseff.end_of_input ()
       )
@@ -603,8 +602,8 @@ let () =
         [
           Alcotest.test_case "one byte per read" `Quick test_source_reads;
           Alcotest.test_case "head as one chunk" `Quick test_one_chunk_head;
-          Alcotest.test_case "head with parse_partial" `Quick test_partial_head;
-          Alcotest.test_case "pipelined heads with parse_chunks_each" `Quick
+          Alcotest.test_case "head with Push.parse" `Quick test_partial_head;
+          Alcotest.test_case "pipelined heads with Push.parse_each" `Quick
             test_chunks_each_heads;
           Alcotest.test_case "head in a large chunk" `Quick
             test_head_in_large_chunk;

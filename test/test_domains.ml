@@ -1,6 +1,6 @@
 (* Tests for multi-domain (OCaml 5) safety.
 
-   All mutable parser state is local to each [parse] / [parse_source] call.
+   All mutable parser state is local to each [parse] / [Source.parse] call.
    These tests verify that independent parses can run concurrently in separate
    domains without interference. *)
 
@@ -242,7 +242,7 @@ let test_streaming_across_domains () =
         let input = Printf.sprintf "item%d" i in
         let source = Parseff.Source.of_string input in
         ( input,
-          Parseff.parse_source source (fun () ->
+          Parseff.Source.parse source (fun () ->
               Parseff.literal input;
               input
           )
@@ -371,7 +371,7 @@ let test_streaming_json_across_domains () =
     parallel num_domains (fun i ->
         let input, expected_name = docs.(i mod Array.length docs) in
         let source = Parseff.Source.of_string input in
-        (i, expected_name, Parseff.parse_source source json)
+        (i, expected_name, Parseff.Source.parse source json)
     )
   in
   List.iter
@@ -413,7 +413,7 @@ let test_chunked_streaming_across_domains () =
         let input = Printf.sprintf "hello%d" i in
         let source = chunked_source 2 input in
         ( input,
-          Parseff.parse_source source (fun () ->
+          Parseff.Source.parse source (fun () ->
               Parseff.literal input;
               input
           )

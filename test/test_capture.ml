@@ -168,7 +168,7 @@ let test_recover_range_after_input () =
         (Printf.sprintf "stream, ahead %d" ahead)
         expected
         (show
-           (parse_source ~backtrack_window:16 ~diagnostics:d source (body ahead))
+           (Source.parse ~backtrack_window:16 ~diagnostics:d source (body ahead))
         )
     )
     [
@@ -260,7 +260,7 @@ let test_grammar2_streaming () =
   in
   let d = Diagnostics.create () in
   let r =
-    parse_source ~diagnostics:d (Source.of_seq chunks)
+    Source.parse ~diagnostics:d (Source.of_seq chunks)
       (program (recovering ~sync:skip_stmt ~hole:SHole stmt))
   in
   Alcotest.(check string)
@@ -867,7 +867,7 @@ let test_progress_whole_character () =
     (errors d);
   let d = Diagnostics.create () in
   let r =
-    parse_source ~diagnostics:d
+    Source.parse ~diagnostics:d
       (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
       ws_int_many
   in
@@ -1403,7 +1403,7 @@ let test_recover_record () =
     seen := [];
     let r =
       if source then
-        parse_source ~diagnostics:d
+        Source.parse ~diagnostics:d
           (one_byte_reads lost_input)
           (lost_top (statement ?keep))
       else
@@ -1419,7 +1419,7 @@ let test_recover_record () =
     [ (12, unfinished) ]
     (run ~keep:keep_inner ());
   Alcotest.check errs "keep gets the failure" [ no_closer ] !seen;
-  Alcotest.check entry_list "parse_source, one byte per read"
+  Alcotest.check entry_list "Source.parse, one byte per read"
     [ (12, unfinished) ]
     (run ~source:true ~keep:keep_inner ());
   Alcotest.check entry_list "keep replaces the default" []
@@ -1810,11 +1810,11 @@ let test_limits_propagate () =
   in
   Alcotest.(check string)
     "window, without capture" "Ok"
-    (kind_name (parse_source ~backtrack_window:4 (source ()) body));
+    (kind_name (Source.parse ~backtrack_window:4 (source ()) body));
   Alcotest.(check string)
     "window" "Backtrack_window_exceeded"
     (kind_name
-       (parse_source ~backtrack_window:4 (source ()) (fun () ->
+       (Source.parse ~backtrack_window:4 (source ()) (fun () ->
             match capture body with Ok c -> c | Error _ -> '?'
         )
        )
@@ -1833,11 +1833,11 @@ let test_streaming_pins_start () =
   in
   Alcotest.(check string)
     "without capture, cut releases the input" "expected '!', found '?'"
-    (kind_name (parse_source ~backtrack_window:16 (source ()) body));
+    (kind_name (Source.parse ~backtrack_window:16 (source ()) body));
   Alcotest.(check string)
     "capture keeps its start" "Backtrack_window_exceeded"
     (kind_name
-       (parse_source ~backtrack_window:16 ~consume:`Partial (source ())
+       (Source.parse ~backtrack_window:16 ~consume:`Partial (source ())
           (fun () -> match capture body with Ok c -> c | Error _ -> '?'
         )
        )
@@ -1893,7 +1893,7 @@ let test_guard_read_raises () =
         (name ^ ": window exceeded in the guard")
         "Error backtrack window of 2 bytes exceeded"
         (outcome (fun () ->
-             parse_source ~backtrack_window:2 ~diagnostics:d (byte_reads "abcd")
+             Source.parse ~backtrack_window:2 ~diagnostics:d (byte_reads "abcd")
                p
          )
         );
@@ -1901,7 +1901,7 @@ let test_guard_read_raises () =
         (name ^ ": read raises in the guard")
         "Io"
         (outcome (fun () ->
-             parse_source ~diagnostics:d (byte_reads ~fail_at:2 "abcd") p
+             Source.parse ~diagnostics:d (byte_reads ~fail_at:2 "abcd") p
          )
         )
     )
@@ -1920,7 +1920,7 @@ let test_jump_read_raises () =
     position ()
   in
   let d = Diagnostics.create () in
-  ( match parse_source ~diagnostics:d (byte_reads ~fail_at:10 input) body with
+  ( match Source.parse ~diagnostics:d (byte_reads ~fail_at:10 input) body with
   | exception Io ->
       ()
   | exception exn ->
@@ -1930,7 +1930,7 @@ let test_jump_read_raises () =
   );
   let d = Diagnostics.create () in
   let r =
-    parse_source ~diagnostics:d ~consume:`Partial (byte_reads ~fail_at:10 input)
+    Source.parse ~diagnostics:d ~consume:`Partial (byte_reads ~fail_at:10 input)
       (fun () ->
         let p = try body () with Io -> -1 in
         (p, position ())
@@ -1965,7 +1965,7 @@ let test_streaming_release () =
   let run ?release body =
     Result.map_error
       (fun e -> kind_name (Error e))
-      (parse_source ~backtrack_window:16 ~consume:`Partial (source ())
+      (Source.parse ~backtrack_window:16 ~consume:`Partial (source ())
          (fun () ->
            match capture ?release body with
            | Ok c ->
@@ -2005,7 +2005,7 @@ let test_streaming_release_commit_in_recognize () =
   let run advance =
     let cell = Ref.create 0 in
     Result.get_ok
-      (parse_source ~consume:`Partial (Source.of_string "abcd?") (fun () ->
+      (Source.parse ~consume:`Partial (Source.of_string "abcd?") (fun () ->
            let r =
              capture ~release:true (fun () ->
                  recognize (fun () ->
@@ -2061,7 +2061,7 @@ let test_streaming_nested_release () =
       "input is larger than the window" true
       (String.length input > 4 * 1024);
     let r =
-      parse_source ~backtrack_window:1024 ~diagnostics:d (chunks 64 input)
+      Source.parse ~backtrack_window:1024 ~diagnostics:d (chunks 64 input)
         (fun () -> List.length (many statement)
       )
     in
@@ -2225,7 +2225,7 @@ let release_live_words elements =
   let r = Ref.create 0 in
   let at = ref 0 and n = ref 0 in
   let result =
-    parse_source ~backtrack_window:64
+    Source.parse ~backtrack_window:64
       (Source.of_seq (Seq.init elements (fun _ -> "a")))
       (fun () ->
         match

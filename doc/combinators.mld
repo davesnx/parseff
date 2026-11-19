@@ -393,7 +393,7 @@ parse then reports the furthest failure.
 
 {2 Tracing}
 
-Pass [~trace] to {!val:Parseff.parse} or {!val:Parseff.parse_source} to see
+Pass [~trace] to {!val:Parseff.parse} or {!val:Parseff.Source.parse} to see
 which [context] constructs the parser entered, and where each one returned or
 failed. {!val:Parseff.print_trace} prints the events as an indented tree:
 

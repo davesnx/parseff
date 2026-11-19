@@ -189,7 +189,7 @@ let test_streaming () =
     (fun input ->
       let d = Diagnostics.create () in
       let r =
-        parse_source ~diagnostics:d
+        Source.parse ~diagnostics:d
           (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
           value
       in
@@ -311,7 +311,7 @@ let issue_60_list ?keep ?(source = false) input =
   in
   let r =
     if source then
-      parse_source ~diagnostics:d
+      Source.parse ~diagnostics:d
         (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
         parser
     else
@@ -336,7 +336,7 @@ let test_record () =
   check "the documented keep keeps the inner error"
     ("Ok [\"\"; _; \"\"]", [ (6, "unfinished string") ])
     (issue_60_list ~keep:keep_inner input);
-  check "parse_source, one byte per read"
+  check "Source.parse, one byte per read"
     ("Ok [\"\"; _; \"\"]", [ (6, "unfinished string") ])
     (issue_60_list ~source:true ~keep:keep_inner input);
   check "keep replaces the default" ("Ok [\"\"; _; \"\"]", [])
@@ -458,7 +458,7 @@ let test_streaming_release () =
   let run ?release () =
     let d = Diagnostics.create () in
     let r =
-      parse_source ~backtrack_window:16 ~diagnostics:d
+      Source.parse ~backtrack_window:16 ~diagnostics:d
         (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
         (fun () ->
           ignore (char '[');

@@ -29,12 +29,12 @@ let test_values_one_byte_chunks () =
   Alcotest.(check (list string))
     "values"
     [ "ok 1"; "ok 22"; "ok 333" ]
-    (collect (Parseff.parse_source_each (bytes_src "1\n22\n333\n") line))
+    (collect (Parseff.Source.parse_each (bytes_src "1\n22\n333\n") line))
 
 let test_empty_source () =
   Alcotest.(check (list string))
     "no values" []
-    (collect (Parseff.parse_source_each (bytes_src "") line))
+    (collect (Parseff.Source.parse_each (bytes_src "") line))
 
 let lookahead_words ?(fail_on = "") () =
   let current = ref None in
@@ -70,14 +70,14 @@ let test_pending_returns_held_value () =
     "the last word is returned"
     [ "ok one"; "ok two"; "ok three" ]
     (collect
-       (Parseff.parse_source_each ~pending (bytes_src "one two three") element)
+       (Parseff.Source.parse_each ~pending (bytes_src "one two three") element)
     )
 
 let test_without_pending_held_value_is_lost () =
   let element, _ = lookahead_words () in
   Alcotest.(check (list string))
     "the sequence ends when no input remains" [ "ok one"; "ok two" ]
-    (collect (Parseff.parse_source_each (bytes_src "one two three") element))
+    (collect (Parseff.Source.parse_each (bytes_src "one two three") element))
 
 let test_pending_only_asked_at_end () =
   let element, pending = lookahead_words () in
@@ -88,7 +88,7 @@ let test_pending_only_asked_at_end () =
     asked := p :: !asked;
     p
   in
-  ignore (collect (Parseff.parse_source_each ~pending source element));
+  ignore (collect (Parseff.Source.parse_each ~pending source element));
   Alcotest.(check (list bool)) "asked twice" [ false; true ] !asked
 
 let test_pending_error_ends () =
@@ -97,7 +97,7 @@ let test_pending_error_ends () =
     "an error on the held value ends the sequence"
     [ "ok one"; "ok two"; "error 13 bad word" ]
     (collect
-       (Parseff.parse_source_each ~pending (bytes_src "one two three") element)
+       (Parseff.Source.parse_each ~pending (bytes_src "one two three") element)
     )
 
 let test_pending_empty_source () =
@@ -109,7 +109,7 @@ let test_pending_empty_source () =
   Alcotest.(check (list string))
     "one run on empty input" [ "ok held" ]
     (collect
-       (Parseff.parse_source_each ~pending (bytes_src "") (fun () -> "held"))
+       (Parseff.Source.parse_each ~pending (bytes_src "") (fun () -> "held"))
     )
 
 let test_error_of_each_value () =
@@ -121,7 +121,7 @@ let test_error_of_each_value () =
   Alcotest.(check (list string))
     "own error"
     [ "ok 12"; "error 2 expected digit, found 'x'" ]
-    (collect (Parseff.parse_source_each (bytes_src "12x") parser))
+    (collect (Parseff.Source.parse_each (bytes_src "12x") parser))
 
 let test_doc_example () =
   let record () =
@@ -130,7 +130,7 @@ let test_doc_example () =
     int_of_string id
   in
   let ids source =
-    Parseff.parse_source_each source record
+    Parseff.Source.parse_each source record
     |> Seq.filter_map Result.to_option
     |> List.of_seq
   in
@@ -150,7 +150,7 @@ let raises_invalid name f =
       ()
 
 let test_force_twice () =
-  let seq = Parseff.parse_source_each (bytes_src "1\n2\n") line in
+  let seq = Parseff.Source.parse_each (bytes_src "1\n2\n") line in
   match seq () with
   | Seq.Cons (Ok "1", rest) -> (
       raises_invalid "head again" seq;
@@ -169,7 +169,7 @@ let test_no_progress () =
   Alcotest.(check (list string))
     "stops with an error"
     [ "ok 12"; "error 2 the parser consumed no input" ]
-    (collect (Seq.take 3 (Parseff.parse_source_each (bytes_src "12x") parser)))
+    (collect (Seq.take 3 (Parseff.Source.parse_each (bytes_src "12x") parser)))
 
 let error_input = "1\n22\nx3\n4\n"
 
@@ -186,13 +186,13 @@ let test_error_location () =
     "absolute"
     [ "ok 1"; "ok 22"; "error 5 3:1 expected digit, found 'x'" ]
     (List.map show_loc
-       (List.of_seq (Parseff.parse_source_each (bytes_src error_input) line))
+       (List.of_seq (Parseff.Source.parse_each (bytes_src error_input) line))
     )
 
 let test_render_error () =
   let single_parse_error =
     match
-      Parseff.parse_source (bytes_src error_input) (fun () ->
+      Parseff.Source.parse (bytes_src error_input) (fun () ->
           ignore (line ());
           ignore (line ());
           line ()
@@ -201,10 +201,10 @@ let test_render_error () =
     | Error e ->
         e
     | Ok _ ->
-        Alcotest.fail "one parse_source call succeeded"
+        Alcotest.fail "one Source.parse call succeeded"
   in
   match
-    List.of_seq (Parseff.parse_source_each (bytes_src error_input) line)
+    List.of_seq (Parseff.Source.parse_each (bytes_src error_input) line)
   with
   | [ Ok _; Ok _; Error e ] ->
       Alcotest.(check string)
@@ -225,7 +225,7 @@ let test_location_after_compaction () =
   match
     List.of_seq
       (Seq.drop 1000
-         (Parseff.parse_source_each ~backtrack_window:16
+         (Parseff.Source.parse_each ~backtrack_window:16
             (bytes_src ~chunk:7 input) line
          )
       )
@@ -264,7 +264,7 @@ let test_read_ahead_kept () =
         (Printf.sprintf "window %d chunk %d" window chunk)
         [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
         (collect
-           (Parseff.parse_source_each ~backtrack_window:window
+           (Parseff.Source.parse_each ~backtrack_window:window
               (bytes_src ~chunk input) token_value
            )
         )
@@ -284,7 +284,7 @@ let test_read_ahead_kept () =
     "window 4"
     [ "ok a1"; "ok b22"; "error 8 backtrack window of 4 bytes exceeded" ]
     (collect
-       (Parseff.parse_source_each ~backtrack_window:4 (bytes_src ~chunk:1 input)
+       (Parseff.Source.parse_each ~backtrack_window:4 (bytes_src ~chunk:1 input)
           token_value
        )
     );
@@ -292,7 +292,7 @@ let test_read_ahead_kept () =
     "of_string"
     [ "ok a1"; "ok b22"; "ok c333"; "ok d4" ]
     (collect
-       (Parseff.parse_source_each (Parseff.Source.of_string input) token_value)
+       (Parseff.Source.parse_each (Parseff.Source.of_string input) token_value)
     )
 
 let test_diagnostics_per_value () =
@@ -334,7 +334,7 @@ let test_diagnostics_per_value () =
       ("end", []);
     ]
     (walk []
-       (Parseff.parse_source_each ~diagnostics:diags
+       (Parseff.Source.parse_each ~diagnostics:diags
           (bytes_src "1\n22\n333\n55x")
           parser
        )
@@ -363,7 +363,7 @@ let test_trace_across_values () =
     "values"
     [ "ok 1"; "ok 22"; "ok 333" ]
     (collect
-       (Parseff.parse_source_each ~trace (bytes_src "1\n22\n333\n") parser)
+       (Parseff.Source.parse_each ~trace (bytes_src "1\n22\n333\n") parser)
     );
   Alcotest.(check (list string))
     "events"
@@ -414,7 +414,7 @@ let test_memory_bounded () =
         n
       )
       0
-      (Parseff.parse_source_each ~backtrack_window:4096
+      (Parseff.Source.parse_each ~backtrack_window:4096
          (repeated_chunks ~count:2000 block)
          line
       )
@@ -475,7 +475,7 @@ let test_interleaved () =
     spawn (fun () ->
         Seq.iter
           (fun v -> r := show v :: !r)
-          (Parseff.parse_source_each (yielding_src data) line)
+          (Parseff.Source.parse_each (yielding_src data) line)
     )
   in
   go a "1\n22\n333\n";
@@ -504,7 +504,7 @@ let test_consumer_yields () =
             log := (name ^ " " ^ show v) :: !log;
             Effect.perform Yield
           )
-          (Parseff.parse_source_each (bytes_src data) line)
+          (Parseff.Source.parse_each (bytes_src data) line)
     )
   in
   go "a" "1\n22\n";
@@ -516,20 +516,20 @@ let test_consumer_yields () =
     (List.rev !log)
 
 let test_backtrack_window_message () =
-  Alcotest.check_raises "parse_source_each"
+  Alcotest.check_raises "Source.parse_each"
     (Invalid_argument
-       "Parseff.parse_source_each: backtrack_window must be at least 2"
+       "Parseff.Source.parse_each: backtrack_window must be at least 2"
     ) (fun () ->
       let (_ : (string, Parseff.error) result Seq.t) =
-        Parseff.parse_source_each ~backtrack_window:1 (bytes_src "") line
+        Parseff.Source.parse_each ~backtrack_window:1 (bytes_src "") line
       in
       ()
   );
-  Alcotest.check_raises "parse_source"
+  Alcotest.check_raises "Source.parse"
     (Invalid_argument
-       "Parseff.parse_source: backtrack_window must be at least 2"
+       "Parseff.Source.parse: backtrack_window must be at least 2"
     ) (fun () ->
-      ignore (Parseff.parse_source ~backtrack_window:1 (bytes_src "") line)
+      ignore (Parseff.Source.parse ~backtrack_window:1 (bytes_src "") line)
   )
 
 exception Boom
@@ -538,7 +538,7 @@ let check_stopped seq =
   Alcotest.check_raises "first force" Boom (fun () -> ignore (seq ()));
   Alcotest.check_raises "second force"
     (Invalid_argument
-       "Parseff.parse_source_each: the sequence stopped after an exception"
+       "Parseff.Source.parse_each: the sequence stopped after an exception"
     ) (fun () -> ignore (seq ())
   );
   ( match Parseff.position () with
@@ -558,11 +558,11 @@ let check_stopped seq =
 
 let test_parser_raises () =
   check_stopped
-    (Parseff.parse_source_each (bytes_src "1\n") (fun () -> raise Boom))
+    (Parseff.Source.parse_each (bytes_src "1\n") (fun () -> raise Boom))
 
 let test_read_raises () =
   check_stopped
-    (Parseff.parse_source_each
+    (Parseff.Source.parse_each
        (Parseff.Source.of_function (fun _ _ _ -> raise Boom))
        line
     )

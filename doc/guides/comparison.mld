@@ -236,7 +236,7 @@ monadic/applicative operators.
     {td Monadic (CPS-based)}}
   {tr
     {td Streaming}
-    {td [parse_source] with [Source.t]}
+    {td [Source.parse] with [Source.t]}
     {td Buffered / Unbuffered modules}}
   {tr
     {td Backtracking}

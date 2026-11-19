@@ -193,6 +193,6 @@ mark takes none.
 
 {1 Streaming support}
 
-All UTF-8 primitives work with streaming input ({!val:Parseff.parse_source}). Multi-byte UTF-8 sequences that span
+All UTF-8 primitives work with streaming input ({!val:Parseff.Source.parse}). Multi-byte UTF-8 sequences that span
 chunk boundaries are handled correctly, the streaming runtime ensures enough
 bytes are available before decoding each code point.

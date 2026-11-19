@@ -91,7 +91,7 @@ type note = { at : range option; text : string }
 type excerpt
 (** Source lines kept with the error so that {!render_error} does not need the
     input. An error from {!parse} keeps the input string and reads the lines
-    from it when it is first rendered. An error from {!parse_source}, or from a
+    from it when it is first rendered. An error from {!Source.parse}, or from a
     parser inside {!within}, keeps a copy of the lines. *)
 
 type custom_error = ..
@@ -346,9 +346,9 @@ val print_trace : Format.formatter -> trace_event -> unit
 
 val parse :
   ?max_depth:int ->
-  ?consume:[ `All | `Partial ] ->
   ?diagnostics:Diagnostics.t ->
   ?trace:(trace_event -> unit) ->
+  ?consume:[ `All | `Partial ] ->
   string ->
   (unit -> 'a) ->
   ('a, error) Stdlib.result
@@ -415,7 +415,7 @@ val literal : ?case_sensitive:bool -> string -> unit
     The one exception is a mismatch inside a multi-byte character: it is
     reported at the start of that character.
 
-    In {!parse_source}, [literal] compares the buffered bytes first. It reads
+    In {!Source.parse}, [literal] compares the buffered bytes first. It reads
     more input only while they match the start of [s], so a wrong byte fails at
     once, without a wait for more input. The error shows the bytes read so far:
     its [found] text can be shorter than {!parse} gives on the whole input.
@@ -780,7 +780,7 @@ val with_range : (unit -> 'a) -> 'a * range
 val recognize : (unit -> 'a) -> string
 (** [recognize parser] runs [parser], drops its result and returns the input
     text that [parser] consumed. If [parser] fails, [recognize] fails with the
-    same error. In {!parse_source}, the text must fit in [~backtrack_window],
+    same error. In {!Source.parse}, the text must fit in [~backtrack_window],
     also after a {!commit}.
 
     Example:
@@ -943,7 +943,7 @@ val peek_with : (unit -> 'a) -> 'a * int
     in a [ref] by hand. A token kept by hand is not put back by a rewind: the
     parser must save and restore it.
 
-    In {!parse_source}, the input that [parser] reads must fit in
+    In {!Source.parse}, the input that [parser] reads must fit in
     [~backtrack_window]. This includes the whitespace and comments that it skips
     before the token. *)
 
@@ -962,7 +962,7 @@ val not_followed_by : ?label:string -> (unit -> 'a) -> unit
     {!cut} inside [parser] has no effect outside it, and the recovery functions
     inside [parser] run as without the collector.
 
-    In {!parse_source}, the input that [parser] reads must fit in
+    In {!Source.parse}, the input that [parser] reads must fit in
     [~backtrack_window].
 
     Example:
@@ -1002,7 +1002,7 @@ val capture :
     failure into a value, as a choice does, so the recovery functions inside
     [parser] do not recover: [parser] runs as without the collector, as
     {!recover} says. [Depth_limit_exceeded] and [Backtrack_window_exceeded] are
-    not caught. In {!parse_source}, the input that [parser] reads must fit in
+    not caught. In {!Source.parse}, the input that [parser] reads must fit in
     [~backtrack_window]. A traced parse gets a [Captured] event for [Error e].
 
     [capture] also returns a failure at the end of the input. A parser that
@@ -1020,7 +1020,7 @@ val capture :
     nothing. Do not parse the same input again with another parser after
     [Error e]: skip from the current position, and from [e.range.start] when it
     is later. A {!cut} also continues to the frames outside [capture]. In
-    {!parse_source}, only the input that [parser] reads after the rewind point
+    {!Source.parse}, only the input that [parser] reads after the rewind point
     must fit in [~backtrack_window], so a parser that calls {!cut} after each
     decided part can be longer than the window. The default is [false].
 
@@ -1123,7 +1123,7 @@ val recover :
     parse without the collector that returns [Ok v] returns [Ok v] and records
     no error with it, unless a recovery function is in one of the places of the
     previous paragraph, or the parse with the collector exceeds the
-    [~backtrack_window] of {!parse_source}: with the collector, a recovery
+    [~backtrack_window] of {!Source.parse}: with the collector, a recovery
     function keeps the input from its start, so it can need a larger window than
     the parse without the collector.
 
@@ -1703,7 +1703,7 @@ val one_of_labeled : (string * (unit -> 'a)) list -> 'a
 module Slice : sig
   type t
   (** A slice of the input. With {!Parseff.parse} it is zero-copy: it points
-      into the input string. With {!Parseff.parse_source} it is an owned copy.
+      into the input string. With {!Parseff.Source.parse} it is an owned copy.
       Use {!length} and {!get} to read it without a copy, and {!to_string} to
       materialize it when needed. *)
 
@@ -1730,11 +1730,11 @@ module Slice : sig
 
   val recognize : (unit -> 'a) -> t
   (** [recognize parser] is {!Parseff.recognize} but returns a slice. With
-      {!Parseff.parse_source} the slice is an owned copy. *)
+      {!Parseff.Source.parse} the slice is an owned copy. *)
 
   val take : int -> t
   (** [take n] reads exactly [n] bytes like {!Parseff.take}, and returns them as
-      a slice. With {!Parseff.parse_source} the slice is an owned copy.
+      a slice. With {!Parseff.Source.parse} the slice is an owned copy.
 
       Example:
       {@ocaml[
@@ -1816,7 +1816,7 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
     Before it gives a value, [many_iter] seals every open frame, as {!cut} does
     with no enclosing {!val:context}: no {!or_}, {!many}, {!optional} or similar
     frame outside it can rewind before that value, and a streaming source can
-    drop the input before it. Thus with {!parse_source} memory is bounded by the
+    drop the input before it. Thus with {!Source.parse} memory is bounded by the
     size of one element, not by the number of elements. The exception is
     {!recognize} and {!Slice.recognize}: they keep their input, so inside them
     the parse fails with [Backtrack_window_exceeded] when that input is larger
@@ -2406,10 +2406,10 @@ val within : int -> (unit -> 'a) -> 'a
     is the number of bytes missing. A negative [n] fails like {!take}. A
     [within] inside another one ends at the end of the outer one at the latest.
 
-    [within] does not copy or hold the [n] bytes. With {!parse_source}, [n] can
+    [within] does not copy or hold the [n] bytes. With {!Source.parse}, [n] can
     be larger than [~backtrack_window] when [parser] calls {!commit} as it
     reads. Inside a frame on string input, {!Slice.take}, {!Slice.take_while}
-    and {!Slice.recognize} return copies, as they do with {!parse_source}.
+    and {!Slice.recognize} return copies, as they do with {!Source.parse}.
 
     Inside the frame the input ends at the frame end, so {!skip_to} raises
     [Invalid_argument] for a target past it, also for a position that
@@ -2428,7 +2428,7 @@ val take_iter : int -> (Slice.t -> unit) -> unit
 [@@alert unstable "This value can change in a 1.x release."]
 (** [take_iter n f] reads exactly [n] bytes like {!take}, and gives them to [f]
     in pieces, in order, with no empty piece. Joined, the pieces are the [n]
-    bytes. With {!parse} there is one piece. With {!parse_source} a piece is the
+    bytes. With {!parse} there is one piece. With {!Source.parse} a piece is the
     part of the [n] bytes that is in the input buffer, so the [n] bytes are
     never held whole and [n] can be larger than [~backtrack_window]. Inside
     {!recognize} or {!Slice.recognize} the input is kept: when [n] is larger
@@ -2488,10 +2488,10 @@ val take_while_iter :
     The parser pulls data on demand by calling the source's read function;
     existing parser code works unchanged.
 
-    A source is for one call of {!parse_source} or {!parse_source_each}.
+    A source is for one call of {!Source.parse} or {!Source.parse_each}.
     [of_string] starts again from the beginning, but the other sources continue
     where the last read stopped, and bytes that the first call read ahead are
-    lost. To parse many values from one source, use {!parse_source_each}. *)
+    lost. To parse many values from one source, use {!Source.parse_each}. *)
 module Source : sig
   type t
 
@@ -2589,289 +2589,306 @@ module Source : sig
       {@ocaml[
       let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])
       ]} *)
+
+  val parse :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    ?consume:[ `All | `Partial ] ->
+    t ->
+    (unit -> 'a) ->
+    ('a, error) Stdlib.result
+  (** [parse source parser] runs [parser] pulling input from [source] on demand.
+      Takes the same [consume], [diagnostics] and [trace] arguments as
+      {!Parseff.parse} and behaves identically, but the input does not need to
+      be fully available up front.
+
+      With the default [`All], the check for remaining input pulls one more byte
+      from [source] after the parser returns. It succeeds when [source] is at
+      its end, and fails with [Expected End_of_input] as soon as one more byte
+      exists. It does not read the rest of [source]. With [`Partial], [source]
+      is read only as far as the parser needs.
+
+      The same parsers work with both {!Parseff.parse} and [Source.parse] — no
+      changes required. Streaming backtracking is bounded by [backtrack_window]
+      (default: [65536] bytes). If the parser needs to keep more rewind history
+      than that, parsing fails with [Backtrack_window_exceeded]. Use {!commit}
+      to seal branches once the grammar has clearly chosen them.
+
+      [backtrack_window] must be at least [2]. Smaller values raise
+      [Invalid_argument].
+
+      Only the source's read function may suspend, for example to wait on an Eio
+      promise or yield to a scheduler. Two parses on one domain can then run
+      concurrently. A parser callback that suspends, such as a [satisfy]
+      predicate or a [many] body, is not supported.
+
+      System threads that share a domain must not parse at the same time: the
+      runtime can switch threads inside a parser.
+
+      Example:
+      {@ocaml[
+      let read_json () =
+        let ic = open_in "data.json" in
+        let source = Source.of_channel ic in
+        let result = Source.parse source json in
+        close_in ic;
+        result
+      ]} *)
+
+  val parse_each :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    ?pending:(unit -> bool) ->
+    t ->
+    (unit -> 'a) ->
+    ('a, error) Stdlib.result Seq.t
+  (** [parse_each source parser] parses a stream of values from [source], such
+      as NDJSON lines. Each element of the sequence runs [parser] once on the
+      rest of [source], as {!Source.parse} with [~consume:`Partial] does. The
+      sequence ends when no input remains, or after the first [Error]. Memory is
+      bounded by [backtrack_window], not by the number of values. Between two
+      elements the consumer may suspend, for example in an Eio fiber.
+
+      [parser] must also consume the separator after each value; a run that
+      consumes no input is an [Error]. Positions count from the start of
+      [source]. [diagnostics] is emptied each time an element is forced, so read
+      it before you force the next one. The sequence is ephemeral: forcing an
+      element twice raises [Invalid_argument].
+
+      [parser] must not read past its value, unless you give [pending]. A parser
+      that keeps a lookahead, such as a lexer that reads the next token early,
+      can hold the start of the last value when no input remains. [pending] is
+      called before a run when no input remains, in the same run as [parser]. If
+      it returns [true], [parser] runs one more time, and that run may consume
+      no input. [pending] must return [false] after the held values are
+      returned, otherwise the sequence does not end. An [Error] ends the
+      sequence also when values are held.
+
+      Example:
+      {@ocaml[
+      let record () =
+        let id = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+        let _ = char '\n' in
+        int_of_string id
+
+      let ids text =
+        Source.parse_each (Source.of_string text) record
+        |> Seq.filter_map Result.to_option
+        |> List.of_seq
+      ]}
+      Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
 end
 
-val parse_source :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  ?consume:[ `All | `Partial ] ->
-  ?diagnostics:Diagnostics.t ->
-  ?trace:(trace_event -> unit) ->
-  Source.t ->
-  (unit -> 'a) ->
-  ('a, error) Stdlib.result
-(** [parse_source source parser] runs [parser] pulling input from [source] on
-    demand. Takes the same [consume], [diagnostics] and [trace] arguments as
-    {!parse} and behaves identically, but the input does not need to be fully
-    available up front.
+(** Push parsing: the caller gives the input in chunks. *)
+module Push : sig
+  type 'a t
+  (** A parse that takes its input in chunks: push input. The caller gives the
+      input with {!Push.feed}, and each call returns [Await] when the parser
+      needs more input or [Done] with the result. Use it when your code owns the
+      read loop, as with Lwt, Async or a callback API.
 
-    With the default [`All], the check for remaining input pulls one more byte
-    from [source] after the parser returns. It succeeds when [source] is at its
-    end, and fails with [Expected End_of_input] as soon as one more byte exists.
-    It does not read the rest of [source]. With [`Partial], [source] is read
-    only as far as the parser needs.
+      The parser is the same [unit -> 'a] function as for {!Parseff.parse}.
+      {!Push.parse} runs it on a source like {!Source.of_chunks} whose read
+      performs an effect when it needs a chunk that the caller has not given
+      yet. The parse stops there, and the next {!Push.feed} resumes it with the
+      chunk. This is one effect for each chunk that the parser waits for.
+      {!Parseff.parse} and {!Source.parse} use no effects, and {!Push.parse}
+      does not change them. A 454-byte HTTP request head in one chunk takes
+      about 14500 instructions with {!Push.parse} and 13400 with
+      {!Source.parse}, 8% more.
 
-    The same parsers work with both [parse] and [parse_source] — no changes
-    required. Streaming backtracking is bounded by [backtrack_window] (default:
-    [65536] bytes). If the parser needs to keep more rewind history than that,
-    parsing fails with [Backtrack_window_exceeded]. Use {!commit} to seal
-    branches once the grammar has clearly chosen them.
+      A push parse always stops after the value and returns the bytes that
+      follow it. To require the whole input, end the parser with
+      {!end_of_input}: [Done] then comes at {!Push.finish}.
 
-    [backtrack_window] must be at least [2]. Smaller values raise
-    [Invalid_argument].
+      Only the read of the source may stop the parser, as for {!Source.parse}.
+      Two push parses and calls to {!Parseff.parse} can run in turn on one
+      domain. A push parse that waits holds the {!Ref} cells that it set and its
+      [diagnostics] collector until it ends or {!Push.finish} is called, as a
+      {!Source.parse} that waits in an Eio fiber does: another parse cannot use
+      them. A push parse can continue on another domain, but only one domain may
+      use it at a time; the result of two domains that use one push parse at the
+      same time is not defined.
 
-    Only the source's read function may suspend, for example to wait on an Eio
-    promise or yield to a scheduler. Two parses on one domain can then run
-    concurrently. A parser callback that suspends, such as a [satisfy] predicate
-    or a [many] body, is not supported.
+      Unstable: {!Push.parse}, {!Push.feed} and {!Push.finish} can change in a
+      1.x release.
 
-    System threads that share a domain must not parse at the same time: the
-    runtime can switch threads inside a parser.
+      Example:
+      {@ocaml[
+      let line () =
+        let s = take_while (fun c -> c <> '\n') in
+        let _ = char '\n' in
+        s
 
-    Example:
-    {@ocaml[
-    let read_json () =
-      let ic = open_in "data.json" in
-      let source = Source.of_channel ic in
-      let result = parse_source source json in
-      close_in ic;
-      result
-    ]} *)
+      let lines chunks =
+        let rec go t = function
+          | [] ->
+              Push.finish t
+          | chunk :: rest ->
+              begin match Push.feed t chunk with
+              | Push.Await ->
+                  go t rest
+              | Push.Done r ->
+                  r
+              end
+        in
+        go (Push.parse line) chunks
+      ]}
+      Here [lines [ "ab"; "c\nde" ]] is [Ok ("abc", "de")]. *)
 
-val parse_source_each :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  ?diagnostics:Diagnostics.t ->
-  ?trace:(trace_event -> unit) ->
-  ?pending:(unit -> bool) ->
-  Source.t ->
-  (unit -> 'a) ->
-  ('a, error) Stdlib.result Seq.t
-(** [parse_source_each source parser] parses a stream of values from [source],
-    such as NDJSON lines. Each element of the sequence runs [parser] once on the
-    rest of [source], as {!parse_source} with [~consume:`Partial] does. The
-    sequence ends when no input remains, or after the first [Error]. Memory is
-    bounded by [backtrack_window], not by the number of values. Between two
-    elements the consumer may suspend, for example in an Eio fiber.
+  type 'a step =
+    | Await
+        (** The parser needs more input: call {!Push.feed} or {!Push.finish}. *)
+    | Done of ('a * string, error) Stdlib.result
+        (** The parse ended. [Ok (v, leftover)] has the value and the
+            [leftover]: the bytes after the value in the chunks given so far.
+            For a pipelined protocol, give the [leftover] to the next parse,
+            before its next chunk. *)
 
-    [parser] must also consume the separator after each value; a run that
-    consumes no input is an [Error]. Positions count from the start of [source].
-    [diagnostics] is emptied each time an element is forced, so read it before
-    you force the next one. The sequence is ephemeral: forcing an element twice
-    raises [Invalid_argument].
+  val parse :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    (unit -> 'a) ->
+    'a t
+  [@@alert unstable "This value can change in a 1.x release."]
+  (** [parse parser] is a parse of [parser] that has no input yet. The parser
+      starts at the first {!Push.feed} or {!Push.finish}. The arguments are
+      those of {!Source.parse}, without [consume]. Positions count from the
+      first byte of the first chunk.
 
-    [parser] must not read past its value, unless you give [pending]. A parser
-    that keeps a lookahead, such as a lexer that reads the next token early, can
-    hold the start of the last value when no input remains. [pending] is called
-    before a run when no input remains, in the same run as [parser]. If it
-    returns [true], [parser] runs one more time, and that run may consume no
-    input. [pending] must return [false] after the held values are returned,
-    otherwise the sequence does not end. An [Error] ends the sequence also when
-    values are held.
+      [diagnostics] stays in use from the first {!Push.feed} until the parse
+      ends. *)
 
-    Example:
-    {@ocaml[
-    let record () =
-      let id = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-      let _ = char '\n' in
-      int_of_string id
+  val feed : 'a t -> string -> 'a step
+  [@@alert unstable "This value can change in a 1.x release."]
+  (** [feed t chunk] gives [chunk] to the parse and runs the parser until it
+      needs more input or ends. An empty [chunk] gives no input and returns
+      [Await] when the parse waits.
 
-    let ids text =
-      parse_source_each (Source.of_string text) record
-      |> Seq.filter_map Result.to_option
-      |> List.of_seq
-    ]}
-    Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
+      Parseff can keep [chunk] as its input with no copy, and a value of the
+      parser can be [chunk] itself. So [chunk] must not change while the parse
+      runs or while a value taken from it is in use. This matters only for a
+      string made with [Bytes.unsafe_to_string] from bytes that are written
+      again.
 
-(** The result of a push to {!parse_chunks_each}. *)
-type chunks_step =
-  | Need_input
-      (** All the given input is parsed: push the next chunk, or [None] at the
-          end of the input. *)
-  | Stopped of string
-      (** [on_value] returned [`Stop]. The string has the bytes after that value
-          in the chunks given so far. Give it to the next parse, before its next
-          chunk. *)
-  | Error_of of error  (** A run of the parser failed, and the stream ended. *)
-  | Ended  (** [None] was pushed and no input remained. *)
+      An exception that the parser raises comes out of [feed], and the parse
+      ends. Raises [Invalid_argument] after the parse ended, and when called
+      from inside a parser. A function that runs outside the parse, such as a
+      [trace] callback or the function given to {!take_iter} or {!many_iter},
+      may feed another push parse, but feeding its own push parse raises
+      [Invalid_argument]. *)
 
-val parse_chunks_each :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  ?diagnostics:Diagnostics.t ->
-  ?trace:(trace_event -> unit) ->
-  on_value:('a -> [ `Continue | `Stop ]) ->
-  (unit -> 'a) ->
-  string option ->
-  chunks_step
-(** [parse_chunks_each ~on_value parser] returns [push], which parses a stream
-    of values from chunks that the caller gives, such as the requests of a
-    pipelined HTTP/1.1 connection. It is the push counterpart of
-    {!parse_source_each}.
+  val finish : 'a t -> ('a * string, error) Stdlib.result
+  [@@alert unstable "This value can change in a 1.x release."]
+  (** [finish t] tells the parse that the input ended, and runs the parser to
+      the end. A parser that waits for more input then succeeds or fails as
+      {!Source.parse} does at the end of its source. [finish] on a parse with no
+      chunk parses the empty input.
 
-    [push (Some chunk)] runs [parser] on the input given so far. Each value goes
-    to [on_value], and [parser] runs again on the bytes after that value. When
-    [parser] needs bytes that were not given, [push] returns [Need_input]. An
-    empty [chunk] gives no input. [push None] ends the input: a parser that
-    waits then succeeds or fails as {!parse_source_each} does at the end of its
-    source.
+      A push parse that you drop before it ends is collected by the GC, and
+      nothing in the parser runs again: no exception handler and no cleanup. Its
+      [diagnostics] stays in use, and the {!Ref} cells that it set cannot be set
+      by another parse. Call [finish] to end the parse and release them.
 
-    All the values run in one effect fiber. {!parse_partial} starts a new fiber
-    for each value, and its stack grows again each time. A 103-byte HTTP request
-    head takes about 5,942 instructions when 1,000 heads come in one chunk,
-    6,786 when each head comes in its own chunk, 6,862 with {!parse_partial} and
-    5,442 with {!parse}.
+      Raises [Invalid_argument] as {!Push.feed} does. *)
 
-    Each run follows the rules of {!parse_source_each}: a run that consumes no
-    input gives [Error_of], positions count from the first byte of the first
-    chunk, and [diagnostics] is emptied before each run, so read it in
-    [on_value]. After [Ended] it is empty, because the last run that finds no
-    input empties it too. The arguments are those of {!parse_partial}.
+  (** The result of a push to {!Push.parse_each}. *)
+  type each_step =
+    | Need_input
+        (** All the given input is parsed: push the next chunk, or [None] at the
+            end of the input. *)
+    | Stopped of string
+        (** [on_value] returned [`Stop]. The string has the bytes after that
+            value in the chunks given so far. Give it to the next parse, before
+            its next chunk. *)
+    | Error_of of error
+        (** A run of the parser failed, and the stream ended. *)
+    | Ended  (** [None] was pushed and no input remained. *)
 
-    Between two values the parse holds no {!Ref} cells and not its [diagnostics]
-    collector, as a finished {!parse_source}. When it waits inside a value, it
-    holds them as a {!parse_partial} that waits does.
+  val parse_each :
+    ?max_depth:int ->
+    ?backtrack_window:int ->
+    ?diagnostics:Diagnostics.t ->
+    ?trace:(trace_event -> unit) ->
+    on_value:('a -> [ `Continue | `Stop ]) ->
+    (unit -> 'a) ->
+    string option ->
+    each_step
+  (** [parse_each ~on_value parser] returns [push], which parses a stream of
+      values from chunks that the caller gives, such as the requests of a
+      pipelined HTTP/1.1 connection. It is the push counterpart of
+      {!Source.parse_each}.
 
-    A [chunk] must not change while the parse uses it, as for {!feed}. An
-    exception that [parser] or [on_value] raises comes out of [push], and the
-    stream ends. [push] raises [Invalid_argument] after [Stopped], [Error_of] or
-    [Ended], when called from inside a parser, and when called from [on_value].
+      [push (Some chunk)] runs [parser] on the input given so far. Each value
+      goes to [on_value], and [parser] runs again on the bytes after that value.
+      When [parser] needs bytes that were not given, [push] returns
+      [Need_input]. An empty [chunk] gives no input. [push None] ends the input:
+      a parser that waits then succeeds or fails as {!Source.parse_each} does at
+      the end of its source.
 
-    Example:
-    {@ocaml[
-    let line () =
-      let s = take_while (fun c -> c <> '\n') in
-      let _ = char '\n' in
-      s
+      All the values run in one effect fiber. {!Push.parse} starts a new fiber
+      for each value, and its stack grows again each time. A 103-byte HTTP
+      request head takes about 5,942 instructions when 1,000 heads come in one
+      chunk, 6,786 when each head comes in its own chunk, 6,862 with
+      {!Push.parse} and 5,442 with {!Parseff.parse}.
 
-    let lines chunks =
-      let seen = ref [] in
-      let on_value s =
-        seen := s :: !seen;
-        `Continue
-      in
-      let push = parse_chunks_each ~on_value line in
-      let rec go = function
-        | [] ->
-            push None
-        | chunk :: rest -> (
-            match push (Some chunk) with Need_input -> go rest | step -> step
-          )
-      in
-      match go chunks with
-      | Ended ->
-          Ok (List.rev !seen)
-      | Error_of e ->
-          Error e
-      | Need_input | Stopped _ ->
-          assert false
-    ]}
-    Here [lines [ "ab"; "c\nde\n" ]] is [Ok [ "abc"; "de" ]]. *)
+      Each run follows the rules of {!Source.parse_each}: a run that consumes no
+      input gives [Error_of], positions count from the first byte of the first
+      chunk, and [diagnostics] is emptied before each run, so read it in
+      [on_value]. After [Ended] it is empty, because the last run that finds no
+      input empties it too. The arguments are those of {!Push.parse}.
 
-type 'a partial
-(** A parse that takes its input in chunks: push input. The caller gives the
-    input with {!feed}, and each call returns [Await] when the parser needs more
-    input or [Done] with the result. Use it when your code owns the read loop,
-    as with Lwt, Async or a callback API.
+      Between two values the parse holds no {!Ref} cells and not its
+      [diagnostics] collector, as a finished {!Source.parse}. When it waits
+      inside a value, it holds them as a {!Push.parse} that waits does.
 
-    The parser is the same [unit -> 'a] function as for {!parse}.
-    {!parse_partial} runs it on a source like {!Source.of_chunks} whose read
-    performs an effect when it needs a chunk that the caller has not given yet.
-    The parse stops there, and the next {!feed} resumes it with the chunk. This
-    is one effect for each chunk that the parser waits for. {!parse} and
-    {!parse_source} use no effects, and {!parse_partial} does not change them. A
-    454-byte HTTP request head in one chunk takes about 14500 instructions with
-    {!parse_partial} and 13400 with {!parse_source}, 8% more.
+      A [chunk] must not change while the parse uses it, as for {!Push.feed}. An
+      exception that [parser] or [on_value] raises comes out of [push], and the
+      stream ends. [push] raises [Invalid_argument] after [Stopped], [Error_of]
+      or [Ended], when called from inside a parser, and when called from
+      [on_value].
 
-    A partial parse always stops after the value and returns the bytes that
-    follow it. To require the whole input, end the parser with {!end_of_input}:
-    [Done] then comes at {!finish}.
+      Example:
+      {@ocaml[
+      let line () =
+        let s = take_while (fun c -> c <> '\n') in
+        let _ = char '\n' in
+        s
 
-    Only the read of the source may stop the parser, as for {!parse_source}. Two
-    partial parses and calls to {!parse} can run in turn on one domain. A
-    partial parse that waits holds the {!Ref} cells that it set and its
-    [diagnostics] collector until it ends or {!finish} is called, as a
-    {!parse_source} that waits in an Eio fiber does: another parse cannot use
-    them. A partial parse can continue on another domain, but only one domain
-    may use it at a time; the result of two domains that use one partial parse
-    at the same time is not defined.
-
-    Unstable: {!parse_partial}, {!feed} and {!finish} can change in a 1.x
-    release.
-
-    Example:
-    {@ocaml[
-    let line () =
-      let s = take_while (fun c -> c <> '\n') in
-      let _ = char '\n' in
-      s
-
-    let lines chunks =
-      let rec go t = function
-        | [] ->
-            finish t
-        | chunk :: rest ->
-            begin match feed t chunk with Await -> go t rest | Done r -> r
-            end
-      in
-      go (parse_partial line) chunks
-    ]}
-    Here [lines [ "ab"; "c\nde" ]] is [Ok ("abc", "de")]. *)
-
-type 'a step =
-  | Await  (** The parser needs more input: call {!feed} or {!finish}. *)
-  | Done of ('a * string, error) Stdlib.result
-      (** The parse ended. [Ok (v, leftover)] has the value and the [leftover]:
-          the bytes after the value in the chunks given so far. For a pipelined
-          protocol, give the [leftover] to the next parse, before its next
-          chunk. *)
-
-val parse_partial :
-  ?max_depth:int ->
-  ?backtrack_window:int ->
-  ?diagnostics:Diagnostics.t ->
-  ?trace:(trace_event -> unit) ->
-  (unit -> 'a) ->
-  'a partial
-[@@alert unstable "This value can change in a 1.x release."]
-(** [parse_partial parser] is a parse of [parser] that has no input yet. The
-    parser starts at the first {!feed} or {!finish}. The arguments are those of
-    {!parse_source}, without [consume]. Positions count from the first byte of
-    the first chunk.
-
-    [diagnostics] stays in use from the first {!feed} until the parse ends. *)
-
-val feed : 'a partial -> string -> 'a step
-[@@alert unstable "This value can change in a 1.x release."]
-(** [feed t chunk] gives [chunk] to the parse and runs the parser until it needs
-    more input or ends. An empty [chunk] gives no input and returns [Await] when
-    the parse waits.
-
-    Parseff can keep [chunk] as its input with no copy, and a value of the
-    parser can be [chunk] itself. So [chunk] must not change while the parse
-    runs or while a value taken from it is in use. This matters only for a
-    string made with [Bytes.unsafe_to_string] from bytes that are written again.
-
-    An exception that the parser raises comes out of [feed], and the parse ends.
-    Raises [Invalid_argument] after the parse ended, and when called from inside
-    a parser. A function that runs outside the parse, such as a [trace] callback
-    or the function given to {!take_iter} or {!many_iter}, may feed another
-    partial parse, but feeding its own partial parse raises [Invalid_argument].
-*)
-
-val finish : 'a partial -> ('a * string, error) Stdlib.result
-[@@alert unstable "This value can change in a 1.x release."]
-(** [finish t] tells the parse that the input ended, and runs the parser to the
-    end. A parser that waits for more input then succeeds or fails as
-    {!parse_source} does at the end of its source. [finish] on a parse with no
-    chunk parses the empty input.
-
-    A partial parse that you drop before it ends is collected by the GC, and
-    nothing in the parser runs again: no exception handler and no cleanup. Its
-    [diagnostics] stays in use, and the {!Ref} cells that it set cannot be set
-    by another parse. Call [finish] to end the parse and release them.
-
-    Raises [Invalid_argument] as {!feed} does. *)
+      let lines chunks =
+        let seen = ref [] in
+        let on_value s =
+          seen := s :: !seen;
+          `Continue
+        in
+        let push = Push.parse_each ~on_value line in
+        let rec go = function
+          | [] ->
+              push None
+          | chunk :: rest -> (
+              match push (Some chunk) with
+              | Push.Need_input ->
+                  go rest
+              | step ->
+                  step
+            )
+        in
+        match go chunks with
+        | Push.Ended ->
+            Ok (List.rev !seen)
+        | Push.Error_of e ->
+            Error e
+        | Push.Need_input | Push.Stopped _ ->
+            assert false
+      ]}
+      Here [lines [ "ab"; "c\nde\n" ]] is [Ok [ "abc"; "de" ]]. *)
+end
 
 (** {1 Binary Parsing}
 

@@ -30,7 +30,7 @@ let check_all ?(consume = `All) ?(chunk_sizes = [ 1; 2; 4096 ]) name show_v
         (Printf.sprintf "%s chunk %d" name chunk_size)
         expected
         (show show_v
-           (Parseff.parse_source ~consume
+           (Parseff.Source.parse ~consume
               (chunked_source ~chunk_size input)
               parser
            )
@@ -98,7 +98,7 @@ let test_recognize_longer_than_window_fails () =
   let input = String.make 20 'a' ^ ";" in
   let run parser =
     show Fun.id
-      (Parseff.parse_source ~consume:`Partial ~backtrack_window:8
+      (Parseff.Source.parse ~consume:`Partial ~backtrack_window:8
          (chunked_source ~chunk_size:1 input)
          parser
       )
@@ -121,7 +121,7 @@ let test_recognize_tokens_in_small_window () =
     String.concat "," (List.init 50 (fun i -> Printf.sprintf "k=%d" i))
   in
   match
-    Parseff.parse_source ~backtrack_window:8
+    Parseff.Source.parse ~backtrack_window:8
       (chunked_source ~chunk_size:1 input) (fun () ->
         Parseff.sep_by
           (fun () -> Parseff.recognize key_value)

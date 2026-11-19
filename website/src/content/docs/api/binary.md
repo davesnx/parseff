@@ -239,4 +239,4 @@ Integer parsers use the OCaml stdlib's `String.get_int16_be`, `String.get_int32_
 
 ## Streaming support
 
-All binary parsers work with streaming input (`Parseff.parse_source`). Multi-byte reads that span chunk boundaries are handled correctly — the streaming runtime ensures enough bytes are buffered before each read.
+All binary parsers work with streaming input (`Parseff.Source.parse`). Multi-byte reads that span chunk boundaries are handled correctly — the streaming runtime ensures enough bytes are buffered before each read.

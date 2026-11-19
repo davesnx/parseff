@@ -286,7 +286,7 @@ let run_program ~streaming program input =
   in
   let result =
     if streaming then
-      parse_source ~consume:`Partial ~diagnostics:env.errors
+      Source.parse ~consume:`Partial ~diagnostics:env.errors
         (chunked_source input) top
     else
       parse ~consume:`Partial ~diagnostics:env.errors input top

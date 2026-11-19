@@ -57,7 +57,7 @@ let bigstring_source ~size input =
 
 let feed_bytes ?backtrack_window input parser =
   let t =
-    Parseff.parse_partial ?backtrack_window (fun () ->
+    Parseff.Push.parse ?backtrack_window (fun () ->
         let v = parser () in
         Parseff.end_of_input ();
         v
@@ -65,12 +65,12 @@ let feed_bytes ?backtrack_window input parser =
   in
   let rec go i =
     if i = String.length input then
-      Parseff.finish t
+      Parseff.Push.finish t
     else
-      match Parseff.feed t (String.make 1 input.[i]) with
-      | Parseff.Await ->
+      match Parseff.Push.feed t (String.make 1 input.[i]) with
+      | Parseff.Push.Await ->
           go (i + 1)
-      | Parseff.Done r ->
+      | Parseff.Push.Done r ->
           r
   in
   Result.map fst (go 0)
@@ -78,17 +78,17 @@ let feed_bytes ?backtrack_window input parser =
 let stream_results ?backtrack_window input parser =
   [
     ( "of_function",
-      Parseff.parse_source ?backtrack_window
+      Parseff.Source.parse ?backtrack_window
         (function_source ~size:1 input)
         parser
     );
     ( "of_chunks",
-      Parseff.parse_source ?backtrack_window
+      Parseff.Source.parse ?backtrack_window
         (chunks_source ~size:1 input)
         parser
     );
     ( "of_bigstring_chunks",
-      Parseff.parse_source ?backtrack_window
+      Parseff.Source.parse ?backtrack_window
         (bigstring_source ~size:1 input)
         parser
     );

@@ -50,7 +50,7 @@ let run ?diagnostics mode input p =
   | None ->
       parse ?diagnostics input p
   | Some chunk_size ->
-      parse_source ?diagnostics (chunked ~chunk_size input) p
+      Source.parse ?diagnostics (chunked ~chunk_size input) p
 
 let check_all name pp input expected p =
   List.iter
@@ -335,7 +335,7 @@ let test_streaming_boundary () =
         (Printf.sprintf "letter, chunk %d" chunk_size)
         "Error 3: expected end of keyword"
         (show Fun.id
-           (parse_source ~backtrack_window:4 (chunked ~chunk_size "letter")
+           (Source.parse ~backtrack_window:4 (chunked ~chunk_size "letter")
               (fun () ->
                 kw "let" ();
                 "kw"
@@ -346,7 +346,7 @@ let test_streaming_boundary () =
         (Printf.sprintf "let x, chunk %d" chunk_size)
         "Ok x"
         (show Fun.id
-           (parse_source ~backtrack_window:4 (chunked ~chunk_size "let x")
+           (Source.parse ~backtrack_window:4 (chunked ~chunk_size "let x")
               (fun () ->
                 kw "let" ();
                 ignore (char ' ');

@@ -221,16 +221,16 @@ let run ~what input f =
 
 let results t src =
   if t.each then
-    List.of_seq (Parseff.parse_source_each src t.parser)
+    List.of_seq (Parseff.Source.parse_each src t.parser)
   else
-    [ Parseff.parse_source src t.parser ]
+    [ Parseff.Source.parse src t.parser ]
 
 let small_window_results t src =
   if t.each then
     List.of_seq
-      (Parseff.parse_source_each ~backtrack_window:small_window src t.parser)
+      (Parseff.Source.parse_each ~backtrack_window:small_window src t.parser)
   else
-    [ Parseff.parse_source ~backtrack_window:small_window src t.parser ]
+    [ Parseff.Source.parse ~backtrack_window:small_window src t.parser ]
 
 let chunks_of ~chunk_size input =
   List.init
@@ -241,16 +241,16 @@ let chunks_of ~chunk_size input =
     )
 
 let feed_run parser chunks =
-  let t = Parseff.parse_partial parser in
+  let t = Parseff.Push.parse parser in
   let rec go fed = function
     | [] ->
-        (Parseff.finish t, fed, [])
+        (Parseff.Push.finish t, fed, [])
     | chunk :: rest -> (
         let fed = fed + String.length chunk in
-        match Parseff.feed t chunk with
-        | Parseff.Await ->
+        match Parseff.Push.feed t chunk with
+        | Parseff.Push.Await ->
             go fed rest
-        | Parseff.Done r ->
+        | Parseff.Push.Done r ->
             (r, fed, rest)
       )
   in
@@ -321,7 +321,7 @@ let check_case t seed case =
       | r when agree ~small:false [ r ] reference ->
           ()
       | _ ->
-          Alcotest.failf "%s: parse and parse_source differ on %S" what input
+          Alcotest.failf "%s: parse and Source.parse differ on %S" what input
   );
   ( if not t.each then
       let stop () =
@@ -338,7 +338,7 @@ let check_case t seed case =
         [
           run ~what input (fun () -> Parseff.parse ~consume:`Partial input stop);
           run ~what input (fun () ->
-              Parseff.parse_source ~consume:`Partial
+              Parseff.Source.parse ~consume:`Partial
                 (source ~chunk_size:1 input)
                 stop
           );
@@ -357,7 +357,7 @@ let check_case t seed case =
         Alcotest.failf "%s: streamed result differs on %S" what input;
       let fed = run ~what input (fun () -> fed_results t ~chunk_size input) in
       if fed <> List.map (normal ~offset:0) reference then
-        Alcotest.failf "%s: parse_partial result differs on %S" what input;
+        Alcotest.failf "%s: Push.parse result differs on %S" what input;
       let small =
         run ~what input (fun () ->
             small_window_results t (source ~chunk_size input)

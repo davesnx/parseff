@@ -26,9 +26,9 @@ let both ?(consume = `Partial) show_v input parser expected =
     "parse" expected
     (show_result show_vp (Parseff.parse ~consume input with_pos));
   Alcotest.(check string)
-    "parse_source" expected
+    "Source.parse" expected
     (show_result show_vp
-       (Parseff.parse_source ~consume (chunked_source input) with_pos)
+       (Parseff.Source.parse ~consume (chunked_source input) with_pos)
     )
 
 let show_unit () = "()"
@@ -135,7 +135,7 @@ let test_keyword_does_not_allocate () =
 let test_keyword_needs_one_more_byte_of_window () =
   let run window parser =
     show_result show_unit
-      (Parseff.parse_source ~backtrack_window:window (chunked_source "let")
+      (Parseff.Source.parse ~backtrack_window:window (chunked_source "let")
          parser
       )
   in
@@ -193,9 +193,9 @@ let test_identifier_rejects_a_bad_start () =
     "parse" "Error@0 expected identifier, found '1abc'"
     (show_result show_string (Parseff.parse ~consume:`Partial "1abc" name));
   Alcotest.(check string)
-    "parse_source" "Error@0 expected identifier, found '1'"
+    "Source.parse" "Error@0 expected identifier, found '1'"
     (show_result show_string
-       (Parseff.parse_source ~consume:`Partial (chunked_source "1abc") name)
+       (Parseff.Source.parse ~consume:`Partial (chunked_source "1abc") name)
     );
   both show_string "(" name "Error@0 expected identifier, found '('";
   both ~consume:`All show_string "" name
@@ -257,7 +257,7 @@ let test_identifier_look_ahead_consumes_nothing () =
 let test_identifier_needs_one_more_byte_of_window () =
   let run window parser =
     show_result show_string
-      (Parseff.parse_source ~backtrack_window:window (chunked_source "let")
+      (Parseff.Source.parse ~backtrack_window:window (chunked_source "let")
          parser
       )
   in

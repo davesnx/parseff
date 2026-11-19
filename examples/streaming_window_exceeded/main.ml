@@ -42,7 +42,7 @@ let () =
   let input = "GET /foo/bar" in
   let source = Parseff.Source.of_seq (chunked_seq ~chunk_size:2 input) in
   match
-    Parseff.parse_source ~backtrack_window:8 source request_line_without_commit
+    Parseff.Source.parse ~backtrack_window:8 source request_line_without_commit
   with
   | Ok (`GET, p) ->
       Printf.printf "unexpected success: GET %s\n" p

@@ -26,7 +26,7 @@ let requests ~buf_size ~window =
       | Error e ->
           print_error e
       )
-    (Parseff.parse_source_each ~backtrack_window:window src Http.request)
+    (Parseff.Source.parse_each ~backtrack_window:window src Http.request)
 
 let response ~meth =
   let input = In_channel.input_all stdin in
