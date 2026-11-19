@@ -87,10 +87,10 @@ let rec expr () =
   end else
     a
 
-let expr_or_hole d () =
-  recover d
+let expr_or_hole () =
+  recover
     ~sync:(skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ';' || c = ','))
-    (fun () -> require d expr (fun _ -> Hole_expr))
+    (fun () -> require expr (fun _ -> Hole_expr))
     (fun _ -> Hole_expr)
 
 let skip_statement () =
@@ -100,27 +100,27 @@ let skip_statement () =
 let skip_argument =
   skip_nested [ ('(', ')'); ('{', '}') ] (fun c -> c = ',' || c = ';')
 
-let let_stmt d () =
+let let_stmt () =
   context "statement" (fun () ->
       kw "let" ();
       cut ();
-      let name = require d ident (fun _ -> "_") in
-      require d (sym '=') ignore;
-      let value = expr_or_hole d () in
-      require d (sym ';') ignore;
+      let name = require ident (fun _ -> "_") in
+      require (sym '=') ignore;
+      let value = expr_or_hole () in
+      require (sym ';') ignore;
       Let (name, value)
   )
 
-let rec if_stmt d () =
+let rec if_stmt () =
   context "if" (fun () ->
       kw "if" ();
       cut ();
-      let c = expr_or_hole d () in
-      require d (kw "then") ignore;
-      If (c, block d ())
+      let c = expr_or_hole () in
+      require (kw "then") ignore;
+      If (c, block ())
   )
 
-and call_stmt d () =
+and call_stmt () =
   context "call" (fun () ->
       let name = ident () in
       sym '(' ();
@@ -128,46 +128,40 @@ and call_stmt d () =
       let args =
         context ~delimited:true "arguments" (fun () ->
             let args =
-              list ~sep:(sym ',') d ~close:(at ')') ~sync:skip_argument expr
+              list ~sep:(sym ',') ~close:(at ')') ~sync:skip_argument expr
                 (fun _ -> Hole_expr)
                 ()
             in
-            require d (sym ')') ignore;
+            require (sym ')') ignore;
             args
         )
       in
-      require d (sym ';') ignore;
+      require (sym ';') ignore;
       Call (name, args)
   )
 
-and statement d () =
+and statement () =
   tick ();
-  one_of [ let_stmt d; if_stmt d; call_stmt d ] ()
+  one_of [ let_stmt; if_stmt; call_stmt ] ()
 
-and block d () =
+and block () =
   context ~delimited:true "block" (fun () ->
       sym '{' ();
       cut ();
       let stmts =
-        list d ~close:(at '}') ~sync:skip_statement (statement d)
-          (fun _ -> Bad)
-          ()
+        list ~close:(at '}') ~sync:skip_statement statement (fun _ -> Bad) ()
       in
-      require d (sym '}') ignore;
+      require (sym '}') ignore;
       stmts
   )
 
-let program d () =
+let program () =
   ws ();
-  list d
-    ~close:(fun () -> false)
-    ~sync:skip_statement (statement d)
-    (fun _ -> Bad)
-    ()
+  list ~close:(fun () -> false) ~sync:skip_statement statement (fun _ -> Bad) ()
 
 let run input =
   let d = Diagnostics.create () in
-  let r = parse ~diagnostics:d input (program d) in
+  let r = parse ~diagnostics:d input program in
   (show_result show_stmts r, entries d)
 
 let check input expected =
@@ -233,18 +227,17 @@ let test_separated () =
   check "f(1 ?, 2);" ("Ok f(1,2)", [ (4, "expected ',', found '?'") ])
 
 let plain_program () =
-  let no_collector = Diagnostics.create () in
   ws ();
-  many (statement no_collector) ()
+  many statement ()
 
-let braces ?trailing d () =
+let braces ?trailing () =
   sym '{' ();
   let xs =
-    list ~sep:(sym ',') ?trailing d ~close:(at '}') ~sync:skip_argument expr
+    list ~sep:(sym ',') ?trailing ~close:(at '}') ~sync:skip_argument expr
       (fun _ -> Hole_expr)
       ()
   in
-  require d (sym '}') ignore;
+  require (sym '}') ignore;
   xs
 
 let show_exprs l = String.concat "," (List.map show_expr l)
@@ -252,7 +245,7 @@ let show_exprs l = String.concat "," (List.map show_expr l)
 let test_braces () =
   let run ?trailing input =
     let d = Diagnostics.create () in
-    let r = parse ~diagnostics:d input (braces ?trailing d) in
+    let r = parse ~diagnostics:d input (braces ?trailing) in
     (show_result show_exprs r, entries d)
   in
   let check ?trailing input expected =
@@ -301,8 +294,8 @@ let test_skip_past_the_error () =
   let r =
     parse ~diagnostics:d "{ac ab}" (fun () ->
         sym '{' ();
-        let l = list d ~close:(at '}') ~sync:ignore element (fun _ -> "_") () in
-        require d (sym '}') ignore;
+        let l = list ~close:(at '}') ~sync:ignore element (fun _ -> "_") () in
+        require (sym '}') ignore;
         l
     )
   in
@@ -311,15 +304,15 @@ let test_skip_past_the_error () =
     [ (2, "expected 'b', found 'c'"); (3, "expected 'a', found ' '") ]
     (entries d)
 
-let opt_braces ?trailing d () =
+let opt_braces ?trailing () =
   sym '{' ();
   let xs =
-    list ~sep:(sym ',') ?trailing d ~close:(at '}') ~sync:skip_argument
+    list ~sep:(sym ',') ?trailing ~close:(at '}') ~sync:skip_argument
       (fun () -> optional expr ())
       (fun _ -> Some Hole_expr)
       ()
   in
-  require d (sym '}') ignore;
+  require (sym '}') ignore;
   xs
 
 let opt_strict () =
@@ -336,7 +329,7 @@ let test_never_accepts_invalid () =
   let pieces = [| "{"; "}"; ","; ", "; "1"; "2 "; "+"; " "; "?"; "(" |] in
   let compare_with show listed plain input =
     let d = Diagnostics.create () in
-    let r = parse ~diagnostics:d input (listed d) in
+    let r = parse ~diagnostics:d input listed in
     match parse input plain with
     | Ok v ->
         Alcotest.(check string)
@@ -366,7 +359,7 @@ let test_never_accepts_invalid () =
     (fun input ->
       let d = Diagnostics.create () in
       let plain = parse input plain_program in
-      let r = parse ~diagnostics:d input (program d) in
+      let r = parse ~diagnostics:d input program in
       match plain with
       | Ok _ ->
           Alcotest.(check string)
@@ -393,7 +386,7 @@ let plain_items close () =
   sym close ();
   xs
 
-let list_items d close () =
+let list_items close () =
   sym
     ( if close = ')' then
         '('
@@ -402,12 +395,12 @@ let list_items d close () =
     )
     ();
   let xs =
-    list ~sep:(sym ',') ~trailing:true d ~close:(at close) ~sync:skip_argument
+    list ~sep:(sym ',') ~trailing:true ~close:(at close) ~sync:skip_argument
       expr
       (fun _ -> Hole_expr)
       ()
   in
-  require d (sym close) ignore;
+  require (sym close) ignore;
   xs
 
 let valid_inputs =
@@ -427,7 +420,7 @@ let test_valid_same () =
       let expected = show_result show_stmts (parse input plain_program) in
       Alcotest.(check string)
         (input ^ ": many") expected
-        (show_result show_stmts (parse ~diagnostics:d input (program d)));
+        (show_result show_stmts (parse ~diagnostics:d input program));
       Alcotest.check errs (input ^ ": nothing recorded") [] (entries d)
     )
     valid_inputs;
@@ -440,7 +433,7 @@ let test_valid_same () =
       Alcotest.(check string)
         (input ^ ": sep_by")
         (show (parse input (plain_items close)))
-        (show (parse ~diagnostics:d input (list_items d close)));
+        (show (parse ~diagnostics:d input (list_items close)));
       Alcotest.check errs (input ^ ": nothing recorded") [] (entries d)
     )
     [
@@ -452,16 +445,68 @@ let test_valid_same () =
       ("{ 1, 2, }", '}');
     ]
 
+let test_runner_collector () =
+  let input = "let x = 1 + * 2; @@; let z = ; let y = 2" in
+  let recovered =
+    ( "Ok x=_; BAD; z=_; y=2",
+      [
+        (12, "expected integer, found '*'");
+        (17, "expected identifier, \"if\", or \"let\", found '@'");
+        (29, "expected integer, found ';'");
+        (40, "expected ';', found end of input");
+      ]
+    )
+  in
+  let stopped = ("Error at 12: expected integer, found '*'", []) in
+  let partial diagnostics =
+    let t = parse_partial ?diagnostics program in
+    match feed t input with
+    | Done r ->
+        Result.map fst r
+    | Await ->
+        Result.map fst (finish t)
+  in
+  let first_of_each diagnostics =
+    match
+      Seq.uncons (parse_source_each ?diagnostics (bytes_source input) program)
+    with
+    | Some (r, _) ->
+        r
+    | None ->
+        Alcotest.fail "parse_source_each gave no value"
+  in
+  let runners =
+    [
+      ("parse", fun diagnostics -> parse ?diagnostics input program);
+      ( "parse_source",
+        fun diagnostics ->
+          parse_source ?diagnostics (bytes_source input) program
+      );
+      ("parse_source_each", first_of_each);
+      ("parse_partial", partial);
+    ]
+  in
+  List.iter
+    (fun (name, run) ->
+      let d = Diagnostics.create () in
+      let r = run (Some d) in
+      Alcotest.(check (pair string errs))
+        (name ^ " with ~diagnostics")
+        recovered
+        (show_result show_stmts r, entries d);
+      Alcotest.(check (pair string errs))
+        (name ^ " without ~diagnostics")
+        stopped
+        (show_result show_stmts (run None), [])
+    )
+    runners
+
 let test_no_collector () =
   List.iter
     (fun (input, expected) ->
-      let d = Diagnostics.create () in
       Alcotest.(check string)
         input expected
-        (show_result show_stmts (parse input (program d)));
-      Alcotest.(check int)
-        (input ^ ": nothing recorded")
-        0 (Diagnostics.length d)
+        (show_result show_stmts (parse input program))
     )
     [
       ("let x = 1; f(1, 2);", "Ok x=1; f(1,2)");
@@ -478,19 +523,19 @@ let test_require () =
     let d = Diagnostics.create () in
     let r =
       if diagnostics then
-        parse ~diagnostics:d input (p d)
+        parse ~diagnostics:d input p
       else
-        parse input (p d)
+        parse input p
     in
     (show_result Fun.id r, entries d)
   in
   let check name expected actual =
     Alcotest.(check (pair string errs)) name expected actual
   in
-  let close_paren d () =
+  let close_paren () =
     sym '(' ();
     let x = ident () in
-    require d (sym ')') ignore;
+    require (sym ')') ignore;
     x ^ "!"
   in
   check "present" ("Ok x!", []) (run "(x)" close_paren);
@@ -505,8 +550,8 @@ let test_require () =
   check "no collector"
     ("Error at 2: expected ')', found end of input", [])
     (run ~diagnostics:false "(x" close_paren);
-  let pair d () =
-    require d
+  let pair () =
+    require
       (fun () ->
         sym '(' ();
         sym ')' ();
@@ -520,8 +565,8 @@ let test_require () =
   check "a failure where it started is inserted"
     ("Ok missing", [ (0, "expected '(', found end of input") ])
     (run "" pair);
-  let inner d () =
-    require d
+  let inner () =
+    require
       (fun () ->
         warn
           (Warning.Recorded (Result.get_error (capture (fun () -> fail "inner")))
@@ -540,7 +585,7 @@ let test_require_expected_set () =
   let r =
     parse ~diagnostics:d "a" (fun () ->
         ignore (optional (fun () -> char 'b') ());
-        require d (fun () -> ignore (char 'c')) ignore;
+        require (fun () -> ignore (char 'c')) ignore;
         ignore (char 'a')
     )
   in
@@ -561,8 +606,7 @@ let test_trace () =
         ()
   in
   ignore
-    (parse ~trace ~diagnostics:d "f(1 2, , 3" (fun () -> ignore (statement d ()))
-    );
+    (parse ~trace ~diagnostics:d "f(1 2, , 3" (fun () -> ignore (statement ())));
   Alcotest.check errs "one event for each recorded error" (entries d)
     (List.rev !events)
 
@@ -587,7 +631,7 @@ let test_sync_before_element () =
   let d = Diagnostics.create () in
   let r =
     parse ~consume:`Partial ~diagnostics:d "a (b; c" (fun () ->
-        list ~sep:(sym ',') d ~close:(at ';')
+        list ~sep:(sym ',') ~close:(at ';')
           ~sync:(fun () -> skip_while (fun c -> c <> '(' && c <> ','))
           element
           (fun _ -> '_')
@@ -616,11 +660,11 @@ let int_item () =
   ws ();
   n
 
-let item d () =
+let item () =
   if at '(' () then begin
     sym '(' ();
     let v =
-      recover d
+      recover
         ~sync:(fun () -> skip_while (fun c -> c <> ')'))
         (fun () ->
           let a = int_item () in
@@ -629,26 +673,26 @@ let item d () =
         )
         (fun _ -> Gap)
     in
-    require d (sym ')') ignore;
+    require (sym ')') ignore;
     v
   end else
     Num (int_item ())
 
-let items d () =
+let items () =
   sym '[' ();
   let xs =
-    list ~sep:(sym ',') d ~close:(at ']')
+    list ~sep:(sym ',') ~close:(at ']')
       ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
-      (item d)
+      item
       (fun _ -> Gap)
       ()
   in
-  require d (sym ']') ignore;
+  require (sym ']') ignore;
   xs
 
 let run_items input =
   let d = Diagnostics.create () in
-  let r = parse ~diagnostics:d input (items d) in
+  let r = parse ~diagnostics:d input items in
   (show_result (fun l -> String.concat "," (List.map show_item l)) r, entries d)
 
 let test_recover_in_element () =
@@ -666,7 +710,7 @@ let test_list_in_or_branch () =
   let d = Diagnostics.create () in
   let parser () =
     or_
-      (fun () -> String.concat "," (List.map show_item (items d ())))
+      (fun () -> String.concat "," (List.map show_item (items ())))
       (fun () ->
         literal "[a]";
         "letter"
@@ -697,10 +741,8 @@ let test_element_without_progress () =
     let r =
       parse ~diagnostics:d input (fun () ->
           sym '{' ();
-          let l =
-            list d ~close:(at '}') ~sync:ignore (element d) (fun _ -> -2) ()
-          in
-          require d (sym '}') ignore;
+          let l = list ~close:(at '}') ~sync:ignore element (fun _ -> -2) () in
+          require (sym '}') ignore;
           l
       )
     in
@@ -708,10 +750,10 @@ let test_element_without_progress () =
       entries d
     )
   in
-  let only_require d () =
+  let only_require () =
     guard ();
     let e =
-      require d
+      require
         (fun () ->
           let v = integer () in
           ws ();
@@ -719,10 +761,10 @@ let test_element_without_progress () =
         )
         (fun _ -> -1)
     in
-    require d (sym ';') ignore;
+    require (sym ';') ignore;
     e
   in
-  let warns _ () =
+  let warns () =
     guard ();
     if at '@' () then begin
       warn (Warning.W "empty statement");
@@ -773,7 +815,7 @@ let test_empty_element_is_a_value () =
       Alcotest.(check string)
         input
         (show_result show_opts (parse input opt_strict))
-        (show_result show_opts (parse ~diagnostics:d input (opt_braces d)));
+        (show_result show_opts (parse ~diagnostics:d input opt_braces));
       Alcotest.check errs (input ^ ": nothing recorded") [] (entries d)
     )
     [ "{1, , 3}"; "{, 1}"; "{1,}"; "{}"; "{,}"; "{ , , }"; "{1}" ]
@@ -790,11 +832,11 @@ let test_record_separator () =
               calls := e.pos :: !calls;
               []
             )
-            d ~close:(at '}') ~sync:skip_argument expr
+            ~close:(at '}') ~sync:skip_argument expr
             (fun _ -> Hole_expr)
             ()
         in
-        require d (sym '}') ignore;
+        require (sym '}') ignore;
         xs
     )
   in
@@ -811,16 +853,16 @@ let paren_item () =
   end else
     int_item ()
 
-let paren_list d () =
+let paren_list () =
   sym '[' ();
   let xs =
-    list ~sep:(sym ',') d ~close:(at ']')
+    list ~sep:(sym ',') ~close:(at ']')
       ~sync:(skip_nested [ ('(', ')'); ('[', ']') ] (fun c -> c = ','))
       paren_item
       (fun _ -> -1)
       ()
   in
-  require d (sym ']') ignore;
+  require (sym ']') ignore;
   xs
 
 let test_failed_step_leaves_nothing () =
@@ -832,7 +874,7 @@ let test_failed_step_leaves_nothing () =
         ()
   in
   let d = Diagnostics.create () in
-  let r = parse ~trace ~diagnostics:d "[1 (2" (paren_list d) in
+  let r = parse ~trace ~diagnostics:d "[1 (2" paren_list in
   Alcotest.(check string)
     "value" "Error at 3: expected end of input, found '('"
     (show_result (fun _ -> "") r);
@@ -846,7 +888,7 @@ let test_failed_step_leaves_nothing () =
   let r =
     parse_source ~backtrack_window:3 ~diagnostics:d
       (bytes_source "[1 (2 3) 4]")
-      (paren_list d)
+      paren_list
   in
   Alcotest.(check string)
     "window" "Backtrack_window_exceeded"
@@ -862,7 +904,7 @@ let test_require_commit () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "x" (fun () ->
-        require d
+        require
           (fun () ->
             warn (Warning.W "inner");
             commit ();
@@ -878,10 +920,10 @@ let test_require_commit () =
   Alcotest.check errs "an insertion undoes what the parser did"
     [ (0, "expected ')', found 'x'") ]
     (entries d);
-  let branch d () =
+  let branch () =
     or_
       (fun () ->
-        require d
+        require
           (fun () ->
             ignore (char 'a');
             commit ()
@@ -901,18 +943,18 @@ let test_require_commit () =
   Alcotest.(check string)
     "commit in require: without the collector"
     "Error at 1: expected 'b', found 'c'"
-    (show_result Fun.id (parse "ac" (branch d)));
+    (show_result Fun.id (parse "ac" branch));
   Alcotest.(check string)
     "commit in require: with the collector, it reaches the or_"
     "Error at 1: expected 'b', found 'c'"
-    (show_result Fun.id (parse ~diagnostics:d "ac" (branch d)))
+    (show_result Fun.id (parse ~diagnostics:d "ac" branch))
 
 let test_require_undoes_parser () =
   let d = Diagnostics.create () in
   let cut_in_require () =
     or_
       (fun () ->
-        require d
+        require
           (fun () ->
             cut ();
             ignore (char 'x')
@@ -935,7 +977,7 @@ let test_require_undoes_parser () =
   let value =
     parse ~diagnostics:d "q" (fun () ->
         Ref.set r 0;
-        require d
+        require
           (fun () ->
             Ref.set r 1;
             commit ();
@@ -957,7 +999,7 @@ let test_dropped_element_undoes_ref () =
     show_result string_of_int
       (parse ~consume:`Partial ~diagnostics:d input (fun () ->
            ignore
-             (list ?sep d
+             (list ?sep
                 ~close:(fun () -> false)
                 ~sync:ignore (element cell) ignore ()
              );
@@ -997,7 +1039,7 @@ let test_require_fail_rule () =
     let d = Diagnostics.create () in
     let r =
       parse ~diagnostics:d "ac" (fun () ->
-          require d
+          require
             (fun () ->
               or_
                 (fun () ->
@@ -1038,7 +1080,7 @@ let test_raising_callbacks () =
           let v =
             match
               capture (fun () ->
-                  match body d with s -> s | exception Stop -> "stop"
+                  match body () with s -> s | exception Stop -> "stop"
               )
             with
             | Ok s ->
@@ -1046,9 +1088,7 @@ let test_raising_callbacks () =
             | Error _ ->
                 "error"
           in
-          let w =
-            try or_ (fun () -> body d) (fun () -> "or") () with Stop -> "stop"
-          in
+          let w = try or_ body (fun () -> "or") () with Stop -> "stop" in
           ignore w;
           ignore (take_while (fun _ -> true));
           v
@@ -1068,8 +1108,8 @@ let test_raising_callbacks () =
   in
   let lst ?(keep = fun e _ -> [ e ]) ?(sync = sync) ?(hole = fun _ -> '?')
       ?(close = fun () -> peek_char () = Some ')') ?(sep = sep_comma)
-      ?(element = digit_ws) d =
-    String.of_seq (List.to_seq (list ~keep ~sep d ~close ~sync element hole ()))
+      ?(element = digit_ws) () =
+    String.of_seq (List.to_seq (list ~keep ~sep ~close ~sync element hole ()))
   in
   let stop _ = raise Stop in
   guarded "keep, missing separator" "1 2)" (lst ~keep:(fun _ _ -> raise Stop));
@@ -1087,19 +1127,19 @@ let test_raising_callbacks () =
            digit_ws ()
      )
     );
-  guarded "require: parser" "x" (fun d ->
-      require d (fun () -> raise Stop) ignore;
+  guarded "require: parser" "x" (fun () ->
+      require (fun () -> raise Stop) ignore;
       "r"
   );
-  guarded "require: missing" "x" (fun d ->
-      require d (fun () -> ignore (char ')')) stop;
+  guarded "require: missing" "x" (fun () ->
+      require (fun () -> ignore (char ')')) stop;
       "r"
   )
 
 let test_trace_order () =
-  let element d () =
+  let element () =
     let c =
-      recover d
+      recover
         ~sync:(fun () -> skip_while (fun c -> c = 'x'))
         digit
         (fun _ -> '?')
@@ -1124,10 +1164,9 @@ let test_trace_order () =
               ignore (char ',');
               ws ()
             )
-            d
             ~close:(fun () -> peek_char () = Some ')')
             ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ',' || c = ')'))
-            (element d)
+            element
             (fun _ -> '!')
             ()
         in
@@ -1162,7 +1201,6 @@ let test_first_element_fail () =
       let l =
         list
           ~sep:(fun () -> ignore (char ','))
-          d
           ~close:(fun () -> peek_char () = Some ')')
           ~sync:ignore element
           (fun _ -> '!')
@@ -1192,9 +1230,9 @@ let test_fail_at_close_ends_list () =
     else
       fail "not a digit"
   in
-  let parser ?sep ?trailing d () =
+  let parser ?sep ?trailing () =
     let l =
-      list ?sep ?trailing d
+      list ?sep ?trailing
         ~close:(fun () -> peek_char () = Some ')')
         ~sync:ignore element
         (fun _ -> '!')
@@ -1204,13 +1242,10 @@ let test_fail_at_close_ends_list () =
     String.of_seq (List.to_seq l)
   in
   let run ?sep ?trailing input =
-    let unused = Diagnostics.create () in
-    let plain =
-      show_result Fun.id (parse input (parser ?sep ?trailing unused))
-    in
+    let plain = show_result Fun.id (parse input (parser ?sep ?trailing)) in
     let d = Diagnostics.create () in
     let collected =
-      show_result Fun.id (parse ~diagnostics:d input (parser ?sep ?trailing d))
+      show_result Fun.id (parse ~diagnostics:d input (parser ?sep ?trailing))
     in
     (plain, collected, entries d)
   in
@@ -1227,7 +1262,6 @@ let test_fail_at_close_ends_list () =
 let test_no_collector_is_plain () =
   let rs = Random.State.make [| 2026; 11; 17 |] in
   let pieces = [| "{"; "}"; ","; ", "; "1"; "2 "; "+"; " "; "?"; "(" |] in
-  let unused = Diagnostics.create () in
   let many_braces () =
     sym '{' ();
     let xs = many expr () in
@@ -1236,10 +1270,8 @@ let test_no_collector_is_plain () =
   in
   let list_many () =
     sym '{' ();
-    let xs =
-      list unused ~close:(at '}') ~sync:ignore expr (fun _ -> Hole_expr) ()
-    in
-    require unused (sym '}') ignore;
+    let xs = list ~close:(at '}') ~sync:ignore expr (fun _ -> Hole_expr) () in
+    require (sym '}') ignore;
     xs
   in
   let same show input listed plain =
@@ -1258,9 +1290,9 @@ let test_no_collector_is_plain () =
            )
           )
     in
-    same show_exprs input (braces unused) strict_braces;
-    same show_exprs input (braces ~trailing:true unused) loose_braces;
-    same show_opts input (opt_braces unused) opt_strict;
+    same show_exprs input braces strict_braces;
+    same show_exprs input (braces ~trailing:true) loose_braces;
+    same show_opts input opt_braces opt_strict;
     same show_exprs input list_many many_braces
   done
 
@@ -1269,7 +1301,7 @@ let test_require_furthest_failure () =
     let d = Diagnostics.create () in
     let r =
       parse ~diagnostics:d "ax" (fun () ->
-          require d p ignore;
+          require p ignore;
           literal "ax"
       )
     in
@@ -1316,7 +1348,7 @@ let test_progress () =
     max_steps := (20 * len) + 20;
     input_length := len;
     let d = Diagnostics.create () in
-    ( match parse ~diagnostics:d input (program d) with
+    ( match parse ~diagnostics:d input program with
     | Ok _ | Error _ ->
         ()
     | exception e ->
@@ -1373,7 +1405,7 @@ let test_streaming () =
       let d = Diagnostics.create () in
       let r =
         parse_source ~backtrack_window:64 ~diagnostics:d (bytes_source input)
-          (program d)
+          program
       in
       let value, expected = run input in
       Alcotest.(check string) input value (show_result show_stmts r);
@@ -1403,8 +1435,7 @@ let test_streaming () =
   in
   let d = Diagnostics.create () in
   match
-    parse_source ~backtrack_window:32 ~diagnostics:d (bytes_source long)
-      (program d)
+    parse_source ~backtrack_window:32 ~diagnostics:d (bytes_source long) program
   with
   | Ok l ->
       Alcotest.(check int) "long input in a small window" 2000 (List.length l);
@@ -1429,14 +1460,14 @@ let run_iter ?(window = 4) ~collector ~stream input p =
     match
       match (stream, collector) with
       | false, true ->
-          parse ~diagnostics:d input (p d)
+          parse ~diagnostics:d input p
       | false, false ->
-          parse input (p d)
+          parse input p
       | true, true ->
           parse_source ~backtrack_window:window ~diagnostics:d
-            (bytes_source input) (p d)
+            (bytes_source input) p
       | true, false ->
-          parse_source ~backtrack_window:window (bytes_source input) (p d)
+          parse_source ~backtrack_window:window (bytes_source input) p
     with
     | Ok s ->
         "Ok " ^ s
@@ -1475,9 +1506,9 @@ let check_iter name input p ~collector ~plain =
     )
     [ false; true ]
 
-let at_closer failure d () =
+let at_closer failure () =
   let l =
-    list ~sep:comma_only d
+    list ~sep:comma_only
       ~close:(fun () -> peek_char () = Some 'a')
       ~sync:ignore
       (fun () ->
@@ -1527,10 +1558,10 @@ let iter_in_element ~release =
   check_iter
     (name "an element without ~sep")
     "baab"
-    (fun d () ->
+    (fun () ->
       ignore (char 'b');
       let l =
-        list ~release d
+        list ~release
           ~close:(fun () -> false)
           ~sync:ignore iter_element
           (fun _ -> "H")
@@ -1542,10 +1573,10 @@ let iter_in_element ~release =
   check_iter
     (name "an element after a separator")
     "b,aab"
-    (fun d () ->
+    (fun () ->
       ignore (char 'b');
       let l =
-        list ~release ~sep:comma_only d
+        list ~release ~sep:comma_only
           ~close:(fun () -> false)
           ~sync:ignore iter_element
           (fun _ -> "H")
@@ -1560,10 +1591,10 @@ let test_iter_element_release () = iter_in_element ~release:true
 
 let test_iter_missing_separator () =
   check_iter "an element after a missing separator" "b aab"
-    (fun d () ->
+    (fun () ->
       ignore (char 'b');
       let l =
-        list ~sep:comma_only d
+        list ~sep:comma_only
           ~close:(fun () -> false)
           ~sync:ignore
           (fun () ->
@@ -1580,10 +1611,10 @@ let test_iter_missing_separator () =
 
 let test_iter_at_end () =
   check_iter "an element after a separator at the end of the input" "b1,"
-    (fun d () ->
+    (fun () ->
       ignore (char 'b');
       let l =
-        list ~sep:comma_only d
+        list ~sep:comma_only
           ~close:(fun () -> false)
           ~sync:ignore
           (fun () ->
@@ -1605,9 +1636,9 @@ let test_iter_at_end () =
 
 let test_iter_close () =
   check_iter "close" "aab"
-    (fun d () ->
+    (fun () ->
       let l =
-        list ~sep:comma_only d
+        list ~sep:comma_only
           ~close:(fun () ->
             iter_a ();
             true
@@ -1624,8 +1655,8 @@ let test_iter_close () =
 
 let test_iter_require () =
   check_iter "require" "aab"
-    (fun d () ->
-      require d
+    (fun () ->
+      require
         (fun () ->
           iter_a ();
           (fail "u" : unit)
@@ -1636,8 +1667,8 @@ let test_iter_require () =
     ~collector:"f got 0; Invalid_argument; entries []"
     ~plain:"f got 2; Error at 2: u; entries []";
   check_iter "require at the end of the input" ""
-    (fun d () ->
-      require d
+    (fun () ->
+      require
         (fun () ->
           iter_a ();
           ignore (char ')')
@@ -1648,9 +1679,9 @@ let test_iter_require () =
     ~collector:"f got 0; Invalid_argument; entries []"
     ~plain:"f got 0; Error at 0: expected ')', found end of input; entries []"
 
-let commit_at_end ~release tail d () =
+let commit_at_end ~release tail () =
   let l =
-    list ~release ~sep:comma_only d
+    list ~release ~sep:comma_only
       ~close:(fun () -> peek_char () = Some ')')
       ~sync:ignore
       (fun () ->
@@ -1687,8 +1718,8 @@ let test_commit_at_end () =
     (fun release ->
       List.iter
         (fun (name, tail, later, in_or, in_optional) ->
-          let left d () =
-            let s = commit_at_end ~release tail d () in
+          let left () =
+            let s = commit_at_end ~release tail () in
             if later then ignore (char 'q');
             s
           in
@@ -1703,9 +1734,9 @@ let test_commit_at_end () =
           check_iter
             ("commit at the end of the input, in or_, " ^ name)
             "n,"
-            (fun d () ->
+            (fun () ->
               or_
-                (fun () -> left d ())
+                (fun () -> left ())
                 (fun () ->
                   ignore (rest ());
                   "ALT"
@@ -1717,8 +1748,8 @@ let test_commit_at_end () =
           check_iter
             ("commit at the end of the input, in optional, " ^ name)
             "n,"
-            (fun d () ->
-              match optional (fun () -> left d ()) () with
+            (fun () ->
+              match optional (fun () -> left ()) () with
               | Some s ->
                   s
               | None ->
@@ -1732,10 +1763,10 @@ let test_commit_at_end () =
     )
     [ false; true ]
 
-let committing_braces d () =
+let committing_braces () =
   sym '{' ();
   let xs =
-    list ~sep:(sym ',') d
+    list ~sep:(sym ',')
       ~close:(fun () -> peek_char () = Some '}' || peek_char () = Some '^')
       ~sync:skip_argument
       (fun () ->
@@ -1760,7 +1791,7 @@ let committing_braces d () =
       (fun _ -> "H")
       ()
   in
-  require d (sym '}') ignore;
+  require (sym '}') ignore;
   end_of_input ();
   String.concat "," xs
 
@@ -1778,14 +1809,12 @@ let test_commit_never_reaches_the_caller () =
     in
     List.iter
       (fun stream ->
-        let run collector p =
-          run_iter ~window:64 ~collector ~stream input (fun d () -> p d)
-        in
-        let alone collector = run collector (fun d -> committing_braces d ()) in
+        let run collector p = run_iter ~window:64 ~collector ~stream input p in
+        let alone collector = run collector committing_braces in
         let in_or collector =
-          run collector (fun d ->
+          run collector (fun () ->
               or_
-                (fun () -> committing_braces d ())
+                (fun () -> committing_braces ())
                 (fun () ->
                   ignore (rest ());
                   "ALT"
@@ -1820,9 +1849,9 @@ let test_commit_never_reaches_the_caller () =
   done
 
 let test_commit_in_first_at_closer () =
-  let first element d () =
+  let first element () =
     let l =
-      list ~sep:comma_only d
+      list ~sep:comma_only
         ~close:(fun () -> peek_char () = Some 'a')
         ~sync:ignore element
         (fun _ -> "H")
@@ -1886,6 +1915,7 @@ let () =
           test_case "valid input: same as many and sep_by" `Quick
             test_valid_same;
           test_case "no collector" `Quick test_no_collector;
+          test_case "the collector of the runner" `Quick test_runner_collector;
           test_case "require" `Quick test_require;
           test_case "require: expected set" `Quick test_require_expected_set;
           test_case "trace" `Quick test_trace;

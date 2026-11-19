@@ -188,7 +188,7 @@ let rec run env = function
       check env "after capture"
   | Recover (a, sync) ->
       let s = save env in
-      recover env.errors
+      recover
         ~sync:(fun () ->
           restore env s;
           check env "recover sync";

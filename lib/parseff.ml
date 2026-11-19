@@ -48,14 +48,13 @@ let[@inline always] span_get s i =
   if i < 0 || i >= s.len then invalid_arg "Parseff.span_get";
   String.unsafe_get s.buf (s.off + i)
 
-type location = { offset : int; line : int; col : int }
+type location = { offset : int; line : int; byte_col : int }
 type range_data = { start : int; stop : int }
 type note_data = { at : range_data option; text : string }
 
 type endian = Big | Little
 
 type custom_error = ..
-type custom_error += Limit_exceeded of { limit : int }
 
 (* The public trace event [Fail], added at the end of this file, is an
    extension constructor too, and a structure cannot define two extension
@@ -88,6 +87,7 @@ type far_extra =
   | Payload of custom_error
   | Payload_ext of custom_error * fail_extra
   | Payload_failure of string * fail_extra
+  | Payload_limit of int * fail_extra
 type abort_frames = {
   at : int;
   mutable open_frames : (string * int * bool) list;
@@ -260,6 +260,7 @@ type error_kind =
   | Expected of { items : expected * expected list; found : found; more : int }
   | Failed of string
   | Custom of custom_error
+  | Limit_exceeded of { limit : int }
   | Depth_limit_exceeded of { limit : int }
   | Backtrack_window_exceeded of { limit : int; oldest : int }
 
@@ -1241,7 +1242,7 @@ let[@inline never] handle_location st =
   {
     offset = st.pos;
     line = idx.line_base + line_idx + 1;
-    col = st.pos - idx.starts.(line_idx) + 1;
+    byte_col = st.pos - idx.starts.(line_idx) + 1;
   }
 
 let buffer_room kept n =
@@ -2575,9 +2576,7 @@ let[@inline never] limited st stop f =
 
 let[@inline never] fail_limit st ~from ~upto limit =
   fail_user st upto
-    (Payload_ext
-       (Limit_exceeded { limit }, { from; upto; notes = []; help = None })
-    )
+    (Payload_limit (limit, { from; upto; notes = []; help = None }))
 
 let[@inline never] scan_until st ~keep_from start stop pred =
   let p = ref start in
@@ -4829,7 +4828,11 @@ let location_of_position input pos =
     (Bytes.unsafe_of_string input)
     (min pos (String.length input));
   let line_idx = find_line idx pos in
-  { offset = pos; line = line_idx + 1; col = pos - idx.starts.(line_idx) + 1 }
+  {
+    offset = pos;
+    line = line_idx + 1;
+    byte_col = pos - idx.starts.(line_idx) + 1;
+  }
 
 let window_size = 240
 let max_frames = 5
@@ -5040,8 +5043,6 @@ let error_message ?custom e =
       "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
   | Failed m ->
       m
-  | Custom (Limit_exceeded { limit }) ->
-      Printf.sprintf "limit of %d exceeded" limit
   | Custom v -> (
       match custom with
       | Some f ->
@@ -5049,6 +5050,8 @@ let error_message ?custom e =
       | None ->
           "custom error (no ~custom printer given)"
     )
+  | Limit_exceeded { limit } ->
+      Printf.sprintf "limit of %d exceeded" limit
   | Depth_limit_exceeded { limit } ->
       Printf.sprintf "maximum nesting depth %d exceeded" limit
   | Backtrack_window_exceeded { limit; _ } ->
@@ -5453,7 +5456,7 @@ let pending = { views = []; frame_locs = []; char_column = None; built = false }
 let window_index x (l : location) =
   let idx = create_line_index () in
   let text = x.kept in
-  let line_start = l.offset - l.col + 1 in
+  let line_start = l.offset - l.byte_col + 1 in
   let prev =
     if line_start > 0 then
       last_newline text 0 (line_start - 1) + 1
@@ -5524,7 +5527,9 @@ let render ?name ?source ?custom e =
           )
     | None, Some l ->
         Some
-          (l, Some (Option.value (shown e.excerpt).char_column ~default:l.col))
+          ( l,
+            Some (Option.value (shown e.excerpt).char_column ~default:l.byte_col)
+          )
     | None, None ->
         None
   in
@@ -5540,7 +5545,7 @@ let render ?name ?source ?custom e =
                 (imin f.start (String.length s))
             )
         in
-        Some (l.line, l.col, shown)
+        Some (l.line, l.byte_col, shown)
     | None ->
         List.nth (shown e.excerpt).frame_locs i
   in
@@ -5585,7 +5590,7 @@ let render ?name ?source ?custom e =
           match src with
           | Some (s, _) ->
               let l = location_of_position s r.start in
-              Some (l.line, l.col)
+              Some (l.line, l.byte_col)
           | None ->
               None
         in
@@ -5607,7 +5612,9 @@ let render ?name ?source ?custom e =
       )
   in
   let error_view =
-    Option.bind where (fun ((loc : location), _) -> get loc.line (loc.col - 1))
+    Option.bind where (fun ((loc : location), _) ->
+        get loc.line (loc.byte_col - 1)
+    )
   in
   let placed =
     if error_view = None then
@@ -6184,7 +6191,7 @@ let scan_location input ~from ~lines ~start pos =
     else
       start
   in
-  Some { offset = pos; line = lines + n + 1; col = pos - start + 1 }
+  Some { offset = pos; line = lines + n + 1; byte_col = pos - start + 1 }
 
 let memory_location st pos =
   if pos < 0 || pos > st.input_len then
@@ -6197,7 +6204,7 @@ let memory_location st pos =
           {
             offset = pos;
             line = idx.line_base + li + 1;
-            col = pos - idx.starts.(li) + 1;
+            byte_col = pos - idx.starts.(li) + 1;
           }
     | Some idx ->
         scan_location st.input ~from:idx.scanned_up_to
@@ -6283,7 +6290,7 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
             {
               offset = pos;
               line = idx.line_base + li + 1;
-              col = pos - idx.starts.(li) + 1;
+              byte_col = pos - idx.starts.(li) + 1;
             }
         end else
           None
@@ -6341,6 +6348,9 @@ let error_of_far ~last st outer =
       let span = extras_span pos x in
       build st ~last ~pos:span.start ~notes:x.notes ?help:x.help (Failed m) span
         frames
+  | Payload_limit (limit, x) when f.special = special_user ->
+      let span = extras_span pos x in
+      build st ~last ~pos:span.start (Limit_exceeded { limit }) span frames
   | _ ->
       begin match expected_of_far f with
       | [], _ ->
@@ -6541,7 +6551,7 @@ let recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
       let f = st.far in
       let at =
         match f.extra with
-        | (Payload_ext (_, x) | Payload_failure (_, x))
+        | (Payload_ext (_, x) | Payload_failure (_, x) | Payload_limit (_, x))
           when f.special = special_user ->
             imin f.pos (extras_span f.pos x).start
         | _ ->
@@ -6561,15 +6571,15 @@ let recovering st ~release ~contexts ~record ~progress errors ~sync parser hole
     recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
       hole
 
-let recover ?(release = false) ?(contexts = `All) ?keep errors ~sync parser hole
-    =
+let recover ?(release = false) ?(contexts = `All) ?keep ~sync parser hole =
   let st = get_state () in
-  if st.diag != errors.self || st.recovery_off > 0 || not (have st 1) then
-    parser ()
-  else
-    recovering_on st ~release ~contexts
-      ~record:(record_of_keep errors st keep)
-      ~progress:true errors ~sync parser hole
+  match st.diag with
+  | Sink errors when st.recovery_off = 0 && have st 1 ->
+      recovering_on st ~release ~contexts
+        ~record:(record_of_keep errors st keep)
+        ~progress:true errors ~sync parser hole
+  | _ ->
+      parser ()
 
 let skip_nested ?atom pairs stop () =
   let st = get_state () in
@@ -6638,52 +6648,56 @@ let far_back st saved = if st.far != saved then far_merge st saved
 
 let failed_at st start = st.far.pos = start
 
-let require errors parser missing =
+let require_on st errors parser missing =
+  let start = st.pos in
+  let frame = State.push_rewind_frame st frame_recovery in
+  let saved = st.far in
+  if saved != far_none then st.far <- far_none;
+  State.hold_far st frame saved;
+  match parser () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      far_merge st (State.held_of st frame);
+      v
+  | exception Fail when failed_at st start ->
+      if open_choice st then begin
+        State.pop_rewind_frame st frame;
+        far_merge st (State.held_of st frame);
+        raise_notrace Fail
+      end;
+      let saved = State.held_of st frame in
+      if saved.pos = start then begin
+        let own = st.far in
+        st.far <- saved;
+        far_merge st own
+      end;
+      let e = error_of_far ~last:false st (outer_of st `All st.far.pos) in
+      restore_rewind_frame st frame;
+      State.pop_rewind_frame st frame;
+      st.far <-
+        ( if saved.pos = start then
+            far_none
+          else
+            saved
+        );
+      let base = far_copy saved in
+      record_diagnostic errors st e.range.start e;
+      let v = missing e in
+      mark_recovered st base;
+      captured st start e;
+      v
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      far_merge st (State.held_of st frame);
+      raise exn
+
+let require parser missing =
   let st = get_state () in
-  if st.diag != errors.self || st.recovery_off > 0 then
-    parser ()
-  else
-    let start = st.pos in
-    let frame = State.push_rewind_frame st frame_recovery in
-    let saved = st.far in
-    if saved != far_none then st.far <- far_none;
-    State.hold_far st frame saved;
-    match parser () with
-    | v ->
-        State.pop_rewind_frame st frame;
-        far_merge st (State.held_of st frame);
-        v
-    | exception Fail when failed_at st start ->
-        if open_choice st then begin
-          State.pop_rewind_frame st frame;
-          far_merge st (State.held_of st frame);
-          raise_notrace Fail
-        end;
-        let saved = State.held_of st frame in
-        if saved.pos = start then begin
-          let own = st.far in
-          st.far <- saved;
-          far_merge st own
-        end;
-        let e = error_of_far ~last:false st (outer_of st `All st.far.pos) in
-        restore_rewind_frame st frame;
-        State.pop_rewind_frame st frame;
-        st.far <-
-          ( if saved.pos = start then
-              far_none
-            else
-              saved
-          );
-        let base = far_copy saved in
-        record_diagnostic errors st e.range.start e;
-        let v = missing e in
-        mark_recovered st base;
-        captured st start e;
-        v
-    | exception exn ->
-        State.pop_rewind_frame st frame;
-        far_merge st (State.held_of st frame);
-        raise exn
+  match st.diag with
+  | Sink errors when st.recovery_off = 0 ->
+      require_on st errors parser missing
+  | _ ->
+      parser ()
 
 let skip_char st =
   let p = st.pos in
@@ -6692,257 +6706,264 @@ let skip_char st =
 
 exception Not_an_element
 
-let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
-    errors ~close ~sync element hole () =
-  let st = get_state () in
+let list_on st errors ~release ~contexts ~keep ~sep ~trailing ~close ~sync
+    element hole =
   let record = record_of_keep errors st keep in
-  if st.diag != errors.self || st.recovery_off > 0 || open_choice st then (
-    match sep with
-    | None ->
-        many element ()
-    | Some s ->
-        let xs = sep_by element s () in
-        if trailing && xs <> [] then ignore (optional s ());
-        xs
-  ) else
-    let closed () = (not (have st 1)) || look_ahead close in
-    let item () =
-      if not (have st 1) then
-        element ()
-      else
-        recovering st ~release ~contexts ~record ~progress:(Option.is_none sep)
-          errors ~sync element hole
-    in
-    let rec attempt ?(again = item) frame f =
-      match f () with
-      | v ->
-          Some v
-      | exception Fail when State.frame_replayable st frame ->
-          restore_rewind_frame st frame;
-          State.clear_recovered st frame;
-          attempt frame (fun () -> without_recovery st again)
-      | exception Fail when not (State.frame_committed st frame) ->
-          restore_rewind_frame st frame;
-          State.pop_rewind_frame st frame;
-          None
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          raise exn
-    in
-    let guarded frame f =
-      match f () with
-      | v ->
-          v
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          raise exn
-    in
-    let unrecovered () = without_recovery st element in
-    let plain_step ~expected frame =
-      let saved = st.far in
-      if not expected then begin
-        if saved != far_none then st.far <- far_none;
-        State.hold_far st frame saved
-      end;
-      match unrecovered () with
-      | v ->
-          far_back st (State.held_of st frame);
-          State.release_far st frame;
-          Some v
-      | exception Fail when not (State.frame_committed st frame) ->
-          if not expected then st.far <- State.held_of st frame;
-          restore_rewind_frame st frame;
-          State.pop_rewind_frame st frame;
-          None
-      | exception exn ->
-          far_back st (State.held_of st frame);
-          State.pop_rewind_frame st frame;
-          raise exn
-    in
-    let inserted base at e =
-      mark_recovered st base;
-      record_error errors st record e [];
-      captured st at e
-    in
-    let rec steps acc =
-      let start = st.pos in
-      if closed () then
-        let frame = State.push_rewind_frame st frame_step in
-        match plain_step ~expected:false frame with
-        | None ->
-            List.rev acc
-        | Some v ->
-            if st.pos <> start then (
-              State.pop_rewind_frame st frame;
-              steps (v :: acc)
-            ) else (
-              restore_rewind_frame st frame;
-              State.pop_rewind_frame st frame;
-              List.rev acc
-            )
-      else
-        let recorded = st.diag_len in
-        let frame = State.push_rewind_frame st frame_step in
-        match attempt frame item with
-        | None ->
-            List.rev acc
-        | Some v ->
-            if st.pos <> start then (
-              State.pop_rewind_frame st frame;
-              steps (v :: acc)
-            ) else if st.diag_len = recorded then (
-              restore_rewind_frame st frame;
-              State.pop_rewind_frame st frame;
-              List.rev acc
-            ) else begin
-              State.pop_rewind_frame st frame;
-              allow_recovery st;
-              sync ();
-              if st.pos = start && have st 1 then skip_char st;
-              mark_recovered st (far_copy st.far);
-              steps (v :: acc)
-            end
-    in
-    let rec first s =
-      let start = st.pos in
-      if closed () then begin
-        let frame = State.push_rewind_frame st frame_step in
-        match plain_step ~expected:true frame with
-        | Some v ->
-            State.pop_rewind_frame st frame;
-            after ~empty:(st.pos = start) s [ v ]
-        | None ->
-            []
-      end else
-        let frame = State.push_rewind_frame st frame_step in
-        match attempt frame item with
-        | None ->
-            []
-        | Some v ->
-            State.pop_rewind_frame st frame;
-            after ~empty:(st.pos = start) s [ v ]
-    and after ~empty s acc =
-      let at = st.pos in
-      let saved = far_from st at in
+  let closed () = (not (have st 1)) || look_ahead close in
+  let item () =
+    if not (have st 1) then
+      element ()
+    else
+      recovering st ~release ~contexts ~record ~progress:(Option.is_none sep)
+        errors ~sync element hole
+  in
+  let rec attempt ?(again = item) frame f =
+    match f () with
+    | v ->
+        Some v
+    | exception Fail when State.frame_replayable st frame ->
+        restore_rewind_frame st frame;
+        State.clear_recovered st frame;
+        attempt frame (fun () -> without_recovery st again)
+    | exception Fail when not (State.frame_committed st frame) ->
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        None
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        raise exn
+  in
+  let guarded frame f =
+    match f () with
+    | v ->
+        v
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        raise exn
+  in
+  let unrecovered () = without_recovery st element in
+  let plain_step ~expected frame =
+    let saved = st.far in
+    if not expected then begin
+      if saved != far_none then st.far <- far_none;
+      State.hold_far st frame saved
+    end;
+    match unrecovered () with
+    | v ->
+        far_back st (State.held_of st frame);
+        State.release_far st frame;
+        Some v
+    | exception Fail when not (State.frame_committed st frame) ->
+        if not expected then st.far <- State.held_of st frame;
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        None
+    | exception exn ->
+        far_back st (State.held_of st frame);
+        State.pop_rewind_frame st frame;
+        raise exn
+  in
+  let inserted base at e =
+    mark_recovered st base;
+    record_error errors st record e [];
+    captured st at e
+  in
+  let rec steps acc =
+    let start = st.pos in
+    if closed () then
       let frame = State.push_rewind_frame st frame_step in
-      if st.far == far_none then State.hold_far st frame saved;
-      match optional s () with
-      | Some _ ->
-          let el = st.pos in
-          far_back st (State.held_of st frame);
-          State.release_far st frame;
-          if empty && el = at then begin
+      match plain_step ~expected:false frame with
+      | None ->
+          List.rev acc
+      | Some v ->
+          if st.pos <> start then (
+            State.pop_rewind_frame st frame;
+            steps (v :: acc)
+          ) else (
             restore_rewind_frame st frame;
             State.pop_rewind_frame st frame;
             List.rev acc
-          end else if trailing && guarded frame closed then
-            match plain_step ~expected:false frame with
-            | None ->
-                ignore (optional s ());
-                List.rev acc
-            | Some v ->
-                if st.pos <> at then (
-                  State.pop_rewind_frame st frame;
-                  after ~empty:(st.pos = el) s (v :: acc)
-                ) else (
-                  restore_rewind_frame st frame;
-                  State.pop_rewind_frame st frame;
-                  List.rev acc
-                )
-          else
-            let recorded = st.diag_len in
-            let again () =
-              ignore (s ());
-              item ()
-            in
-            begin match attempt ~again frame item with
-            | None ->
-                if trailing then ignore (optional s ());
-                List.rev acc
-            | Some v ->
-                if st.pos <> at then (
-                  State.pop_rewind_frame st frame;
-                  after ~empty:(st.pos = el) s (v :: acc)
-                ) else if st.diag_len = recorded then (
-                  restore_rewind_frame st frame;
-                  State.pop_rewind_frame st frame;
-                  List.rev acc
-                ) else (
-                  State.pop_rewind_frame st frame;
-                  allow_recovery st;
-                  mark_recovered st (far_copy st.far);
-                  List.rev (v :: acc)
-                )
-            end
+          )
+    else
+      let recorded = st.diag_len in
+      let frame = State.push_rewind_frame st frame_step in
+      match attempt frame item with
       | None ->
-          let saved = State.held_of st frame in
-          State.pop_rewind_frame st frame;
-          if closed () then begin
-            far_back st saved;
+          List.rev acc
+      | Some v ->
+          if st.pos <> start then (
+            State.pop_rewind_frame st frame;
+            steps (v :: acc)
+          ) else if st.diag_len = recorded then (
+            restore_rewind_frame st frame;
+            State.pop_rewind_frame st frame;
             List.rev acc
-          end else if empty then begin
-            far_back st saved;
+          ) else begin
+            State.pop_rewind_frame st frame;
             allow_recovery st;
-            List.rev acc
-          end else
-            let e =
-              error_of_far ~last:false st (outer_of st contexts st.far.pos)
-            in
-            far_back st saved;
-            missing_separator s acc at e
-      | exception exn ->
-          let saved = State.held_of st frame in
+            sync ();
+            if st.pos = start && have st 1 then skip_char st;
+            mark_recovered st (far_copy st.far);
+            steps (v :: acc)
+          end
+  in
+  let rec first s =
+    let start = st.pos in
+    if closed () then begin
+      let frame = State.push_rewind_frame st frame_step in
+      match plain_step ~expected:true frame with
+      | Some v ->
           State.pop_rewind_frame st frame;
-          far_back st saved;
-          raise exn
-    and missing_separator s acc at e =
-      allow_recovery st;
-      let base = far_copy st.far in
-      let at_start = ref false in
-      let element () =
-        match element () with
-        | v ->
-            v
-        | exception Fail ->
-            at_start := failed_at st at;
-            raise_notrace Fail
-      in
-      let record e inner =
-        if !at_start then raise Not_an_element;
-        record_error errors st record e inner
-      in
-      let frame = State.push_rewind_frame st frame_barrier in
-      match
-        recovering st ~release ~contexts ~record:(Some record) ~progress:false
-          errors ~sync element hole
-      with
-      | v ->
+          after ~empty:(st.pos = start) s [ v ]
+      | None ->
+          []
+    end else
+      let frame = State.push_rewind_frame st frame_step in
+      match attempt frame item with
+      | None ->
+          []
+      | Some v ->
           State.pop_rewind_frame st frame;
-          inserted base at e;
-          if st.pos = at then
-            List.rev (v :: acc)
-          else
-            after ~empty:false s (v :: acc)
-      | exception Fail ->
+          after ~empty:(st.pos = start) s [ v ]
+  and after ~empty s acc =
+    let at = st.pos in
+    let saved = far_from st at in
+    let frame = State.push_rewind_frame st frame_step in
+    if st.far == far_none then State.hold_far st frame saved;
+    match optional s () with
+    | Some _ ->
+        let el = st.pos in
+        far_back st (State.held_of st frame);
+        State.release_far st frame;
+        if empty && el = at then begin
           restore_rewind_frame st frame;
           State.pop_rewind_frame st frame;
+          List.rev acc
+        end else if trailing && guarded frame closed then
+          match plain_step ~expected:false frame with
+          | None ->
+              ignore (optional s ());
+              List.rev acc
+          | Some v ->
+              if st.pos <> at then (
+                State.pop_rewind_frame st frame;
+                after ~empty:(st.pos = el) s (v :: acc)
+              ) else (
+                restore_rewind_frame st frame;
+                State.pop_rewind_frame st frame;
+                List.rev acc
+              )
+        else
+          let recorded = st.diag_len in
+          let again () =
+            ignore (s ());
+            item ()
+          in
+          begin match attempt ~again frame item with
+          | None ->
+              if trailing then ignore (optional s ());
+              List.rev acc
+          | Some v ->
+              if st.pos <> at then (
+                State.pop_rewind_frame st frame;
+                after ~empty:(st.pos = el) s (v :: acc)
+              ) else if st.diag_len = recorded then (
+                restore_rewind_frame st frame;
+                State.pop_rewind_frame st frame;
+                List.rev acc
+              ) else (
+                State.pop_rewind_frame st frame;
+                allow_recovery st;
+                mark_recovered st (far_copy st.far);
+                List.rev (v :: acc)
+              )
+          end
+    | None ->
+        let saved = State.held_of st frame in
+        State.pop_rewind_frame st frame;
+        if closed () then begin
+          far_back st saved;
+          List.rev acc
+        end else if empty then begin
+          far_back st saved;
+          allow_recovery st;
+          List.rev acc
+        end else
+          let e =
+            error_of_far ~last:false st (outer_of st contexts st.far.pos)
+          in
+          far_back st saved;
+          missing_separator s acc at e
+    | exception exn ->
+        let saved = State.held_of st frame in
+        State.pop_rewind_frame st frame;
+        far_back st saved;
+        raise exn
+  and missing_separator s acc at e =
+    allow_recovery st;
+    let base = far_copy st.far in
+    let at_start = ref false in
+    let element () =
+      match element () with
+      | v ->
+          v
+      | exception Fail ->
+          at_start := failed_at st at;
+          raise_notrace Fail
+    in
+    let record e inner =
+      if !at_start then raise Not_an_element;
+      record_error errors st record e inner
+    in
+    let frame = State.push_rewind_frame st frame_barrier in
+    match
+      recovering st ~release ~contexts ~record:(Some record) ~progress:false
+        errors ~sync element hole
+    with
+    | v ->
+        State.pop_rewind_frame st frame;
+        inserted base at e;
+        if st.pos = at then
+          List.rev (v :: acc)
+        else
+          after ~empty:false s (v :: acc)
+    | exception Fail ->
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        st.far <- base;
+        List.rev acc
+    | exception Not_an_element ->
+        State.pop_rewind_frame st frame;
+        sync ();
+        if st.pos > at then begin
+          inserted base at e;
+          after ~empty:false s acc
+        end else begin
           st.far <- base;
           List.rev acc
-      | exception Not_an_element ->
-          State.pop_rewind_frame st frame;
-          sync ();
-          if st.pos > at then begin
-            inserted base at e;
-            after ~empty:false s acc
-          end else begin
-            st.far <- base;
-            List.rev acc
-          end
-      | exception exn ->
-          State.pop_rewind_frame st frame;
-          raise exn
-    in
-    match sep with None -> steps [] | Some s -> first s
+        end
+    | exception exn ->
+        State.pop_rewind_frame st frame;
+        raise exn
+  in
+  match sep with None -> steps [] | Some s -> first s
+
+let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
+    ~close ~sync element hole () =
+  let st = get_state () in
+  match st.diag with
+  | Sink errors when st.recovery_off = 0 && not (open_choice st) ->
+      list_on st errors ~release ~contexts ~keep ~sep ~trailing ~close ~sync
+        element hole
+  | _ -> (
+      match sep with
+      | None ->
+          many element ()
+      | Some s ->
+          let xs = sep_by element s () in
+          if trailing && xs <> [] then ignore (optional s ());
+          xs
+    )
 
 let run_detailed st ~all thunk =
   let previous = State.enter st in

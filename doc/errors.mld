@@ -14,7 +14,8 @@ A parse fails with one of two sorts of error.
 {b Built-in errors} come from Parseff itself: a primitive such as
 {!val:Parseff.char} does not match, {!val:Parseff.fail} stops with a message,
 or a limit such as [max_depth] is reached. Their [kind] is [Expected],
-[Failed], [Depth_limit_exceeded] or [Backtrack_window_exceeded]. You do not
+[Failed], [Limit_exceeded], [Depth_limit_exceeded] or
+[Backtrack_window_exceeded]. You do not
 declare them, and {!val:Parseff.render_error} prints them with a full message.
 
 {b Custom errors} are cases you add to {!type:Parseff.custom_error}. You raise
@@ -271,7 +272,7 @@ type error = {
   kind : error_kind;
   range : range;  (** the bytes the error is about, empty at the end of the input *)
   location : location option;
-      (** line and column of [range.start], [None] when the line is not known; [col] counts bytes, the column [render_error] prints counts Unicode characters *)
+      (** line and column of [range.start], [None] when the line is not known; [byte_col] counts bytes, the column [render_error] prints counts Unicode characters *)
   contexts : context list;  (** open constructs, outermost first *)
   notes : note list;
   help : string option;  (** the text given with [~help] *)
@@ -302,6 +303,9 @@ buildable, for [~notes] of {!val:Parseff.fail}.
   [fail] or [error] failures wins. Relabeling combinators
   ({!val:Parseff.expect}, {!val:Parseff.one_of_labeled}) do not relabel it.
 - [Custom e]: a value given to {!val:Parseff.error}.
+- [Limit_exceeded { limit }]: a run of {!val:Parseff.take_while} or
+  {!val:Parseff.take_until}, or a repetition of {!val:Parseff.many}, went over
+  the [~at_most] given as [limit].
 - [Depth_limit_exceeded { limit }]: a {!val:Parseff.rec_} call exceeded the
   [~max_depth] limit.
 - [Backtrack_window_exceeded { limit; oldest }]: a streaming parser needed more rewind
@@ -378,11 +382,11 @@ and the context line then says [from byte N].
 [Parseff.error_message] returns only the one-line message.
 
 The columns of the header and of the [* while parsing] lines count Unicode
-characters (code points), while [location.col] counts bytes (see the UTF-8 page
+characters (code points), while [location.byte_col] counts bytes (see the UTF-8 page
 of the API documentation). When streaming has dropped the start of a line and
 [~source] is not given, the header still has the line and the character column,
 because Parseff counts the characters of the line that it drops. When the error
-starts in the dropped part of the line, the column is [location.col], which
+starts in the dropped part of the line, the column is [location.byte_col], which
 counts bytes. The excerpt shows the kept part of the line, cut on the left with
 [...], with carets only under the kept part of the range and no caret row when
 the whole range is dropped. A context line for a context that starts in the

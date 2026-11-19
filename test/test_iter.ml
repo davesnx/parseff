@@ -571,7 +571,7 @@ let test_recover_raises_with_collector () =
       ()
   in
   let in_recover () =
-    Parseff.recover errs ~sync:ignore
+    Parseff.recover ~sync:ignore
       (fun () ->
         items ();
         "ok"
@@ -582,7 +582,6 @@ let test_recover_raises_with_collector () =
     String.concat ","
       (Parseff.list
          ~sep:(fun () -> ignore (comma ()))
-         errs
          ~close:(fun () -> false)
          ~sync:ignore
          (fun () ->
@@ -622,7 +621,7 @@ let test_barriers_raise () =
       ("look_ahead", fun p -> Parseff.look_ahead p);
       ("peek_with", fun p -> ignore (Parseff.peek_with p));
       ("capture", fun p -> ignore (Parseff.capture p));
-      ("recover", fun p -> Parseff.recover d ~sync:ignore p ignore);
+      ("recover", fun p -> Parseff.recover ~sync:ignore p ignore);
       ( "take_iter in look_ahead",
         fun _ -> Parseff.look_ahead (fun () -> Parseff.take_iter 1 ignore_value)
       );
@@ -655,7 +654,7 @@ let test_released_recover () =
   let got = ref 0 in
   let r =
     Parseff.parse ~diagnostics:d "1,2,x" (fun () ->
-        Parseff.recover ~release:true d
+        Parseff.recover ~release:true
           ~sync:(fun () -> ignore (Parseff.take_while (fun _ -> true)))
           (fun () ->
             Parseff.sep_by_iter number comma (fun _ -> incr got) ();

@@ -466,7 +466,7 @@ let test_require_and_list () =
   let p () =
     let _ = Parseff.char '[' in
     let items =
-      Parseff.list errors
+      Parseff.list
         ~sep:(fun () -> ignore (Parseff.char ','))
         ~close:(fun () ->
           Parseff.or_
@@ -479,7 +479,7 @@ let test_require_and_list () =
         (fun _ -> "?")
         ()
     in
-    Parseff.require errors (fun () -> ignore (Parseff.char ']')) ignore;
+    Parseff.require (fun () -> ignore (Parseff.char ']')) ignore;
     String.concat "," items
   in
   let show_diags () =

@@ -58,31 +58,31 @@ let comma () =
 let integer () =
   Int (int_of_string (take_while ~at_least:1 ~label:"integer" is_digit))
 
-let rec value d () =
+let rec value () =
   let v =
     match peek_char () with
     | Some '[' ->
         ignore (char '[');
         ws ();
-        List (items d ']')
+        List (items ']')
     | Some '"' ->
         Str (string_literal ())
     | Some c when is_lower c ->
         let name = take_while is_lower in
         ignore (char '(');
         ws ();
-        Call (name, items d ')')
+        Call (name, items ')')
     | _ ->
         integer ()
   in
   ws ();
   v
 
-and items d close =
+and items close =
   let xs =
-    list ~sep:comma d
+    list ~sep:comma
       ~close:(fun () -> peek_char () = Some close)
-      ~sync:skip_value (value d)
+      ~sync:skip_value value
       (fun _ -> Hole)
       ()
   in
@@ -91,7 +91,7 @@ and items d close =
 
 let run input =
   let d = Diagnostics.create () in
-  let r = parse ~diagnostics:d input (value d) in
+  let r = parse ~diagnostics:d input value in
   (show_result r, errors d)
 
 let case input value errors =
@@ -153,15 +153,15 @@ let skip_one_counter () =
   done
 
 let test_one_counter_differs () =
-  let rec value d () =
+  let rec value () =
     match peek_char () with
     | Some c when is_lower c ->
         let name = take_while is_lower in
         ignore (char '(');
         let xs =
-          list ~sep:comma d
+          list ~sep:comma
             ~close:(fun () -> peek_char () = Some ')')
-            ~sync:skip_one_counter (value d)
+            ~sync:skip_one_counter value
             (fun _ -> Hole)
             ()
         in
@@ -171,7 +171,7 @@ let test_one_counter_differs () =
         integer ()
   in
   let d = Diagnostics.create () in
-  let r = parse ~diagnostics:d "g(f(1, ?[2 ), 3)" (value d) in
+  let r = parse ~diagnostics:d "g(f(1, ?[2 ), 3)" value in
   Alcotest.(check string)
     "value" "Error at 16: expected ')' or ',', found end of input"
     (show_result r)
@@ -193,7 +193,7 @@ let test_streaming () =
       let r =
         parse_source ~diagnostics:d
           (Source.of_seq (Seq.map (String.make 1) (String.to_seq input)))
-          (value d)
+          value
       in
       let expected, expected_errors = run input in
       Alcotest.(check string) (input ^ ": value") expected (show_result r);
@@ -217,7 +217,7 @@ let test_same_as_sep_by () =
   in
   let d = Diagnostics.create () in
   let recovering () =
-    list ~sep:comma ~trailing:true d
+    list ~sep:comma ~trailing:true
       ~close:(fun () -> false)
       ~sync:skip_value
       (fun () -> any_char ())
@@ -247,8 +247,7 @@ let test_same_as_sep_by () =
     = Ok [ 'a'; 'b'; ' '; 'c' ]
     )
 
-let test_wrong_collector () =
-  let d = Diagnostics.create () in
+let test_no_collector () =
   let calls = ref 0 in
   let list () =
     list ~sep:comma
@@ -256,38 +255,27 @@ let test_wrong_collector () =
         incr calls;
         [ e ]
       )
-      d
       ~close:(fun () -> false)
-      ~sync:skip_value (value d)
+      ~sync:skip_value value
       (fun _ -> Hole)
       ()
   in
-  let plain () = sep_by (value d) comma () in
+  let plain () = sep_by value comma () in
   List.iter
     (fun input ->
       let expected = show_result (parse input (fun () -> List (plain ()))) in
       Alcotest.(check string)
         (input ^ ": no collector") expected
-        (show_result (parse input (fun () -> List (list ()))));
-      Alcotest.(check string)
-        (input ^ ": other collector")
-        expected
-        (show_result
-           (parse ~diagnostics:(Diagnostics.create ()) input (fun () ->
-                List (list ())
-            )
-           )
-        )
+        (show_result (parse input (fun () -> List (list ()))))
     )
     [ "1"; "1, 2"; "1, ?, 3"; "?" ];
-  Alcotest.(check int) "keep not called" 0 !calls;
-  Alcotest.(check int) "nothing recorded" 0 (Diagnostics.length d)
+  Alcotest.(check int) "keep not called" 0 !calls
 
 let test_rollback () =
   let d = Diagnostics.create () in
   let r =
     parse ~diagnostics:d "[1, ?, 3}"
-      (or_ (value d) (fun () ->
+      (or_ value (fun () ->
            ignore (take_while (fun _ -> true));
            Hole
        )
@@ -316,7 +304,7 @@ let issue_60_list ?keep ?(source = false) input =
   let parser () =
     ignore (char '[');
     let xs =
-      list ~sep:comma ?keep d
+      list ~sep:comma ?keep
         ~close:(fun () -> peek_char () = Some ']')
         ~sync:(skip_nested [ ('[', ']') ] (fun c -> c = ','))
         element
@@ -383,7 +371,6 @@ let test_record_arguments () =
                 (e :: inner);
             []
           )
-          d
           ~close:(fun () -> false)
           ~sync:(fun () -> skip_while (fun c -> c <> ','))
           element
@@ -417,7 +404,6 @@ let test_release () =
           List
             (list ?release ?keep
                ~sep:(fun () -> ignore (char ','))
-               d
                ~close:(fun () -> false)
                ~sync:(fun () ->
                  seen := position () :: !seen;
@@ -486,7 +472,7 @@ let test_streaming_release () =
         (fun () ->
           ignore (char '[');
           let xs =
-            list ?release ~sep:comma d
+            list ?release ~sep:comma
               ~close:(fun () -> peek_char () = Some ']')
               ~sync:skip_value element
               (fun _ -> Hole)
@@ -521,7 +507,6 @@ let test_failing_hole () =
           let xs =
             list ?keep
               ~sep:(fun () -> ignore (char ','))
-              d
               ~close:(fun () -> peek_char () = Some ']')
               ~sync:(fun () -> skip_while (fun c -> c <> ',' && c <> ']'))
               (fun () -> Int (Char.code (digit ()) - 48))
@@ -560,7 +545,7 @@ let test_outer_false () =
           context ~delimited:true "list" (fun () ->
               ignore (char '[');
               let xs =
-                list ?contexts ~sep:comma d
+                list ?contexts ~sep:comma
                   ~close:(fun () -> peek_char () = Some ']')
                   ~sync:skip_value
                   (fun () ->
@@ -596,7 +581,7 @@ let run_table ?trailing input =
         ignore (char '{');
         ws ();
         let xs =
-          list ~sep:comma ?trailing d
+          list ~sep:comma ?trailing
             ~close:(fun () -> peek_char () = Some '}')
             ~sync:(skip_nested [ ('{', '}') ] (fun c -> c = ','))
             (fun () ->
@@ -641,7 +626,6 @@ let test_record_not_called () =
                 incr calls;
                 [ e ]
               )
-              d
               ~close:(fun () -> peek_char () = Some ']')
               ~sync:skip_value
               (fun () ->
@@ -731,7 +715,7 @@ let () =
           test_case "end of input" `Quick test_end_of_input;
           test_case "streaming" `Quick test_streaming;
           test_case "same as sep_by" `Quick test_same_as_sep_by;
-          test_case "wrong collector" `Quick test_wrong_collector;
+          test_case "no collector" `Quick test_no_collector;
           test_case "release" `Quick test_release;
           test_case "failing hole or keep" `Quick test_failing_hole;
           test_case "streaming release" `Quick test_streaming_release;

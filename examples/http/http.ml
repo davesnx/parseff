@@ -165,31 +165,41 @@ let status () =
 
 let folded_fields () =
   Parseff.context "header section" (fun () ->
-      let rec loop n acc =
-        match (Parseff.peek_char (), acc) with
-        | Some '\r', _ ->
-            crlf ();
-            List.rev acc
-        | _ when n = max_headers ->
-            Parseff.error (Parseff.Limit_exceeded { limit = max_headers })
-        | Some (' ' | '\t'), (name, value) :: rest ->
+      let start = Parseff.position () in
+      let line () =
+        match Parseff.peek_char () with
+        | Some (' ' | '\t') when Parseff.position () > start ->
             Parseff.skip_while ~set:ows is_ows;
             let more =
               Parseff.take_while ~at_most:max_value ~set:field_char
                 is_field_char
             in
             crlf ();
-            let value =
-              if value = "" then
-                more
-              else
-                value ^ " " ^ more
-            in
-            loop (n + 1) ((name, trim_ows value) :: rest)
+            `Fold more
         | _ ->
-            loop (n + 1) (field () :: acc)
+            `Field (field ())
       in
-      loop 0 []
+      let lines = Parseff.many ~at_most:max_headers line () in
+      crlf ();
+      List.rev
+        (List.fold_left
+           (fun acc line ->
+             match (line, acc) with
+             | `Field f, _ ->
+                 f :: acc
+             | `Fold more, (name, value) :: rest ->
+                 let value =
+                   if value = "" then
+                     more
+                   else
+                     value ^ " " ^ more
+                 in
+                 (name, trim_ows value) :: rest
+             | `Fold _, [] ->
+                 acc
+           )
+           [] lines
+        )
   )
 
 let rec skip_empty_lines () =
@@ -425,13 +435,13 @@ let status_of_error (e : Parseff.error) =
     match List.rev e.contexts with c :: _ -> c.name | [] -> ""
   in
   match e.kind with
-  | Custom (Parseff.Limit_exceeded _) when innermost = "method" ->
+  | Parseff.Limit_exceeded _ when innermost = "method" ->
       (501, "Not Implemented")
   | Custom (Unsupported_coding _) ->
       (501, "Not Implemented")
-  | Custom (Parseff.Limit_exceeded _) when innermost = "request target" ->
+  | Parseff.Limit_exceeded _ when innermost = "request target" ->
       (414, "URI Too Long")
-  | Custom (Parseff.Limit_exceeded _)
+  | Parseff.Limit_exceeded _
     when innermost = "header section" || innermost = "trailer section" ->
       (431, "Request Header Fields Too Large")
   | Backtrack_window_exceeded _

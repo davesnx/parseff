@@ -4,19 +4,17 @@ open Parseff
 
 module Nested_or = struct
   let calls = ref 0
-  let rec value n j d () =
+  let rec value n j () =
     if j = n then incr calls;
     or_
       (fun () ->
         ignore (char '(');
-        let v = value n (j + 1) d () in
+        let v = value n (j + 1) () in
         ignore (char ')');
         v
       )
       (fun () ->
-        recover d ~sync:ignore
-          (fun () -> String.make 1 (digit ()))
-          (fun _ -> "?")
+        recover ~sync:ignore (fun () -> String.make 1 (digit ())) (fun _ -> "?")
       )
       ()
   let counter = calls
@@ -25,7 +23,7 @@ end
 module S1 = struct
   let count = ref 0
   let nop () = ()
-  let x1 errors k =
+  let x1 k =
     let rec level j () =
       expression
         ~operand:(fun () ->
@@ -43,9 +41,7 @@ module S1 = struct
                 ignore
                   (or_
                      (fun () ->
-                       recover errors ~sync:nop
-                         (fun () -> char 'q')
-                         (fun _ -> 'H')
+                       recover ~sync:nop (fun () -> char 'q') (fun _ -> 'H')
                      )
                      (fun () -> 'e')
                      ()
@@ -63,7 +59,7 @@ end
 module S2 = struct
   let count = ref 0
   let nop () = ()
-  let family absorb errors k =
+  let family absorb k =
     let rec level j () : unit =
       or_
         (fun () ->
@@ -80,9 +76,7 @@ module S2 = struct
           );
           ignore
             (or_
-               (fun () ->
-                 recover errors ~sync:nop (fun () -> char 'q') (fun _ -> 'H')
-               )
+               (fun () -> recover ~sync:nop (fun () -> char 'q') (fun _ -> 'H'))
                (fun () -> 'e')
                ()
             );
@@ -109,9 +103,9 @@ module S2 = struct
          )
          ()
       )
-  let by_list errors f =
+  let by_list f =
     ignore
-      (list errors
+      (list
          ~close:(fun () -> true)
          ~sync:nop
          (fun () ->
@@ -127,7 +121,7 @@ end
 module S3 = struct
   let calls = ref 0
   let nop () = ()
-  let grammar errors =
+  let grammar =
     let rec item () : unit =
       rec_ (fun () ->
           incr calls;
@@ -146,7 +140,7 @@ module S3 = struct
               ignore
                 (or_
                    (fun () ->
-                     recover errors ~sync:nop (fun () -> char 'q') (fun _ -> 'H')
+                     recover ~sync:nop (fun () -> char 'q') (fun _ -> 'H')
                    )
                    (fun () -> 'e')
                    ()
@@ -170,7 +164,7 @@ end
 module S4 = struct
   let count = ref 0
   let s1 c = String.make 1 c
-  let family errors k =
+  let family k =
     let rec level j () : string =
       let inner () =
         if j < k then
@@ -184,9 +178,7 @@ module S4 = struct
         match
           optional
             (fun () ->
-              recover errors ~sync:ignore
-                (fun () -> s1 (char 'a'))
-                (fun _ -> "H")
+              recover ~sync:ignore (fun () -> s1 (char 'a')) (fun _ -> "H")
             )
             ()
         with
@@ -199,7 +191,6 @@ module S4 = struct
         let l =
           list
             ~sep:(fun () -> ignore (char 'a'))
-            errors
             ~close:(fun () -> peek_char () = Some 'c')
             ~sync:ignore inner
             (fun _ -> "H")
@@ -217,7 +208,7 @@ end
 module S9 = struct
   let count = ref 0
   let s1 c = String.make 1 c
-  let family errors k =
+  let family k =
     let rec level j () : string =
       let next () =
         if j < k then
@@ -233,7 +224,6 @@ module S9 = struct
             String.concat ","
               (list ~release:true
                  ~sep:(fun () -> ignore ((fun () -> char 'b') ()))
-                 errors
                  ~close:(fun () -> false)
                  ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
                  (fun () -> s1 (char 'a'))
@@ -294,15 +284,15 @@ module S11 = struct
   let calls = ref 0
   let s1 c = String.make 1 c
   let a () = s1 (char 'a')
-  let rec t1 k d () =
+  let rec t1 k () =
     if k = 0 then (
       incr calls;
       s1 (char 'k')
     ) else
       or_
         (fun () ->
-          let l = sep_by (t1 (k - 1) d) (fun () -> cut ()) () in
-          String.concat "" l ^ context "c" (fun () -> require d a (fun _ -> "M"))
+          let l = sep_by (t1 (k - 1)) (fun () -> cut ()) () in
+          String.concat "" l ^ context "c" (fun () -> require a (fun _ -> "M"))
         )
         (fun () ->
           context "c" (fun () ->
@@ -311,15 +301,15 @@ module S11 = struct
           )
         )
         ()
-  let rec t1b k d () =
+  let rec t1b k () =
     if k = 0 then (
       incr calls;
       s1 (char 'k')
     ) else
       or_
         (fun () ->
-          let l = sep_by (t1b (k - 1) d) (fun () -> cut ()) () in
-          String.concat "" l ^ require d a (fun _ -> "M")
+          let l = sep_by (t1b (k - 1)) (fun () -> cut ()) () in
+          String.concat "" l ^ require a (fun _ -> "M")
         )
         (fun () ->
           context "c" (fun () ->
@@ -328,20 +318,18 @@ module S11 = struct
           )
         )
         ()
-  let rec t2 k d () =
+  let rec t2 k () =
     if k = 0 then (
       incr calls;
       s1 (char 'k')
     ) else
       fold_left
-        (fun () ->
-          match capture (t2 (k - 1) d) with Ok v -> v | Error _ -> "E"
-        )
+        (fun () -> match capture (t2 (k - 1)) with Ok v -> v | Error _ -> "E")
         (fun () ->
           let o =
             context "c" (fun () ->
                 cut ();
-                require d a (fun _ -> "M")
+                require a (fun _ -> "M")
             )
           in
           fun x y -> x ^ o ^ y
@@ -381,7 +369,7 @@ module S12 = struct
         ];
       ]
       ()
-  let rec t ~ctx k d () =
+  let rec t ~ctx k () =
     if k = 0 then (
       incr calls;
       s1 (char 'k')
@@ -391,9 +379,9 @@ module S12 = struct
           ~operand:
             (expr
                ~operand:(fun () ->
-                 require d (fun () -> s1 (char 'a')) (fun _ -> "M")
+                 require (fun () -> s1 (char 'a')) (fun _ -> "M")
                )
-               ~pre:(t ~ctx (k - 1) d)
+               ~pre:(t ~ctx (k - 1))
                ~il:eps
                ~ir:(fun () -> s1 (char 'b'))
                ~post:(fun () -> s1 (char 'a'))
@@ -422,48 +410,47 @@ module S13 = struct
     s1 (char 'k')
   let closed () = peek_char () = Some ')'
   let sync () = skip_while (fun c -> c <> 'b')
-  let lst ?sep d el =
+  let lst ?sep el =
     "<"
-    ^ String.concat "," (list ?sep d ~close:closed ~sync el (fun _ -> "H") ())
+    ^ String.concat "," (list ?sep ~close:closed ~sync el (fun _ -> "H") ())
     ^ ">"
-  let rec ta k d () =
+  let rec ta k () =
     if k = 0 then
       leaf ()
     else
-      let l = lst ~sep:(fun () -> commit ()) d (ta (k - 1) d) in
-      l ^ require d (fun () -> fail "u") (fun _ -> "M")
-  let rec tb k d () =
+      let l = lst ~sep:(fun () -> commit ()) (ta (k - 1)) in
+      l ^ require (fun () -> fail "u") (fun _ -> "M")
+  let rec tb k () =
     if k = 0 then
       leaf ()
     else
       fold_right
-        (fun () -> require d (fun () -> s1 (char 'a')) (fun _ -> "M"))
+        (fun () -> require (fun () -> s1 (char 'a')) (fun _ -> "M"))
         (fun () ->
-          let t = lst ~sep:(fun () -> commit ()) d (tb (k - 1) d) in
+          let t = lst ~sep:(fun () -> commit ()) (tb (k - 1)) in
           fun x y -> "{" ^ x ^ t ^ y ^ "}"
         )
         ()
-  let rec tc k d () =
+  let rec tc k () =
     if k = 0 then
       leaf ()
     else
       lst
         ~sep:(fun () -> cut ())
-        d
         (fun () ->
           one_of
             [
               (fun () ->
                 or_
-                  (fun () -> require d (fun () -> fail "u") (fun _ -> "M"))
-                  (tc (k - 1) d)
+                  (fun () -> require (fun () -> fail "u") (fun _ -> "M"))
+                  (tc (k - 1))
                   ()
               );
               (fun () -> s1 (char 'a'));
             ]
             ()
         )
-  let rec td k d () =
+  let rec td k () =
     if k = 0 then
       leaf ()
     else
@@ -473,8 +460,8 @@ module S13 = struct
             fold_right
               (fun () ->
                 or_
-                  (fun () -> require d (fun () -> s1 (char 'a')) (fun _ -> "M"))
-                  (td (k - 1) d)
+                  (fun () -> require (fun () -> s1 (char 'a')) (fun _ -> "M"))
+                  (td (k - 1))
                   ()
               )
               (fun () ->
@@ -482,7 +469,7 @@ module S13 = struct
                   String.concat ","
                     (sep_by
                        (fun () ->
-                         require d (fun () -> s1 (char 'a')) (fun _ -> "M")
+                         require (fun () -> s1 (char 'a')) (fun _ -> "M")
                        )
                        (fun () -> cut ())
                        ()
@@ -507,25 +494,25 @@ module S14 = struct
   let leaf () =
     incr calls;
     s1 (char 'k')
-  let req_a d () = require d (fun () -> s1 (char 'a')) (fun _ -> "M")
+  let req_a () = require (fun () -> s1 (char 'a')) (fun _ -> "M")
   let sync () = skip_while (fun c -> c <> 'b')
-  let rec te ~post k d () =
+  let rec te ~post k () =
     if k = 0 then
       leaf ()
     else
       let e () =
-        expression ~operand:(req_a d)
+        expression ~operand:req_a
           ([
              [
                infix_left (fun () ->
-                   let t = req_a d () in
+                   let t = req_a () in
                    fun x y -> "(" ^ x ^ "L" ^ t ^ y ^ ")"
                );
              ];
              [
                prefix (fun () -> fun x -> "(P" ^ x ^ ")");
                infix_right (fun () ->
-                   let t = te ~post (k - 1) d () in
+                   let t = te ~post (k - 1) () in
                    fun x y -> "(" ^ x ^ "R" ^ t ^ y ^ ")"
                );
              ];
@@ -541,7 +528,6 @@ module S14 = struct
                            ~sep:(fun () ->
                              ignore ((fun () -> ignore (char 'b')) ())
                            )
-                           d
                            ~close:(fun () -> false)
                            ~sync
                            (fun () -> s1 (char 'a'))
@@ -561,7 +547,6 @@ module S14 = struct
       String.concat ","
         (list
            ~sep:(fun () -> ())
-           d
            ~close:(fun () -> peek_char () = Some 'c')
            ~sync e
            (fun _ -> "H")
@@ -572,7 +557,7 @@ end
 
 module U1 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let rec level j () : unit =
       let inner () =
         if j < k then
@@ -583,7 +568,7 @@ module U1 = struct
         )
       in
       cut ();
-      require errors
+      require
         (fun () ->
           expression ~operand:inner
             [
@@ -618,7 +603,7 @@ end
 
 module U2 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let rec level j () : unit =
       let inner () =
         if j < k then
@@ -630,7 +615,7 @@ module U2 = struct
       in
       let sep () =
         expression
-          ~operand:(fun () -> require errors inner (fun _ -> ()))
+          ~operand:(fun () -> require inner (fun _ -> ()))
           [
             [
               infix_left (fun () ->
@@ -655,7 +640,7 @@ module U2 = struct
           ()
       in
       ignore
-        (list ~release:true ~sep errors
+        (list ~release:true ~sep
            ~close:(fun () -> peek_char () = Some 'c')
            ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
            (fun () -> cut ())
@@ -671,15 +656,13 @@ end
 module T1 = struct
   let count = ref 0
   let nop () = ()
-  let family errors k =
+  let family k =
     let rec level j () : unit =
       ignore
         (list
            ~sep:(fun () ->
-             ignore
-               (recover errors ~sync:nop (fun () -> char 'c') (fun _ -> 'H'))
+             ignore (recover ~sync:nop (fun () -> char 'c') (fun _ -> 'H'))
            )
-           errors
            ~close:(fun () -> peek_char () = Some 'c')
            ~sync:(fun () -> skip_while (fun c -> c <> 'b'))
            (fun () ->
@@ -700,9 +683,9 @@ end
 
 module T2 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let rec level j () : unit =
-      require errors
+      require
         (fun () ->
           let inner () =
             if j < k then
@@ -747,7 +730,7 @@ end
 
 module Z1 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let sync () = skip_while (fun c -> c <> 'b') in
     let rec level j () : unit =
       let inner () =
@@ -763,7 +746,6 @@ module Z1 = struct
           ignore
             (list
                ~sep:(fun () -> ignore (inner ()))
-               errors
                ~close:(fun () -> false)
                ~sync inner
                (fun _ -> ())
@@ -804,7 +786,7 @@ end
 
 module Z2 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let sync () = skip_while (fun c -> c <> 'b') in
     let rec level j () : unit =
       let inner () =
@@ -820,7 +802,6 @@ module Z2 = struct
           ignore
             (list
                ~sep:(fun () -> ignore (inner ()))
-               errors
                ~close:(fun () -> false)
                ~sync inner
                (fun _ -> ())
@@ -868,7 +849,7 @@ module X1 = struct
         e
     | Ok () ->
         assert false
-  let family errors k =
+  let family k =
     let sync () = skip_while (fun c -> c <> 'b') in
     let rec level j () : unit =
       let inner () =
@@ -891,7 +872,6 @@ module X1 = struct
                       ()
                    )
                )
-               errors
                ~close:(fun () -> false)
                ~sync
                (fun () -> ignore (char 'a'))
@@ -906,7 +886,6 @@ module X1 = struct
                   (within 3 (fun () ->
                        list
                          ~sep:(fun () -> ignore (char 'a'))
-                         errors
                          ~close:(fun () -> peek_char () = Some 'c')
                          ~sync
                          (fun () -> commit ())
@@ -942,7 +921,7 @@ end
 
 module V1 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let sync () = skip_while (fun c -> c <> 'b') in
     let rec level j () : unit =
       let inner () =
@@ -961,7 +940,7 @@ module V1 = struct
                   ignore
                     (optional
                        (fun () ->
-                         list errors
+                         list
                            ~close:(fun () -> peek_char () = Some 'c')
                            ~sync
                            (fun () -> ignore (char 'z'))
@@ -974,7 +953,6 @@ module V1 = struct
                   ()
                )
            )
-           errors
            ~close:(fun () -> false)
            ~sync inner
            (fun _ -> ())
@@ -989,7 +967,7 @@ end
 
 module V2 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let cell = Ref.create 0 in
     let rec level j () : unit =
       let inner () =
@@ -1002,7 +980,7 @@ module V2 = struct
       in
       expression
         ~operand:(fun () ->
-          require errors
+          require
             (fun () ->
               ignore (char 'a');
               ignore (char 'a')
@@ -1033,7 +1011,7 @@ module V2 = struct
         [
           (fun () ->
             ignore
-              (recover ~release:true errors
+              (recover ~release:true
                  ~sync:(fun () -> ())
                  (fun () ->
                    literal "ab";
@@ -1053,7 +1031,7 @@ end
 
 module C1 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let sync () = skip_while (fun c -> c <> 'b') in
     let rec level j () : unit =
       let inner () =
@@ -1072,13 +1050,13 @@ module C1 = struct
                (fun () -> one_of [ inner; (fun () -> ignore (char 'c')) ] ())
                (fun () ->
                  ignore
-                   (list errors
+                   (list
                       ~close:(fun () -> peek_char () = Some 'c')
                       ~sync
                       (fun () ->
                         context "c" (fun () ->
                             cut ();
-                            require errors
+                            require
                               (fun () -> ignore (any_char ()))
                               (fun _ -> ())
                         )
@@ -1100,7 +1078,7 @@ end
 
 module C2 = struct
   let count = ref 0
-  let family errors k =
+  let family k =
     let sync () = skip_while (fun c -> c <> 'b') in
     let cell = Ref.create 0 in
     let rec level j () : unit =
@@ -1168,7 +1146,6 @@ module C2 = struct
       ignore
         (list
            ~sep:(fun () -> ignore (e1 ()))
-           errors
            ~close:(fun () -> false)
            ~sync
            (fun () -> fail "u")
@@ -1189,9 +1166,9 @@ let runs counter run input k ~collector =
   let outcome =
     match
       if collector then
-        parse ~consume:`Partial ~diagnostics:d (input k) (fun () -> run d k)
+        parse ~consume:`Partial ~diagnostics:d (input k) (fun () -> run k)
       else
-        parse ~consume:`Partial (input k) (fun () -> run d k)
+        parse ~consume:`Partial (input k) (fun () -> run k)
     with
     | _ ->
         Parsed
@@ -1258,7 +1235,7 @@ let shapes =
   [
     ( "s1",
       S1.counter,
-      (fun d k -> ignore (S1.x1 d k ())),
+      (fun k -> ignore (S1.x1 k ())),
       (fun _ -> "z"),
       never,
       [
@@ -1275,196 +1252,196 @@ let shapes =
     );
     ( "s2 fold_right",
       S2.counter,
-      (fun d k -> ignore (S2.family ((fun _ -> S2.by_fold_right) d) d k ())),
+      (fun k -> ignore (S2.family S2.by_fold_right k ())),
       (fun _ -> "z"),
       never,
       [ (1, 3); (2, 5); (4, 9); (8, 17); (16, 33); (20, 41) ]
     );
     ( "s2 capture",
       S2.counter,
-      (fun d k -> ignore (S2.family ((fun _ -> S2.by_capture) d) d k ())),
+      (fun k -> ignore (S2.family S2.by_capture k ())),
       (fun _ -> "z"),
       never,
       [ (1, 2); (2, 3); (4, 5); (8, 9); (16, 17); (20, 21) ]
     );
     ( "s2 many",
       S2.counter,
-      (fun d k -> ignore (S2.family ((fun _ -> S2.by_many) d) d k ())),
+      (fun k -> ignore (S2.family S2.by_many k ())),
       (fun _ -> "z"),
       never,
       [ (1, 3); (2, 5); (4, 9); (8, 17); (16, 33); (20, 41) ]
     );
     ( "s2 list",
       S2.counter,
-      (fun d k -> ignore (S2.family (S2.by_list d) d k ())),
+      (fun k -> ignore (S2.family S2.by_list k ())),
       (fun _ -> "z"),
       never,
       [ (1, 1); (2, 1); (4, 1); (8, 1); (16, 1); (20, 1) ]
     );
     ( "s3",
       S3.counter,
-      (fun d _ -> ignore (S3.grammar d ())),
+      (fun _ -> ignore (S3.grammar ())),
       (fun k -> String.make k '(' ^ "z"),
       never,
       [ (1, 5); (2, 11); (4, 29); (8, 89); (12, 181); (16, 305) ]
     );
     ( "s4",
       S4.counter,
-      (fun d k -> ignore (S4.family d k ())),
+      (fun k -> ignore (S4.family k ())),
       (fun _ -> "ab"),
       never,
       [ (1, 3); (2, 2); (4, 2); (8, 2); (12, 2); (16, 2); (20, 2) ]
     );
     ( "s9",
       S9.counter,
-      (fun d k -> ignore (S9.family d k ())),
+      (fun k -> ignore (S9.family k ())),
       (fun _ -> "ab"),
       never,
       [ (1, 4); (2, 10); (4, 46); (8, 766) ]
     );
     ( "u1",
       U1.counter,
-      (fun d k -> ignore (U1.family d k ())),
+      (fun k -> ignore (U1.family k ())),
       (fun _ -> "baabc"),
       never,
       [ (1, 5); (2, 13); (4, 13); (6, 13); (8, 13); (10, 13); (12, 13) ]
     );
     ( "u2",
       U2.counter,
-      (fun d k -> ignore (U2.family d k ())),
+      (fun k -> ignore (U2.family k ())),
       (fun _ -> "aacaba"),
       never,
       [ (1, 10); (2, 10); (4, 10); (6, 10); (8, 10); (10, 10); (12, 10) ]
     );
     ( "t1",
       T1.counter,
-      (fun d k -> ignore (T1.family d k ())),
+      (fun k -> ignore (T1.family k ())),
       (fun _ -> "bc"),
       never,
       [ (1, 2); (2, 2); (4, 2); (6, 2); (8, 2); (10, 2); (12, 2) ]
     );
     ( "t2",
       T2.counter,
-      (fun d k -> ignore (T2.family d k ())),
+      (fun k -> ignore (T2.family k ())),
       (fun _ -> "a"),
       (fun k -> k >= 2),
       [ (1, 1); (2, 3); (3, 3); (4, 3); (5, 3); (6, 3); (7, 3); (8, 3) ]
     );
     ( "z1",
       Z1.counter,
-      (fun d k -> ignore (Z1.family d k ())),
+      (fun k -> ignore (Z1.family k ())),
       (fun _ -> Z1.input),
       never,
       [ (1, 15); (2, 70); (3, 74); (4, 350); (5, 345); (6, 1600) ]
     );
     ( "z2",
       Z2.counter,
-      (fun d k -> ignore (Z2.family d k ())),
+      (fun k -> ignore (Z2.family k ())),
       (fun _ -> Z2.input),
       never,
       [ (1, 31); (2, 115); (3, 703); (4, 4819) ]
     );
     ( "x1",
       X1.counter,
-      (fun d k -> ignore (X1.family d k ())),
+      (fun k -> ignore (X1.family k ())),
       (fun _ -> "baaaa"),
       never,
       [ (1, 6); (2, 14); (4, 62); (8, 1022) ]
     );
     ( "c2",
       C2.counter,
-      (fun d k -> ignore (C2.family d k ())),
+      (fun k -> ignore (C2.family k ())),
       (fun _ -> C2.input),
       never,
       [ (1, 2); (2, 4); (3, 8); (4, 16); (5, 32); (6, 64); (8, 256) ]
     );
     ( "v1",
       V1.counter,
-      (fun d k -> ignore (V1.family d k ())),
+      (fun k -> ignore (V1.family k ())),
       (fun _ -> V1.input),
       never,
       [ (1, 5); (2, 7); (3, 9); (4, 11); (5, 13); (6, 15); (8, 19) ]
     );
     ( "v2",
       V2.counter,
-      (fun d k -> ignore (V2.family d k ())),
+      (fun k -> ignore (V2.family k ())),
       (fun _ -> V2.input),
       never,
       [ (1, 6); (2, 6); (3, 6); (4, 6); (5, 6); (6, 6); (8, 6) ]
     );
     ( "s11 t1",
       S11.counter,
-      (fun d k -> ignore (S11.t1 k d ())),
+      (fun k -> ignore (S11.t1 k ())),
       (fun _ -> ""),
       never,
       [ (1, 1); (2, 2); (4, 8); (8, 128); (12, 2048) ]
     );
     ( "s11 t1b",
       S11.counter,
-      (fun d k -> ignore (S11.t1b k d ())),
+      (fun k -> ignore (S11.t1b k ())),
       (fun _ -> ""),
       never,
       [ (1, 1); (2, 2); (4, 8); (8, 128); (12, 2048) ]
     );
     ( "s11 t2",
       S11.counter,
-      (fun d k -> ignore (S11.t2 k d ())),
+      (fun k -> ignore (S11.t2 k ())),
       (fun _ -> ""),
       never,
       [ (1, 2); (2, 4); (4, 16); (8, 256); (12, 4096) ]
     );
     ( "s12 context true",
       S12.counter,
-      (fun d k -> ignore (S12.t ~ctx:true k d ())),
+      (fun k -> ignore (S12.t ~ctx:true k ())),
       (fun _ -> "a"),
       never,
       [ (1, 4); (2, 24); (3, 108); (4, 448); (5, 1812); (6, 7272); (8, 116496) ]
     );
     ( "s12 context false",
       S12.counter,
-      (fun d k -> ignore (S12.t ~ctx:false k d ())),
+      (fun k -> ignore (S12.t ~ctx:false k ())),
       (fun _ -> "a"),
       never,
       [ (1, 4); (2, 24); (3, 108); (4, 448); (5, 1812); (6, 7272); (8, 116496) ]
     );
     ( "s13 A",
       S13.counter,
-      (fun d k -> ignore (S13.ta k d ())),
+      (fun k -> ignore (S13.ta k ())),
       (fun _ -> "k"),
       never,
       [ (2, 3); (4, 5); (8, 9); (12, 13); (16, 17) ]
     );
     ( "s13 B",
       S13.counter,
-      (fun d k -> ignore (S13.tb k d ())),
+      (fun k -> ignore (S13.tb k ())),
       (fun _ -> "z"),
       never,
       [ (2, 4); (4, 4); (8, 4); (12, 4); (16, 4) ]
     );
     ( "s14 postfix",
       S14.counter,
-      (fun d k -> ignore (S14.te ~post:true k d ())),
+      (fun k -> ignore (S14.te ~post:true k ())),
       (fun _ -> "z"),
       never,
       [ (1, 4); (2, 4); (4, 4); (8, 4); (12, 4); (14, 4) ]
     );
     ( "s14 no postfix",
       S14.counter,
-      (fun d k -> ignore (S14.te ~post:false k d ())),
+      (fun k -> ignore (S14.te ~post:false k ())),
       (fun _ -> "z"),
       never,
       [ (1, 2); (2, 8); (4, 128); (8, 32768) ]
     );
     ( "nested or_ around one error, closed",
       Nested_or.counter,
-      (fun d k -> ignore (Nested_or.value k 0 d ())),
+      (fun k -> ignore (Nested_or.value k 0 ())),
       (fun k -> String.make k '(' ^ "x" ^ String.make k ')'),
       never,
       [ (1, 1); (2, 1); (5, 1); (20, 1); (60, 1) ]
     );
     ( "nested or_ around one error, not closed",
       Nested_or.counter,
-      (fun d k -> ignore (Nested_or.value k 0 d ())),
+      (fun k -> ignore (Nested_or.value k 0 ())),
       (fun k -> String.make k '(' ^ "x"),
       never,
       [ (1, 2); (2, 3); (5, 6); (20, 21); (60, 61) ]
@@ -1475,7 +1452,7 @@ let gated_shapes =
   [
     ( "c1",
       C1.counter,
-      (fun d k -> ignore (C1.family d k ())),
+      (fun k -> ignore (C1.family k ())),
       (fun _ -> C1.input),
       never,
       [
@@ -1484,14 +1461,14 @@ let gated_shapes =
     );
     ( "s13 C",
       S13.counter,
-      (fun d k -> ignore (S13.tc k d ())),
+      (fun k -> ignore (S13.tc k ())),
       (fun _ -> "aab"),
       never,
       [ (2, 5); (4, 17); (8, 257); (12, 4097) ]
     );
     ( "s13 D",
       S13.counter,
-      (fun d k -> ignore (S13.td k d ())),
+      (fun k -> ignore (S13.td k ())),
       (fun _ -> "aab"),
       never,
       [ (2, 2); (4, 8); (8, 128); (12, 2048) ]
@@ -1514,7 +1491,7 @@ let () =
           Alcotest.test_case "an undeclared exception is a fault" `Quick
             (fun () ->
               let calls = ref 0 and phase = ref 0 in
-              let raising exn _ _ =
+              let raising exn _ =
                 incr phase;
                 if !phase mod 2 = 0 then raise exn
               in

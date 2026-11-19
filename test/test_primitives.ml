@@ -949,7 +949,7 @@ let digits_with_warning () =
 let test_warning_next_to_recovered_error () =
   let d = Parseff.Diagnostics.create () in
   let sync () = Parseff.skip_while (fun c -> c <> ';') in
-  let item () = Parseff.recover d ~sync digits_with_warning (fun _ -> -1) in
+  let item () = Parseff.recover ~sync digits_with_warning (fun _ -> -1) in
   let r =
     Parseff.parse ~diagnostics:d "07;x" (fun () ->
         let a = item () in
@@ -1920,7 +1920,7 @@ let test_span_get () =
 let check_location msg (offset, line, col) (actual : Parseff.location) =
   Alcotest.(check int) (msg ^ " offset") offset actual.offset;
   Alcotest.(check int) (msg ^ " line") line actual.line;
-  Alcotest.(check int) (msg ^ " col") col actual.col
+  Alcotest.(check int) (msg ^ " col") col actual.byte_col
 
 let test_location_at_start () =
   match

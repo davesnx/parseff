@@ -26,12 +26,8 @@ let check_ok name testable expected = function
       Alcotest.failf "%s: %s" name (Parseff.error_message e)
 
 let check_limit name ~limit ~range = function
-  | Error
-      {
-        Parseff.kind = Custom (Parseff.Limit_exceeded { limit = l });
-        range = r;
-        _;
-      } ->
+  | Error { Parseff.kind = Parseff.Limit_exceeded { limit = l }; range = r; _ }
+    ->
       Alcotest.(check int) (name ^ " limit") limit l;
       Alcotest.(check (pair int int)) (name ^ " range") range (r.start, r.stop)
   | Error e ->
@@ -328,10 +324,10 @@ let test_within_fail_range () =
 
 let test_within_recover_sync_to_end () =
   let input = "abcdefXYZ" in
-  let parser errors () =
+  let parser () =
     let v =
       Parseff.within 6 (fun () ->
-          Parseff.recover errors
+          Parseff.recover
             ~sync:(fun () -> Parseff.skip_while always)
             (fun () ->
               Parseff.literal "abX";
@@ -347,9 +343,7 @@ let test_within_recover_sync_to_end () =
     Alcotest.(check int) (name ^ " errors") 1 (Parseff.Diagnostics.length errors)
   in
   let errors = Parseff.Diagnostics.create () in
-  run "recover (string)"
-    (Parseff.parse ~diagnostics:errors input (parser errors))
-    errors;
+  run "recover (string)" (Parseff.parse ~diagnostics:errors input parser) errors;
   List.iter
     (fun chunk_size ->
       let errors = Parseff.Diagnostics.create () in
@@ -357,7 +351,7 @@ let test_within_recover_sync_to_end () =
         (Printf.sprintf "recover (chunks of %d)" chunk_size)
         (Parseff.parse_source ~diagnostics:errors
            (chunked_source ~chunk_size input)
-           (parser errors)
+           parser
         )
         errors
     )
@@ -956,9 +950,7 @@ let limit_parser at_most () =
   )
 
 let check_limit_contexts name ~limit ~range = function
-  | Error
-      ({ Parseff.kind = Custom (Parseff.Limit_exceeded { limit = l }); _ } as e)
-    ->
+  | Error ({ Parseff.kind = Parseff.Limit_exceeded { limit = l }; _ } as e) ->
       Alcotest.(check (pair int (pair int int)))
         name (limit, range)
         (l, (e.range.start, e.range.stop));
@@ -1053,7 +1045,7 @@ let test_limit_with_a_pause_in_recover () =
   let errors = Parseff.Diagnostics.create () in
   let parser () =
     ignore (Parseff.optional (fun () -> Parseff.literal "aaaX") ());
-    Parseff.recover errors
+    Parseff.recover
       ~sync:(fun () -> Parseff.skip_while (fun _ -> true))
       (fun () -> Parseff.take_while ~at_most:1 is_a)
       (fun _ -> "hole")
@@ -1092,8 +1084,7 @@ let test_limit_with_a_pause_in_recover () =
   check_ok "recover" Alcotest.string "hole" result;
   Alcotest.(check bool) "parses ran during the reads" true (!others > 0);
   match Parseff.Diagnostics.to_list errors with
-  | [ { value = { kind = Custom (Parseff.Limit_exceeded { limit }); _ }; _ } ]
-    ->
+  | [ { value = { kind = Parseff.Limit_exceeded { limit }; _ }; _ } ] ->
       Alcotest.(check int) "recorded limit" 1 limit
   | l ->
       Alcotest.failf "expected one limit error, got %d errors" (List.length l)

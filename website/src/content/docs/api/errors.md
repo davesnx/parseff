@@ -19,7 +19,7 @@ Parseff exposes four main APIs for error handling:
 
 A parse fails with one of two sorts of error.
 
-**Built-in errors** come from Parseff itself: a primitive such as `Parseff.char` does not match, `Parseff.fail` stops with a message, or a limit such as `max_depth` is reached. Their `kind` is `Expected`, `Failed`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`. You do not declare them, and `Parseff.render_error` prints them with a full message.
+**Built-in errors** come from Parseff itself: a primitive such as `Parseff.char` does not match, `Parseff.fail` stops with a message, or a limit such as `max_depth` is reached. Their `kind` is `Expected`, `Failed`, `Limit_exceeded`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`. You do not declare them, and `Parseff.render_error` prints them with a full message.
 
 **Custom errors** are cases you add to `Parseff.custom_error`. You raise them with `Parseff.error` and get them back in `kind` as `Custom`. Use them when the input has the right shape but a wrong value, such as a number out of range, and the caller must handle that case in code, not only print it. Give `Parseff.render_error` a `~custom` printer to print them.
 
@@ -228,7 +228,7 @@ type error = {
   kind : error_kind;
   range : range;  (** the bytes the error is about, empty at the end of the input *)
   location : location option;
-      (** line and column of [range.start], [None] when the line is not known; [col] counts bytes, the column [render_error] prints counts Unicode characters *)
+      (** line and column of [range.start], [None] when the line is not known; [byte_col] counts bytes, the column [render_error] prints counts Unicode characters *)
   contexts : context list;  (** open constructs, outermost first *)
   notes : note list;
   help : string option;  (** the text given with [~help] *)
@@ -242,6 +242,7 @@ type error = {
 - `Expected { items; found; more }`: a primitive failed. `items` is everything that was expected at the furthest failure position, sorted and without duplicates: `Char`, `Literal`, `Label` or `End_of_input`. `found` is `Text` with the text at that position, `End` at the end of the input, `Short n` when a read of a fixed number of bytes, such as `take`, found only `n` bytes before the end of the input, or `Value` with the integer read in the same width when `BE.int16` and its relatives do not match. Characters print as `'x'`, literals as `"abc"` and labels as written. `items` holds at most 64 items; `more` counts the alternatives past that, `0` otherwise.
 - `Failed msg`: a failure raised with `Parseff.fail`, or `"no alternative matched"` when `one_of []` is the only failure at the furthest position. Failures of primitives are always `Expected`, so they merge with the other alternatives that were expected at the same position. A `fail` does not merge: at the same position it wins over `Expected`, and the first of two `fail` or `error` failures wins. Relabeling combinators (`Parseff.expect`, `Parseff.one_of_labeled`) do not relabel it.
 - `Custom e`: a value given to `Parseff.error`.
+- `Limit_exceeded { limit }`: a run of `Parseff.take_while` or `Parseff.take_until`, or a repetition of `Parseff.many`, went over the `~at_most` given as `limit`.
 - `Depth_limit_exceeded { limit }`: a `Parseff.rec_` call exceeded the `~max_depth` limit.
 - `Backtrack_window_exceeded { limit; oldest }`: a streaming parser needed more rewind history than `~backtrack_window` allows.
 The match on `kind` is exhaustive: the compiler tells you when a case is missing. `Custom` holds an `Parseff.custom_error`, which is extensible, so match it with a final `_` case.
@@ -279,7 +280,7 @@ input.json:4:5: [error] expected ',' or '}', found '"'
 - The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the context line then says `from byte N`. `Parseff.error_message` returns only the one-line message.
 
-The columns of the header and of the `* while parsing` lines count Unicode characters (code points), while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the header still has the line and the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the column is `location.col`, which counts bytes. The excerpt shows the kept part of the line, cut on the left with `...`, with carets only under the kept part of the range and no caret row when the whole range is dropped. A context line for a context that starts in the dropped part of the line says `from byte N`.
+The columns of the header and of the `* while parsing` lines count Unicode characters (code points), while `location.byte_col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the header still has the line and the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the column is `location.byte_col`, which counts bytes. The excerpt shows the kept part of the line, cut on the left with `...`, with carets only under the kept part of the range and no caret row when the whole range is dropped. A context line for a context that starts in the dropped part of the line says `from byte N`.
 
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'

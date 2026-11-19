@@ -14,6 +14,65 @@ let check_parseff_error exn =
     "mentions parse context" true
     (contains msg "parse context")
 
+let test_byte_col_counts_bytes () =
+  let input = "\195\169 = 1" in
+  let parser () =
+    ignore (Parseff.take_while (fun c -> c <> ' '));
+    Parseff.skip_whitespace ();
+    ignore (Parseff.char ':')
+  in
+  match Parseff.parse input parser with
+  | Error ({ location = Some l; _ } as e) ->
+      Alcotest.(check (triple int int int))
+        "offset, line, byte_col" (3, 1, 4)
+        (l.offset, l.line, l.byte_col);
+      Alcotest.(check int)
+        "location_of_position" 4 (Parseff.location_of_position input 3).byte_col;
+      Alcotest.(check string)
+        "the header counts characters" "1:3: [error] expected ':', found '='"
+        (List.hd (String.split_on_char '\n' (Parseff.render_error e)))
+  | Error _ ->
+      Alcotest.fail "expected an error with a location"
+  | Ok () ->
+      Alcotest.fail "expected an error"
+
+let test_limit_exceeded_kind () =
+  let byte_source input =
+    Parseff.Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
+  in
+  let check name input parser limit range =
+    List.iter
+      (fun (runner, r) ->
+        match r with
+        | Error ({ Parseff.kind = Parseff.Limit_exceeded { limit = l }; _ } as e)
+          ->
+            Alcotest.(check int) (name ^ ", " ^ runner ^ ": limit") limit l;
+            Alcotest.(check (pair int int))
+              (name ^ ", " ^ runner ^ ": range")
+              range
+              (e.range.start, e.range.stop);
+            Alcotest.(check string)
+              (name ^ ", " ^ runner ^ ": message")
+              (Printf.sprintf "limit of %d exceeded" limit)
+              (Parseff.error_message e)
+        | Error e ->
+            Alcotest.failf "%s, %s: expected Limit_exceeded, got %s" name runner
+              (Parseff.error_message e)
+        | Ok _ ->
+            Alcotest.failf "%s, %s: expected Limit_exceeded, got Ok" name runner
+      )
+      [
+        ("parse", Parseff.parse input parser);
+        ("parse_source", Parseff.parse_source (byte_source input) parser);
+      ]
+  in
+  check "take_while" "aaaa"
+    (fun () -> ignore (Parseff.take_while ~at_most:3 (fun c -> c = 'a')))
+    3 (0, 4);
+  check "many" "aaa"
+    (fun () -> ignore (Parseff.many ~at_most:2 (fun () -> Parseff.char 'a') ()))
+    2 (2, 3)
+
 let test_fold_left_user_exception () =
   let op () =
     ignore (Parseff.char '+');
@@ -2196,6 +2255,8 @@ let describe_kind (e : Parseff.error) =
       "message " ^ m
   | Parseff.Custom _ ->
       "user"
+  | Parseff.Limit_exceeded { limit } ->
+      Printf.sprintf "limit %d" limit
   | Parseff.Depth_limit_exceeded { limit } ->
       Printf.sprintf "depth %d" limit
   | Parseff.Backtrack_window_exceeded { limit; _ } ->
@@ -2473,8 +2534,8 @@ let check_location_agrees label input (e : Parseff.error) =
   | Some location ->
       Alcotest.(check (pair int int))
         (label ^ " line and column")
-        (at.line, at.col)
-        (location.line, location.col);
+        (at.line, at.byte_col)
+        (location.line, location.byte_col);
       Alcotest.(check int) (label ^ " offset") e.range.start location.offset
   | None ->
       Alcotest.failf "%s has no location" label
@@ -3003,7 +3064,7 @@ let test_cut_line_keeps_line_and_column () =
       | Stdlib.Error (e : Parseff.error) ->
           Some
             ( Option.map
-                (fun (l : Parseff.location) -> (l.line, l.col))
+                (fun (l : Parseff.location) -> (l.line, l.byte_col))
                 e.location,
               header_of (Parseff.render_error ~name:"stdin" e)
             )
@@ -3414,7 +3475,7 @@ let test_location_after_dropped_lines () =
     Parseff.cut ();
     let l = Parseff.location () in
     ignore (Parseff.char 'f');
-    (l.line, l.col)
+    (l.line, l.byte_col)
   in
   match
     Parseff.parse_source ~backtrack_window:4
@@ -3814,7 +3875,10 @@ let test_upto_past_the_buffer () =
       Alcotest.(check (option (pair int int)))
         "location is the range start"
         (Some (1, 4))
-        (Option.map (fun (l : Parseff.location) -> (l.line, l.col)) e.location)
+        (Option.map
+           (fun (l : Parseff.location) -> (l.line, l.byte_col))
+           e.location
+        )
   | Stdlib.Ok _ ->
       Alcotest.fail "expected an error"
   );
@@ -4005,7 +4069,7 @@ let test_position_is_known_or_absent () =
       | Some location ->
           Alcotest.(check (pair int int))
             "line and column" (2, 3)
-            (location.line, location.col);
+            (location.line, location.byte_col);
           Alcotest.(check string)
             "the header column counts characters" "2:2: [error]"
             (String.sub (Parseff.render_error e) 0 12)
@@ -4038,7 +4102,7 @@ let test_position_is_known_or_absent () =
       | Some location ->
           Alcotest.(check (pair int int))
             "a known line is exact" (2, 2)
-            (location.line, location.col)
+            (location.line, location.byte_col)
       | None ->
           Alcotest.fail "expected a position"
     )
@@ -4787,6 +4851,10 @@ let () =
           test_case "char and one-byte literal print once" `Quick
             test_char_and_one_byte_literal_print_once;
         ]
+      );
+      ("limit exceeded", [ test_case "kind" `Quick test_limit_exceeded_kind ]);
+      ( "location",
+        [ test_case "byte_col counts bytes" `Quick test_byte_col_counts_bytes ]
       );
       ( "fold exceptions",
         [

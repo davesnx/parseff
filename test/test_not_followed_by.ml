@@ -240,7 +240,7 @@ let test_no_recovery_inside () =
   let result =
     parse ~diagnostics:d "ab" (fun () ->
         not_followed_by (fun () ->
-            recover d
+            recover
               ~sync:(fun () -> ignore (any_char ()))
               (fun () -> char 'x')
               (fun _ -> 'h')

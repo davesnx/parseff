@@ -36,8 +36,8 @@
     stanza to find the unstable parts that you use, and write
     [[@@@alert "-unstable"]] at the top of a file to silence it there. The
     standard library uses the same alert, for example on [Domain]. The
-    [~at_most] arguments of {!val:take_while} and {!val:many} and the
-    [Limit_exceeded] error are unstable too, but have no alert.
+    [~at_most] arguments of {!val:take_while}, {!val:take_until} and {!val:many}
+    are unstable too, but have no alert.
 
     A 1.x release can add events to {!type:trace_event} and fields to some
     records; {!type:error_kind} says which types are final until 2.0. *)
@@ -64,9 +64,10 @@ val span_get : span -> int -> char
 
 (** {1 Location Type} *)
 
-type location = private { offset : int; line : int; col : int }
-(** A source location. [line] and [col] are 1-based. [col] counts bytes from the
-    start of the line (not characters — relevant for UTF-8). *)
+type location = private { offset : int; line : int; byte_col : int }
+(** A source location. [line] and [byte_col] are 1-based. [byte_col] counts
+    bytes from the start of the line, not characters: on a line with non-ASCII
+    UTF-8 text it is larger than the column {!render_error} prints. *)
 
 (** {1 Errors} *)
 
@@ -118,23 +119,13 @@ type custom_error = ..
     own cases with [type Parseff.custom_error += Too_large of int] and match
     them as [Custom (Too_large n)]. *)
 
-type custom_error +=
-  | Limit_exceeded of { limit : int }
-        (** The input went over a limit given with [~at_most] to
-            {!val:take_while} or {!val:many}. [limit] is that value. The error
-            range covers the run or the item that went over it, so a server can
-            answer "header too large" and not "bad request". It is an ordinary
-            failure: when a failure is recorded farther in the input, the parse
-            reports that one; see {!val:take_while} for how {!commit} keeps the
-            limit. Unstable: this case can change in a 1.x release. *)
-
-(** What failed. These five cases are final until 2.0, so a match on all of them
+(** What failed. These six cases are final until 2.0, so a match on all of them
     needs no [_] case. A new kind of error is a {!custom_error} in [Custom].
 
     The cases of {!type:expected} and {!type:found} and the fields of
     {!type:range} and {!type:note} are final until 2.0 too. A 1.x release can
     add fields to {!type:location}, {!type:context} and {!type:error}, so match
-    them with [_], as in [{ line; col; _ }]. *)
+    them with [_], as in [{ line; byte_col; _ }]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
@@ -146,6 +137,14 @@ type error_kind = private
           [one_of []] is the only failure at the furthest position. Failures of
           primitives are otherwise [Expected]. *)
   | Custom of custom_error  (** A value given to {!val:error}. *)
+  | Limit_exceeded of { limit : int }
+      (** The input went over a limit given with [~at_most] to
+          {!val:take_while}, {!val:take_until} or {!val:many}. [limit] is that
+          value. The error range covers the run or the item that went over it,
+          so a server can answer "header too large" and not "bad request". It is
+          an ordinary failure: when a failure is recorded farther in the input,
+          the parse reports that one; see {!val:take_while} for how {!commit}
+          keeps the limit. *)
   | Depth_limit_exceeded of { limit : int }
       (** {!val:rec_} nested deeper than [max_depth], or a {!val:fold_right}
           chain longer than its limit. *)
@@ -166,7 +165,7 @@ type error = private {
       (** The bytes the error is about, never reversed, empty at the end of the
           input. *)
   location : location option;
-      (** Line and column of [range.start], 1-based. [location.col] counts
+      (** Line and column of [range.start], 1-based. [location.byte_col] counts
           bytes, while the column {!render_error} prints counts Unicode
           characters, so the two differ on a line with non-ASCII text. [None]
           when the line is not known: in streaming, when the position is older
@@ -188,7 +187,7 @@ val error_message : ?custom:(custom_error -> string) -> error -> string
     [expected "else", "if", or "while", found 'xyz']. A message lists at most 8
     expected items, then [, or N more alternatives]. [custom] prints [Custom]
     errors, without it the message is [custom error (no ~custom printer given)].
-    {!Limit_exceeded} always prints as [limit of N exceeded]. *)
+    [Limit_exceeded] prints as [limit of N exceeded]. *)
 
 val render_error :
   ?name:string ->
@@ -216,20 +215,20 @@ val render_error :
     position is older than the buffered input, the header is
     [input.json: byte N: [error] ...] and there is no excerpt. The columns of
     the header and of the [* while parsing] lines count Unicode characters (code
-    points), while [location.col] counts bytes, so they differ on a line with
-    non-ASCII text. In streaming, when the start of the error line is no longer
-    buffered and [source] is not given, the header still has the line and the
-    character column, because Parseff counts the characters of the line that it
-    drops. The excerpt of the error line is then cut on the left with [...], and
-    a [* while parsing] line for a context that starts in the dropped part of
-    the line says [from byte N]. A [`Warning] error from {!val:warn} prints
+    points), while [location.byte_col] counts bytes, so they differ on a line
+    with non-ASCII text. In streaming, when the start of the error line is no
+    longer buffered and [source] is not given, the header still has the line and
+    the character column, because Parseff counts the characters of the line that
+    it drops. The excerpt of the error line is then cut on the left with [...],
+    and a [* while parsing] line for a context that starts in the dropped part
+    of the line says [from byte N]. A [`Warning] error from {!val:warn} prints
     [[warning]] in the header in place of [[error]]. When the error starts in
-    the dropped part of its line, the header column is [location.col], which
-    counts bytes, the excerpt shows the kept part of the line, and carets mark
-    only the kept part of the range, with no caret row when the whole range is
-    dropped. Carets count terminal cells, so a wide character such as [名] takes
-    two and a combining mark takes none, and a control byte, an invalid UTF-8
-    byte or a C1 control prints in the excerpt as the escape
+    the dropped part of its line, the header column is [location.byte_col],
+    which counts bytes, the excerpt shows the kept part of the line, and carets
+    mark only the kept part of the range, with no caret row when the whole range
+    is dropped. Carets count terminal cells, so a wide character such as [名]
+    takes two and a combining mark takes none, and a control byte, an invalid
+    UTF-8 byte or a C1 control prints in the excerpt as the escape
     {!val:error_message} uses, such as [\x1B], with as many carets as the escape
     has characters. An error with a [help] text ends with a [* help:] line, and
     so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded] error. The
@@ -384,14 +383,13 @@ val parse :
     from the start of a buffer. With [`Partial], the result does not say where
     the parser stopped; call {!position} at the end of the parser to read it.
 
-    [diagnostics] is the collector given to {!warn}, {!recover}, {!require} and
-    {!list}. The runner empties it before the parser starts. Read it with
-    {!Diagnostics.to_list} after the parse, whether the result is [Ok] or
-    [Error]. With any other collector, {!recover}, {!require} and {!list} do not
-    recover: the parse fails at the first error, as without them. Thus the same
-    parser can report every error with [~diagnostics] and stop at the first one
-    without it. {!warn} records its warnings in [diagnostics], and records
-    nothing when the runner got no [~diagnostics].
+    [diagnostics] is the collector of {!warn}, {!recover}, {!require} and
+    {!list}: they record into it. The runner empties it before the parser
+    starts. Read it with {!Diagnostics.to_list} after the parse, whether the
+    result is [Ok] or [Error]. Without [~diagnostics], {!recover}, {!require}
+    and {!list} do not recover: the parse fails at the first error, as without
+    them, and {!warn} records nothing. Thus the same parser can report every
+    error with [~diagnostics] and stop at the first one without it.
 
     [trace] receives a {!type:trace_event} when a {!val:context} starts, returns
     and fails. {!print_trace} prints the events as a tree. An exception from
@@ -411,9 +409,10 @@ val parse :
 
     Returns [Ok result] on success, or [Error e] on failure, where [e] is an
     {!type:error}. [e.kind] is [Expected] for a mismatch, [Failed] for
-    {!val:fail}, [Custom] for {!val-error}, [Depth_limit_exceeded] when
-    recursion nested deeper than [max_depth], and [Backtrack_window_exceeded]
-    for streaming.
+    {!val:fail}, [Custom] for {!val-error}, [Limit_exceeded] when a run or a
+    repetition went over its [~at_most], [Depth_limit_exceeded] when recursion
+    nested deeper than [max_depth], and [Backtrack_window_exceeded] for
+    streaming.
 
     Example:
     {@ocaml[
@@ -504,8 +503,8 @@ val take_while :
 
     When [~at_most] is specified, the run may have at most that many characters.
     When character [at_most + 1] matches too, the parse fails with
-    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
-    the [at_most + 1] characters read. [take_while] reads at most [at_most + 1]
+    [Limit_exceeded { limit = at_most }], and the error range covers the
+    [at_most + 1] characters read. [take_while] reads at most [at_most + 1]
     characters. On a stream, these characters must fit in the backtrack window
     together with the input that the parser still keeps; when they do not, the
     parse fails with [Backtrack_window_exceeded] first. So keep [at_most] well
@@ -566,10 +565,10 @@ val take_until : ?at_most:int -> ?label:string -> string -> string
 
     When [~at_most] is specified, the result may have at most that many bytes.
     When [terminator] does not start within the first [at_most + 1] bytes, the
-    parse fails with [Custom (Limit_exceeded { limit = at_most })], and the
-    error range covers those [at_most + 1] bytes. [take_until] then reads at
-    most [at_most + String.length terminator] bytes. When the input ends before
-    that, the parse fails as an unterminated input instead. The limit failure is
+    parse fails with [Limit_exceeded { limit = at_most }], and the error range
+    covers those [at_most + 1] bytes. [take_until] then reads at most
+    [at_most + String.length terminator] bytes. When the input ends before that,
+    the parse fails as an unterminated input instead. The limit failure is
     recovered from and reported as described in {!take_while}.
 
     On a stream, the result must fit in the backtrack window, as with
@@ -1077,16 +1076,15 @@ val recover :
   ?release:bool ->
   ?contexts:[ `All | `Inner ] ->
   ?keep:(Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
-  Diagnostics.t ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
   'a
-(** [recover errors ~sync parser hole] runs [parser] with {!capture}. If
-    [parser] fails with the error [e], [recover] records [e] in [errors], calls
-    [sync ()] to skip to a point where parsing can continue, and returns
-    [hole e]. Unlike {!capture}, [recover] lets the recovery functions inside
-    [parser] recover.
+(** [recover ~sync parser hole] runs [parser] with {!capture}. If [parser] fails
+    with the error [e], [recover] records [e] in the collector that the runner
+    got as [~diagnostics], calls [sync ()] to skip to a point where parsing can
+    continue, and returns [hole e]. Unlike {!capture}, [recover] lets the
+    recovery functions inside [parser] recover.
 
     A recovery does not take the place of an alternative. [recover], {!require}
     and {!list} recover only where no open choice is around them. An open choice
@@ -1103,13 +1101,13 @@ val recover :
     turns a failure into [Error e], as a choice does: with the collector, its
     [parser] runs without recovery. Inside an open choice, a recovery function
     fails as without the collector, so the choice goes on as without it and
-    nothing is recorded. For example,
-    [or_ (fun () -> recover errors ~sync ab hole) ac] on ["ac"] returns ["ac"]
-    and records nothing, and [optional (fun () -> recover ...)] recovers only
-    after a {!commit} or {!cut} in it. To recover inside a branch, read the
-    token that selects the branch, call {!commit}, then the recovery function.
-    Inside {!look_ahead}, {!peek_with} and an operator lookup of {!precedence},
-    the recovery functions do not recover either.
+    nothing is recorded. For example, [or_ (fun () -> recover ~sync ab hole) ac]
+    on ["ac"] returns ["ac"] and records nothing, and
+    [optional (fun () -> recover ...)] recovers only after a {!commit} or {!cut}
+    in it. To recover inside a branch, read the token that selects the branch,
+    call {!commit}, then the recovery function. Inside {!look_ahead},
+    {!peek_with} and an operator lookup of {!precedence}, the recovery functions
+    do not recover either.
 
     When a recovery happened and a branch of an enclosing {!or_}, {!one_of} or
     {!optional}, a step of a repetition or a fold, or an operand of
@@ -1127,16 +1125,16 @@ val recover :
 
     The end of a loop is not an alternative: {!many} stops where its element
     fails, and whether the input after the loop parses is not known there. In
-    [many (fun () -> recover errors ~sync statement hole)], [recover] also
-    recovers at the token after the last statement, such as the [}] of a block,
-    and [sync] or the forced progress skips it. Use {!list} with [~close] for a
-    loop, or make the loop stop at that token before [recover] runs. The same
-    holds for a step of a fold after the first element, a recovery function in
-    an operator parser of {!precedence} or {!expression}, and an operand after
-    an infix operator: the other operators of the table are not tried before the
-    operand recovers. With [+] and [++] on one level, {!expression} reads
-    ["1++"] as [1 + hole] with the collector. Make an operator token take the
-    longest match, so that [+] fails before [++].
+    [many (fun () -> recover ~sync statement hole)], [recover] also recovers at
+    the token after the last statement, such as the [}] of a block, and [sync]
+    or the forced progress skips it. Use {!list} with [~close] for a loop, or
+    make the loop stop at that token before [recover] runs. The same holds for a
+    step of a fold after the first element, a recovery function in an operator
+    parser of {!precedence} or {!expression}, and an operand after an infix
+    operator: the other operators of the table are not tried before the operand
+    recovers. With [+] and [++] on one level, {!expression} reads ["1++"] as
+    [1 + hole] with the collector. Make an operator token take the longest
+    match, so that [+] fails before [++].
 
     A {!commit} or {!cut} in [parser] reaches the frames outside [recover], as
     without the collector, and [recover] still goes back to its start when it
@@ -1156,23 +1154,23 @@ val recover :
     function keeps the input from its start, so it can need a larger window than
     the parse without the collector.
 
-    The errors that [parser] recorded in [errors] before it failed are removed,
-    as with {!capture}: only [e] stays. To keep them, give [~keep].
+    The errors that [parser] recorded before it failed are removed, as with
+    {!capture}: only [e] stays. To keep them, give [~keep].
 
     [~keep] chooses what is recorded in place of [e]: [recover] calls
     [keep entry inner], where [entry] is the entry of [e] (at [e.range.start])
     and [inner] holds the entries, errors and warnings, that [parser] recorded
-    in [errors] and that the failure removed, in the order they were recorded.
-    [recover] records the entries that [keep] returns, in that order, so they
-    are removed when a construct around [recover] goes back, as any other
-    diagnostic. The default is [fun entry _ -> [ entry ]]. With [~release:true],
-    [inner] holds only the entries recorded after the last {!commit}, {!cut} or
-    value given out by a [*_iter] function, such as {!many_iter}, that reached
-    [recover], since the entries before it stay as in {!capture}. [keep] must be
-    a pure function: no side effects and no parsing. It can run more than once
-    for the same error: a loop such as {!many} runs its element again at the
-    same position and then drops that step, so [many (fun () -> list ~keep ...)]
-    on ["a,x"] calls [keep] twice for the error at [x]. If [keep] raises, the
+    and that the failure removed, in the order they were recorded. [recover]
+    records the entries that [keep] returns, in that order, so they are removed
+    when a construct around [recover] goes back, as any other diagnostic. The
+    default is [fun entry _ -> [ entry ]]. With [~release:true], [inner] holds
+    only the entries recorded after the last {!commit}, {!cut} or value given
+    out by a [*_iter] function, such as {!many_iter}, that reached [recover],
+    since the entries before it stay as in {!capture}. [keep] must be a pure
+    function: no side effects and no parsing. It can run more than once for the
+    same error: a loop such as {!many} runs its element again at the same
+    position and then drops that step, so [many (fun () -> list ~keep ...)] on
+    ["a,x"] calls [keep] twice for the error at [x]. If [keep] raises, the
     exception leaves the parse, as an exception from a build function does. For
     example, to keep the errors of [parser], and [e] only when there are none:
     {@ocaml[
@@ -1188,18 +1186,17 @@ val recover :
     function that reached [recover], and the errors recorded before that call
     stay as in {!capture}.
 
-    [errors] must be the collector given to the runner as [~diagnostics];
-    otherwise [recover] calls [parser] directly, so the parse fails as without
-    [recover]. If [sync] consumes nothing, [recover] still consumes input, so a
-    loop around it always moves forward: it moves to the start of the error
-    range and one character past it, but never past the end of the input. To
-    continue without consuming input, use {!capture}. A failure at the end of
-    the input is not recovered: the parse fails there, as without [recover].
-    Thus an element that is cut short by the end of the input gives one error,
-    not a second one where the enclosing construct expects more input. A failure
-    is at the end when the input ends both where it was raised and where its
-    error range starts: a {!fail} [~from] an earlier position, such as
-    [number too large] for the last number of the input, is recovered.
+    When the runner got no [~diagnostics], [recover] calls [parser] directly, so
+    the parse fails as without [recover]. If [sync] consumes nothing, [recover]
+    still consumes input, so a loop around it always moves forward: it moves to
+    the start of the error range and one character past it, but never past the
+    end of the input. To continue without consuming input, use {!capture}. A
+    failure at the end of the input is not recovered: the parse fails there, as
+    without [recover]. Thus an element that is cut short by the end of the input
+    gives one error, not a second one where the enclosing construct expects more
+    input. A failure is at the end when the input ends both where it was raised
+    and where its error range starts: a {!fail} [~from] an earlier position,
+    such as [number too large] for the last number of the input, is recovered.
 
     When [sync] fails, [recover] fails with the failure of [sync]. A [sync] that
     reads a closing token fails at the end of the input when the token is
@@ -1210,7 +1207,7 @@ val recover :
 
     Example:
     {@ocaml[
-    let assignment errors () =
+    let assignment () =
       let name =
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
@@ -1218,7 +1215,7 @@ val recover :
       let _ = char '=' in
       skip_whitespace ();
       let value =
-        recover errors
+        recover
           ~sync:(fun () -> skip_while (fun c -> c <> ';'))
           integer
           (fun _ -> 0)
@@ -1228,27 +1225,28 @@ val recover :
 
     let () =
       let errors = Diagnostics.create () in
-      let r = parse ~diagnostics:errors "x = ?;" (assignment errors) in
+      let r = parse ~diagnostics:errors "x = ?;" assignment in
       assert (r = Ok ("x", 0));
       assert (Diagnostics.length errors = 1)
     ]} *)
 
-val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
-(** [require errors parser missing] runs [parser]. If the furthest failure of
-    [parser] is at the position where [require] started, [require] records the
-    error [e] in [errors], goes back to that position and returns [missing e]:
-    it inserts the missing part, consumes nothing and the parse goes on. Use it
-    for a token that the grammar needs at this point, such as [then], [;], or
-    the [)] that closes a list, and for a missing expression.
+val require : (unit -> 'a) -> (error -> 'a) -> 'a
+(** [require parser missing] runs [parser]. If the furthest failure of [parser]
+    is at the position where [require] started, [require] records the error [e]
+    in the collector that the runner got as [~diagnostics], goes back to that
+    position and returns [missing e]: it inserts the missing part, consumes
+    nothing and the parse goes on. Use it for a token that the grammar needs at
+    this point, such as [then], [;], or the [)] that closes a list, and for a
+    missing expression.
 
     The furthest failure decides, not the position where [parser] stopped. A
     branch of [parser] that read further and failed means that the construct is
     there and broken, not missing: the failure goes on, as without [require],
     and an enclosing {!recover} or {!list} handles it. On ["ax"],
-    [require errors (fun () -> ignore (optional ab ()); ignore (char ')'))
-     ignore] with [ab] reading ['a'] then ['b'] does not insert: [ab] failed at
-    1. With [capture ab] in place of [optional ab ()], the failure of [ab] is
-    not counted, and [require] inserts the [)] at 0. The same rule holds for a
+    [require (fun () -> ignore (optional ab ()); ignore (char ')')) ignore] with
+    [ab] reading ['a'] then ['b'] does not insert: [ab] failed at 1. With
+    [capture ab] in place of [optional ab ()], the failure of [ab] is not
+    counted, and [require] inserts the [)] at 0. The same rule holds for a
     failure of {!fail} or {!val-error}: it is inserted only when no branch of
     [parser] read further.
 
@@ -1270,15 +1268,14 @@ val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
     In byte mode, a token parser usually skips the whitespace after it. Then [e]
     points after that whitespace, not at the end of the previous token.
 
-    [errors] must be the collector given to the runner as [~diagnostics];
-    otherwise [require] calls [parser] directly. A traced parse gets a
-    [Captured] event for each insertion.
+    When the runner got no [~diagnostics], [require] calls [parser] directly. A
+    traced parse gets a [Captured] event for each insertion.
 
     Example:
     {@ocaml[
     type call = Call of string * int list
 
-    let call errors () =
+    let call () =
       let name =
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
@@ -1289,7 +1286,6 @@ val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
             let _ = char ',' in
             skip_whitespace ()
           )
-          errors
           ~close:(fun () -> peek_char () = Some ')')
           ~sync:(skip_nested [ ('(', ')') ] (fun c -> c = ','))
           (fun () ->
@@ -1300,12 +1296,12 @@ val require : Diagnostics.t -> (unit -> 'a) -> (error -> 'a) -> 'a
           (fun _ -> 0)
           ()
       in
-      require errors (fun () -> ignore (char ')')) ignore;
+      require (fun () -> ignore (char ')')) ignore;
       Call (name, args)
 
     let () =
       let errors = Diagnostics.create () in
-      let r = parse ~diagnostics:errors "f(1, 2" (call errors) in
+      let r = parse ~diagnostics:errors "f(1, 2" call in
       assert (r = Ok (Call ("f", [ 1; 2 ])));
       match Diagnostics.to_list errors with
       | [ { Diagnostics.value = e; _ } ] ->
@@ -1320,15 +1316,14 @@ val list :
   ?keep:(Diagnostics.entry -> Diagnostics.entry list -> Diagnostics.entry list) ->
   ?sep:(unit -> unit) ->
   ?trailing:bool ->
-  Diagnostics.t ->
   close:(unit -> bool) ->
   sync:(unit -> unit) ->
   (unit -> 'a) ->
   (error -> 'a) ->
   unit ->
   'a list
-(** [list errors ~close ~sync element hole ()] parses [element] again and again,
-    as {!many} does, and recovers from each [element] that fails, except where
+(** [list ~close ~sync element hole ()] parses [element] again and again, as
+    {!many} does, and recovers from each [element] that fails, except where
     [close ()] is [true] or the input ends. It is one loop for a list of
     statements and, with [~sep], for a list with separators. It does not read
     the closing token: follow it with {!require}.
@@ -1413,15 +1408,16 @@ val list :
     {!many} and {!sep_by}, so the list ends before it, or before its separator,
     and the parser after the list reports the error. Inside {!look_ahead},
     {!peek_with} or an operator lookup of {!precedence}, [list] is the plain
-    parser. [errors] must be the collector given to the runner as
-    [~diagnostics]; otherwise [list] is the plain parser: {!many} [element]
-    without [~sep], {!sep_by} [element] [sep] with it, and with [~trailing:true]
-    also an optional separator after a list that is not empty. [close] is not
-    used then. For valid input, when [close] is [true] where the plain parser
-    ends the list, and with [~sep] the separator consumes input and fails there,
-    [list] with the collector gives the same list as the plain parser, and
-    records nothing. A separator that can succeed on no input, or that reads the
-    closing token, lets [list] try an element where {!sep_by} ends.
+    parser. [list] records its errors in the collector that the runner got as
+    [~diagnostics]. When the runner got no [~diagnostics], [list] is the plain
+    parser: {!many} [element] without [~sep], {!sep_by} [element] [sep] with it,
+    and with [~trailing:true] also an optional separator after a list that is
+    not empty. [close] is not used then. For valid input, when [close] is [true]
+    where the plain parser ends the list, and with [~sep] the separator consumes
+    input and fails there, [list] with the collector gives the same list as the
+    plain parser, and records nothing. A separator that can succeed on no input,
+    or that reads the closing token, lets [list] try an element where {!sep_by}
+    ends.
 
     As with {!look_ahead} and {!or_}, [close] and an element that runs where
     [close] is [true] or at the end of the input can give trace events for work
@@ -1449,24 +1445,24 @@ val list :
       ignore (optional (fun () -> char ';') ());
       skip_whitespace ()
 
-    let block errors () =
+    let block () =
       context ~delimited:true "block" (fun () ->
           let _ = char '{' in
           skip_whitespace ();
           let stmts =
-            list errors
+            list
               ~close:(fun () -> peek_char () = Some '}')
               ~sync:skip_statement statement
               (fun _ -> Bad)
               ()
           in
-          require errors (fun () -> ignore (char '}')) ignore;
+          require (fun () -> ignore (char '}')) ignore;
           stmts
       )
 
     let () =
       let errors = Diagnostics.create () in
-      let r = parse ~diagnostics:errors "{ x = 1; y = ; " (block errors) in
+      let r = parse ~diagnostics:errors "{ x = 1; y = ; " block in
       assert (r = Ok [ Assign ("x", 1); Bad ]);
       assert (
         List.map
@@ -1752,8 +1748,8 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> unit -> 'a list
     When [~at_most] is specified, [many] returns at most that many results.
     After [at_most] results, it runs [parser] once more. When that run succeeds
     and consumes input, the parse fails with
-    [Custom (Limit_exceeded { limit = at_most })], and the error range covers
-    the extra item. The limit failure follows the rule of every failure, as for
+    [Limit_exceeded { limit = at_most }], and the error range covers the extra
+    item. The limit failure follows the rule of every failure, as for
     {!take_while}: a failure recorded farther in the input is reported in its
     place, also one that the extra item records in a branch it abandons. A
     {!commit} in [parser] once it has decided forgets those. Raises
