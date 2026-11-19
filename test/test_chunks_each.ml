@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 let digits () =
   Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit"
 
@@ -13,7 +11,7 @@ let show : Parseff.chunks_step -> string = function
       "await"
   | Parseff.Stopped rest ->
       Printf.sprintf "stopped %S" rest
-  | Parseff.Parse_error e ->
+  | Parseff.Error_of e ->
       Printf.sprintf "failed %d %s" e.Parseff.range.start
         (Parseff.error_message e)
   | Parseff.Ended ->
@@ -152,8 +150,8 @@ let test_end_inside_value () =
   Alcotest.(check (list string)) "values" [ "1" ] (List.rev !seen)
 
 let done_msg = "Parseff.parse_chunks_each: the parse is done"
-let own_msg =
-  "Parseff.parse_chunks_each: called from its own parser or callback"
+let own_msg = "Parseff.parse_chunks_each: called from its own parser"
+let on_value_msg = "Parseff.parse_chunks_each: called from on_value"
 
 let ended_push last =
   let _, on_value = collecting ~stop_at:"1" () in
@@ -195,7 +193,7 @@ let test_push_from_on_value () =
   in
   push := Parseff.parse_chunks_each ~on_value line;
   Alcotest.(check string) "step" "await" (show (!push (Some "1\n")));
-  Alcotest.(check (option string)) "raised" (Some own_msg) !raised
+  Alcotest.(check (option string)) "raised" (Some on_value_msg) !raised
 
 let test_push_from_parser () =
   let push = ref (fun _ -> Parseff.Ended) in
@@ -497,6 +495,21 @@ let test_error_kind_failed_unshadowed () =
   | Error e ->
       Alcotest.(check string) "message" "boom" (kind_message e.Parseff.kind)
 
+let trace_fail_name = function Parseff.Fail { name; _ } -> name | _ -> ""
+
+let test_trace_fail_unshadowed () =
+  let names = ref [] in
+  let trace e = names := trace_fail_name e :: !names in
+  let r =
+    Parseff.parse ~trace "" (fun () ->
+        Parseff.context "item" (fun () -> Parseff.fail "boom")
+    )
+  in
+  Alcotest.(check bool) "failed" true (Result.is_error r);
+  Alcotest.(check (list string))
+    "names" [ "item" ]
+    (List.filter (fun n -> n <> "") !names)
+
 let () =
   let open Alcotest in
   run "Chunks_each"
@@ -524,6 +537,8 @@ let () =
           test_case "no progress" `Quick test_no_progress_fails;
           test_case "error_kind Failed not hidden" `Quick
             test_error_kind_failed_unshadowed;
+          test_case "trace_event Fail not hidden" `Quick
+            test_trace_fail_unshadowed;
           test_case "end inside a value" `Quick test_end_inside_value;
         ]
       );

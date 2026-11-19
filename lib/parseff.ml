@@ -7143,8 +7143,7 @@ let step name t chunk =
   | Fresh _ | Waiting _ ->
       ()
   | Running ->
-      invalid_arg
-        ("Parseff." ^ name ^ ": called from its own parser or callback")
+      invalid_arg ("Parseff." ^ name ^ ": called from its own parser")
   | Ended ->
       invalid_arg ("Parseff." ^ name ^ ": the parse is done")
   );
@@ -7183,11 +7182,7 @@ let feed t chunk =
 let finish t =
   match step "finish" t None with Finished r -> r | Paused _ -> assert false
 
-type chunks_step =
-  | Need_input
-  | Stopped of string
-  | Parse_error of error
-  | Ended
+type chunks_step = Need_input | Stopped of string | Error_of of error | Ended
 
 let parse_chunks_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ~on_value
@@ -7197,6 +7192,7 @@ let parse_chunks_each ?(max_depth = 128)
   let c = pushed_chunks t in
   let src = Source.make ~initial:"" ~eof:false (Chunks c) in
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let in_on_value = ref false in
   let element () =
     if have st 1 then
       Some (parser ())
@@ -7221,22 +7217,31 @@ let parse_chunks_each ?(max_depth = 128)
     | Ok None ->
         Ended
     | Ok (Some _) when st.pos = start ->
-        Parse_error
+        Error_of
           (error_plain ~last:false st start
              (Failed "the parser consumed no input") []
           )
     | Ok (Some v) -> (
+        in_on_value := true;
         match on_value v with
         | `Continue ->
+            in_on_value := false;
             loop ()
         | `Stop ->
+            in_on_value := false;
             Stopped (leftover t st c)
+        | exception exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            in_on_value := false;
+            Printexc.raise_with_backtrace exn bt
       )
     | Error e ->
-        Parse_error e
+        Error_of e
   in
   t.status <- Fresh loop;
   fun chunk ->
+    if !in_on_value then
+      invalid_arg "Parseff.parse_chunks_each: called from on_value";
     match step "parse_chunks_each" t chunk with
     | Paused _ ->
         Need_input

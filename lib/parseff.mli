@@ -2651,8 +2651,7 @@ val parse_source_each :
     ]}
     Here [ids "1\n22\n333\n"] is [[1; 22; 333]]. *)
 
-(** The result of a push to {!parse_chunks_each}. Unstable: this type can change
-    in a 1.x release. *)
+(** The result of a push to {!parse_chunks_each}. *)
 type chunks_step =
   | Need_input
       (** All the given input is parsed: push the next chunk, or [None] at the
@@ -2661,8 +2660,7 @@ type chunks_step =
       (** [on_value] returned [`Stop]. The string has the bytes after that value
           in the chunks given so far. Give it to the next parse, before its next
           chunk. *)
-  | Parse_error of error
-      (** A run of the parser failed, and the stream ended. *)
+  | Error_of of error  (** A run of the parser failed, and the stream ended. *)
   | Ended  (** [None] was pushed and no input remained. *)
 
 val parse_chunks_each :
@@ -2674,7 +2672,6 @@ val parse_chunks_each :
   (unit -> 'a) ->
   string option ->
   chunks_step
-[@@alert unstable "This value can change in a 1.x release."]
 (** [parse_chunks_each ~on_value parser] returns [push], which parses a stream
     of values from chunks that the caller gives, such as the requests of a
     pipelined HTTP/1.1 connection. It is the push counterpart of
@@ -2689,12 +2686,12 @@ val parse_chunks_each :
 
     All the values run in one effect fiber. {!parse_partial} starts a new fiber
     for each value, and its stack grows again each time. A 103-byte HTTP request
-    head takes about 5,915 instructions when 1,000 heads come in one chunk,
-    6,800 when each head comes in its own chunk, 6,850 with {!parse_partial} and
-    5,430 with {!parse}.
+    head takes about 5,942 instructions when 1,000 heads come in one chunk,
+    6,786 when each head comes in its own chunk, 6,862 with {!parse_partial} and
+    5,442 with {!parse}.
 
     Each run follows the rules of {!parse_source_each}: a run that consumes no
-    input gives [Parse_error], positions count from the first byte of the first
+    input gives [Error_of], positions count from the first byte of the first
     chunk, and [diagnostics] is emptied before each run, so read it in
     [on_value]. After [Ended] it is empty, because the last run that finds no
     input empties it too. The arguments are those of {!parse_partial}.
@@ -2705,9 +2702,8 @@ val parse_chunks_each :
 
     A [chunk] must not change while the parse uses it, as for {!feed}. An
     exception that [parser] or [on_value] raises comes out of [push], and the
-    stream ends. [push] raises [Invalid_argument] after [Stopped], [Parse_error]
-    or [Ended], when called from inside a parser, and when called from
-    [on_value].
+    stream ends. [push] raises [Invalid_argument] after [Stopped], [Error_of] or
+    [Ended], when called from inside a parser, and when called from [on_value].
 
     Example:
     {@ocaml[
@@ -2733,7 +2729,7 @@ val parse_chunks_each :
       match go chunks with
       | Ended ->
           Ok (List.rev !seen)
-      | Parse_error e ->
+      | Error_of e ->
           Error e
       | Need_input | Stopped _ ->
           assert false
