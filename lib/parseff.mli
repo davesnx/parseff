@@ -1862,7 +1862,7 @@ val sep_by_iter :
     ]} *)
 
 val fold_left :
-  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+  ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
 (** [fold_left element op] parses one or more [element] values separated by
     [op], combining them left-associatively. Fails if there are zero [element]
     values.
@@ -1878,7 +1878,7 @@ val fold_left :
     and that pair is not applied. *)
 
 val fold_right :
-  (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+  ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
 (** [fold_right element op] parses one or more [element] values separated by
     [op], combining them right-associatively. Fails if there are zero [element]
     values.

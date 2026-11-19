@@ -203,7 +203,7 @@ These combinators parse sequences of values joined by operators, handling associ
 `Parseff.fold_left` parses one or more values separated by an operator, combining them **left-associatively**. The operator parser returns a function that combines two values. If no elements match, use `~otherwise` to provide a fallback value.
 
 ```ocaml
-val fold_left : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
 ```
 ```ocaml
 (* Parse "1-2-3" as ((1-2)-3) = -4 *)
@@ -236,7 +236,7 @@ let maybe_subtract () =
 `Parseff.fold_right` is like `Parseff.fold_left` but combines **right-associatively**. Use `~otherwise` to provide a fallback value when no elements match; as for `fold_left`, only a failure of the first element gives it. The loop stops after an operator and element that together consume no input, and that pair is not applied.
 
 ```ocaml
-val fold_right : (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> ?otherwise:'a -> unit -> 'a
+val fold_right : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> unit -> 'a
 ```
 ```ocaml
 (* Parse "2^3^2" as 2^(3^2) = 512 *)

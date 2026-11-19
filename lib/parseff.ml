@@ -3530,7 +3530,7 @@ let rec fold_left_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
       State.pop_rewind_frame st frame;
       raise exn
 
-let fold_left (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
+let fold_left ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     =
   match otherwise with
   | None ->
@@ -3599,7 +3599,7 @@ let rec fold_right_or (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) otherwise :
       State.pop_rewind_frame st frame;
       raise exn
 
-let fold_right (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) ?otherwise () : 'a
+let fold_right ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) () : 'a
     =
   match otherwise with
   | None ->
