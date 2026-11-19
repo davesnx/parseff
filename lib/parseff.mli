@@ -64,9 +64,10 @@ val span_get : span -> int -> char
 
 (** {1 Location Type} *)
 
-type location = private { offset : int; line : int; col : int }
-(** A source location. [line] and [col] are 1-based. [col] counts bytes from the
-    start of the line (not characters — relevant for UTF-8). *)
+type location = private { offset : int; line : int; byte_col : int }
+(** A source location. [line] and [byte_col] are 1-based. [byte_col] counts
+    bytes from the start of the line, not characters: on a line with non-ASCII
+    UTF-8 text it is larger than the column {!render_error} prints. *)
 
 (** {1 Errors} *)
 
@@ -124,7 +125,7 @@ type custom_error = ..
     The cases of {!type:expected} and {!type:found} and the fields of
     {!type:range} and {!type:note} are final until 2.0 too. A 1.x release can
     add fields to {!type:location}, {!type:context} and {!type:error}, so match
-    them with [_], as in [{ line; col; _ }]. *)
+    them with [_], as in [{ line; byte_col; _ }]. *)
 type error_kind = private
   | Expected of { items : expected * expected list; found : found; more : int }
       (** A primitive failed. [items] is everything that was expected at the
@@ -164,7 +165,7 @@ type error = private {
       (** The bytes the error is about, never reversed, empty at the end of the
           input. *)
   location : location option;
-      (** Line and column of [range.start], 1-based. [location.col] counts
+      (** Line and column of [range.start], 1-based. [location.byte_col] counts
           bytes, while the column {!render_error} prints counts Unicode
           characters, so the two differ on a line with non-ASCII text. [None]
           when the line is not known: in streaming, when the position is older
@@ -214,20 +215,20 @@ val render_error :
     position is older than the buffered input, the header is
     [input.json: byte N: [error] ...] and there is no excerpt. The columns of
     the header and of the [* while parsing] lines count Unicode characters (code
-    points), while [location.col] counts bytes, so they differ on a line with
-    non-ASCII text. In streaming, when the start of the error line is no longer
-    buffered and [source] is not given, the header still has the line and the
-    character column, because Parseff counts the characters of the line that it
-    drops. The excerpt of the error line is then cut on the left with [...], and
-    a [* while parsing] line for a context that starts in the dropped part of
-    the line says [from byte N]. A [`Warning] error from {!val:warn} prints
+    points), while [location.byte_col] counts bytes, so they differ on a line
+    with non-ASCII text. In streaming, when the start of the error line is no
+    longer buffered and [source] is not given, the header still has the line and
+    the character column, because Parseff counts the characters of the line that
+    it drops. The excerpt of the error line is then cut on the left with [...],
+    and a [* while parsing] line for a context that starts in the dropped part
+    of the line says [from byte N]. A [`Warning] error from {!val:warn} prints
     [[warning]] in the header in place of [[error]]. When the error starts in
-    the dropped part of its line, the header column is [location.col], which
-    counts bytes, the excerpt shows the kept part of the line, and carets mark
-    only the kept part of the range, with no caret row when the whole range is
-    dropped. Carets count terminal cells, so a wide character such as [名] takes
-    two and a combining mark takes none, and a control byte, an invalid UTF-8
-    byte or a C1 control prints in the excerpt as the escape
+    the dropped part of its line, the header column is [location.byte_col],
+    which counts bytes, the excerpt shows the kept part of the line, and carets
+    mark only the kept part of the range, with no caret row when the whole range
+    is dropped. Carets count terminal cells, so a wide character such as [名]
+    takes two and a combining mark takes none, and a control byte, an invalid
+    UTF-8 byte or a C1 control prints in the excerpt as the escape
     {!val:error_message} uses, such as [\x1B], with as many carets as the escape
     has characters. An error with a [help] text ends with a [* help:] line, and
     so does a [Depth_limit_exceeded] or [Backtrack_window_exceeded] error. The

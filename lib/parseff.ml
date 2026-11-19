@@ -48,7 +48,7 @@ let[@inline always] span_get s i =
   if i < 0 || i >= s.len then invalid_arg "Parseff.span_get";
   String.unsafe_get s.buf (s.off + i)
 
-type location = { offset : int; line : int; col : int }
+type location = { offset : int; line : int; byte_col : int }
 type range_data = { start : int; stop : int }
 type note_data = { at : range_data option; text : string }
 
@@ -1242,7 +1242,7 @@ let[@inline never] handle_location st =
   {
     offset = st.pos;
     line = idx.line_base + line_idx + 1;
-    col = st.pos - idx.starts.(line_idx) + 1;
+    byte_col = st.pos - idx.starts.(line_idx) + 1;
   }
 
 let buffer_room kept n =
@@ -4804,7 +4804,11 @@ let location_of_position input pos =
     (Bytes.unsafe_of_string input)
     (min pos (String.length input));
   let line_idx = find_line idx pos in
-  { offset = pos; line = line_idx + 1; col = pos - idx.starts.(line_idx) + 1 }
+  {
+    offset = pos;
+    line = line_idx + 1;
+    byte_col = pos - idx.starts.(line_idx) + 1;
+  }
 
 let window_size = 240
 let max_frames = 5
@@ -5428,7 +5432,7 @@ let pending = { views = []; frame_locs = []; char_column = None; built = false }
 let window_index x (l : location) =
   let idx = create_line_index () in
   let text = x.kept in
-  let line_start = l.offset - l.col + 1 in
+  let line_start = l.offset - l.byte_col + 1 in
   let prev =
     if line_start > 0 then
       last_newline text 0 (line_start - 1) + 1
@@ -5499,7 +5503,9 @@ let render ?name ?source ?custom e =
           )
     | None, Some l ->
         Some
-          (l, Some (Option.value (shown e.excerpt).char_column ~default:l.col))
+          ( l,
+            Some (Option.value (shown e.excerpt).char_column ~default:l.byte_col)
+          )
     | None, None ->
         None
   in
@@ -5515,7 +5521,7 @@ let render ?name ?source ?custom e =
                 (imin f.start (String.length s))
             )
         in
-        Some (l.line, l.col, shown)
+        Some (l.line, l.byte_col, shown)
     | None ->
         List.nth (shown e.excerpt).frame_locs i
   in
@@ -5560,7 +5566,7 @@ let render ?name ?source ?custom e =
           match src with
           | Some (s, _) ->
               let l = location_of_position s r.start in
-              Some (l.line, l.col)
+              Some (l.line, l.byte_col)
           | None ->
               None
         in
@@ -5582,7 +5588,9 @@ let render ?name ?source ?custom e =
       )
   in
   let error_view =
-    Option.bind where (fun ((loc : location), _) -> get loc.line (loc.col - 1))
+    Option.bind where (fun ((loc : location), _) ->
+        get loc.line (loc.byte_col - 1)
+    )
   in
   let placed =
     if error_view = None then
@@ -6159,7 +6167,7 @@ let scan_location input ~from ~lines ~start pos =
     else
       start
   in
-  Some { offset = pos; line = lines + n + 1; col = pos - start + 1 }
+  Some { offset = pos; line = lines + n + 1; byte_col = pos - start + 1 }
 
 let memory_location st pos =
   if pos < 0 || pos > st.input_len then
@@ -6172,7 +6180,7 @@ let memory_location st pos =
           {
             offset = pos;
             line = idx.line_base + li + 1;
-            col = pos - idx.starts.(li) + 1;
+            byte_col = pos - idx.starts.(li) + 1;
           }
     | Some idx ->
         scan_location st.input ~from:idx.scanned_up_to
@@ -6258,7 +6266,7 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
             {
               offset = pos;
               line = idx.line_base + li + 1;
-              col = pos - idx.starts.(li) + 1;
+              byte_col = pos - idx.starts.(li) + 1;
             }
         end else
           None

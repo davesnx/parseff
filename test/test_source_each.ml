@@ -179,7 +179,7 @@ let test_error_location () =
         "ok " ^ v
     | Error e ->
         let l = Option.get e.Parseff.location in
-        Printf.sprintf "error %d %d:%d %s" l.offset l.line l.col
+        Printf.sprintf "error %d %d:%d %s" l.offset l.line l.byte_col
           (Parseff.error_message e)
   in
   Alcotest.(check (list string))
@@ -235,7 +235,7 @@ let test_location_after_compaction () =
       Alcotest.(check (list int))
         "offset line col"
         [ String.length input - 2; 1001; 1 ]
-        [ l.offset; l.line; l.col ];
+        [ l.offset; l.line; l.byte_col ];
       Alcotest.(check string)
         "excerpt"
         "1001:1: [error] expected digit, found 'x'\n\

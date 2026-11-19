@@ -155,14 +155,14 @@ Positions remain byte offsets, consistent with the rest of parseff. A single `Pa
 
 ## Columns in error messages
 
-The column in an error header counts Unicode characters (code points). `location.col` in `Parseff.error` counts bytes, because it indexes the input string. On a line with non-ASCII text the two differ:
+The column in an error header counts Unicode characters (code points). `location.byte_col` in `Parseff.error` counts bytes, because it indexes the input string. On a line with non-ASCII text the two differ:
 
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'
 1 | ["é" "b"]
   |      ^
 ```
-Here `location.col` is 7\. `location` is `None` when the line is not known. When streaming, if the start of the line is no longer buffered, the header still has the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the header column is `location.col`, which counts bytes, and the excerpt shows only the kept part of the line; pass `~source` to `render_error` to get the character column and the full line then. The carets under the source line count terminal cells: a wide character such as `名` takes two, and a combining mark takes none.
+Here `location.byte_col` is 7\. `location` is `None` when the line is not known. When streaming, if the start of the line is no longer buffered, the header still has the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the header column is `location.byte_col`, which counts bytes, and the excerpt shows only the kept part of the line; pass `~source` to `render_error` to get the character column and the full line then. The carets under the source line count terminal cells: a wide character such as `名` takes two, and a combining mark takes none.
 
 
 ## Streaming support

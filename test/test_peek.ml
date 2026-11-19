@@ -555,8 +555,8 @@ let test_location_after_skip () =
       end
     in
     go ();
-    let { offset; line; col } = location () in
-    Printf.sprintf "%d %d:%d" offset line col
+    let { offset; line; byte_col } = location () in
+    Printf.sprintf "%d %d:%d" offset line byte_col
   in
   let expected = Printf.sprintf "Ok %d %d:12" (String.length input) lines in
   Alcotest.(check string)

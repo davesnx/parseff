@@ -156,7 +156,7 @@ let test_bounded_heap () =
     (after - before < 2_000_000)
 
 let show_loc (l : Parseff.location) =
-  Printf.sprintf "%d:%d:%d" l.offset l.line l.col
+  Printf.sprintf "%d:%d:%d" l.offset l.line l.byte_col
 
 let test_location_after_compaction () =
   let text =

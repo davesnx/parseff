@@ -336,7 +336,7 @@ let () =
 `Parseff.location` returns the current position as a `Parseff.location` record with byte offset, line number, and column. Lines and columns are 1-based. Columns count bytes, not characters (relevant for multibyte UTF-8 input).
 
 ```ocaml
-type location = { offset : int; line : int; col : int }
+type location = { offset : int; line : int; byte_col : int }
 val location : unit -> location
 ```
 **Performance:** The line index is built lazily on the first call and extended incrementally on subsequent calls. If you never call `location`, no scanning overhead is incurred.
@@ -364,7 +364,7 @@ let report_error input result =
   match result with
   | Error e ->
       let loc = Parseff.location_of_position input e.Parseff.range.start in
-      Printf.printf "line %d, col %d: %s\n" loc.line loc.col
+      Printf.printf "line %d, byte %d: %s\n" loc.line loc.byte_col
         (Parseff.error_message e)
   | Ok _ -> ()
 ```

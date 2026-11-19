@@ -1920,7 +1920,7 @@ let test_span_get () =
 let check_location msg (offset, line, col) (actual : Parseff.location) =
   Alcotest.(check int) (msg ^ " offset") offset actual.offset;
   Alcotest.(check int) (msg ^ " line") line actual.line;
-  Alcotest.(check int) (msg ^ " col") col actual.col
+  Alcotest.(check int) (msg ^ " col") col actual.byte_col
 
 let test_location_at_start () =
   match

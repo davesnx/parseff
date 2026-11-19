@@ -354,7 +354,7 @@ Lines and columns are 1-based. Columns count bytes, not characters (relevant
 for multibyte UTF-8 input).
 
 {@ocaml skip[
-type location = { offset : int; line : int; col : int }
+type location = { offset : int; line : int; byte_col : int }
 val location : unit -> location
 ]}
 
@@ -386,7 +386,7 @@ let report_error input result =
   match result with
   | Error e ->
       let loc = Parseff.location_of_position input e.Parseff.range.start in
-      Printf.printf "line %d, col %d: %s\n" loc.line loc.col
+      Printf.printf "line %d, byte %d: %s\n" loc.line loc.byte_col
         (Parseff.error_message e)
   | Ok _ -> ()
 ]}

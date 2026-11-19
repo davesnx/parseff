@@ -708,7 +708,7 @@ let test_parse_source_consume_all_preserves_end_of_input_semantics () =
 let check_location msg (offset, line, col) (actual : Parseff.location) =
   Alcotest.(check int) (msg ^ " offset") offset actual.offset;
   Alcotest.(check int) (msg ^ " line") line actual.line;
-  Alcotest.(check int) (msg ^ " col") col actual.col
+  Alcotest.(check int) (msg ^ " col") col actual.byte_col
 
 let test_streaming_location_basic () =
   let input = "aaa\nbbb\nccc" in
@@ -1522,7 +1522,7 @@ let test_location_after_backtrack () =
         let l1 = Parseff.location () in
         Parseff.literal input;
         let l2 = Parseff.location () in
-        Printf.sprintf "%d:%d %d:%d" l1.line l1.col l2.line l2.col
+        Printf.sprintf "%d:%d %d:%d" l1.line l1.byte_col l2.line l2.byte_col
       )
       ()
   in
@@ -1668,7 +1668,7 @@ let test_streaming_matches_parse () =
         fun () ->
           let _ = Parseff.take 4 in
           let l = Parseff.location () in
-          Printf.sprintf "%d:%d:%d" l.offset l.line l.col
+          Printf.sprintf "%d:%d:%d" l.offset l.line l.byte_col
       );
       ( "or_ failure",
         "abc",

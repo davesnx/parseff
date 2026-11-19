@@ -228,7 +228,7 @@ type error = {
   kind : error_kind;
   range : range;  (** the bytes the error is about, empty at the end of the input *)
   location : location option;
-      (** line and column of [range.start], [None] when the line is not known; [col] counts bytes, the column [render_error] prints counts Unicode characters *)
+      (** line and column of [range.start], [None] when the line is not known; [byte_col] counts bytes, the column [render_error] prints counts Unicode characters *)
   contexts : context list;  (** open constructs, outermost first *)
   notes : note list;
   help : string option;  (** the text given with [~help] *)
@@ -280,7 +280,7 @@ input.json:4:5: [error] expected ',' or '}', found '"'
 - The rows the renderer adds never end with a space. Source text is printed byte for byte, so a source line with trailing spaces keeps them.
 `~source` gives the input to read the lines from. Without it the lines kept inside the error are used: the error line, the line before it and the line of the opener, each cut to 240 bytes around the failure. That is enough for in-memory and streaming parses; with a streaming source the old lines may be gone and the context line then says `from byte N`. `Parseff.error_message` returns only the one-line message.
 
-The columns of the header and of the `* while parsing` lines count Unicode characters (code points), while `location.col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the header still has the line and the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the column is `location.col`, which counts bytes. The excerpt shows the kept part of the line, cut on the left with `...`, with carets only under the kept part of the range and no caret row when the whole range is dropped. A context line for a context that starts in the dropped part of the line says `from byte N`.
+The columns of the header and of the `* while parsing` lines count Unicode characters (code points), while `location.byte_col` counts bytes (see the UTF-8 page of the API documentation). When streaming has dropped the start of a line and `~source` is not given, the header still has the line and the character column, because Parseff counts the characters of the line that it drops. When the error starts in the dropped part of the line, the column is `location.byte_col`, which counts bytes. The excerpt shows the kept part of the line, cut on the left with `...`, with carets only under the kept part of the range and no caret row when the whole range is dropped. A context line for a context that starts in the dropped part of the line says `from byte N`.
 
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'
