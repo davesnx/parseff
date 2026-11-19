@@ -221,7 +221,7 @@ A table also takes `Parseff.infix_right` operators such as `^`, `Parseff.prefix`
 
 ## One lookup per operand: `precedence`
 
-`Parseff.precedence` runs the same loop as `expression`. In place of a table, it takes a lookup function. After each operand, the lookup looks at the input once and returns the precedence and the operator, or `None`. With many precedence levels, this is faster than a table, which runs the token parsers one by one:
+`Parseff.precedence` takes a lookup function in place of a table. `precedence` and `expression` each have their own loop, with the same rules for build functions, depth and `commit`. After each operand, the lookup looks at the input once and returns the precedence and the operator, or `None`. Use `expression` for a table of token parsers: tokens with a shared prefix, one token in two roles, and the operator tokens in the expected set of an error. Use `precedence` when the lookup can decide from the next character or from the token of a lexer. With many precedence levels, this is faster than a table, which runs the token parsers one by one:
 
 ```ocaml
 let operator () =

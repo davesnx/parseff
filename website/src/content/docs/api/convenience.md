@@ -318,3 +318,33 @@ let binding () =
 (* Matches "let x" -> "x" *)
 (* Fails on "letter x" at offset 0, expecting "let" *)
 ```
+
+### `is_ident_char`
+
+`Parseff.is_ident_char` is true for an ASCII letter, a digit or `_`. It is the default continuation class of `Parseff.keyword`.
+
+```ocaml
+val is_ident_char : char -> bool
+```
+
+### `identifier`
+
+`Parseff.identifier` reads one byte for which `start` is true, then the bytes for which `inner` is true, and returns them. `~reserved` rejects a word with `expected <label>` at its start, so `Parseff.or_` can still match a `Parseff.keyword` on that input. The default label is `"identifier"`. On a stream, the word and the byte after it must fit in the backtrack window.
+
+```ocaml
+val identifier : ?label:string -> ?reserved:(string -> bool) -> (char -> bool) -> (char -> bool) -> string
+```
+```ocaml
+let is_start c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+
+let reserved = function
+  | "let" | "in" | "if" | "then" | "else" -> true
+  | _ -> false
+
+let name () =
+  Parseff.identifier ~reserved is_start Parseff.is_ident_char
+
+(* Matches "letter" -> "letter" *)
+(* Fails on "let" at offset 0, expecting identifier *)
+```

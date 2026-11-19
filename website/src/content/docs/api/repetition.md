@@ -266,7 +266,7 @@ val expression :
 
 ### `precedence`
 
-`Parseff.precedence` runs the loop of `expression` with a lookup function in place of a table. After each operand, the lookup returns the precedence and the operator, or `None`. It takes infix and postfix operators only; a prefix operator is a type error. Parse a prefix operator in `operand`.
+`Parseff.precedence` takes a lookup function in place of a table. After each operand, the lookup returns the precedence and the operator, or `None`. `precedence` and `expression` each have their own loop, with the same rules for build functions, depth and `commit`. Use `expression` for a table of token parsers: tokens with a shared prefix, one token in two roles, and the operator tokens in the expected set of an error. Use `precedence` when the lookup can decide from the next character or from the token of a lexer; on a grammar with many levels, it is faster. It takes infix and postfix operators only; a prefix operator is a type error. Parse a prefix operator in `operand`.
 
 ```ocaml
 val precedence :
