@@ -295,6 +295,56 @@ let test_partial_head () =
   check "in one chunk" 160. [ head ];
   check "in 64-byte chunks" 400. chunks
 
+let pipelined = 100
+
+let chunks_each_heads chunk =
+  let count = ref 0 in
+  let on_value lines =
+    if lines <> 11 then Alcotest.failf "parsed %d lines, expected 11" lines;
+    incr count;
+    `Continue
+  in
+  let push = Parseff.parse_chunks_each ~on_value (fun () -> head_lines 0) in
+  ( match push (Some chunk) with
+  | Parseff.Need_input ->
+      ()
+  | _ ->
+      Alcotest.fail "expected Need_input after the chunk"
+  );
+  ( match push None with
+  | Parseff.Ended ->
+      ()
+  | _ ->
+      Alcotest.fail "expected Ended"
+  );
+  if !count <> pipelined then
+    Alcotest.failf "parsed %d heads, expected %d" !count pipelined
+
+let test_chunks_each_heads () =
+  let chunk = String.concat "" (List.init pipelined (fun _ -> head)) in
+  let partial = words_per_head (fun () -> feed_head [ head ]) in
+  let runs = 200 in
+  for _ = 1 to 10 do
+    chunks_each_heads chunk
+  done;
+  Gc.full_major ();
+  let before = Gc.minor_words () in
+  for _ = 1 to runs do
+    chunks_each_heads chunk
+  done;
+  let each = (Gc.minor_words () -. before) /. Float.of_int (runs * pipelined) in
+  if partial <= 80. then
+    Alcotest.failf
+      "parse_partial allocated %.1f minor words per head, so the bound of 80 \
+       does not show the cost of a fiber per head"
+      partial;
+  if each > 80. then
+    Alcotest.failf
+      "parse_chunks_each with %d pipelined %d-byte heads in one chunk \
+       allocated %.1f minor words per head, parse_partial %.1f; expected at \
+       most 80"
+      pipelined (String.length head) each partial
+
 let test_head_in_large_chunk () =
   let chunk = head ^ String.make 1_000_000 'x' in
   let parse () = parse_head (Parseff.Source.of_seq (Seq.return chunk)) in
@@ -559,6 +609,8 @@ let () =
           Alcotest.test_case "one byte per read" `Quick test_source_reads;
           Alcotest.test_case "head as one chunk" `Quick test_one_chunk_head;
           Alcotest.test_case "head with parse_partial" `Quick test_partial_head;
+          Alcotest.test_case "pipelined heads with parse_chunks_each" `Quick
+            test_chunks_each_heads;
           Alcotest.test_case "head in a large chunk" `Quick
             test_head_in_large_chunk;
           Alcotest.test_case "short message" `Quick test_short_message;
