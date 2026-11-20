@@ -3,3 +3,7 @@
 (cram
  (applies_to fix-code-spans)
  (deps fix-code-spans.sh))
+
+(cram
+ (applies_to fix-relative-links)
+ (deps fix-relative-links.sh))

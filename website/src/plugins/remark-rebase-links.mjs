@@ -1,13 +1,32 @@
 import { visit } from 'unist-util-visit';
 import { root } from '../../site.mjs';
 
-export default function remarkRebaseLinks({ base }) {
+const VERSION_SEGMENT = /^(?:main|\d+\.\d+\.\d+)(?:[/?#]|$)/;
+
+export default function remarkRebaseLinks({ base, site }) {
   const from = `${root}/`;
   const to = `${base.replace(/\/$/, '')}/`;
+  const origin = site ? site.replace(/\/$/, '') : '';
+  const siteRoot = origin ? `${origin}${root}` : '';
+
   return (tree) => {
-    if (to === from) return;
     visit(tree, ['link', 'definition', 'image'], (node) => {
-      if (node.url.startsWith(from)) node.url = to + node.url.slice(from.length);
+      if (typeof node.url !== 'string') return;
+
+      let url = node.url;
+      if (siteRoot && (url === siteRoot || url.startsWith(`${siteRoot}/`))) {
+        url = url.slice(origin.length);
+        if (url === root) url = from;
+      }
+
+      if (to !== from && url.startsWith(from)) {
+        const rest = url.slice(from.length);
+        if (!VERSION_SEGMENT.test(rest)) {
+          url = to + rest;
+        }
+      }
+
+      node.url = url;
     });
   };
 }

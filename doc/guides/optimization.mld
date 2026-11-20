@@ -66,9 +66,7 @@ let parse_ints () =
   |> List.map int_of_slice
 ]}
 
-See the
-{{:https://davesnx.github.io/parseff/api/zero-copy/}Zero-copy API} reference
-for details.
+See the {{!page-"zero-copy"}Zero-copy API} reference for details.
 
 {1 Dispatch with [peek_char] instead of [or_] in tight loops}
 
