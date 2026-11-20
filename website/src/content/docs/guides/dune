@@ -17,7 +17,7 @@
  (targets first-parser.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Your First Parser' 'description: Build a config file parser from scratch, learning Parseff along the way' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/first-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: Your first parser' 'description: Build a config file parser from scratch' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/first-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
  (alias generate-markdown)
@@ -32,7 +32,7 @@
  (targets ip-address.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: \"Parsing an IP Address\"' 'description: Build a validated IPv4 address parser step by step' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/ip-address.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: \"Parsing an IP address\"' 'description: Build a validated IPv4 address parser step by step' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/ip-address.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
  (alias generate-markdown)
@@ -47,7 +47,7 @@
  (targets expression-parser.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: \"Expressions with Precedence\"' 'description: Build an arithmetic expression parser with operator precedence and an AST' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/expression-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: \"Expressions with precedence\"' 'description: Build an arithmetic expression parser with operator precedence and an AST' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/expression-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
  (alias generate-markdown)
@@ -62,7 +62,7 @@
  (targets json-parser.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: \"A JSON Parser\"' 'description: Build a complete recursive-descent JSON parser with depth limiting' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/json-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: \"A JSON parser\"' 'description: Build a recursive-descent JSON parser with depth limiting' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/json-parser.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
  (alias generate-markdown)
@@ -77,7 +77,7 @@
  (targets error-recovery.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Error Recovery' 'description: Report every error in the input, not only the first' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/error-recovery.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: Error recovery' 'description: Report every syntax error in the input instead of stopping at the first' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/error-recovery.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets}")))
 
 (rule
  (alias generate-markdown)

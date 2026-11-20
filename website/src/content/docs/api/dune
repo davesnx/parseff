@@ -90,7 +90,7 @@
  (targets diagnostics.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Diagnostics' 'description: Non-fatal diagnostics and full-consumption runners' '---' '' '<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/diagnostics.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: Diagnostics' 'description: Warnings, diagnostic collectors, and backtracking Ref state' '---' '' '<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/diagnostics.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
 
 (rule
  (alias generate-markdown)
@@ -104,7 +104,7 @@
  (targets zero-copy.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Zero-copy API' 'description: High-performance span-based parsing operations' '---' '' '<!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/zero-copy.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: Zero-copy API' 'description: Zero-copy slices and fused scanners' '---' '' '<!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/zero-copy.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
 
 (rule
  (alias generate-markdown)
@@ -118,7 +118,7 @@
  (targets streaming.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Streaming' 'description: Parse from files, channels, and custom readers' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
+   "printf '%s\\n' '---' 'title: Streaming' 'description: Pull and push streaming from files, channels, and chunk callbacks' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && sed 's|\\[`\\([^`]*\\)`\\](\\./Parseff[^)]*)|`\\1`|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && sed 's|\\\\=|=|g' %{targets} > %{targets}.tmp && mv %{targets}.tmp %{targets} && %{workspace_root}/website/fix-code-spans.sh %{targets}")))
 
 (rule
  (alias generate-markdown)

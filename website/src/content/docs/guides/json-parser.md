@@ -1,28 +1,15 @@
 ---
-title: "A JSON Parser"
-description: Build a complete recursive-descent JSON parser with depth limiting
+title: "A JSON parser"
+description: Build a recursive-descent JSON parser with depth limiting
 ---
 
 # Guide: A JSON parser
 
-Build a complete recursive-descent JSON parser with depth limiting.
+Build a recursive-descent JSON parser with nesting-depth protection via `Parseff.rec_`.
 
-This walkthrough builds a full JSON parser that handles all JSON value types: null, booleans, numbers, strings, arrays, and objects. It demonstrates recursive descent parsing, mutual recursion between parsers, and depth limiting with `rec_`.
+Source: [`test/test_json.ml`](https://github.com/davesnx/parseff/blob/main/test/test_json.ml).
 
-Source: [`test/test_json.ml`](https://github.com/davesnx/parseff/blob/main/test/test_json.ml)
-
-## What we're building
-
-A parser that takes any valid JSON string and returns a structured OCaml value. Along the way, we'll handle:
-
-- Six different value types with alternation
-- Recursive nesting (arrays inside objects inside arrays...)
-- Whitespace between tokens
-- Depth limiting to prevent stack overflows on malicious input
-
-## The data type
-
-First, we define what a parsed JSON value looks like:
+## Data type
 
 ```ocaml
 type json =
@@ -34,13 +21,7 @@ type json =
   | Object of (string * json) list
 ```
 
-Every JSON value maps to one of these constructors. This is the return type of our parser.
-
-## Primitive value parsers
-
-Each JSON primitive type gets its own parser. These are the leaf nodes. They don't call other parsers recursively.
-
-### Null and booleans
+## Leaf parsers
 
 ```ocaml
 let null_parser () =
@@ -55,21 +36,9 @@ let bool_parser () =
     (fun () ->
       Parseff.literal "false";
       Bool false)
-```
 
-`null_parser` matches the literal `"null"` and returns the `Null` constructor. `bool_parser` uses `or_` to try `"true"` first, backtracking to `"false"` if that fails.
-
-### Numbers
-
-```ocaml
 let number_parser () = Number (Parseff.number ())
-```
 
-`Parseff.number` parses a number with the JSON grammar: integers, decimals, exponents, and negative numbers.
-
-### Strings
-
-```ocaml
 let string_content () = Parseff.take_while (fun c -> c <> '"')
 
 let string_parser () =
@@ -79,168 +48,88 @@ let string_parser () =
   String s
 ```
 
-Match an opening quote, capture everything that isn't a quote, then match the closing quote. This simplified version doesn't handle escape sequences (`\"`, `\\`, etc.). A production parser would need more work here.
+`Parseff.number` parses JSON-grammar numbers (integers, fractions, exponents, optional leading `-`). `string_parser` omits backslash escape sequences for brevity.
 
-## The recursive entry point
+## Recursive grammar
 
-This is where it gets interesting. A JSON value can be any of the six types, and arrays/objects contain more JSON values:
+Arrays and objects contain nested JSON values. Wrap the recursive entry point (`json`) in `Parseff.rec_` so nesting depth is checked against `~max_depth` (default `128`), and wrap `array_parser` / `object_parser` in `Parseff.context` with `~delimited:true` so multi-line errors point back to the opening bracket or brace:
 
 ```ocaml
 let rec json () =
   Parseff.rec_ (fun () ->
-    Parseff.skip_whitespace ();
-    Parseff.one_of
-      [
-        array_parser;
-        object_parser;
-        null_parser;
-        bool_parser;
-        number_parser;
-        string_parser;
-      ]
-  )
-```
+      Parseff.skip_whitespace ();
+      Parseff.one_of
+        [
+          array_parser;
+          object_parser;
+          null_parser;
+          bool_parser;
+          number_parser;
+          string_parser;
+        ])
 
-Three things to notice:
-
-1. **`rec_` wraps the body.** This registers a recursion entry point for depth tracking. Every time `json` calls itself (through arrays or objects), the depth counter increments. When it exceeds `max_depth`, parsing fails cleanly instead of overflowing the stack.
-2. **`one_of` tries each parser in order.** Array and object parsers come first because they start with distinctive characters (`[` and `{`). If those fail, we fall through to the simpler alternatives.
-3. **Whitespace is consumed before the value.** This means individual parsers don't need to worry about leading whitespace.
-
-## Arrays
-
-```ocaml
 and array_parser () =
-  let _ = Parseff.char '[' in
-  Parseff.skip_whitespace ();
-  let elements =
-    Parseff.or_
-      (fun () ->
-        let first = json () in
-        let rest =
-          Parseff.many
-            (fun () ->
-              Parseff.skip_whitespace ();
-              let _ = Parseff.char ',' in
-              json ())
-        in
-        first :: rest)
-      (fun () -> [])
-  in
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char ']' in
-  Array elements
-```
+  Parseff.context ~delimited:true "array" (fun () ->
+      let _ = Parseff.char '[' in
+      Parseff.skip_whitespace ();
+      let elements =
+        Parseff.sep_by json (fun () ->
+            Parseff.skip_whitespace ();
+            Parseff.char ',')
+      in
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char ']' in
+      Array elements)
 
-After the opening `[`, we use `or_` to handle two cases:
-
-- **Non-empty array**: Parse the first element, then `many` parses zero or more `, element` pairs. This pattern avoids a trailing comma problem, since the separator always comes before an element (except the first).
-- **Empty array**: The left branch fails (no element to parse), so we backtrack and return `[]`.
-
-Notice `json ()` is called recursively here. This is where the depth tracking from `rec_` matters. Without it, deeply nested arrays like `[[[[[...]]]]]` would blow the stack.
-
-## Objects
-
-```ocaml
 and object_parser () =
-  let _ = Parseff.char '{' in
-  Parseff.skip_whitespace ();
-  let pairs =
-    Parseff.or_
-      (fun () ->
-        let first = key_value () in
-        let rest =
-          Parseff.many
-            (fun () ->
-              Parseff.skip_whitespace ();
-              let _ = Parseff.char ',' in
-              key_value ())
-        in
-        first :: rest)
-      (fun () -> [])
-  in
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char '}' in
-  Object pairs
-```
+  Parseff.context ~delimited:true "object" (fun () ->
+      let _ = Parseff.char '{' in
+      Parseff.skip_whitespace ();
+      let pairs =
+        Parseff.sep_by key_value (fun () ->
+            Parseff.skip_whitespace ();
+            Parseff.char ',')
+      in
+      Parseff.skip_whitespace ();
+      let _ = Parseff.char '}' in
+      Object pairs)
 
-**Tip:** Wrap `array_parser` and `object_parser` in `Parseff.context ~delimited:true "array" (fun () -> ...)` and `Parseff.context ~delimited:true "object" (fun () -> ...)`. A failure inside a nested value then remembers which array or object it was in, so an error report can say "while parsing array". See [the Combinators page](https://davesnx.github.io/parseff/api/combinators/).
-
-The structure mirrors the array parser exactly. The only difference is that elements are key-value pairs instead of bare values.
-
-## Key-value pairs
-
-```ocaml
 and key_value () =
+  Parseff.skip_whitespace ();
   let _ = Parseff.char '"' in
   let key = string_content () in
   let _ = Parseff.char '"' in
   Parseff.skip_whitespace ();
   let _ = Parseff.char ':' in
-  Parseff.skip_whitespace ();
   let value = json () in
   (key, value)
 ```
 
-Parse a string key (reusing `string_content` from `string_parser`), a colon separator, and then recursively parse the value.
+Only `json` needs `Parseff.rec_`, since every recursive cycle passes through it.
 
-## Running the parser
+## Running and depth limiting
 
 ```ocaml
 let () =
-  let input = {|{"name": "parseff", "version": 1, "tags": ["parser", "ocaml"]}|} in
+  let input =
+    {|{"name": "parseff", "version": 1, "tags": ["parser", "ocaml"] }|}
+  in
   match Parseff.parse input json with
-  | Ok result -> (* ... process the JSON value ... *)
+  | Ok _ -> ()
   | Error { kind = Depth_limit_exceeded { limit }; _ } ->
-      Printf.printf "Nesting is deeper than %d\n" limit
+      Printf.printf "Nesting exceeds %d levels\n" limit
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"input.json" ~source:input e)
 ```
 
-## Depth limiting
-
-Without `rec_`, a malicious input with 10,000 nested arrays would crash your program with a stack overflow. With it, you can set a limit:
+With `~max_depth`, deeply nested input fails with `Depth_limit_exceeded` instead of overflowing the stack:
 
 ```ocaml
-Parseff.parse ~max_depth:64 input json
+let () =
+  let shallow = String.make 50 '[' ^ String.make 50 ']' in
+  assert (Result.is_ok (Parseff.parse shallow json));
+  let deep = String.make 256 '[' ^ String.make 256 ']' in
+  match Parseff.parse ~max_depth:128 deep json with
+  | Error { kind = Depth_limit_exceeded { limit = 128 }; _ } -> ()
+  | _ -> assert false
 ```
-
-When the limit is exceeded, parsing fails with `"maximum nesting depth 64 exceeded"`, giving a clean error instead of a crash.
-
-Here's what happens with deeply nested input:
-
-```ocaml
-(* 50 levels deep: within the default limit of 128 *)
-let input = String.make 50 '[' ^ String.make 50 ']' in
-Parseff.parse input json_array
-(* Ok (Array (Array (Array ...))) *)
-
-(* 256 levels deep: exceeds the limit *)
-let input = String.make 256 '[' ^ String.make 256 ']' in
-Parseff.parse ~max_depth:128 input json
-(* Error { kind = Depth_limit_exceeded { limit = 128 }; ... } *)
-```
-
-## The mutual recursion pattern
-
-This parser uses five mutually recursive functions:
-
-```
-json ──→ one_of ──→ array_parser  ──→ json (recursive)
-                ──→ object_parser ──→ key_value ──→ json (recursive)
-                ──→ null_parser
-                ──→ bool_parser
-                ──→ number_parser
-                ──→ string_parser
-```
-
-In OCaml, mutually recursive functions are defined with `let rec ... and ...`:
-
-```ocaml
-let rec json () = ...
-and array_parser () = ...
-and object_parser () = ...
-and key_value () = ...
-```
-
-Only the top-level entry point (`json`) needs `rec_`. The other functions participate in the recursion, but `json` is where a new nesting level begins.

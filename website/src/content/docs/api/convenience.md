@@ -8,91 +8,40 @@ description: Common parsing patterns made easy
 
 # Convenience combinators
 
-Convenience combinators provide ready-to-use parsers for common patterns like digits, numbers, letters, and whitespace.
+Ready-to-use parsers for ASCII character classes, numbers, whitespace, tokens, fixed-length slices, and framed payloads.
 
 
 ## Character classes
 
-
-### `digit`
-
-`Parseff.digit` parses an ASCII decimal digit, `'0'` to `'9'`, and returns it as a `char`. For the value of a number, use `Parseff.integer`.
-
 ```ocaml
 val digit : unit -> char
-```
-```ocaml
-(* Parse a two-digit number *)
-let two_digits () =
-  let value c = Char.code c - Char.code '0' in
-  let a = Parseff.digit () in
-  let b = Parseff.digit () in
-  (value a * 10) + value b
-
-(* Matches "42" -> 42 *)
-```
-
-### `letter`
-
-`Parseff.letter` parses an ASCII letter (a-z or A-Z).
-
-```ocaml
 val letter : unit -> char
-```
-```ocaml
-let initial () = Parseff.letter ()
-
-(* Matches "A" -> 'A' *)
-(* Matches "z" -> 'z' *)
-(* Fails on "1" *)
-```
-
-### `alphanum`
-
-`Parseff.alphanum` parses an alphanumeric character (letter or digit).
-
-```ocaml
 val alphanum : unit -> char
+val any_char : unit -> char
 ```
+- `Parseff.digit`: ASCII decimal digit (`'0'`..`'9'`). Use `Parseff.integer` to parse an integer value directly.
+- `Parseff.letter`: ASCII letter (`'a'`..`'z'` or `'A'`..`'Z'`).
+- `Parseff.alphanum`: ASCII letter or digit.
+- `Parseff.any_char`: any single byte; fails only at end of input.
 ```ocaml
 let username () =
   let first = Parseff.letter () in
   let rest = Parseff.many Parseff.alphanum in
   String.make 1 first ^ String.of_seq (List.to_seq rest)
-
-(* Matches "user123" -> "user123" *)
-(* Fails on "123user" (must start with letter) *)
-```
-
-### `any_char`
-
-`Parseff.any_char` parses any character. Fails only at end of input.
-
-```ocaml
-val any_char : unit -> char
-```
-```ocaml
-(* Skip past a single unknown character *)
-let skip_one () =
-  let _ = Parseff.any_char () in
-  ()
-
-(* Peek at the next character without consuming it *)
-let peek () = Parseff.look_ahead Parseff.any_char
 ```
 
 ## Numbers
 
-The number parsers read a number at the current position. They stop at the first byte that does not fit, and they work across chunk boundaries in `Parseff.Source.parse`.
-
-
-### `integer`
-
-`Parseff.integer` parses an optional `-` and decimal digits. It fails when the value is outside the `int` range.
+All number parsers stop at the first byte that does not belong to the number and work across chunk boundaries in `Parseff.Source.parse`.
 
 ```ocaml
 val integer : unit -> int
+val number : unit -> float
+val hex_integer : unit -> int
 ```
+- `Parseff.integer`: optional `-` followed by ASCII digits. Fails without a digit or on `int` overflow.
+- `Parseff.number`: JSON-grammar decimal float (optional `-`, digits, optional fraction only when a digit follows `'.'`, optional exponent only when a digit or sign+digit follows `'e'`/`'E'`). Fails without a digit or on float overflow. `"-0"` returns `-0.` (whereas `integer` returns `0`).
+- `Parseff.hex_integer`: unsigned ASCII hex digits (no sign, no `0x` prefix). Fails without a digit or above `max_int`.
 ```ocaml
 let point () =
   let x = Parseff.integer () in
@@ -100,46 +49,14 @@ let point () =
   let y = Parseff.integer () in
   (x, y)
 
-(* Matches "12,-7" -> (12, -7) *)
-```
-
-### `number`
-
-`Parseff.number` parses a decimal number: an optional `-`, digits, an optional fraction and an optional exponent. It reads the longest number at the position: it reads a fraction only when a digit follows the `.`, and an exponent only when a digit, or a sign then a digit, follows the `e`. It fails when the value is too large for a `float`. `"-0"` gives `-0.`, where `Parseff.integer` gives `0`.
-
-```ocaml
-val number : unit -> float
-```
-```ocaml
-let coordinates () =
-  let lat = Parseff.number () in
-  let _ = Parseff.char ',' in
-  let lon = Parseff.number () in
-  (lat, lon)
-
-(* Matches "48.85,-2.35e0" -> (48.85, -2.35) *)
-```
-
-### `hex_integer`
-
-`Parseff.hex_integer` parses hexadecimal digits. It accepts no sign and no `0x` prefix.
-
-```ocaml
-val hex_integer : unit -> int
-```
-```ocaml
 let color () =
   let _ = Parseff.char '#' in
   Parseff.hex_integer ()
-
-(* Matches "#ff8800" -> 0xff8800 *)
 ```
 
-### Other number formats
+### Custom number formats
 
-The number parsers do not read a leading `+`, `.5`, `5.`, digit separators such as `1_000`, `inf` or `nan`. They stop before such text: `number` on `5.` reads `5` and stops at `.`.
-
-For these formats, write your own parser with `Parseff.take_while`, `Parseff.recognize` and a conversion function. This one reads a number and its unit:
+`integer`, `number`, and `hex_integer` do not accept leading `+`, `.5`, digit separators (`1_000`), `inf`, or `nan`, and stop before non-matching suffixes: `number` on `"5."` returns `5.` and stops at `'.'`, and on `"2em"` returns `2.` and stops at `'e'`. Build custom formats with `Parseff.take_while` and `Parseff.recognize`:
 
 ```ocaml
 let is_digit c = c >= '0' && c <= '9'
@@ -149,8 +66,7 @@ let quantity () =
   let text =
     Parseff.recognize (fun () ->
         let _ = Parseff.take_while ~at_least:1 ~label:"digit" is_digit in
-        Parseff.optional
-          (fun () ->
+        Parseff.optional (fun () ->
             let _ = Parseff.char '.' in
             Parseff.take_while ~at_least:1 ~label:"digit" is_digit))
   in
@@ -166,107 +82,21 @@ let quantity () =
 
 ## Whitespace
 
-
-### `is_whitespace`
-
-`Parseff.is_whitespace` returns true for whitespace characters (space, tab, newline, carriage return). This is a predicate, not a parser.
-
 ```ocaml
 val is_whitespace : char -> bool
-```
-```ocaml
-let trim_parser () =
-  Parseff.skip_while Parseff.is_whitespace;
-  let value =
-    Parseff.take_while ~at_least:1
-      (fun c -> not (Parseff.is_whitespace c))
-      ~label:"value"
-  in
-  Parseff.skip_while Parseff.is_whitespace;
-  value
-
-(* Matches "  hello  " -> "hello" *)
-```
-
-### `whitespace`
-
-`Parseff.whitespace` parses zero or more whitespace characters. Returns the matched string. Always succeeds (returns empty string if no whitespace).
-
-```ocaml
-val whitespace : unit -> string
-```
-```ocaml
-let spaced_values () =
-  let a = Parseff.digit () in
-  let _ = Parseff.whitespace () in
-  let b = Parseff.digit () in
-  (a, b)
-
-(* Matches "1 2" -> ('1', '2') *)
-(* Matches "1    2" -> ('1', '2') *)
-(* Matches "12" -> ('1', '2') *)
-```
-
-### `whitespace ~at_least:1`
-
-`Parseff.whitespace` with `~at_least:1` parses one or more whitespace characters. Fails if no whitespace found.
-
-```ocaml
 val whitespace : ?at_least:int -> unit -> string
+val skip_whitespace : unit -> unit
 ```
+- `Parseff.is_whitespace` returns `true` for space, tab, newline, and carriage return.
+- `Parseff.whitespace` reads zero or more ASCII whitespace bytes as a string (pass `~at_least:1` to require at least one).
+- `Parseff.skip_whitespace` skips ASCII whitespace without allocating. Prefer it whenever you do not need the matched string.
 ```ocaml
 let words () =
   Parseff.sep_by ~at_least:1
     (fun () ->
-      Parseff.take_while ~at_least:1
-        (fun c -> not (Parseff.is_whitespace c))
-        ~label:"word")
+      Parseff.take_while ~at_least:1 ~label:"word" (fun c ->
+          not (Parseff.is_whitespace c)))
     (fun () -> Parseff.whitespace ~at_least:1 ())
-
-(* Matches "hello world" -> ["hello"; "world"] *)
-(* Fails on "helloworld" (no whitespace separator) *)
-```
-
-### `skip_whitespace`
-
-`Parseff.skip_whitespace` skips zero or more whitespace characters (returns unit). More efficient than `Parseff.whitespace` when you don't need the matched string.
-
-```ocaml
-val skip_whitespace : unit -> unit
-```
-```ocaml
-(* Parse comma-separated list with flexible spacing *)
-let flexible_list () =
-  let _ = Parseff.char '[' in
-  Parseff.skip_whitespace ();
-  let values =
-    Parseff.sep_by
-      (fun () ->
-        Parseff.skip_whitespace ();
-        let n = Char.code (Parseff.digit ()) - Char.code '0' in
-        Parseff.skip_whitespace ();
-        n)
-      (fun () -> Parseff.char ',')
-  in
-  Parseff.skip_whitespace ();
-  let _ = Parseff.char ']' in
-  values
-
-(* All of these parse to [1; 2; 3]: *)
-(* "[1,2,3]" *)
-(* "[ 1 , 2 , 3 ]" *)
-(* "[  1  ,  2  ,  3  ]" *)
-```
-**Tip:** Always use `skip_whitespace` instead of `whitespace` when you don't need the matched string:
-
-```ocaml
-(* allocates a string you don't need *)
-let _ = Parseff.whitespace () in
-parse_value ()
-
-(* skips without allocating *)
-Parseff.skip_whitespace ();
-parse_value ()
 ```
 
 ## Tokens
@@ -274,7 +104,7 @@ parse_value ()
 
 ### `lexeme`
 
-`Parseff.lexeme` runs a parser, then `~skip`, and returns the result of the parser. `~skip` defaults to `Parseff.skip_whitespace`; pass your own when the grammar also has comments.
+`Parseff.lexeme` runs a parser, then `~skip` (default: `Parseff.skip_whitespace`), and returns the parser's result.
 
 ```ocaml
 val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
@@ -294,42 +124,22 @@ let pair () =
   let _ = token (fun () -> Parseff.char ',') in
   let b = token Parseff.digit in
   (a, b)
-
-(* Matches "1 , 2" -> ('1', '2') *)
-(* Matches "1 # first\n, 2" -> ('1', '2') *)
 ```
 
-### `keyword`
+### `keyword`, `is_ident_char`, and `identifier`
 
-`Parseff.keyword` matches a literal only when the next byte cannot continue an identifier, so that `"let"` does not match the start of `"letter"`. Pass `~is_ident` to change which bytes continue an identifier. In streaming, `keyword` needs a backtrack window of one byte more than the keyword.
-
-```ocaml
-val keyword : ?is_ident:(char -> bool) -> string -> unit
-```
-```ocaml
-let binding () =
-  Parseff.keyword "let";
-  Parseff.skip_whitespace ();
-  Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"name"
-
-(* Matches "let x" -> "x" *)
-(* Fails on "letter x" at offset 0, expecting "let" *)
-```
-
-### `is_ident_char`
-
-`Parseff.is_ident_char` is true for an ASCII letter, a digit or `_`. It is the default continuation class of `Parseff.keyword`.
-
+- `Parseff.is_ident_char`: `true` for ASCII letters, digits, and `'_'`.
+- `Parseff.keyword`: matches a literal only when the following byte does not satisfy `~is_ident` (default `Parseff.is_ident_char`), so `keyword "let"` rejects `"letter"` at offset 0\. Raises `Invalid_argument` on `""`.
+- `Parseff.identifier`: matches one `start` byte followed by zero or more `inner` bytes. `~reserved` rejects keywords as ordinary `Expected` failures at offset 0 so alternatives in `Parseff.or_` still work.
 ```ocaml
 val is_ident_char : char -> bool
-```
-
-### `identifier`
-
-`Parseff.identifier` reads one byte for which `start` is true, then the bytes for which `inner` is true, and returns them. `~reserved` rejects a word with `expected <label>` at its start, so `Parseff.or_` can still match a `Parseff.keyword` on that input. The default label is `"identifier"`. On a stream, the word and the byte after it must fit in the backtrack window.
-
-```ocaml
-val identifier : ?label:string -> ?reserved:(string -> bool) -> (char -> bool) -> (char -> bool) -> string
+val keyword : ?is_ident:(char -> bool) -> string -> unit
+val identifier :
+  ?label:string ->
+  ?reserved:(string -> bool) ->
+  (char -> bool) ->
+  (char -> bool) ->
+  string
 ```
 ```ocaml
 let is_start c =
@@ -339,9 +149,28 @@ let reserved = function
   | "let" | "in" | "if" | "then" | "else" -> true
   | _ -> false
 
-let name () =
-  Parseff.identifier ~reserved is_start Parseff.is_ident_char
+let name () = Parseff.identifier ~reserved is_start Parseff.is_ident_char
+```
+In streaming, `keyword` needs `String.length s + 1` bytes of `~backtrack_window`, and `identifier` needs the word length plus one byte.
 
-(* Matches "letter" -> "letter" *)
-(* Fails on "let" at offset 0, expecting identifier *)
+
+## Fixed-length reads and framed input
+
+```ocaml
+val take : int -> string
+val within : int -> (unit -> 'a) -> 'a
+val take_iter : int -> (Slice.t -> unit) -> unit
+val take_while_iter :
+  ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+```
+- `Parseff.take` reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
+- `Parseff.within` (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
+- `Parseff.take_iter` and `Parseff.take_while_iter` (unstable) stream bytes to a callback as non-empty borrowed `Parseff.Slice.t` pieces without holding the whole payload in memory (sealing open frames like `Parseff.many_iter`).
+```ocaml
+let frame () =
+  let len = Parseff.BE.any_uint16 () in
+  Parseff.within len (fun () ->
+      let tag = Parseff.any_uint8 () in
+      let body = Parseff.take_while (fun _ -> true) in
+      (tag, body))
 ```

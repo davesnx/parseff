@@ -5,100 +5,79 @@ description: Techniques for writing high-performance parsers with Parseff
 
 # Guide: Making parsers fast
 
-Techniques for writing high-performance parsers with Parseff.
+Practical techniques for high-throughput, low-allocation parsers in Parseff.
 
-This guide covers practical techniques for getting the most performance out of Parseff. Each section shows a few non-recommended slow patterns and a fast alternative with an approximate expected impact.
+## Skip instead of allocate
 
-## Quick wins
-
-### Use `skip_whitespace` instead of `whitespace`
-
-When you just need to move past whitespace, `Parseff.skip_whitespace` avoids allocating a string you'd immediately discard. The per-call saving is small, but it adds up in tight loops that skip whitespace between every token:
+Use `Parseff.skip_whitespace` and `Parseff.skip_while` whenever you discard the matched bytes:
 
 ```ocaml
-(* allocates a string you immediately discard *)
+(* allocates and discards a string *)
 let _ = Parseff.whitespace () in
 parse_value ()
 
-(* skips without allocation *)
+(* zero allocation *)
 Parseff.skip_whitespace ();
 parse_value ()
 ```
 
-### Use fused operations
+## Precompute byte sets with `Charset`
 
-Fewer parser round-trips means less work overall. A fused operation parses a whole separated list in one call, where the generic version calls a parser for each element and each separator:
-
-```
-Operation                              Replaces
-sep_by_take ~ws ~sep pred              sep_by (take_while ~at_least:1 pred) (skip_while ws; char sep; skip_while ws)
-Slice.sep_by_take ~ws ~sep pred         Same, but returns slices instead of strings
-```
-
-Values must be nonempty: on a trailing or doubled separator, `sep_by_take` stops before that separator and the whitespace in front of it, and leaves them unread.
-
-### Use zero-copy slices
-
-Avoid intermediate string allocations when you can work with slices. Spans point into the original input buffer with no allocation until you call `Parseff.Slice.to_string`, giving a 2-3x speed improvement and roughly 3x less memory allocation:
+`Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.take_while_iter` accept a precomputed `Parseff.Charset` via `~set`, replacing per-byte closure calls with a 256-byte table lookup. Build the set once outside the parser:
 
 ```ocaml
-(* allocates a string per element *)
-let parse_values () =
-  Parseff.sep_by
-    (fun () -> int_of_string (Parseff.take_while ~at_least:1 is_digit ~label:"digit"))
-    (fun () -> Parseff.char ',')
+let is_ident c =
+  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
 
-(* zero-copy: slices point into the original buffer *)
-let parse_values () =
-  let spans = Parseff.Slice.sep_by_take ~ws:is_whitespace ~sep:',' is_digit in
-  List.map int_of_span spans
+let ident_set = Parseff.Charset.of_predicate is_ident
+
+let ident () = Parseff.take_while ~at_least:1 ~label:"identifier" ~set:ident_set is_ident
 ```
 
-See the Zero-copy API reference for more details.
+## Use zero-copy slices and fused scanners
 
-## Advanced techniques
+`Parseff.Slice` borrows the input buffer without allocating substrings under `Parseff.parse`, and `Parseff.sep_by_take` / `Parseff.Slice.sep_by_take` scan an entire separated list in one loop instead of entering combinator frames per element:
 
-### Minimize `or_` in loops
+```
+Operation                        Replaces
+sep_by_take ~ws ~sep pred        sep_by (take_while ~at_least:1 pred) (skip_while ws; char sep; skip_while ws)
+Slice.sep_by_take ~ws ~sep pred  Same, returning Slice.t list instead of string list
+```
 
-Each `Parseff.or_` sets up a backtracking checkpoint, which is extra work the runtime has to do. In a `Parseff.many` loop that runs thousands of times, doing less per iteration makes a real difference:
+Elements must be non-empty: on a trailing or doubled separator, `sep_by_take` stops before that separator and its leading whitespace.
+
+```ocaml
+let is_digit c = c >= '0' && c <= '9'
+
+let int_of_slice slice =
+  let rec loop i acc =
+    if i >= Parseff.Slice.length slice then acc
+    else
+      let c = Parseff.Slice.get slice i in
+      loop (i + 1) ((acc * 10) + (Char.code c - Char.code '0'))
+  in
+  loop 0 0
+
+let parse_ints () =
+  Parseff.Slice.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' is_digit
+  |> List.map int_of_slice
+```
+
+See the [Zero-copy API](https://davesnx.github.io/parseff/api/zero-copy/) reference for details.
+
+## Dispatch with `peek_char` instead of `or_` in tight loops
+
+Each `Parseff.or_` installs a backtracking frame. Inside hot loops, dispatch on `Parseff.peek_char` or read a token once and match on it:
 
 ```ocaml
 let keyword () =
-  (* installs a checkpoint per alternation, per iteration *)
-  Parseff.or_
-    (fun () -> Parseff.literal "class")
-    (fun () ->
-      Parseff.or_
-        (fun () -> Parseff.literal "function")
-        (fun () -> Parseff.literal "let"))
-
-let keyword () =
-  (* parse then validate, no backtracking *)
-  let w = Parseff.take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') ~label:"keyword" in
+  let w =
+    Parseff.take_while ~at_least:1 ~label:"keyword" (fun c ->
+        c >= 'a' && c <= 'z')
+  in
   match w with
   | "class" | "function" | "let" -> w
   | _ -> Parseff.fail "expected keyword"
 ```
 
-**When `or_` is fine:**
-
-- Top-level choices (not inside tight loops)
-- Complex parsers where each branch has distinct structure
-- When the number of alternatives is small
-
-### Push work into bulk operations
-
-The less your parser has to bounce back and forth between tiny operations, the faster it runs. Bulk operations do the entire scan in one go instead of making repeated round-trips:
-
-```ocaml
-let parse_list () =
-  (* using combinators *)
-  Parseff.sep_by
-    (fun () -> int_of_string (Parseff.take_while ~at_least:1 is_digit ~label:"digit"))
-    (fun () -> Parseff.char ',')
-
-let parse_list () =
-  (* runs the entire scan in one operation *)
-  Parseff.sep_by_take ~ws:is_whitespace ~sep:',' is_digit
-  |> List.map int_of_string
-```
+Reserve `or_` and `one_of` for branches with genuinely distinct structure or outside inner loops. For expression grammars with many operator precedence levels, `Parseff.precedence` dispatches with a single lookup per operand instead of scanning a table.

@@ -1,41 +1,37 @@
 ---
 title: Quick start
-description: Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (unit -> 'a), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy slice APIs and fused operations.
+description: Direct-style parser combinator library for OCaml 5 with automatic backtracking, streaming, error recovery, and zero-copy slices.
 ---
 
 # Quick start
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy slice APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5. Parsers are plain functions (`unit -> 'a`); the runtime handles backtracking, streaming input, and error reporting with source excerpts. Designed for performance with zero-copy slice APIs and fused operations.
 
 ## Features
 
-- Build parsers with **direct-style** and compose with `Parseff` combinators
-- API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
-- [**Typed domain errors and source excerpts**](/parseff/api/errors/): every error says what was expected at the furthest failure, with a caret under the source
-- **Automatic backtracking** with [`Parseff.or_`](/parseff/api/combinators/#or_)
-- **Minimal dependency footprint** only `uucp` for Unicode support
-- [**Streaming support**](/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.Source.parse`](/parseff/api/streaming/#sourceparse) call keeps its state per domain, so independent parses can run in parallel across domains
-- [**Zero-copy slice APIs**](/parseff/api/zero-copy/) for low-allocation parsing
-- [**Fused operations**](/parseff/api/zero-copy/) for hot paths
+- **Direct-style parsers**: compose plain `unit -> 'a` functions without monadic (`>>=`, `>>|`, `*>`) or binding (`let*`, `let+`, `and+`) operators.
+- [**Structured errors and source excerpts**](/parseff/api/errors/): furthest-failure reporting with merged expectations, typed custom errors, construct contexts, and multi-error [recovery](/parseff/guides/error-recovery/).
+- **Automatic backtracking**: [`Parseff.or_`](/parseff/api/combinators/#or_) and `Parseff.one_of`, with `commit` and `cut` to seal branches.
+- [**Pull and push streaming**](/parseff/api/streaming/): `Source.parse`, `Source.parse_each`, and `Push` with bounded backtracking.
+- **Domain-safe**: parse state lives per domain so independent parses run in parallel across OCaml 5 domains.
+- [**Zero-copy slices and fused scanners**](/parseff/api/zero-copy/): `Slice.t`, `Charset`, and `sep_by_take` for low-allocation hot paths.
+- **Minimal dependencies**: depends only on `uucp` for Unicode character properties.
 
 ## Performance
 
-Parseff is built for throughput and low allocation: in the current benchmark suite, the generic Parseff parsers are up to ~1.5x faster than Angstrom's baselines, and its fused zero-copy paths roughly ~3x faster.
+Parseff is built for throughput and low allocation: in the benchmark suite, Parseff's generic parsers are up to ~1.5x faster than Angstrom's baselines, and its fused zero-copy paths are ~3x faster. Against Angstrom's optimized JSON parser, Parseff's optimized path is ~1.5x faster while reducing minor allocations from ~11.1 GB to ~1.3 GB.
 
-Even against Angstrom's optimized JSON parser, Parseff's optimized path is still ~1.5x faster while cutting minor allocations from ~11.1 GB to ~1.3 GB; against Angstrom's generic JSON parser, the generic / optimized Parseff paths land at ~800 MB / ~1.3 GB versus ~5.9 GB.
-
-See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for the methodology and results, [bench/bench\_json.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml) for the JSON benchmark, and [bench/](https://github.com/davesnx/parseff/tree/main/bench) for the full suite.
+See the [comparison with Angstrom](/parseff/guides/comparison/), [`bench/bench_json.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), and [`bench/`](https://github.com/davesnx/parseff/tree/main/bench).
 
 ## Installation
 
-### with opam
+### opam
 
 ```bash
 opam install parseff -y
 ```
 
-### with dune package management
+### Dune package management
 
 Add `parseff` to your `dune-project`:
 
@@ -47,7 +43,7 @@ Add `parseff` to your `dune-project`:
   parseff))
 ```
 
-Then lock and build:
+Lock and build:
 
 ```bash
 dune pkg lock
@@ -74,13 +70,12 @@ dune install
 
 ## Example
 
-Here's a small parser that validates IPv4 addresses `192.168.1.1` or `0.0.0.0`. A detailed explanation of the [IPv4 addresses parser](/parseff/guides/ip-address):
+An IPv4 address parser validating octets in `0`–`255` (see the [IP address guide](/parseff/guides/ip-address/)):
 
 ```ocaml
-(* Add our own error case to Parseff *)
 type Parseff.custom_error += Out_of_range of int
 
-let number () =
+let octet () =
   let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
@@ -88,13 +83,13 @@ let number () =
   else Parseff.error (Out_of_range n)
 
 let ip_address () =
-  let a = number () in
+  let a = octet () in
   let _ = Parseff.char '.' in
-  let b = number () in
+  let b = octet () in
   let _ = Parseff.char '.' in
-  let c = number () in
+  let c = octet () in
   let _ = Parseff.char '.' in
-  let d = number () in
+  let d = octet () in
   (a, b, c, d)
 
 let () =
@@ -109,14 +104,16 @@ let () =
 
 ## API organization
 
-| Section | Combinators |
-|---------|------------|
-| [Core](/parseff/api/primitives) | `literal`, `char`, `satisfy`, `take_while`, `skip_while`, `fail`, `error`, `end_of_input`, `with_range`, `recognize` |
-| [Combinators](/parseff/api/combinators) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `not_followed_by`, `expect`, `commit`, `cut`, `rec_`, `peek_with`, `skip_to`, `parse ~trace` |
-| [Repetition and separation](/parseff/api/repetition) | `many`, `count`, `sep_by`, `between`, `end_by`, `fold_left`, `fold_right`, `expression`, `precedence` |
-| [Convenience](/parseff/api/convenience) | `digit`, `letter`, `alphanum`, `any_char`, `is_whitespace`, `whitespace`, `skip_whitespace`, `integer`, `number`, `hex_integer`, `lexeme`, `keyword` |
-| [Errors](/parseff/api/errors) | `fail`, `error`, `expect`, `context`, `render_error` |
-| [Error recovery](/parseff/guides/error-recovery) | `capture`, `recover`, `require`, `list`, `skip_nested` |
-| [Diagnostics](/parseff/api/diagnostics) | `warn`, `Diagnostics`, `parse ~consume ~diagnostics`, `Ref` |
-| [Zero-copy and fused operations](/parseff/api/zero-copy) | `Slice.take_while`, `Slice.sep_by_take`, `sep_by_take`, `Slice.take`, `Slice.length`, `Slice.get` |
-| [Streaming](/parseff/api/streaming) | `Source.of_string`, `Source.of_channel`, `Source.of_function`, `Source.of_bigstring_chunks`, `Source.parse`, `Source.parse_each` |
+| Section | Key APIs |
+|---------|----------|
+| [Primitives](/parseff/api/primitives/) | `literal`, `char`, `satisfy`, `peek_char`, `Charset`, `take_while`, `skip_while`, `take_until`, `skip_until`, `end_of_input`, `position`, `with_range`, `location`, `recognize` |
+| [Combinators](/parseff/api/combinators/) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `peek_with`, `skip_to`, `not_followed_by`, `expect`, `context`, `commit`, `cut`, `rec_`, `parse ~trace` |
+| [Repetition and separation](/parseff/api/repetition/) | `many`, `count`, `sep_by`, `end_by`, `between`, `many_iter`, `sep_by_iter`, `fold_left`, `fold_right`, `expression`, `precedence` |
+| [Convenience](/parseff/api/convenience/) | `digit`, `letter`, `alphanum`, `any_char`, `integer`, `number`, `hex_integer`, `whitespace`, `skip_whitespace`, `lexeme`, `keyword`, `identifier`, `take`, `within`, `take_iter`, `take_while_iter` |
+| [Errors](/parseff/api/errors/) | `fail`, `error`, `expect`, `context`, `cut`, `render_error`, `error_message` |
+| [Error recovery](/parseff/guides/error-recovery/) | `capture`, `recover`, `require`, `list`, `skip_nested` |
+| [Diagnostics](/parseff/api/diagnostics/) | `warn`, `Diagnostics`, `Ref` |
+| [Zero-copy API](/parseff/api/zero-copy/) | `Slice.take_while`, `Slice.take`, `Slice.recognize`, `Slice.sep_by_take`, `sep_by_take` |
+| [Streaming](/parseff/api/streaming/) | `Source.of_*`, `Source.parse`, `Source.parse_each`, `Push.parse`, `Push.feed`, `Push.finish`, `Push.parse_each` |
+| [Binary parsing](/parseff/api/binary/) | `any_uint8`, `any_int8`, `any_varint`, `BE.*`, `LE.*` |
+| [UTF-8 parsing](/parseff/api/utf8/) | `Utf8.satisfy`, `Utf8.char`, `Utf8.any_char`, `Utf8.take_while`, `Utf8.letter`, `Utf8.whitespace`, `Utf8.Slice.take_while` |

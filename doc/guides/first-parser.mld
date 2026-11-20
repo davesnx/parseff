@@ -1,22 +1,13 @@
 {0 Guide: Your first parser}
 
-Build a config file parser from scratch, learning Parseff along the way.
+Build a key-value config file parser from scratch.
 
-{1 Why parser combinators?}
-
-Parser combinators let you write small parsers that each handle one thing, then
-compose them. Instead of a single regex that's hard to read, test, and extend,
-you get modular pieces with clear error messages.
-
-There are three ways to compose parsers:
+Parser combinators compose small single-purpose parsers in three ways:
 
 {ul
 {- {b Sequence}: parse A, then parse B ([let] bindings)}
-{- {b Choice}: try A, if it fails try B ({!val:Parseff.or_})}
-{- {b Repetition}: parse A zero or more times ({!val:Parseff.many})}}
-
-This tutorial builds a key-value config file parser from scratch, adding one
-feature at a time.
+{- {b Choice}: try A, then fall back to B ({!val:Parseff.or_}, {!val:Parseff.one_of})}
+{- {b Repetition}: parse A repeatedly ({!val:Parseff.many}, {!val:Parseff.sep_by})}}
 
 {1 The format}
 
@@ -28,22 +19,18 @@ tags = web,api,v2
 debug = true
 v}
 
-Lines starting with [#] are comments. Blank lines are skipped. Everything else
-is [key = value].
+Lines starting with [#] are comments, blank lines are ignored, and all other
+lines are [key = value].
 
-{1 Step 1: parsing a key-value pair}
-
-Each parser reads input by calling combinators like {!val:Parseff.take_while}
-(with [~at_least:1]) and {!val:Parseff.char}, and returns a value.
+{1 Step 1: key-value pairs}
 
 {@ocaml[
 let key () =
-  Parseff.take_while ~at_least:1
-    (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_')
-    ~label:"key"
+  Parseff.take_while ~at_least:1 ~label:"key" (fun c ->
+      (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '_')
 
 let raw_value () =
-  Parseff.take_while ~at_least:1 (fun c -> c <> '\n') ~label:"value"
+  Parseff.take_while ~at_least:1 ~label:"value" (fun c -> c <> '\n')
 
 let entry () =
   let k = key () in
@@ -54,79 +41,55 @@ let entry () =
   (k, v)
 ]}
 
-[take_while ~at_least:1] scans characters while the predicate holds and requires
-at least one match. The [~label] appears in error messages if nothing matches, as
-[expected <label>]. [char '=']
-matches a single character. [skip_while] advances past whitespace without
-allocating a string.
+[take_while ~at_least:1] consumes bytes matching the predicate and fails with
+[expected <label>] if none match. [skip_while] advances without allocating a
+string. Sequencing uses plain OCaml [let] bindings.
 
-Sequencing is just [let] bindings. Each line advances the cursor through the
-input.
-
-To run it:
+Run it with {!val:Parseff.parse}:
 
 {@ocaml skip[
 match Parseff.parse "host = localhost" entry with
-| Ok (k, v) -> Printf.printf "%s -> %s\n" k v  (* "host" -> "localhost" *)
+| Ok (k, v) -> Printf.printf "%s -> %s\n" k v
 | Error e -> prerr_endline (Parseff.render_error ~name:"entry" e)
 ]}
 
-{!val:Parseff.parse} returns [Ok value] on success, or [Error e] on failure,
-where [e] says what was expected and where.
-
 {1 Step 2: comments and blank lines}
 
-A comment line starts with [#]. A line can be a comment, an entry, or blank. We
-need alternation: try one option, and if it fails, try the next.
-{!val:Parseff.or_} does this for two alternatives:
+A line is a comment, an entry, or blank. {!val:Parseff.one_of} tries each
+alternative in order, backtracking automatically on failure:
 
 {@ocaml[
 let comment () =
   let _ = Parseff.char '#' in
-  let _ = Parseff.take_while (fun c -> c <> '\n') in
-  ()
-]}
+  Parseff.skip_while (fun c -> c <> '\n')
 
-[or_] tries the left parser. If it fails, it {b backtracks} (resets the cursor
-to where it was) and tries the right. No input is consumed on failure. For more
-than two alternatives, {!val:Parseff.one_of} takes a list:
-
-{@ocaml[
 let line () =
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
   Parseff.one_of
     [
-      (fun () -> comment (); None);
+      (fun () ->
+        comment ();
+        None);
       (fun () -> Some (entry ()));
-      (fun () -> None);  (* blank line: always succeeds *)
+      (fun () -> None);
     ]
 ]}
 
-[one_of] tries each parser in order until one succeeds. Here: try a comment,
-then try an entry, then fall through to [None] for blank lines. The last branch
-always succeeds, so [line] never fails.
-
-[take_while] (without [~at_least]) can match zero characters. It always succeeds.
+The final branch matches blank lines without consuming input.
 
 {1 Step 3: the whole file}
 
-{!val:Parseff.sep_by} parses repeated elements with a separator between them:
+{!val:Parseff.sep_by} parses lines separated by ['\n']. {!val:Parseff.parse}
+requires full input consumption by default, so trailing garbage fails rather
+than being silently ignored.
 
 {@ocaml[
 let config () =
-  let lines =
-    Parseff.sep_by line (fun () -> Parseff.char '\n')
-  in
+  let lines = Parseff.sep_by line (fun () -> Parseff.char '\n') in
   List.filter_map Fun.id lines
-]}
 
-[parse] requires all input to be consumed, so there is no trailing data.
-["host = localhost\ngarbage"] fails instead of partially succeeding.
-
-Running the full parser:
-
-{@ocaml[
-let input = {|# Server configuration
+let input =
+  {|# Server configuration
 host = localhost
 port = 8080
 tags = web,api,v2
@@ -135,9 +98,7 @@ debug = true|}
 let () =
   match Parseff.parse input config with
   | Ok entries ->
-      List.iter (fun (k, v) ->
-        Printf.printf "%s = %s\n" k v
-      ) entries
+      List.iter (fun (k, v) -> Printf.printf "%s = %s\n" k v) entries
   | Error e -> prerr_endline (Parseff.render_error ~name:"config" e)
 ]}
 
@@ -152,85 +113,74 @@ v}
 
 {1 Step 4: typed values}
 
-Right now all values are strings. We can parse them into typed data with
-alternation. We already saw [one_of] in step 2 for choosing between
-comment/entry/blank. Here we use both [or_] (for the two-way true/false choice)
-and [one_of] (for the three-way type choice):
+Parse values into an algebraic type using {!val:Parseff.or_} (two branches) and
+{!val:Parseff.one_of} (three or more):
 
 {@ocaml skip[
 type config_value =
   | Bool of bool
   | Int of int
   | Tags of string list
-  | Str of string
 
 let bool_value () =
   Parseff.or_
-    (fun () -> Parseff.literal "true"; Bool true)
-    (fun () -> Parseff.literal "false"; Bool false)
+    (fun () ->
+      Parseff.literal "true";
+      Bool true)
+    (fun () ->
+      Parseff.literal "false";
+      Bool false)
 
-let int_value () =
-  let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"integer" in
-  Int (int_of_string s)
+let int_value () = Int (Parseff.integer ())
 
 let tag_list () =
   let tags =
     Parseff.sep_by
-      (fun () -> Parseff.take_while ~at_least:1 (fun c -> c <> ',' && c <> '\n') ~label:"tag")
+      (fun () ->
+        Parseff.take_while ~at_least:1 ~label:"tag" (fun c ->
+            c <> ',' && c <> '\n'))
       (fun () -> Parseff.char ',')
   in
   Tags tags
 
-let typed_value () =
-  Parseff.one_of
-    [
-      (fun () -> bool_value ());
-      (fun () -> int_value ());
-      (fun () -> tag_list ());
-    ]
-]}
+let typed_value () = Parseff.one_of [ bool_value; int_value; tag_list ]
 
-[literal] matches a literal string (for multi-character matches like ["true"]).
-[or_] is shorthand when you have exactly two alternatives; [one_of] takes a list
-for three or more. Order matters: [bool_value] must come before [tag_list],
-otherwise ["true"] would match as [Tags ["true"]].
-
-Now swap [raw_value] for [typed_value] in the entry parser:
-
-{@ocaml skip[
 let typed_entry () =
   let k = key () in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
   let _ = Parseff.char '=' in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
-  let v = typed_value () in
-  (k, v)
+  (k, typed_value ())
 ]}
+
+Order matters: [bool_value] must come before [tag_list], otherwise ["true"]
+matches as [Tags [ "true" ]].
 
 {1 Step 5: validation with typed errors}
 
-Suppose ports must be 0-65535. Use {!val:Parseff.error} with a case of
-{!type:Parseff.custom_error} to report a structured error:
+To reject invalid port numbers with a structured error, extend
+{!type:Parseff.custom_error} and call {!val:Parseff.error}:
 
 {@ocaml skip[
 type Parseff.custom_error += Port_out_of_range of int
 
 let port_value () =
-  let s = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') ~label:"digit" in
-  let n = int_of_string s in
+  let n = Parseff.integer () in
   if n >= 0 && n <= 65535 then Int n
-  else Parseff.error (Port_out_of_range n)
+  else (
+    Parseff.cut ();
+    Parseff.error (Port_out_of_range n))
 ]}
 
-The error flows through to the result type:
+Match the custom error at the call site:
 
 {@ocaml skip[
 match Parseff.parse "port = 99999" typed_entry with
 | Ok _ -> ()
 | Error { kind = Custom (Port_out_of_range n); _ } ->
     Printf.printf "%d is not a valid port\n" n
-| Error e ->
-    Printf.printf "Parse error: %s\n" (Parseff.error_message e)
+| Error e -> prerr_endline (Parseff.render_error e)
 ]}
 
-{!val:Parseff.error} raises a typed error value. {!val:Parseff.fail} raises a string message (reported as [Failed]). Use [error] when callers need to distinguish different failure modes; use [fail] for simple messages shown directly to users.
+Use {!val:Parseff.error} when callers need to match failure cases in code, and
+{!val:Parseff.fail} when a string message is enough.

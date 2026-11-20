@@ -1,32 +1,25 @@
 {0 Comparison with Angstrom}
 
-How Parseff compares to Angstrom in performance, API style, and trade-offs.
-
-{{:https://github.com/inhabitedtype/angstrom} Angstrom} is the most widely used
-parser combinator library in the OCaml ecosystem. This page compares Parseff and
-Angstrom side by side: performance, API style, and when to use each.
+How Parseff compares to {{:https://github.com/inhabitedtype/angstrom}Angstrom}
+in performance, API style, and trade-offs.
 
 {1 Performance}
 
-This page focuses on the cross-library parser workloads in [bench/]: JSON,
-CSV, and arithmetic. As a high-level snapshot, the strongest Parseff results in
-those workloads are:
+Cross-library workloads in
+{{:https://github.com/davesnx/parseff/tree/main/bench}[bench/]}:
 
 {v
-Benchmark    Best Parseff result                     What it measures
-JSON         ~2.47M/s optimized                      Full JSON array parser vs Angstrom
-CSV          ~3.93M/s fused                          CSV field parser vs Angstrom and MParser
-Arithmetic   ~11.86M/s fused                         Expression parser/evaluator vs Angstrom and MParser
+Benchmark    Best Parseff result   What it measures
+JSON         ~2.47M/s optimized    Full JSON array parser vs Angstrom
+CSV          ~3.93M/s fused        CSV field parser vs Angstrom and MParser
+Arithmetic   ~11.86M/s fused       Expression evaluator vs Angstrom and MParser
 v}
-
-Those rows are useful for a high-level snapshot, but they are not directly
-comparable across rows because the workloads differ.
 
 {2 JSON benchmark}
 
-Benchmarked on a JSON array parser ([{[1, 2, 3, ..., 10]}]) over 1,000,000
-iterations (3 runs). Source:
-{{:https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml} bench/bench_json.ml}.
+JSON array parser ([[1, 2, 3, ..., 10]]) over 1,000,000 iterations (3 runs).
+Source:
+{{:https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml}[bench/bench_json.ml]}.
 
 {v
                         Parses/sec     vs. Angstrom (generic)   Minor allocs
@@ -36,60 +29,37 @@ Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
 Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 v}
 
-{b Optimized} uses [Slice.sep_by_take] plus [List.map] over zero-copy slices.
-Scanning avoids per-element [String.sub] allocation during parsing, while value
-conversion still uses the stdlib [float_of_string] via [Parseff.Slice.to_string].
-
-{b Generic} uses the ordinary [char], [skip_while], [take_while], and [sep_by]
-combinators with the same [float_of_string] conversion as [Angstrom (generic)],
-so it reflects the baseline direct-style API.
-
-All parsers produce the same output ([float list]) from the same input and
-require full input consumption.
-
-Minor allocation totals are the cumulative values reported by
-[Benchmark.latencyN] for the full 1,000,000-parse run.
-
-Against each library's best JSON parser, Parseff's optimized path is still
-~1.4x faster, while the generic Parseff parser is roughly on par with
-Angstrom's optimized parser and still ~1.4x faster than Angstrom's generic
-baseline.
+- {b Optimized}: {!val:Parseff.Slice.sep_by_take} plus [List.map] (avoids
+  per-element [String.sub] during scanning; still converts with
+  [float_of_string] via {!val:Parseff.Slice.to_string}).
+- {b Generic}: ordinary [char], [skip_while], [take_while], and [sep_by] with
+  the same [float_of_string] conversion as [Angstrom (generic)].
+- Minor allocations are cumulative [Benchmark.latencyN] totals across all
+  1,000,000 parses.
 
 {2 Other cross-library benchmarks}
 
-The other cross-library workloads in [bench/] show the same pattern:
-
 {v
-                       Parseff best     Parseff generic   Angstrom best   MParser
-CSV                    ~3,930,000       ~2,790,000       ~2,550,000      ~1,490,000
-Arithmetic             ~11,860,000      ~2,960,000       ~5,360,000      ~1,510,000
+            Parseff best   Parseff generic   Angstrom best   MParser
+CSV         ~3,930,000     ~2,790,000        ~2,550,000      ~1,490,000
+Arithmetic  ~11,860,000    ~2,960,000        ~5,360,000      ~1,510,000
 v}
-
-On CSV, Parseff's generic parser is still ~9% faster than Angstrom's best
-result, and the fused path is ~1.5x faster. On arithmetic, Parseff's generic
-parser is ~1.8x faster than Angstrom's generic baseline, and the fused
-evaluator is ~2.2x faster than Angstrom's optimized parser.
 
 {2 Why Parseff is faster}
 
-{b Direct character scanning.} {!val:Parseff.take_while} runs a tight [while]
-loop with character predicates.
-
-{b Fewer allocations.} Span-based APIs return slices of the input string without
-calling [String.sub]. Angstrom's [take_while1] allocates a
-new string per call.
-
-{b Fused operations.} {!val:Parseff.Slice.sep_by_take} parses an entire separated
-list in one fused operation. Angstrom's equivalent chains [sep_by], [char],
-[skip_while], and [take_while1] through monadic operators, each creating closures.
-
-{b No monadic overhead.} Parsers are direct function calls. No CPS, no closure
-allocation for sequencing.
+- {b Direct character scanning}: {!val:Parseff.take_while} runs a tight loop
+  over the input buffer (optionally backed by a {!module:Parseff.Charset} table).
+- {b Zero-copy slices}: {!module:Parseff.Slice} avoids per-token [String.sub]
+  allocations.
+- {b Fused scanners}: {!val:Parseff.Slice.sep_by_take} scans a separated list
+  in one loop without chaining monadic closures.
+- {b Direct-style calls}: sequencing uses plain OCaml function calls rather
+  than CPS closures.
 
 {1 API style}
 
-The fundamental difference: Parseff uses direct-style imperative code. Angstrom
-uses monadic composition.
+Parseff uses direct-style OCaml functions ([unit -> 'a]); Angstrom uses monadic
+and applicative combinators.
 
 {2 Sequencing}
 
@@ -97,10 +67,12 @@ uses monadic composition.
 
 {@ocaml skip[
 let key_value () =
-  let key = Parseff.take_while ~at_least:1 (fun c -> c <> ':') ~label:"key" in
+  let key = Parseff.take_while ~at_least:1 ~label:"key" (fun c -> c <> ':') in
   let _ = Parseff.char ':' in
   Parseff.skip_whitespace ();
-  let value = Parseff.take_while ~at_least:1 (fun c -> c <> '\n') ~label:"value" in
+  let value =
+    Parseff.take_while ~at_least:1 ~label:"value" (fun c -> c <> '\n')
+  in
   (key, value)
 ]}
 
@@ -115,39 +87,19 @@ let key_value =
   return (key, value)
 ]}
 
-Both do the same thing. Parseff reads like sequential OCaml code. Angstrom
-threads results through [>>=] and [return].
-
-{2 Alternation}
+{2 Alternation and repetition}
 
 {b Parseff:}
 
 {@ocaml skip[
 let value () =
-  Parseff.one_of
-    [ null_parser; bool_parser; number_parser; string_parser ]
-]}
+  Parseff.one_of [ null_parser; bool_parser; number_parser; string_parser ]
 
-{b Angstrom:}
-
-{@ocaml skip[
-let value =
-  null_parser <|> bool_parser <|> number_parser <|> string_parser
-]}
-
-Similar readability. Angstrom's [<|>] is more concise. Parseff's
-{!val:Parseff.one_of} is explicit about the list structure.
-
-{2 Repetition}
-
-{b Parseff:}
-
-{@ocaml skip[
 let numbers () =
   Parseff.sep_by
     (fun () ->
       Parseff.skip_whitespace ();
-      let s = Parseff.take_while ~at_least:1 is_digit ~label:"digit" in
+      let s = Parseff.take_while ~at_least:1 ~label:"digit" is_digit in
       Parseff.skip_whitespace ();
       int_of_string s)
     (fun () -> Parseff.char ',')
@@ -156,45 +108,38 @@ let numbers () =
 {b Angstrom:}
 
 {@ocaml skip[
+let value =
+  null_parser <|> bool_parser <|> number_parser <|> string_parser
+
 let numbers =
   sep_by (ws *> char ',' <* ws)
     (take_while1 is_digit >>| int_of_string)
 ]}
 
-Angstrom is more concise here thanks to applicative operators ([*>], [<*]).
-Parseff is more explicit: whitespace handling is visible, not hidden in operator
-chains.
-
-{2 A complete side-by-side}
-
-Here's the same expression parser in both libraries:
+{2 Side-by-side expression parser}
 
 {b Parseff:}
 
 {@ocaml skip[
 let rec expr () =
-  Parseff.fold_left
-    term
-    (fun () ->
+  Parseff.fold_left term (fun () ->
       Parseff.skip_whitespace ();
       let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
-      fun a b -> a + b)
+      ( + ))
 
 and term () =
-  Parseff.fold_left
-    factor
-    (fun () ->
+  Parseff.fold_left factor (fun () ->
       Parseff.skip_whitespace ();
       let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
-      fun a b -> a * b)
+      ( * ))
 
 and factor () =
   Parseff.or_
     (fun () ->
       let _ = Parseff.char '(' in
-      let e = expr () in
+      let e = Parseff.rec_ expr in
       let _ = Parseff.char ')' in
       e)
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
@@ -209,15 +154,9 @@ let expr =
       char '(' *> expr <* char ')'
       <|> (satisfy is_digit >>| fun c -> Char.code c - 48)
     in
-    let term =
-      chainl1 factor (ws *> char '*' <* ws >>| fun _ -> ( * ))
-    in
-    chainl1 term (ws *> char '+' <* ws >>| fun _ -> ( + ))
-  )
+    let term = chainl1 factor (ws *> char '*' <* ws >>| fun _ -> ( * )) in
+    chainl1 term (ws *> char '+' <* ws >>| fun _ -> ( + )))
 ]}
-
-Angstrom is denser. Parseff is more readable for people who aren't fluent in
-monadic/applicative operators.
 
 {1 Feature comparison}
 
@@ -232,36 +171,36 @@ monadic/applicative operators.
     {td 4.x+}}
   {tr
     {td API style}
-    {td Imperative (direct style)}
-    {td Monadic (CPS-based)}}
+    {td Direct style}
+    {td Monadic (CPS)}}
   {tr
-    {td Streaming}
-    {td [Source.parse] with [Source.t]}
-    {td Buffered / Unbuffered modules}}
+    {td Pull streaming}
+    {td [Source.parse], [Source.parse_each]}
+    {td Buffered / Unbuffered}}
+  {tr
+    {td Push / async}
+    {td [Push.parse], [Push.parse_each]; Eio fibers via [Source]}
+    {td Incremental [Partial] API}}
   {tr
     {td Backtracking}
-    {td Automatic via [or_]}
-    {td Automatic via [<|>]}}
+    {td Automatic via [or_]; bounded window in streaming}
+    {td Automatic via [<|>]; unbounded buffer}}
   {tr
     {td Zero-copy}
-    {td [Slice.t] type + fused ops}
-    {td Limited via [Unsafe] / bigstring slices}}
+    {td [Slice.t] + fused scanners}
+    {td [Unsafe] / bigstring slices}}
   {tr
     {td Recursion safety}
     {td [rec_] with [~max_depth]}
-    {td Manual (no built-in depth limit)}}
+    {td Manual}}
   {tr
     {td Custom errors}
-    {td [error] with an extensible variant ([custom_error])}
-    {td Limited (string-based)}}
+    {td Extensible [custom_error], diagnostics, recovery}
+    {td String-based}}
   {tr
     {td Error labels}
-    {td [expect], [one_of_labeled]}
-    {td [<?>] operator}}
-  {tr
-    {td Async support}
-    {td Not built-in (wrap in Domain)}
-    {td Incremental API with Partial}}
+    {td [expect], [one_of_labeled], [context]}
+    {td [<?>]} }
   {tr
     {td Maturity}
     {td New}
@@ -277,7 +216,7 @@ monadic/applicative operators.
     {th MParser}
     {th Opal}}
   {tr
-    {td Imperative-style API}
+    {td Direct-style API}
     {td Yes}
     {td No}
     {td No}
@@ -296,7 +235,7 @@ monadic/applicative operators.
     {td No}}
   {tr
     {td Unbounded lookahead}
-    {td Yes}
+    {td In-memory (bounded window in streaming)}
     {td Yes}
     {td Yes}
     {td No}}
@@ -313,7 +252,7 @@ monadic/applicative operators.
     {td No}
     {td No}}
   {tr
-    {td Streaming/incremental}
+    {td Streaming / incremental}
     {td Yes}
     {td Yes}
     {td No}
@@ -325,7 +264,5 @@ monadic/applicative operators.
     {td No}
     {td No}}}
 
-  {b Note:} MParser and Opal require explicit backtracking (like Parsec's [try]). Angstrom
-and Parseff backtrack automatically on alternation. MParser and Opal don't
-support streaming input. Only Parseff supports custom typed errors beyond
-strings.
+MParser and Opal require explicit backtracking (like Parsec's [try]) and do not
+support streaming.

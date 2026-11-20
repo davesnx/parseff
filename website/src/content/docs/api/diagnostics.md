@@ -1,6 +1,6 @@
 ---
 title: Diagnostics
-description: Non-fatal diagnostics and full-consumption runners
+description: Warnings, diagnostic collectors, and backtracking Ref state
 ---
 
 <!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->
@@ -8,9 +8,9 @@ description: Non-fatal diagnostics and full-consumption runners
 
 # Diagnostics
 
-Use diagnostics when you want to keep parsing and report multiple validation problems instead of stopping at the first one.
+Diagnostics let a parser record warnings and recovered errors without stopping at the first problem.
 
-To collect parse errors and continue after them, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
+To recover from syntax errors and continue parsing, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
 
 
 ## Types
@@ -28,32 +28,18 @@ module Diagnostics : sig
   val clear : t -> unit
 end
 ```
-A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Each entry holds an `Parseff.error` and its start position. The `severity` field of the error tells a warning from an error:
+A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Each entry carries a `Parseff.error` and its start offset (`pos = value.range.start`):
 
-- `` `Warning ``: a diagnostic from `Parseff.warn`.
-- `` `Error ``: an error that `Parseff.recover`, `Parseff.require` or `Parseff.list` recorded before the parse continued. A failed parse returns an `` `Error `` too.
+- `` `Warning ``: emitted by `Parseff.warn`.
+- `` `Error ``: recorded by `Parseff.recover`, `Parseff.require`, or `Parseff.list` before continuing.
 
-## Emitting diagnostics
+## Emitting and collecting diagnostics
 
 ```ocaml
 val warn :
-  ?from:int ->
-  ?upto:int ->
-  ?notes:note list ->
-  ?help:string ->
-  custom_error ->
-  unit
-```
-`Parseff.warn` works as `Parseff.error`, but records the error and continues parsing. Declare the cases of `Parseff.custom_error` for your warnings. The warning covers the current position, or the bytes from `~from` to `~upto`, with the same rules as `Parseff.fail`. `~notes` and `~help` are kept in the error, and `Parseff.render_error` prints them.
+  ?from:int -> ?upto:int -> ?notes:note list -> ?help:string ->
+  custom_error -> unit
 
-
-## Collecting diagnostics
-
-Create a collector and pass it to the runner with `~diagnostics`. The runner empties it first. `Parseff.warn`, `recover`, `require` and `list` record into that collector. When the runner got no collector, `warn` records nothing, and `recover`, `require` and `list` do not recover.
-
-The result of the parse is the usual `Parseff.error` result. Read the diagnostics from the collector after the parse. They are there for `Ok` and for `Error`.
-
-```ocaml
 val parse :
   ?max_depth:int ->
   ?diagnostics:Diagnostics.t ->
@@ -63,10 +49,9 @@ val parse :
   (unit -> 'a) ->
   ('a, error) Stdlib.result
 ```
-```ocaml
-Parseff.parse input parser
-```
-By default the parse requires that all input is consumed. It is the same as calling `Parseff.end_of_input` once more at the end of your parser. It does not change how explicit `Parseff.end_of_input` calls behave inside your parser. Pass `` ~consume:`Partial `` to let the parse stop before the end of the input. `Parseff.Source.parse` takes the same arguments.
+`Parseff.warn` records a `Parseff.custom_error` with severity `` `Warning `` and continues parsing. `~from`, `~upto`, `~notes`, and `~help` work as in `Parseff.fail`.
+
+Pass a `Parseff.Diagnostics.t` collector to `Parseff.parse`, `Parseff.Source.parse`, or `Parseff.Push.parse` via `~diagnostics`. The runner clears the collector before running; entries are available after the parse whether it returns `Ok` or `Error`. Without `~diagnostics`, `warn` is a no-op and `recover`/`require`/`list` do not recover.
 
 
 ## Example
@@ -110,8 +95,6 @@ let report input =
         (Parseff.render_error ~name:"ip" ~source:input ~custom value))
     (Parseff.Diagnostics.to_list diagnostics)
 ```
-The parse succeeds, and each octet out of range gives a warning:
-
 ```ocaml
 # report "999.2.3.256";;
 Parsed: 999.2.3.256
@@ -123,7 +106,7 @@ ip:1:9: [warning] octet 256 out of range (0-255)
   |         ^^^
 - : unit = ()
 ```
-To react to one warning, match the `kind` and the `severity` of the entry:
+To inspect specific entries programmatically, match on `severity` and `kind`:
 
 ```ocaml
 let octets_out_of_range diagnostics =
@@ -138,18 +121,16 @@ let octets_out_of_range diagnostics =
 
 ## Backtracking semantics
 
-Diagnostics are transactional with parser control flow:
+Diagnostics are transactional with backtracking:
 
-- `Parseff.or_`: diagnostics from failed branches are rolled back
-- `Parseff.many`: diagnostics from the final failing attempt are rolled back
-- `Parseff.look_ahead` and `Parseff.peek_with`: diagnostics are rolled back
-- `Parseff.capture` and `Parseff.recover`: when the parser inside fails, the warnings and errors that it recorded are rolled back. `recover` records the error of the parser in their place. To keep them, pass `~keep` to `recover`; see the [error recovery guide](./error-recovery.md)
-This prevents diagnostics from leaking out of speculative branches.
+- `Parseff.or_` / `Parseff.one_of`: rolled back on failed branches.
+- `Parseff.many` / `Parseff.sep_by`: rolled back on the final failing iteration.
+- `Parseff.look_ahead` / `Parseff.peek_with`: always rolled back.
+- `Parseff.capture` / `Parseff.recover`: rolled back when the inner parser fails (`recover` records the inner parser's error instead; pass `~keep` to retain earlier diagnostics, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide).
 
+## Backtracking state (`Ref`)
 
-## Ref
-
-A `Parseff.Ref.t` is a `ref` whose changes are undone when the parser backtracks, in the same cases as diagnostics. Use it for state that the parser builds as it reads, such as a symbol table. Only the value in the cell is restored, so store immutable values.
+`Parseff.Ref.t` is a mutable cell whose writes roll back on backtracking under the same rules as diagnostics (for symbol tables, indentation stacks, or similar parser state). Store immutable values, as only the cell binding is restored.
 
 ```ocaml
 module Ref : sig
@@ -159,8 +140,6 @@ module Ref : sig
   val set : 'a t -> 'a -> unit
 end
 ```
-In this example both branches of `statement` call `declare`, and the first branch fails on `;`. The plain `ref` keeps the name of the failed branch. The `Parseff.Ref.t` does not.
-
 ```ocaml
 let plain = ref []
 let names = Parseff.Ref.create []

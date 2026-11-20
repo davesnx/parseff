@@ -2,7 +2,7 @@
 
 # Parseff
 
-Parseff is a direct-style parser combinator library for OCaml 5 where parsers are plain functions (`unit -> 'a`), errors carry the failure position, what was expected and a source excerpt, and the runtime handles control flow, backtracking, and streaming input. Designed for performance with zero-copy slice APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5\. Parsers are plain functions (`unit -> 'a`); the runtime handles backtracking, streaming input, and error reporting with source excerpts. Designed for performance with zero-copy slice APIs and fused operations.
 
 [Documentation](https://davesnx.github.io/parseff/)
 
@@ -16,10 +16,9 @@ $ opam install parseff -y
 ## Example
 
 ```ocaml
-(* Add our own error case to Parseff *)
 type Parseff.custom_error += Out_of_range of int
 
-let number () =
+let octet () =
   let digits = Parseff.many ~at_least:1 Parseff.digit in
   let value d = Char.code d - Char.code '0' in
   let n = List.fold_left (fun acc d -> (acc * 10) + value d) 0 digits in
@@ -27,25 +26,25 @@ let number () =
   else Parseff.error (Out_of_range n)
 
 let ip_address () =
-  let a = number () in
+  let a = octet () in
   let _ = Parseff.char '.' in
-  let b = number () in
+  let b = octet () in
   let _ = Parseff.char '.' in
-  let c = number () in
+  let c = octet () in
   let _ = Parseff.char '.' in
-  let d = number () in
+  let d = octet () in
   (a, b, c, d)
 
 let () =
   match Parseff.parse "192.168.1.1" ip_address with
-  | Ok ((a, b, c, d)) ->
+  | Ok (a, b, c, d) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error { kind = Custom (Out_of_range n); range; _ } ->
       Printf.printf "Error at %d: %d out of range (0-255)\n" range.start n
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
 ```
-The program prints `Parsed: 192.168.1.1`. A failed parse returns one `Parseff.error`. On `"192.168.1."`, `Parseff.render_error` prints the message, the source line and a caret under the failure:
+This prints `Parsed: 192.168.1.1`. On `"192.168.1."`, `Parseff.render_error` prints:
 
 ```
 address:1:11: [error] expected digit, found end of input
@@ -55,23 +54,19 @@ address:1:11: [error] expected digit, found end of input
 
 ## Features
 
-- Build parsers with **direct-style** and compose with `Parseff` combinators
-- API is designed to be expressive enough to **not need monadic operators** (`>>=`, `>>|`, `*>`), **nor binding operators** (`let*`, `let+`, `and+`)
-- [**Typed domain errors and source excerpts**](https://davesnx.github.io/parseff/api/errors/): every error says what was expected at the furthest failure, with a caret under the source
-- **Automatic backtracking** with [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_)
-- **Minimal dependency footprint** only `uucp` for Unicode support
-- [**Streaming support**](https://davesnx.github.io/parseff/api/streaming/)
-- **Domain-safe** each [`Parseff.parse`](https://davesnx.github.io/parseff/api/diagnostics/#collecting-diagnostics) / [`Parseff.Source.parse`](https://davesnx.github.io/parseff/api/streaming/#sourceparse) call keeps its state per domain, so independent parses can run in parallel across domains
-- [**Zero-copy slice APIs**](https://davesnx.github.io/parseff/api/zero-copy/) for low-allocation parsing
-- [**Fused operations**](https://davesnx.github.io/parseff/api/zero-copy/) for hot paths
+- **Direct-style parsers**: compose plain `unit -> 'a` functions without monadic (`>>=`, `>>|`, `*>`) or binding (`let*`, `let+`, `and+`) operators.
+- [**Structured errors and source excerpts**](https://davesnx.github.io/parseff/api/errors/): furthest-failure reporting with merged expectations, typed custom errors, construct contexts, and multi-error [recovery](https://davesnx.github.io/parseff/guides/error-recovery/).
+- **Automatic backtracking**: [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_) and `Parseff.one_of`, with `commit` and `cut` to seal branches.
+- [**Pull and push streaming**](https://davesnx.github.io/parseff/api/streaming/): `Source.parse`, `Source.parse_each`, and `Push` with bounded backtracking.
+- **Domain-safe**: parse state lives per domain so independent parses run in parallel across OCaml 5 domains.
+- [**Zero-copy slices and fused scanners**](https://davesnx.github.io/parseff/api/zero-copy/): `Slice.t`, `Charset`, and `sep_by_take` for low-allocation hot paths.
+- **Minimal dependencies**: depends only on `uucp` for Unicode character properties.
 
 ## Performance
 
-Parseff is built for throughput and low allocation: in the current benchmark suite, the generic Parseff parsers are up to ~1.5x faster than Angstrom's baselines, and its fused zero-copy paths roughly ~3x faster.
+Parseff is built for throughput and low allocation: in the benchmark suite, Parseff's generic parsers are up to ~1.5x faster than Angstrom's baselines, and its fused zero-copy paths are ~3x faster. Against Angstrom's optimized JSON parser, Parseff's optimized path is ~1.5x faster while reducing minor allocations from ~11.1 GB to ~1.3 GB.
 
-Even against Angstrom's optimized JSON parser, Parseff's optimized path is still ~1.5x faster while cutting minor allocations from ~11.1 GB to ~1.3 GB; against Angstrom's generic JSON parser, the generic / optimized Parseff paths land at ~800 MB / ~1.3 GB versus ~5.9 GB.
-
-See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) for the methodology and results, [bench/bench\_json.ml](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml) for the JSON benchmark, and [bench/](https://github.com/davesnx/parseff/tree/main/bench) for the full suite.
+See the [comparison with Angstrom](https://davesnx.github.io/parseff/guides/comparison/), [`bench/bench_json.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), and [`bench/`](https://github.com/davesnx/parseff/tree/main/bench).
 
 
 ## Documentation
@@ -80,11 +75,11 @@ See the [full comparison](https://davesnx.github.io/parseff/guides/comparison/) 
 - [API reference](https://davesnx.github.io/parseff/api/primitives/)
 - [Your first parser](https://davesnx.github.io/parseff/guides/first-parser/)
 - [Error handling](https://davesnx.github.io/parseff/api/errors/)
+- [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/)
+- [Expressions with precedence](https://davesnx.github.io/parseff/guides/expression-parser/)
+- [A JSON parser](https://davesnx.github.io/parseff/guides/json-parser/)
 - [Making parsers fast](https://davesnx.github.io/parseff/guides/optimization/)
 - [Comparison with Angstrom](https://davesnx.github.io/parseff/guides/comparison/)
-- [A JSON parser](https://davesnx.github.io/parseff/guides/json-parser/)
-- [Expressions with precedence](https://davesnx.github.io/parseff/guides/expression-parser/)
-- [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/)
 
 ## Contributing
 
