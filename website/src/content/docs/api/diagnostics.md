@@ -69,11 +69,11 @@ let number_lenient () =
 
 let ip_address_lenient () =
   let a = number_lenient () in
-  ignore (Parseff.char '.');
+  let _ = Parseff.char '.' in
   let b = number_lenient () in
-  ignore (Parseff.char '.');
+  let _ = Parseff.char '.' in
   let c = number_lenient () in
-  ignore (Parseff.char '.');
+  let _ = Parseff.char '.' in
   let d = number_lenient () in
   (a, b, c, d)
 
@@ -155,11 +155,11 @@ let statement () =
   Parseff.or_
     (fun () ->
       declare ();
-      ignore (Parseff.char '=');
+      let _ = Parseff.char '=' in
       `Assign)
     (fun () ->
       declare ();
-      ignore (Parseff.char ';');
+      let _ = Parseff.char ';' in
       `Declare)
 
 let () =

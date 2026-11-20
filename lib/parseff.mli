@@ -578,8 +578,9 @@ val recognize : (unit -> 'a) -> string
     {@ocaml[
     let ident_text () =
       recognize (fun () ->
-          ignore (letter ());
-          ignore (many (fun () -> or_ alphanum (fun () -> char '_')))
+          let _ = letter () in
+          let _ = many (fun () -> or_ alphanum (fun () -> char '_')) in
+          ()
       )
     (* "foo_1 = 2" -> "foo_1" *)
     ]} *)
@@ -707,7 +708,7 @@ val peek_with : (unit -> 'a) -> 'a * int
       | Some 'a' .. 'z' ->
           Name (take_while (fun c -> c >= 'a' && c <= 'z'))
       | Some c ->
-          ignore (any_char ());
+          let _ = any_char () in
           Symbol c
 
     let read_at = ref (-1)
@@ -725,7 +726,7 @@ val peek_with : (unit -> 'a) -> 'a * int
       !current
 
     let advance () =
-      ignore (peek ());
+      let _ = peek () in
       skip_to !stop
     ]}
 
@@ -941,7 +942,7 @@ val capture :
       | Error e ->
           warn ~from:e.range.start (Skipped e);
           skip_while (fun c -> c <> ';');
-          ignore (optional (fun () -> char ';'));
+          let _ = optional (fun () -> char ';') in
           `Hole
     ]} *)
 
@@ -983,7 +984,7 @@ val recover :
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
       skip_whitespace ();
-      ignore (char '=');
+      let _ = char '=' in
       skip_whitespace ();
       let value =
         recover
@@ -991,7 +992,7 @@ val recover :
           integer
           (fun _ -> 0)
       in
-      ignore (char ';');
+      let _ = char ';' in
       (name, value)
 
     let () =
@@ -1020,11 +1021,11 @@ val require : (unit -> 'a) -> (error -> 'a) -> 'a
       let name =
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
-      ignore (char '(');
+      let _ = char '(' in
       let args =
         list
           ~sep:(fun () ->
-            ignore (char ',');
+            let _ = char ',' in
             skip_whitespace ()
           )
           ~close:(fun () -> peek_char () = Some ')')
@@ -1036,7 +1037,7 @@ val require : (unit -> 'a) -> (error -> 'a) -> 'a
           )
           (fun _ -> 0)
       in
-      require (fun () -> ignore (char ')')) ignore;
+      let _ = require (fun () -> char ')') (fun _ -> ')') in
       (name, args)
 
     let () =
@@ -1099,22 +1100,22 @@ val list :
         take_while ~at_least:1 ~label:"name" (fun c -> c >= 'a' && c <= 'z')
       in
       skip_whitespace ();
-      ignore (char '=');
+      let _ = char '=' in
       skip_whitespace ();
       let value = integer () in
       skip_whitespace ();
-      ignore (char ';');
+      let _ = char ';' in
       skip_whitespace ();
       Assign (name, value)
 
     let skip_stmt () =
       skip_while (fun c -> c <> ';' && c <> '}');
-      ignore (optional (fun () -> char ';'));
+      let _ = optional (fun () -> char ';') in
       skip_whitespace ()
 
     let block () =
       context ~delimited:true "block" (fun () ->
-          ignore (char '{');
+          let _ = char '{' in
           skip_whitespace ();
           let stmts =
             list
@@ -1122,7 +1123,7 @@ val list :
               ~sync:skip_stmt assign_stmt
               (fun _ -> Bad)
           in
-          require (fun () -> ignore (char '}')) ignore;
+          let _ = require (fun () -> char '}') (fun _ -> '}') in
           stmts
       )
 
@@ -1155,9 +1156,10 @@ val skip_nested :
 
     {@ocaml[
     let string_literal () =
-      ignore (char '"');
+      let _ = char '"' in
       skip_while (fun c -> c <> '"');
-      ignore (char '"')
+      let _ = char '"' in
+      ()
 
     let skip_argument () =
       skip_nested ~atom:string_literal
@@ -1283,7 +1285,7 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
                 let n =
                   take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
                 in
-                ignore (char ' ');
+                let _ = char ' ' in
                 int_of_string n
               )
               (fun n -> sum := !sum + n)
@@ -1306,7 +1308,7 @@ val sep_by_iter :
     let () =
       let r =
         parse "[1,2,3]" (fun () ->
-            ignore (char '[');
+            let _ = char '[' in
             sep_by_iter
               (fun () -> take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
               (fun () -> char ',')
@@ -1352,13 +1354,13 @@ type ('a, +'kind) operator
     end = struct
       let add : (int, _) operator =
         infix_left (fun () ->
-            ignore (char '+');
+            let _ = char '+' in
             ( + )
         )
 
       let neg : (int, _) operator =
         prefix (fun () ->
-            ignore (char '-');
+            let _ = char '-' in
             ( ~- )
         )
     end
@@ -1414,7 +1416,7 @@ val expression :
     {@ocaml[
     let token c () =
       skip_whitespace ();
-      ignore (char c);
+      let _ = char c in
       skip_whitespace ()
 
     let op c f () =
@@ -1474,7 +1476,7 @@ val precedence :
 
     {@ocaml[
     let read build () =
-      ignore (any_char ());
+      let _ = any_char () in
       build
 
     let add = infix_left (read ( + ))
@@ -1499,13 +1501,13 @@ val precedence :
       skip_whitespace ();
       match peek_char () with
       | Some '-' ->
-          ignore (any_char ());
+          let _ = any_char () in
           -rec_ (fun () -> precedence ~min:3 ~operator operand)
       | Some '(' ->
-          ignore (any_char ());
+          let _ = any_char () in
           let e = rec_ expr in
           skip_whitespace ();
-          ignore (char ')');
+          let _ = char ')' in
           e
       | _ ->
           integer ()
@@ -1848,7 +1850,7 @@ module Source : sig
       {@ocaml[
       let record () =
         let id = take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-        ignore (char '\n');
+        let _ = char '\n' in
         int_of_string id
 
       let ids text =
@@ -1877,7 +1879,7 @@ module Push : sig
       {@ocaml[
       let line () =
         let s = take_while (fun c -> c <> '\n') in
-        ignore (char '\n');
+        let _ = char '\n' in
         s
 
       let lines chunks =
@@ -1968,7 +1970,7 @@ module Push : sig
       {@ocaml[
       let line () =
         let s = take_while (fun c -> c <> '\n') in
-        ignore (char '\n');
+        let _ = char '\n' in
         s
 
       let lines chunks =

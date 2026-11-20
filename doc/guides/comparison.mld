@@ -68,7 +68,7 @@ and applicative combinators.
 {@ocaml skip[
 let key_value () =
   let key = Parseff.take_while ~at_least:1 ~label:"key" (fun c -> c <> ':') in
-  ignore (Parseff.char ':');
+  let _ = Parseff.char ':' in
   Parseff.skip_whitespace ();
   let value =
     Parseff.take_while ~at_least:1 ~label:"value" (fun c -> c <> '\n')
@@ -124,23 +124,23 @@ let numbers =
 let rec expr () =
   Parseff.fold_left term (fun () ->
       Parseff.skip_whitespace ();
-      ignore (Parseff.char '+');
+      let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
       ( + ))
 
 and term () =
   Parseff.fold_left factor (fun () ->
       Parseff.skip_whitespace ();
-      ignore (Parseff.char '*');
+      let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
       ( * ))
 
 and factor () =
   Parseff.or_
     (fun () ->
-      ignore (Parseff.char '(');
+      let _ = Parseff.char '(' in
       let e = Parseff.rec_ expr in
-      ignore (Parseff.char ')');
+      let _ = Parseff.char ')' in
       e)
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
 ]}

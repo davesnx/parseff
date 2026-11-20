@@ -35,7 +35,7 @@ let raw_value () =
 let entry () =
   let k = key () in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
-  ignore (Parseff.char '=');
+  let _ = Parseff.char '=' in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
   let v = raw_value () in
   (k, v)
@@ -60,7 +60,7 @@ alternative in order, backtracking automatically on failure:
 
 {@ocaml[
 let comment () =
-  ignore (Parseff.char '#');
+  let _ = Parseff.char '#' in
   Parseff.skip_while (fun c -> c <> '\n')
 
 let line () =
@@ -148,7 +148,7 @@ let typed_value () = Parseff.one_of [ bool_value; int_value; tag_list ]
 let typed_entry () =
   let k = key () in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
-  ignore (Parseff.char '=');
+  let _ = Parseff.char '=' in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
   (k, typed_value ())
 ]}

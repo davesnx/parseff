@@ -48,12 +48,12 @@ val hex_integer : unit -> int
 {@ocaml[
 let point () =
   let x = Parseff.integer () in
-  ignore (Parseff.char ',');
+  let _ = Parseff.char ',' in
   let y = Parseff.integer () in
   (x, y)
 
 let color () =
-  ignore (Parseff.char '#');
+  let _ = Parseff.char '#' in
   Parseff.hex_integer ()
 ]}
 
@@ -72,11 +72,10 @@ let is_letter c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 let quantity () =
   let text =
     Parseff.recognize (fun () ->
-        ignore (Parseff.take_while ~at_least:1 ~label:"digit" is_digit);
-        ignore
-          (Parseff.optional (fun () ->
-               ignore (Parseff.char '.');
-               Parseff.take_while ~at_least:1 ~label:"digit" is_digit)))
+        let _ = Parseff.take_while ~at_least:1 ~label:"digit" is_digit in
+        Parseff.optional (fun () ->
+            let _ = Parseff.char '.' in
+            Parseff.take_while ~at_least:1 ~label:"digit" is_digit))
   in
   let unit_ = Parseff.take_while ~at_least:1 ~label:"unit" is_letter in
   (float_of_string text, unit_)
@@ -134,7 +133,7 @@ let token p = Parseff.lexeme ~skip:skip_space_and_comments p
 
 let pair () =
   let a = token Parseff.digit in
-  ignore (token (fun () -> Parseff.char ','));
+  let _ = token (fun () -> Parseff.char ',') in
   let b = token Parseff.digit in
   (a, b)
 ]}

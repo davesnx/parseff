@@ -38,7 +38,7 @@ let raw_value () =
 let entry () =
   let k = key () in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
-  ignore (Parseff.char '=');
+  let _ = Parseff.char '=' in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
   let v = raw_value () in
   (k, v)
@@ -60,7 +60,7 @@ A line is a comment, an entry, or blank. `Parseff.one_of` tries each alternative
 
 ```ocaml
 let comment () =
-  ignore (Parseff.char '#');
+  let _ = Parseff.char '#' in
   Parseff.skip_while (fun c -> c <> '\n')
 
 let line () =
@@ -145,7 +145,7 @@ let typed_value () = Parseff.one_of [ bool_value; int_value; tag_list ]
 let typed_entry () =
   let k = key () in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
-  ignore (Parseff.char '=');
+  let _ = Parseff.char '=' in
   Parseff.skip_while (fun c -> c = ' ' || c = '\t');
   (k, typed_value ())
 ```

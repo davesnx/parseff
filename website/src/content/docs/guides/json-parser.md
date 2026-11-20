@@ -42,9 +42,9 @@ let number_parser () = Number (Parseff.number ())
 let string_content () = Parseff.take_while (fun c -> c <> '"')
 
 let string_parser () =
-  ignore (Parseff.char '"');
+  let _ = Parseff.char '"' in
   let s = string_content () in
-  ignore (Parseff.char '"');
+  let _ = Parseff.char '"' in
   String s
 ```
 
@@ -70,7 +70,7 @@ let rec json () =
 
 and array_parser () =
   Parseff.context ~delimited:true "array" (fun () ->
-      ignore (Parseff.char '[');
+      let _ = Parseff.char '[' in
       Parseff.skip_whitespace ();
       let elements =
         Parseff.sep_by json (fun () ->
@@ -78,12 +78,12 @@ and array_parser () =
             Parseff.char ',')
       in
       Parseff.skip_whitespace ();
-      ignore (Parseff.char ']');
+      let _ = Parseff.char ']' in
       Array elements)
 
 and object_parser () =
   Parseff.context ~delimited:true "object" (fun () ->
-      ignore (Parseff.char '{');
+      let _ = Parseff.char '{' in
       Parseff.skip_whitespace ();
       let pairs =
         Parseff.sep_by key_value (fun () ->
@@ -91,16 +91,16 @@ and object_parser () =
             Parseff.char ',')
       in
       Parseff.skip_whitespace ();
-      ignore (Parseff.char '}');
+      let _ = Parseff.char '}' in
       Object pairs)
 
 and key_value () =
   Parseff.skip_whitespace ();
-  ignore (Parseff.char '"');
+  let _ = Parseff.char '"' in
   let key = string_content () in
-  ignore (Parseff.char '"');
+  let _ = Parseff.char '"' in
   Parseff.skip_whitespace ();
-  ignore (Parseff.char ':');
+  let _ = Parseff.char ':' in
   let value = json () in
   (key, value)
 ```

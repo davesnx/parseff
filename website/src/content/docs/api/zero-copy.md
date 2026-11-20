@@ -80,9 +80,9 @@ let csv_to_ints () =
   |> List.map int_of_slice
 
 let json_int_array () =
-  ignore (Parseff.char '[');
+  let _ = Parseff.char '[' in
   let nums = csv_to_ints () in
-  ignore (Parseff.char ']');
+  let _ = Parseff.char ']' in
   nums
 
 let () =
@@ -101,11 +101,11 @@ val sep_by_take :
 ```
 ```ocaml
 let array_values () =
-  ignore (Parseff.char '[');
+  let _ = Parseff.char '[' in
   let values =
     Parseff.sep_by_take ~ws:Parseff.is_whitespace ~sep:',' (fun c ->
         c >= '0' && c <= '9')
   in
-  ignore (Parseff.char ']');
+  let _ = Parseff.char ']' in
   List.map int_of_string values
 ```

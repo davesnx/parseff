@@ -62,7 +62,7 @@ Each element runs the parser like `` Source.parse ~consume:`Partial ``. The pars
 ```ocaml
 let record () =
   let id = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
-  ignore (Parseff.char '\n');
+  let _ = Parseff.char '\n' in
   int_of_string id
 
 let () =
@@ -153,7 +153,7 @@ let () =
   in
   let pair () =
     let key = Parseff.take_while (fun c -> c <> '=') in
-    ignore (Parseff.char '=');
+    let _ = Parseff.char '=' in
     (key, Parseff.take_while (fun _ -> true))
   in
   match parse_bigstring buf pair with
@@ -222,7 +222,7 @@ end
 ```ocaml
 let line () =
   let s = Parseff.take_while (fun c -> c <> '\n') in
-  ignore (Parseff.char '\n');
+  let _ = Parseff.char '\n' in
   s
 
 let push_lines chunks =

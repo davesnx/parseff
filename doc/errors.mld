@@ -76,7 +76,7 @@ let () =
   match
     Parseff.parse "10.300" (fun () ->
         let a = octet () in
-        ignore (Parseff.char '.');
+        let _ = Parseff.char '.' in
         (a, octet ()))
   with
   | Error e -> print_endline (Parseff.render_error ~name:"address" e)

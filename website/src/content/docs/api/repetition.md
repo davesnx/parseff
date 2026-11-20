@@ -43,7 +43,7 @@ let hex_digit () =
       || (c >= 'A' && c <= 'F'))
 
 let hex_color () =
-  ignore (Parseff.char '#');
+  let _ = Parseff.char '#' in
   let r = Parseff.count 2 hex_digit in
   let g = Parseff.count 2 hex_digit in
   let b = Parseff.count 2 hex_digit in
@@ -138,14 +138,14 @@ let subtraction () =
   Parseff.fold_left ~otherwise:0
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     (fun () ->
-      ignore (Parseff.char '-');
+      let _ = Parseff.char '-' in
       ( - ))
 
 let power () =
   Parseff.fold_right
     (fun () -> Char.code (Parseff.digit ()) - Char.code '0')
     (fun () ->
-      ignore (Parseff.char '^');
+      let _ = Parseff.char '^' in
       fun a b -> int_of_float (float_of_int a ** float_of_int b))
 ```
 
@@ -174,7 +174,7 @@ See the [Expressions with precedence](https://davesnx.github.io/parseff/guides/e
 
 ```ocaml
 let json_array () =
-  ignore (Parseff.char '[');
+  let _ = Parseff.char '[' in
   Parseff.skip_whitespace ();
   let values =
     Parseff.sep_by
@@ -186,7 +186,7 @@ let json_array () =
       (fun () -> Parseff.char ',')
   in
   Parseff.skip_whitespace ();
-  ignore (Parseff.char ']');
+  let _ = Parseff.char ']' in
   values
 
 let () =

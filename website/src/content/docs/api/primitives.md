@@ -38,11 +38,11 @@ val char : char -> char
 ```
 ```ocaml
 let pair () =
-  ignore (Parseff.char '(');
+  let _ = Parseff.char '(' in
   let a = Parseff.digit () in
-  ignore (Parseff.char ',');
+  let _ = Parseff.char ',' in
   let b = Parseff.digit () in
-  ignore (Parseff.char ')');
+  let _ = Parseff.char ')' in
   (a, b)
 ```
 
@@ -200,10 +200,12 @@ val Slice.recognize : (unit -> 'a) -> Slice.t
 ```ocaml
 let ident () =
   Parseff.recognize (fun () ->
-      ignore (Parseff.letter ());
-      ignore
-        (Parseff.many (fun () ->
-             Parseff.or_ Parseff.alphanum (fun () -> Parseff.char '_'))))
+      let _ = Parseff.letter () in
+      let _ =
+        Parseff.many (fun () ->
+            Parseff.or_ Parseff.alphanum (fun () -> Parseff.char '_'))
+      in
+      ())
 
 let () =
   match Parseff.parse ~consume:`Partial "foo_1 = 2" ident with

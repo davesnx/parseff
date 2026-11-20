@@ -5,9 +5,15 @@ description: Report every syntax error in the input instead of stopping at the f
 
 # Guide: Error recovery
 
-Report every syntax error in an input and build a partial AST with holes instead of stopping at the first failure.
+By default, a parser stops at the first syntax error and returns a single `Error`. For small data formats that is usually enough, but programming languages, config files, and editor tooling (compilers, linters, language servers) need to report every syntax error in one pass and still build a partial AST with placeholder ("hole") nodes so later passes such as type checking or completion can run on the valid parts.
 
-Parseff provides five recovery primitives: `Parseff.capture`, `Parseff.recover`, `Parseff.require`, `Parseff.list`, and `Parseff.skip_nested`. For the exhaustive edge-case specification, see the `Parseff` API reference.
+Error recovery catches a failure locally so the rest of the input can still be parsed. Most grammars combine three techniques:
+
+- **Synchronize and skip** (`Parseff.recover`): record the error, skip ahead to a boundary token such as `;`, return a hole node, and continue on the next construct.
+- **Insert a missing token or value** (`Parseff.require`): when an expected closing delimiter or operand is absent, record the error and return a placeholder without skipping input.
+- **Recover inside lists** (`Parseff.list` and `Parseff.skip_nested`): recover from broken elements or missing separators without consuming the closing delimiter.
+
+All three build on `Parseff.capture` and record errors into a `Parseff.Diagnostics.t` collector passed to the runner. Without a collector, recovery is disabled and the same parser fails at the first error. For the exhaustive edge-case specification, see the `Parseff` API reference.
 
 ## Starting grammar: a statement list
 
@@ -34,11 +40,11 @@ let statement () =
       ws ();
       let name = ident () in
       ws ();
-      ignore (Parseff.char '=');
+      let _ = Parseff.char '=' in
       ws ();
       let value = integer () in
       ws ();
-      ignore (Parseff.char ';');
+      let _ = Parseff.char ';' in
       Let (name, value))
 
 let program body () =
@@ -75,7 +81,8 @@ Without recovery, parsing stops at the first broken statement:
 ```ocaml
 let skip_statement () =
   Parseff.skip_while (fun c -> c <> ';');
-  ignore (Parseff.optional (fun () -> Parseff.char ';'))
+  let _ = Parseff.optional (fun () -> Parseff.char ';') in
+  ()
 
 let statements =
   program (fun () ->
@@ -126,17 +133,17 @@ let let_statement value () =
       ws ();
       let name = ident () in
       ws ();
-      ignore (Parseff.char '=');
+      let _ = Parseff.char '=' in
       ws ();
       let v = value () in
       ws ();
-      ignore (Parseff.char ';');
+      let _ = Parseff.char ';' in
       Let (name, v))
 
 let number_statement () =
   let n = integer () in
   ws ();
-  ignore (Parseff.char ';');
+  let _ = Parseff.char ';' in
   Let ("_", n)
 
 let either =
@@ -162,7 +169,7 @@ Inside a single alternative chosen by a prefix token, use `Parseff.commit` (not 
 let signed () =
   Parseff.or_
     (fun () ->
-      ignore (Parseff.char '-');
+      let _ = Parseff.char '-' in
       Parseff.commit ();
       -Parseff.require integer (fun _ -> 1))
     integer
@@ -192,7 +199,7 @@ Inside `Parseff.many`, `recover` would treat a closing brace `'}'` as a broken s
 - For separated lists with missing separators (e.g. `f(1 2)`), skip trailing whitespace after each element and separator rather than leading whitespace, so the next element can start immediately after a missing separator.
 ```ocaml
 let comma () =
-  ignore (Parseff.char ',');
+  let _ = Parseff.char ',' in
   ws ()
 
 let argument () =
@@ -202,7 +209,7 @@ let argument () =
 
 let call ?(trailing = false) () =
   let name = ident () in
-  ignore (Parseff.char '(');
+  let _ = Parseff.char '(' in
   ws ();
   let args =
     Parseff.list ~trailing ~sep:comma
@@ -211,7 +218,7 @@ let call ?(trailing = false) () =
       argument
       (fun _ -> None)
   in
-  Parseff.require (fun () -> ignore (Parseff.char ')')) ignore;
+  let _ = Parseff.require (fun () -> Parseff.char ')') (fun _ -> ')') in
   (name, args)
 
 let run_call ?trailing input =
@@ -285,7 +292,7 @@ let infix token name =
 
 let negation =
   Parseff.prefix (fun () ->
-      ignore (Parseff.char '-');
+      let _ = Parseff.char '-' in
       Parseff.commit ();
       fun e -> Negation e)
 
@@ -302,7 +309,7 @@ let expr () =
     Parseff.expression ~operand
       [ [ infix plus "+"; infix plus_plus "++" ]; [ negation ] ]
   in
-  ignore (Parseff.char ';');
+  let _ = Parseff.char ';' in
   e
 
 let run_expr input =

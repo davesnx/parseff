@@ -23,11 +23,11 @@ let octet () =
 
 let ip_address () =
   let a = octet () in
-  ignore (Parseff.char '.');
+  let _ = Parseff.char '.' in
   let b = octet () in
-  ignore (Parseff.char '.');
+  let _ = Parseff.char '.' in
   let c = octet () in
-  ignore (Parseff.char '.');
+  let _ = Parseff.char '.' in
   let d = octet () in
   (a, b, c, d)
 ```
@@ -64,11 +64,11 @@ let octet () =
 
 let ip_address () =
   let a = octet () in
-  ignore (dot ());
+  let _ = dot () in
   let b = octet () in
-  ignore (dot ());
+  let _ = dot () in
   let c = octet () in
-  ignore (dot ());
+  let _ = dot () in
   let d = octet () in
   (a, b, c, d)
 ```

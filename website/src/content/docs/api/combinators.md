@@ -142,14 +142,14 @@ val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
 ```ocaml
 let array_parser value () =
   Parseff.context ~delimited:true "array" (fun () ->
-      ignore (Parseff.char '[');
+      let _ = Parseff.char '[' in
       let xs =
         Parseff.sep_by value (fun () ->
             Parseff.skip_whitespace ();
             Parseff.char ',')
       in
       Parseff.skip_whitespace ();
-      ignore (Parseff.char ']');
+      let _ = Parseff.char ']' in
       xs)
 ```
 Name grammar constructs (statements, objects, declarations), not single tokens. If two failures tie at the furthest position, the first construct stack is kept.
@@ -178,19 +178,22 @@ let statement () =
           Parseff.literal "let";
           Parseff.cut ();
           Parseff.skip_whitespace ();
-          ignore
-            (Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
-                 c >= 'a' && c <= 'z'));
+          let _ =
+            Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
+                c >= 'a' && c <= 'z')
+          in
           Parseff.skip_whitespace ();
-          ignore (Parseff.char '=');
+          let _ = Parseff.char '=' in
           Parseff.skip_whitespace ();
-          ignore
-            (Parseff.take_while ~at_least:1 ~label:"expression" (fun c ->
-                 c >= '0' && c <= '9'));
+          let _ =
+            Parseff.take_while ~at_least:1 ~label:"expression" (fun c ->
+                c >= '0' && c <= '9')
+          in
           Parseff.char ';')
         (fun () ->
-          ignore
-            (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'));
+          let _ =
+            Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+          in
           Parseff.char ';'))
 ```
 
@@ -212,17 +215,20 @@ let decided_statement decide () =
         (fun () ->
           Parseff.literal "let ";
           decide ();
-          ignore
-            (Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
-                 c >= 'a' && c <= 'z'));
+          let _ =
+            Parseff.take_while ~at_least:1 ~label:"name" (fun c ->
+                c >= 'a' && c <= 'z')
+          in
           Parseff.literal " = ";
-          ignore
-            (Parseff.take_while ~at_least:1 ~label:"expression" (fun c ->
-                 c >= '0' && c <= '9'));
+          let _ =
+            Parseff.take_while ~at_least:1 ~label:"expression" (fun c ->
+                c >= '0' && c <= '9')
+          in
           Parseff.char ';')
         (fun () ->
-          ignore
-            (Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'));
+          let _ =
+            Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+          in
           Parseff.char ';'))
 
 let read_statements decide input =
@@ -255,9 +261,9 @@ let number () =
 
 let list_parser () =
   Parseff.context ~delimited:true "list" (fun () ->
-      ignore (Parseff.char '[');
+      let _ = Parseff.char '[' in
       let xs = Parseff.sep_by number (fun () -> Parseff.char ',') in
-      ignore (Parseff.char ']');
+      let _ = Parseff.char ']' in
       xs)
 
 let _ =

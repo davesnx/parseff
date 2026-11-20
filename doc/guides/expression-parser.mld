@@ -39,7 +39,7 @@ let rec expr () =
   let rest =
     Parseff.many (fun () ->
         Parseff.skip_whitespace ();
-        ignore (Parseff.expect "a '+' operator" (fun () -> Parseff.char '+'));
+        let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
         Parseff.skip_whitespace ();
         term ())
   in
@@ -50,7 +50,7 @@ and term () =
   let rest =
     Parseff.many (fun () ->
         Parseff.skip_whitespace ();
-        ignore (Parseff.expect "a '*' operator" (fun () -> Parseff.char '*'));
+        let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
         Parseff.skip_whitespace ();
         factor ())
   in
@@ -60,13 +60,15 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      ignore
-        (Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '('));
+      let _ =
+        Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(')
+      in
       Parseff.skip_whitespace ();
       let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      ignore
-        (Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')'));
+      let _ =
+        Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')')
+      in
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
@@ -92,14 +94,14 @@ With [expect], error messages use grammar names instead of raw tokens:
 let rec expr () =
   Parseff.fold_left term (fun () ->
       Parseff.skip_whitespace ();
-      ignore (Parseff.char '+');
+      let _ = Parseff.char '+' in
       Parseff.skip_whitespace ();
       fun a b -> Add (a, b))
 
 and term () =
   Parseff.fold_left factor (fun () ->
       Parseff.skip_whitespace ();
-      ignore (Parseff.char '*');
+      let _ = Parseff.char '*' in
       Parseff.skip_whitespace ();
       fun a b -> Mul (a, b))
 
@@ -107,10 +109,10 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      ignore (Parseff.char '(');
+      let _ = Parseff.char '(' in
       let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      ignore (Parseff.char ')');
+      let _ = Parseff.char ')' in
       e)
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
 ]}
@@ -125,12 +127,12 @@ and {!val:Parseff.postfix}:
 {@ocaml[
 let add () =
   Parseff.skip_whitespace ();
-  ignore (Parseff.expect "a '+' operator" (fun () -> Parseff.char '+'));
+  let _ = Parseff.expect "a '+' operator" (fun () -> Parseff.char '+') in
   fun a b -> Add (a, b)
 
 let mul () =
   Parseff.skip_whitespace ();
-  ignore (Parseff.expect "a '*' operator" (fun () -> Parseff.char '*'));
+  let _ = Parseff.expect "a '*' operator" (fun () -> Parseff.char '*') in
   fun a b -> Mul (a, b)
 
 let table = [ [ Parseff.infix_left add ]; [ Parseff.infix_left mul ] ]
@@ -141,13 +143,15 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      ignore
-        (Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '('));
+      let _ =
+        Parseff.expect "an opening parenthesis" (fun () -> Parseff.char '(')
+      in
       Parseff.skip_whitespace ();
       let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      ignore
-        (Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')'));
+      let _ =
+        Parseff.expect "a closing parenthesis" (fun () -> Parseff.char ')')
+      in
       e)
     (fun () ->
       let d = Parseff.expect "a number" Parseff.digit in
@@ -179,10 +183,10 @@ and factor () =
   Parseff.skip_whitespace ();
   Parseff.or_
     (fun () ->
-      ignore (Parseff.char '(');
+      let _ = Parseff.char '(' in
       let e = Parseff.rec_ expr in
       Parseff.skip_whitespace ();
-      ignore (Parseff.char ')');
+      let _ = Parseff.char ')' in
       e)
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
 ]}
