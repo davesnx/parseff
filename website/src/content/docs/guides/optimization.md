@@ -63,7 +63,7 @@ let parse_ints () =
   |> List.map int_of_slice
 ```
 
-See the [Zero-copy API](./zero-copy.md) reference for details.
+See the [Zero-copy API](../api/zero-copy.md) reference for details.
 
 ## Dispatch with `peek_char` instead of `or_` in tight loops
 

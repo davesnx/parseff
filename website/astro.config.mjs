@@ -79,7 +79,7 @@ export default defineConfig({
 		},
 	},
 	markdown: {
-		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base, contentDir, site }]],
+		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base, site }]],
 	},
 	integrations: [
 		starlight({
