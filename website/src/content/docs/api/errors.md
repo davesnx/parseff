@@ -99,7 +99,7 @@ let dot () = Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
 
 `Parseff.context` names a grammar construct so failures inside it report `* while parsing <name>`. `Parseff.cut` seals backtracking frames inside the enclosing `context` so a later failure becomes the parse error instead of retrying outer alternatives. See [`combinators`](./combinators.md).
 
-To collect multiple errors and keep parsing, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
+To collect multiple errors and keep parsing, see the [Error recovery](./error-recovery.md) guide.
 
 
 ## Furthest-failure selection

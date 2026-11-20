@@ -167,7 +167,7 @@ val precedence :
   (unit -> 'a) ->
   'a
 ```
-See the [Expressions with precedence](https://davesnx.github.io/parseff/guides/expression-parser/) guide for complete examples.
+See the [Expressions with precedence](./expression-parser.md) guide for complete examples.
 
 
 ## Complete example: JSON integer array

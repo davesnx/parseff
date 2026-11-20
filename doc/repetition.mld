@@ -187,9 +187,8 @@ val precedence :
   'a
 ]}
 
-See the
-{{:https://davesnx.github.io/parseff/guides/expression-parser/}Expressions with precedence}
-guide for complete examples.
+See the {{!page-"expression-parser"}Expressions with precedence} guide for
+complete examples.
 
 {1 Complete example: JSON integer array}
 

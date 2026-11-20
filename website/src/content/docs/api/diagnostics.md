@@ -10,7 +10,7 @@ description: Warnings, diagnostic collectors, and backtracking Ref state
 
 Diagnostics let a parser record warnings and recovered errors without stopping at the first problem.
 
-To recover from syntax errors and continue parsing, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide.
+To recover from syntax errors and continue parsing, see the [Error recovery](./error-recovery.md) guide.
 
 
 ## Types
@@ -126,7 +126,7 @@ Diagnostics are transactional with backtracking:
 - `Parseff.or_` / `Parseff.one_of`: rolled back on failed branches.
 - `Parseff.many` / `Parseff.sep_by`: rolled back on the final failing iteration.
 - `Parseff.look_ahead` / `Parseff.peek_with`: always rolled back.
-- `Parseff.capture` / `Parseff.recover`: rolled back when the inner parser fails (`recover` records the inner parser's error instead; pass `~keep` to retain earlier diagnostics, see the [Error recovery](https://davesnx.github.io/parseff/guides/error-recovery/) guide).
+- `Parseff.capture` / `Parseff.recover`: rolled back when the inner parser fails (`recover` records the inner parser's error instead; pass `~keep` to retain earlier diagnostics, see the [Error recovery](./error-recovery.md) guide).
 
 ## Backtracking state (`Ref`)
 

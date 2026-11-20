@@ -65,9 +65,11 @@ function existingPages(items) {
 	});
 }
 
+const site = 'https://davesnx.github.io';
+
 // https://astro.build/config
 export default defineConfig({
-	site: 'https://davesnx.github.io',
+	site,
 	base,
 	vite: {
 		define: {
@@ -77,7 +79,7 @@ export default defineConfig({
 		},
 	},
 	markdown: {
-		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base }]],
+		remarkPlugins: [remarkBoldAsides, [remarkRebaseLinks, { base, contentDir, site }]],
 	},
 	integrations: [
 		starlight({

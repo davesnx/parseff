@@ -394,8 +394,7 @@ edge cases):
 - {b Collector gating and warnings}: without [~diagnostics], recovery
   combinators run their inner parser directly and stop at the first error.
   {!val:Parseff.warn} writes [`Warning] entries to the same collector alongside
-  [`Error] recovery entries (see
-  {{:https://davesnx.github.io/parseff/api/diagnostics/}Diagnostics}).
+  [`Error] recovery entries (see {{!page-diagnostics}Diagnostics}).
 - {b Tracing}: passing [~trace] emits [Captured] events for each recovered
   failure.
 - {b Streaming}: [capture] and active recovery frames retain input from their
