@@ -35,26 +35,33 @@ let ip_address () =
   let d = octet () in
   (a, b, c, d)
 
-let () =
-  match Parseff.parse "192.168.1.1" ip_address with
+let run input =
+  match Parseff.parse input ip_address with
   | Ok (a, b, c, d) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error { kind = Custom (Out_of_range n); range; _ } ->
       Printf.printf "Error at %d: %d out of range (0-255)\n" range.start n
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
-```
-This prints `Parsed: 192.168.1.1`. On `"192.168.1."`, `Parseff.render_error` prints:
 
-```
-address:1:11: [error] expected digit, found end of input
-1 | 192.168.1.
-  |           ^
+let () =
+  run "192.168.1.1";
+  (* Parsed: 192.168.1.1 *)
+
+  run "192.168.1.256";
+  (* Error at 1: 256 out of range (0-255) *)
+
+  run "192.168.1.";
+  (*
+    address:1:11: [error] expected digit, found end of input
+    1 | 192.168.1.
+      |           ^
+  *)
 ```
 
 ## Features
 
-- **Direct-style parsers**: compose plain `unit -> 'a` functions without monadic (`>>=`, `>>|`, `*>`) or binding (`let*`, `let+`, `and+`) operators.
+- **Direct-style parsers**: compose plain `unit -> 'a` functions **WITHOUT** monadic (`>>=`, `>>|`, `*>`) or binding (`let*`, `let+`, `and+`) operators.
 - [**Structured errors and source excerpts**](https://davesnx.github.io/parseff/api/errors/): furthest-failure reporting with merged expectations, typed custom errors, construct contexts, and multi-error [recovery](https://davesnx.github.io/parseff/guides/error-recovery/).
 - **Automatic backtracking**: [`Parseff.or_`](https://davesnx.github.io/parseff/api/combinators/#or_) and `Parseff.one_of`, with `commit` and `cut` to seal branches.
 - [**Pull and push streaming**](https://davesnx.github.io/parseff/api/streaming/): `Source.parse`, `Source.parse_each`, and `Push` with bounded backtracking.

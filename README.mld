@@ -35,28 +35,33 @@ let ip_address () =
   let d = octet () in
   (a, b, c, d)
 
-let () =
-  match Parseff.parse "192.168.1.1" ip_address with
+let run input =
+  match Parseff.parse input ip_address with
   | Ok (a, b, c, d) ->
       Printf.printf "Parsed: %d.%d.%d.%d\n" a b c d
   | Error { kind = Custom (Out_of_range n); range; _ } ->
       Printf.printf "Error at %d: %d out of range (0-255)\n" range.start n
   | Error e ->
       prerr_endline (Parseff.render_error ~name:"address" e)
+
+let () =
+  run "192.168.1.1";
+  (* Parsed: 192.168.1.1 *)
+
+  run "192.168.1.256";
+  (* Error at 1: 256 out of range (0-255) *)
+
+  run "192.168.1.";
+  (*
+    address:1:11: [error] expected digit, found end of input
+    1 | 192.168.1.
+      |           ^
+  *)
 ]}
-
-This prints [Parsed: 192.168.1.1]. On ["192.168.1."], [Parseff.render_error]
-prints:
-
-{v
-address:1:11: [error] expected digit, found end of input
-1 | 192.168.1.
-  |           ^
-v}
 
 {1 Features}
 
-- {b Direct-style parsers}: compose plain [unit -> 'a] functions without
+- {b Direct-style parsers}: compose plain [unit -> 'a] functions {b WITHOUT}
   monadic ([>>=], [>>|], [*>]) or binding ([let*], [let+], [and+]) operators.
 - {{:https://davesnx.github.io/parseff/api/errors/}{b Structured errors and source excerpts}}:
   furthest-failure reporting with merged expectations, typed custom errors,
