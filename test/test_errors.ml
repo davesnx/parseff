@@ -2646,6 +2646,26 @@ let test_multibyte_literal_mismatch () =
     )
     (render_error "\xC3" (fun () -> Parseff.literal "\xC3\xA9"))
 
+let test_literal_with_stray_continuation_bytes () =
+  let check label input pattern expected =
+    let actual =
+      match Parseff.parse input (fun () -> Parseff.literal pattern) with
+      | Stdlib.Ok () ->
+          "ok"
+      | Stdlib.Error (e : Parseff.error) ->
+          Printf.sprintf "%d: %s" e.range.start (Parseff.error_message e)
+    in
+    Alcotest.(check string) label expected actual
+  in
+  check "after a two-byte character" "\xC3\xA9" "\xC3\xA9\xA8"
+    "2: expected '\\xA8', found end of input";
+  check "more continuation bytes than the lead allows" "\xC3\xA8\xA8\xA8"
+    "\xC3\xA8\xA8\xA8\xA8" "4: expected '\\xA8', found end of input";
+  check "after an ASCII byte" "a" "a\xA8\xA8\xA8\xA8"
+    "1: expected \"\\xA8\\xA8\\xA8\\xA8\", found end of input";
+  check "valid four-byte character" "\xF0\x9F\x98\x81" "\xF0\x9F\x98\x80"
+    "0: expected \"\xF0\x9F\x98\x80\", found '\xF0\x9F\x98\x81'"
+
 let test_expect_with_commit_inside () =
   let with_commit body () =
     Parseff.or_
@@ -3391,7 +3411,7 @@ let test_unread_bytes_found () =
     (fun stale ->
       Alcotest.(check string)
         (Printf.sprintf "stale %C" stale)
-        "1:3: [error] expected 'x', found '\\xE2\\x82'"
+        "1:3: [error] expected 'x'"
         (fst
            (render_after_stale ~read:6 stale input (fun () ->
                 ignore (Parseff.take 4);
@@ -4290,6 +4310,21 @@ let test_expect_relabels_after_duplicates () =
     "expect still relabels" "expected thing or 'a', found '!'"
     (message_of "!" parser)
 
+let test_expect_relabels_after_duplicate_overflow () =
+  List.iter
+    (fun n ->
+      let parser () =
+        Parseff.one_of
+          (List.init n (fun _ () -> Parseff.char 'x')
+          @ [ (fun () -> Parseff.expect "wrap" (fun () -> Parseff.char 'x')) ]
+          )
+      in
+      Alcotest.(check string)
+        (Printf.sprintf "%d duplicates" n)
+        "expected wrap or 'x', found '!'" (message_of "!" parser)
+    )
+    [ 62; 63; 64; 100 ]
+
 let test_char_and_one_byte_literal_print_once () =
   Alcotest.(check string)
     "one item" "expected ',', found '!'"
@@ -4708,6 +4743,8 @@ let () =
             test_look_ahead_probe_does_not_leak;
           test_case "multi-byte literal mismatch" `Quick
             test_multibyte_literal_mismatch;
+          test_case "literal with stray continuation bytes" `Quick
+            test_literal_with_stray_continuation_bytes;
           test_case "expect with commit inside" `Quick
             test_expect_with_commit_inside;
           test_case "commit without a frame" `Quick
@@ -4792,6 +4829,8 @@ let () =
             test_duplicates_do_not_hide_alternatives;
           test_case "expect relabels after duplicates" `Quick
             test_expect_relabels_after_duplicates;
+          test_case "expect relabels after duplicate overflow" `Quick
+            test_expect_relabels_after_duplicate_overflow;
           test_case "char and one-byte literal print once" `Quick
             test_char_and_one_byte_literal_print_once;
         ]

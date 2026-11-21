@@ -76,6 +76,8 @@ type over = {
   mutable oitems : (int * string) list;
   mutable oend : int;
   mutable on : int;
+  mutable opushes : int;
+  mutable oclip : int;
 }
 
 type far_extra =
@@ -1608,7 +1610,6 @@ let far_over f =
       None
 
 let[@inline never] far_overflow f k s =
-  Option.iter (fun o -> o.oend <- no_end) (far_over f);
   if f.special = 0 then begin
     let s =
       if far_carries_string k then
@@ -1616,6 +1617,25 @@ let[@inline never] far_overflow f k s =
       else
         ""
     in
+    let o =
+      match f.extra with
+      | Over o when o.opos = f.pos ->
+          o
+      | _ ->
+          let o =
+            {
+              opos = f.pos;
+              oitems = [];
+              oend = no_end;
+              on = 0;
+              opushes = 0;
+              oclip = 0;
+            }
+          in
+          f.extra <- Over o;
+          o
+    in
+    o.opushes <- o.opushes + 1;
     let present = ref false in
     for j = 0 to f.n - 1 do
       if
@@ -1624,20 +1644,12 @@ let[@inline never] far_overflow f k s =
       then
         present := true
     done;
-    if not !present then begin
-      let o =
-        match far_over f with
-        | Some o ->
-            o
-        | None ->
-            let o = { opos = f.pos; oitems = []; oend = no_end; on = 0 } in
-            f.extra <- Over o;
-            o
-      in
-      if (not (List.mem (k, s) o.oitems)) && List.length o.oitems < far_max_over
-      then
-        o.oitems <- (k, s) :: o.oitems
-    end
+    if
+      (not !present)
+      && (not (List.mem (k, s) o.oitems))
+      && List.length o.oitems < far_max_over
+    then
+      o.oitems <- (k, s) :: o.oitems
   end
 
 let[@inline never] far_push_slow f k s =
@@ -1694,6 +1706,21 @@ let[@inline always] far_push_str f k s =
 
 let far_over_len f =
   match far_over f with Some o -> List.length o.oitems | None -> 0
+
+let far_over_pushes f =
+  match f.extra with
+  | Over o when f.special = 0 && o.opos = f.pos ->
+      o.opushes
+  | _ ->
+      0
+
+let far_clip f =
+  match f.extra with
+  | Over o
+    when f.special = 0 && o.opos = f.pos && o.on = f.n && o.oclip = o.opushes ->
+      o.oend
+  | _ ->
+      no_end
 
 let far_relabel f n0 o0 label =
   f.n <- n0;
@@ -1800,12 +1827,27 @@ let label_varint = "varint up to max_int"
 
 let[@inline never] far_commit_reset st = st.far <- far_none
 
+let[@inline] utf8_sequence_length lead =
+  if lead < 0xC2 then
+    1
+  else if lead < 0xE0 then
+    2
+  else if lead < 0xF0 then
+    3
+  else if lead < 0xF5 then
+    4
+  else
+    1
+
 let char_start s i =
   let j = ref i in
-  while !j > 0 && Char.code (String.unsafe_get s !j) land 0xC0 = 0x80 do
+  while
+    !j > 0 && i - !j < 3 && Char.code (String.unsafe_get s !j) land 0xC0 = 0x80
+  do
     decr j
   done;
-  if Char.code (String.unsafe_get s !j) >= 0xC0 then
+  let lead = Char.code (String.unsafe_get s !j) in
+  if lead >= 0xC0 && i - !j < utf8_sequence_length lead then
     !j
   else
     i
@@ -2259,18 +2301,6 @@ let[@inline never] handle_take_span st n =
   end else
     fail_bytes st n
 
-let[@inline] utf8_sequence_length lead =
-  if lead < 0xC2 then
-    1
-  else if lead < 0xE0 then
-    2
-  else if lead < 0xF0 then
-    3
-  else if lead < 0xF5 then
-    4
-  else
-    1
-
 let[@inline never] utf8_fill st keep_from p =
   match st.source with
   | None ->
@@ -2535,23 +2565,44 @@ let[@inline] location () =
   let st = get_state () in
   handle_location st
 
-let[@inline never] clip_far st start =
+let[@inline never] clip_far st start limit =
   let f = st.far in
-  if f.special = 0 && f.pos >= start && f.pos <= st.input_len then
+  if f.special = 0 && f.pos >= start && f.pos <= limit && far_clip f = no_end
+  then
     match far_over f with
     | Some o ->
-        if o.oend = no_end || o.on <> f.n then begin
-          o.oend <- st.input_len;
-          o.on <- f.n
-        end
+        o.oend <- limit;
+        o.on <- f.n;
+        o.oclip <- o.opushes
     | None ->
         f.extra <-
-          Over { opos = f.pos; oitems = []; oend = st.input_len; on = f.n }
+          Over
+            {
+              opos = f.pos;
+              oitems = [];
+              oend = limit;
+              on = f.n;
+              opushes = 0;
+              oclip = 0;
+            }
+
+let[@inline never] reclip_far st limit n0 p0 =
+  let f = st.far in
+  if f.special = 0 && f.pos <= limit then
+    match far_over f with
+    | Some o when o.on = n0 && o.oclip = p0 && o.oend <> no_end ->
+        o.oend <- imax o.oend limit;
+        o.on <- f.n;
+        o.oclip <- o.opushes
+    | Some _ | None ->
+        ()
 
 let[@inline never] limited st stop f =
   let start = st.pos in
   let far0 = st.far in
   let far0_pos = far0.pos in
+  let far0_n = far0.n in
+  let far0_pushes = far_over_pushes far0 in
   let outer = st.source in
   let outer_len = st.input_len in
   let limit, ended, window =
@@ -2585,8 +2636,11 @@ let[@inline never] limited st stop f =
       leave ();
       v
   | exception exn ->
-      if exn == Fail && (st.far != far0 || st.far.pos <> far0_pos) then
-        clip_far st start;
+      if exn == Fail then
+        if st.far != far0 || st.far.pos <> far0_pos then
+          clip_far st start limit
+        else if st.far.n <> far0_n || far_over_pushes st.far <> far0_pushes then
+          reclip_far st limit far0_n far0_pushes;
       leave ();
       raise exn
 
@@ -4319,6 +4373,12 @@ let expect label p =
     else
       0
   in
+  let p0 =
+    if n0 = far_total_capacity then
+      far_over_pushes f0
+    else
+      0
+  in
   match p () with
   | v ->
       v
@@ -4327,7 +4387,7 @@ let expect label p =
       if f.pos = start then
         begin if f != f0 then
           far_relabel f 0 0 label
-        else if f.n > n0 || (n0 = far_total_capacity && far_over_len f > o0)
+        else if f.n > n0 || (n0 = far_total_capacity && far_over_pushes f > p0)
         then
           far_relabel f n0 o0 label
       end;
@@ -5067,6 +5127,8 @@ let found_text = function
 
 let error_message ?custom e =
   match e.kind with
+  | Expected { items = x, xs; found = Text ""; more } ->
+      "expected " ^ list_expected (x :: xs) more
   | Expected { items = x, xs; found; more } ->
       "expected " ^ list_expected (x :: xs) more ^ ", found " ^ found_text found
   | Failed m ->
@@ -6142,9 +6204,15 @@ let unread_limit st =
   | _ ->
       max_int
 
-let found_of st stop pos =
+let found_of st ~open_end stop pos =
   if pos >= stop then
-    (End, { start = pos; stop = pos })
+    ( ( if open_end then
+          Text ""
+        else
+          End
+      ),
+      { start = pos; stop = pos }
+    )
   else begin
     let p = imax pos st.base in
     let rel = p - st.base in
@@ -6167,19 +6235,21 @@ let found_of st stop pos =
         (Text (Bytes.sub_string st.input rel !k), { start = p; stop = p + !k })
     end else begin
       let n = char_len ~limit:(unread_limit st) st.input rel in
-      let n = imin n (len - rel) in
+      let n =
+        if n <= len - rel then
+          n
+        else if open_end then
+          0
+        else
+          len - rel
+      in
       (Text (Bytes.sub_string st.input rel n), { start = p; stop = p + n })
     end
   end
 
 let found_of_far st f pos =
-  let stop =
-    match far_over f with
-    | Some o when o.on = f.n ->
-        imax st.base (imin o.oend st.input_len)
-    | Some _ | None ->
-        st.input_len
-  in
+  let clip = far_clip f in
+  let stop = imax st.base (imin clip st.input_len) in
   let all_short = ref true and all_value = ref true and value = ref None in
   for i = 0 to f.n - 1 do
     let kind = far_item_kind f i in
@@ -6209,7 +6279,14 @@ let found_of_far st f pos =
     | Some (_, found, width) when !all_value ->
         (Value found, { start = pos; stop = imin stop (pos + width) })
     | _ ->
-        found_of st stop pos
+        let open_end =
+          match st.source with
+          | Some src ->
+              (not src.eof) && stop = st.input_len && clip > st.input_len
+          | None ->
+              false
+        in
+        found_of st ~open_end stop pos
 
 let scan_location input ~from ~lines ~start pos =
   let n = count_newlines input from pos in

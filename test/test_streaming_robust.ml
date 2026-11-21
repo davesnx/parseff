@@ -389,6 +389,187 @@ let test_bad_read_result () =
     )
     [ -1; max_int ]
 
+let describe = function
+  | Stdlib.Ok _ ->
+      "ok"
+  | Stdlib.Error (e : Parseff.error) ->
+      Printf.sprintf "%d-%d: %s" e.range.start e.range.stop
+        (Parseff.error_message e)
+
+let byte_chunks input =
+  Parseff.Source.of_seq (Seq.map (String.make 1) (String.to_seq input))
+
+let check_runners label expected input parser =
+  Alcotest.(check string)
+    (label ^ ": parse") expected
+    (describe (Parseff.parse input parser));
+  Alcotest.(check string)
+    (label ^ ": of_string") expected
+    (describe (Parseff.Source.parse (Parseff.Source.of_string input) parser));
+  Alcotest.(check string)
+    (label ^ ": 1-byte chunks")
+    expected
+    (describe (Parseff.Source.parse (byte_chunks input) parser))
+
+let test_found_stops_at_within_end () =
+  let item last () =
+    Parseff.within 2 (fun () ->
+        Parseff.literal "ab";
+        last ()
+    )
+  in
+  let char_c () = ignore (Parseff.char 'c') in
+  let take_1 () = ignore (Parseff.take 1) in
+  check_runners "many of optional" "2-2: expected 'c', found end of input"
+    "abab" (fun () ->
+      ignore
+        (Parseff.many ~at_least:1 (fun () -> Parseff.optional (item char_c)))
+  );
+  check_runners "many of sep_by_iter" "2-2: expected 1 byte, found end of input"
+    "abab" (fun () ->
+      ignore
+        (Parseff.many ~at_least:1 (fun () ->
+             Parseff.sep_by_iter (item take_1)
+               (fun () -> Parseff.literal "1")
+               ignore
+         )
+        )
+  )
+
+let test_found_at_within_end_after_overflow () =
+  let partial input parser =
+    describe (Parseff.parse ~consume:`Partial input parser)
+  in
+  let chunked input parser =
+    describe (Parseff.Source.parse ~consume:`Partial (byte_chunks input) parser)
+  in
+  List.iter
+    (fun n ->
+      let frame last () =
+        Parseff.within 2 (fun () ->
+            Parseff.literal "ab";
+            ignore (last ())
+        )
+      in
+      let same () =
+        Parseff.one_of
+          (List.init n (fun _ -> frame (fun () -> Parseff.char 'c')))
+      in
+      let distinct () =
+        Parseff.one_of
+          (List.init n (fun i ->
+               frame (fun () -> Parseff.char (Char.chr (i + 33)))
+           )
+          )
+      in
+      let label = Printf.sprintf "%d alternatives" n in
+      Alcotest.(check string)
+        (label ^ ": parse") "2-2: expected 'c', found end of input"
+        (partial "abXYZ" same);
+      Alcotest.(check string)
+        (label ^ ": 1-byte chunks")
+        "2-2: expected 'c', found end of input" (chunked "abXYZ" same);
+      Alcotest.(check string)
+        (label ^ ", distinct: parse and 1-byte chunks")
+        (partial "abXYZ" distinct) (chunked "abXYZ" distinct);
+      Alcotest.(check bool)
+        (label ^ ", distinct: found end of input")
+        true
+        (String.ends_with ~suffix:"found end of input" (partial "abXYZ" distinct)
+        )
+    )
+    [ 2; 64; 65; 100 ]
+
+let test_found_inside_within_with_unread_input () =
+  let parser () =
+    Parseff.within 4 (fun () ->
+        Parseff.literal "ab";
+        Parseff.not_followed_by ~label:"nfb" (fun () -> ())
+    )
+  in
+  Alcotest.(check string)
+    "parse" "2-4: expected nfb, found 'cd'"
+    (describe (Parseff.parse "abcd" parser));
+  Alcotest.(check string)
+    "1-byte chunks" "2-2: expected nfb"
+    (describe (Parseff.Source.parse (byte_chunks "abcd") parser))
+
+let found_is_unknown = function
+  | Stdlib.Error
+      { Parseff.kind = Expected { found = Parseff.Text ""; _ }; range; _ } ->
+      range.start = range.stop
+  | _ ->
+      false
+
+let push_feed_now label parser chunk =
+  match Parseff.Push.feed (Parseff.Push.parse parser) chunk with
+  | Parseff.Push.Done r ->
+      Result.map fst r
+  | Parseff.Push.Await ->
+      Alcotest.failf "%s: Push.feed returned Await" label
+
+let test_found_with_unread_input () =
+  let nfb () = Parseff.not_followed_by ~label:"nfb" (fun () -> ()) in
+  let known = "0-1: expected nfb, found 'a'" in
+  Alcotest.(check string) "parse" known (describe (Parseff.parse "a" nfb));
+  Alcotest.(check string)
+    "of_string" known
+    (describe (Parseff.Source.parse (Parseff.Source.of_string "a") nfb));
+  let chunked = Parseff.Source.parse (byte_chunks "a") nfb in
+  Alcotest.(check string) "1-byte chunks" "0-0: expected nfb" (describe chunked);
+  Alcotest.(check bool)
+    "1-byte chunks: found unknown" true (found_is_unknown chunked);
+  let pushed = push_feed_now "nfb" nfb "a" in
+  Alcotest.(check string) "Push.feed" "0-0: expected nfb" (describe pushed);
+  Alcotest.(check bool) "Push.feed: found unknown" true (found_is_unknown pushed);
+  Alcotest.(check string)
+    "Push.feed, failure at the end of the fed bytes" "1-1: expected nfb"
+    (describe
+       (push_feed_now "end of chunk"
+          (fun () ->
+            ignore (Parseff.any_char ());
+            nfb ()
+          )
+          "a"
+       )
+    );
+  match chunked with
+  | Stdlib.Error e ->
+      Alcotest.(check string)
+        "render_error" "input:1:1: [error] expected nfb\n1 | ...\n  | ^"
+        (Parseff.render_error ~name:"input" e)
+  | Stdlib.Ok () ->
+      Alcotest.fail "expected an error"
+
+let test_found_with_truncated_character () =
+  let at_start () = ignore (Parseff.position ()) in
+  Alcotest.(check string)
+    "parse" "0-1: expected end of input, found '\\xE2'"
+    (describe (Parseff.parse "\xE2\x82" at_start));
+  List.iter
+    (fun (label, chunks) ->
+      let r =
+        Parseff.Source.parse
+          (Parseff.Source.of_seq (List.to_seq chunks))
+          at_start
+      in
+      Alcotest.(check string) label "0-0: expected end of input" (describe r);
+      Alcotest.(check bool) (label ^ ": found unknown") true (found_is_unknown r)
+    )
+    [
+      ("truncated in one chunk", [ "\xE2\x82" ]);
+      ("truncated in 1-byte chunks", [ "\xE2"; "\x82" ]);
+      ("character split across chunks", [ "\xE2\x82"; "\xAC" ]);
+    ];
+  Alcotest.(check string)
+    "complete bytes before the cut" "0-1: expected 'x', found 'a'"
+    (describe
+       (Parseff.Source.parse
+          (Parseff.Source.of_seq (List.to_seq [ "a\xE2"; "\x82\xAC" ]))
+          (fun () -> ignore (Parseff.char 'x'))
+       )
+    )
+
 let () =
   let open Alcotest in
   run "Streaming robustness"
@@ -430,6 +611,19 @@ let () =
         [
           test_case "buf_size" `Quick test_buf_size_rejected;
           test_case "read result" `Quick test_bad_read_result;
+        ]
+      );
+      ( "found",
+        [
+          test_case "stops at the within end" `Quick
+            test_found_stops_at_within_end;
+          test_case "with unread input" `Quick test_found_with_unread_input;
+          test_case "with a truncated character" `Quick
+            test_found_with_truncated_character;
+          test_case "at the within end after overflow" `Quick
+            test_found_at_within_end_after_overflow;
+          test_case "inside within with unread input" `Quick
+            test_found_inside_within_with_unread_input;
         ]
       );
     ]
