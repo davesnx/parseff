@@ -80,9 +80,11 @@ type found = private
       (** Input text at the failure position. Tokens longer than 32 bytes are
           truncated with [...]. Under {!Source.parse} and {!Push}, covers only
           whole characters already buffered, so it can be a prefix of the text
-          {!parse} reports. There, [Text ""] means the failure is at the end of
-          the input read so far and more input may follow: [range] is empty and
-          {!error_message} omits [", found ..."]. *)
+          {!parse} reports. There, [Text ""] means no whole character is
+          buffered at the failure position (it is at the end of the input read
+          so far, or the character there is incomplete) and more input may
+          follow: [range] is empty and {!error_message} omits [", found ..."].
+      *)
   | End  (** End of input. *)
   | Short of int
       (** A fixed-size read (such as {!val:take}) reached end of input with only
