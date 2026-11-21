@@ -5,14 +5,11 @@ description: Basic parsing operations in Parseff
 
 <!-- This file is generated from doc/primitives.mld. Do not edit directly. -->
 
-
 # Primitives
 
 Primitives read bytes directly from the input.
 
-
 ## String and character matching
-
 
 ### `literal`
 
@@ -21,13 +18,14 @@ Primitives read bytes directly from the input.
 ```ocaml
 val literal : ?case_sensitive:bool -> string -> unit
 ```
+
 ```ocaml
 let greeting () =
   Parseff.literal ~case_sensitive:false "hello ";
   Parseff.literal "world"
 ```
-In streaming, `literal` checks buffered bytes first and pulls more input only while the prefix matches, so a wrong byte fails immediately without waiting for the rest of the literal.
 
+In streaming, `literal` checks buffered bytes first and pulls more input only while the prefix matches, so a wrong byte fails immediately without waiting for the rest of the literal.
 
 ### `char`
 
@@ -36,6 +34,7 @@ In streaming, `literal` checks buffered bytes first and pulls more input only wh
 ```ocaml
 val char : char -> char
 ```
+
 ```ocaml
 let pair () =
   let _ = Parseff.char '(' in
@@ -53,6 +52,7 @@ let pair () =
 ```ocaml
 val satisfy : ?label:string -> (char -> bool) -> char
 ```
+
 ```ocaml
 let vowel () =
   Parseff.satisfy ~label:"vowel" (fun c -> String.contains "aeiouAEIOU" c)
@@ -68,6 +68,7 @@ let uppercase () =
 ```ocaml
 val peek_char : unit -> char option
 ```
+
 ```ocaml
 let value_start () =
   match Parseff.peek_char () with
@@ -78,7 +79,6 @@ let value_start () =
 ```
 
 ## Character scanning
-
 
 ### `take_while` and `skip_while`
 
@@ -91,6 +91,7 @@ val take_while :
 
 val skip_while : ?set:Charset.t -> (char -> bool) -> unit
 ```
+
 - `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match.
 - `~at_most` caps the byte count (unstable: may change in 1\.x), failing with `Limit_exceeded { limit = at_most }` if another matching byte follows.
 - `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
@@ -116,6 +117,7 @@ module Charset : sig
   val mem : t -> char -> bool
 end
 ```
+
 ```ocaml
 let is_digit c = c >= '0' && c <= '9'
 let digit_set = Parseff.Charset.of_predicate is_digit
@@ -132,6 +134,7 @@ let fast_digits () =
 val take_until : ?at_most:int -> ?label:string -> string -> string
 val skip_until : ?at_most:int -> ?label:string -> string -> unit
 ```
+
 ```ocaml
 let block_comment () =
   Parseff.literal "/*";
@@ -139,11 +142,10 @@ let block_comment () =
   Parseff.literal "*/";
   body
 ```
+
 In streaming, `skip_until` retains only the last `String.length terminator - 1` bytes, so it can skip past text longer than `~backtrack_window`; `take_until` must hold its entire result in the window.
 
-
 ## Input bounds and positions
-
 
 ### `end_of_input`
 
@@ -167,6 +169,7 @@ val with_range : (unit -> 'a) -> 'a * range
 val location : unit -> location
 val location_of_position : string -> int -> location
 ```
+
 ```ocaml
 let octet () =
   let n, range =
@@ -197,6 +200,7 @@ let report_error input = function
 val recognize : (unit -> 'a) -> string
 val Slice.recognize : (unit -> 'a) -> Slice.t
 ```
+
 ```ocaml
 let ident () =
   Parseff.recognize (fun () ->

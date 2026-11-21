@@ -5,15 +5,14 @@ description: Pull and push streaming from files, channels, and chunk callbacks
 
 <!-- This file is generated from doc/streaming.mld. Do not edit directly. -->
 
-
 # Streaming
 
 Parseff provides two streaming interfaces for input that arrives incrementally:
 
 - `Parseff.Source`: pull-based streaming (files, channels, sockets, sequences, Eio flows).
 - `Parseff.Push`: push-based streaming where your caller owns the read loop (Lwt, Async, callback APIs).
-Ordinary `unit -> 'a` parsers work unchanged with `Parseff.parse`, `Parseff.Source.parse`, and `Parseff.Push.parse`.
 
+Ordinary `unit -> 'a` parsers work unchanged with `Parseff.parse`, `Parseff.Source.parse`, and `Parseff.Push.parse`.
 
 ## Pull streaming: `Source.parse`
 
@@ -30,6 +29,7 @@ val Source.parse :
   (unit -> 'a) ->
   ('a, error) Stdlib.result
 ```
+
 ```ocaml
 let ic = open_in "data.json" in
 let source = Parseff.Source.of_channel ic in
@@ -37,6 +37,7 @@ let result = Parseff.Source.parse source json in
 close_in ic;
 result
 ```
+
 - `~consume` defaults to `` `All ``, pulling one extra byte after the parser returns to check EOF without reading the rest of the source. Pass `` ~consume:`Partial `` to leave remaining bytes unread.
 - `~backtrack_window` bounds how much buffered history Parseff retains for backtracking (default: `65536` bytes; minimum `2`). Exceeding it fails with `Backtrack_window_exceeded`.
 - Error positions are absolute byte offsets from the start of the stream. `found` text covers only whole characters already buffered (Parseff does not pull more bytes just to lengthen a snippet), so it can be a prefix of the text `Parseff.parse` reports and `range.stop` can be smaller. `Text ""` means the failure is at the end of the input read so far: the range is empty and the message has no `found` part.
@@ -57,6 +58,7 @@ val Source.parse_each :
   (unit -> 'a) ->
   ('a, error) Stdlib.result Seq.t
 ```
+
 Each element runs the parser like `` Source.parse ~consume:`Partial ``. The parser must consume its trailing separator (a zero-width run yields an `Error`). The sequence stops at EOF or after the first `Error`, and is ephemeral (forcing an element twice raises `Invalid_argument`). Pass `~pending` if your parser buffers lookahead tokens past its value.
 
 ```ocaml
@@ -75,7 +77,6 @@ let () =
 ## Source constructors
 
 A `Parseff.Source.t` is for a single `Source.parse` or `Source.parse_each` call (only `of_string` restarts from offset 0; other sources continue where the last read stopped and drop buffered lookahead).
-
 
 ### `Source.of_string`
 
@@ -100,6 +101,7 @@ Pulls chunks from a callback returning `Some s` for data (empty strings are skip
 ```ocaml
 val of_chunks : (unit -> string option) -> Source.t
 ```
+
 ```ocaml
 let source =
   Parseff.Source.of_chunks (fun () ->
@@ -117,6 +119,7 @@ Reads chunks from a `string Seq.t` (same chunk-immutability rule as `of_chunks`)
 ```ocaml
 val of_seq : string Seq.t -> Source.t
 ```
+
 ```ocaml
 let source =
   Parseff.Source.of_seq (List.to_seq [ "1\n"; "22\n"; "333\n" ])
@@ -133,6 +136,7 @@ type bigstring =
 val of_bigstring_chunks :
   (unit -> (bigstring * int * int) option) -> Source.t
 ```
+
 ```ocaml
 let parse_bigstring buf parser =
   let sent = ref false in
@@ -169,6 +173,7 @@ Low-level escape hatch matching POSIX `read(2)`: `read buf off len` writes up to
 val of_function :
   ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> Source.t
 ```
+
 ```ocaml
 let source =
   Parseff.Source.of_function ~initial_buffer_size:512 (fun buf off len ->
@@ -215,6 +220,7 @@ module Push : sig
     each_step
 end
 ```
+
 `Parseff.Push.parse`, `Parseff.Push.feed`, and `Parseff.Push.finish` (unstable) parse a single value and return any leftover bytes in `Done (Ok (value, leftover))`. End your parser with `Parseff.end_of_input` if you want to require full consumption. Always call `Push.finish` on an unfinished parse if you passed `~diagnostics` or mutated `Parseff.Ref` cells so those resources are released.
 
 `Parseff.Push.parse_each` parses a stream of values on a single effect fiber (the push counterpart of `Parseff.Source.parse_each`). Push `Some chunk` for data and `None` at EOF:
@@ -255,6 +261,7 @@ Parseff retains buffered bytes from the oldest active rewind point to the newest
 
 - Open backtracking frames (`or_`, `one_of`, `look_ahead`, repetition loops).
 - Primitives building a single value across chunks (`take_while`, `recognize`).
+
 To stay within `~backtrack_window`:
 
 - Dispatch early with `Parseff.peek_char` rather than trying long speculative branches.

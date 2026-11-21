@@ -5,11 +5,9 @@ description: Common parsing patterns made easy
 
 <!-- This file is generated from doc/convenience.mld. Do not edit directly. -->
 
-
 # Convenience combinators
 
 Ready-to-use parsers for ASCII character classes, numbers, whitespace, tokens, fixed-length slices, and framed payloads.
-
 
 ## Character classes
 
@@ -19,6 +17,7 @@ val letter : unit -> char
 val alphanum : unit -> char
 val any_char : unit -> char
 ```
+
 - `Parseff.digit`: ASCII decimal digit (`'0'`..`'9'`). Use `Parseff.integer` to parse an integer value directly.
 - `Parseff.letter`: ASCII letter (`'a'`..`'z'` or `'A'`..`'Z'`).
 - `Parseff.alphanum`: ASCII letter or digit.
@@ -39,6 +38,7 @@ val integer : unit -> int
 val number : unit -> float
 val hex_integer : unit -> int
 ```
+
 - `Parseff.integer`: optional `-` followed by ASCII digits. Fails without a digit or on `int` overflow.
 - `Parseff.number`: JSON-grammar decimal float (optional `-`, digits, optional fraction only when a digit follows `'.'`, optional exponent only when a digit or sign+digit follows `'e'`/`'E'`). Fails without a digit or on float overflow. `"-0"` returns `-0.` (whereas `integer` returns `0`).
 - `Parseff.hex_integer`: unsigned ASCII hex digits (no sign, no `0x` prefix). Fails without a digit or above `max_int`.
@@ -73,6 +73,7 @@ let quantity () =
   let unit_ = Parseff.take_while ~at_least:1 ~label:"unit" is_letter in
   (float_of_string text, unit_)
 ```
+
 ```ocaml
 # Parseff.parse "2em" quantity;;
 - : (float * string, Parseff.error) result = Ok (2., "em")
@@ -87,6 +88,7 @@ val is_whitespace : char -> bool
 val whitespace : ?at_least:int -> unit -> string
 val skip_whitespace : unit -> unit
 ```
+
 - `Parseff.is_whitespace` returns `true` for space, tab, newline, and carriage return.
 - `Parseff.whitespace` reads zero or more ASCII whitespace bytes as a string (pass `~at_least:1` to require at least one).
 - `Parseff.skip_whitespace` skips ASCII whitespace without allocating. Prefer it whenever you do not need the matched string.
@@ -101,7 +103,6 @@ let words () =
 
 ## Tokens
 
-
 ### `lexeme`
 
 `Parseff.lexeme` runs a parser, then `~skip` (default: `Parseff.skip_whitespace`), and returns the parser's result.
@@ -109,6 +110,7 @@ let words () =
 ```ocaml
 val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
 ```
+
 ```ocaml
 let skip_space_and_comments () =
   Parseff.skip_whitespace ();
@@ -141,6 +143,7 @@ val identifier :
   (char -> bool) ->
   string
 ```
+
 ```ocaml
 let is_start c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
@@ -151,8 +154,8 @@ let reserved = function
 
 let name () = Parseff.identifier ~reserved is_start Parseff.is_ident_char
 ```
-In streaming, `keyword` needs `String.length s + 1` bytes of `~backtrack_window`, and `identifier` needs the word length plus one byte.
 
+In streaming, `keyword` needs `String.length s + 1` bytes of `~backtrack_window`, and `identifier` needs the word length plus one byte.
 
 ## Fixed-length reads and framed input
 
@@ -163,6 +166,7 @@ val take_iter : int -> (Slice.t -> unit) -> unit
 val take_while_iter :
   ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
 ```
+
 - `Parseff.take` reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
 - `Parseff.within` (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
 - `Parseff.take_iter` and `Parseff.take_while_iter` (unstable) stream bytes to a callback as non-empty borrowed `Parseff.Slice.t` pieces without holding the whole payload in memory (sealing open frames like `Parseff.many_iter`).

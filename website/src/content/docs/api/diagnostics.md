@@ -5,13 +5,11 @@ description: Warnings, diagnostic collectors, and backtracking Ref state
 
 <!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->
 
-
 # Diagnostics
 
 Diagnostics let a parser record warnings and recovered errors without stopping at the first problem.
 
 To recover from syntax errors and continue parsing, see the [Error recovery](../guides/error-recovery.md) guide.
-
 
 ## Types
 
@@ -28,6 +26,7 @@ module Diagnostics : sig
   val clear : t -> unit
 end
 ```
+
 A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Each entry carries a `Parseff.error` and its start offset (`pos = value.range.start`):
 
 - `` `Warning ``: emitted by `Parseff.warn`.
@@ -49,10 +48,10 @@ val parse :
   (unit -> 'a) ->
   ('a, error) Stdlib.result
 ```
+
 `Parseff.warn` records a `Parseff.custom_error` with severity `` `Warning `` and continues parsing. `~from`, `~upto`, `~notes`, and `~help` work as in `Parseff.fail`.
 
 Pass a `Parseff.Diagnostics.t` collector to `Parseff.parse`, `Parseff.Source.parse`, or `Parseff.Push.parse` via `~diagnostics`. The runner clears the collector before running; entries are available after the parse whether it returns `Ok` or `Error`. Without `~diagnostics`, `warn` is a no-op and `recover`/`require`/`list` do not recover.
-
 
 ## Example
 
@@ -95,6 +94,7 @@ let report input =
         (Parseff.render_error ~name:"ip" ~source:input ~custom value))
     (Parseff.Diagnostics.to_list diagnostics)
 ```
+
 ```ocaml
 # report "999.2.3.256";;
 Parsed: 999.2.3.256
@@ -106,6 +106,7 @@ ip:1:9: [warning] octet 256 out of range (0-255)
   |         ^^^
 - : unit = ()
 ```
+
 To inspect specific entries programmatically, match on `severity` and `kind`:
 
 ```ocaml
@@ -140,6 +141,7 @@ module Ref : sig
   val set : 'a t -> 'a -> unit
 end
 ```
+
 ```ocaml
 let plain = ref []
 let names = Parseff.Ref.create []

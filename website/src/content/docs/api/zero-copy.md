@@ -5,11 +5,9 @@ description: Zero-copy slices and fused scanners
 
 <!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->
 
-
 # Zero-copy API
 
 `Parseff.Slice` and `Parseff.sep_by_take` avoid intermediate string allocations when scanning hot paths or converting bytes directly into values.
-
 
 ## `Slice`
 
@@ -28,8 +26,8 @@ module Slice : sig
     ws:(char -> bool) -> sep:char -> (char -> bool) -> t list
 end
 ```
-`Parseff.Slice.get` indexes relative to the start of the slice and raises `Invalid_argument` outside `0 .. Slice.length s - 1`.
 
+`Parseff.Slice.get` indexes relative to the start of the slice and raises `Invalid_argument` outside `0 .. Slice.length s - 1`.
 
 ### `Slice.take_while`
 
@@ -68,7 +66,6 @@ let () =
 
 Runs a parser, discards its return value, and returns the consumed bytes as a `Parseff.Slice.t`. See `Parseff.recognize`.
 
-
 ### `Slice.sep_by_take`
 
 Fused separated-list scanner returning `Parseff.Slice.t` elements. `~ws` skips surrounding bytes around `~sep`, and the final predicate matches each element's bytes.
@@ -99,6 +96,7 @@ let () =
 val sep_by_take :
   ws:(char -> bool) -> sep:char -> (char -> bool) -> string list
 ```
+
 ```ocaml
 let array_values () =
   let _ = Parseff.char '[' in

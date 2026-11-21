@@ -5,13 +5,11 @@ description: Parse Unicode code points from UTF-8 input
 
 <!-- This file is generated from doc/utf8.mld. Do not edit directly. -->
 
-
 # UTF-8 parsing
 
 `Parseff.Utf8` provides primitives operating on Unicode code points (`Uchar.t`) decoded from UTF-8 `string` input, backed by [uucp](https://erratique.ch/software/uucp) for Unicode character properties.
 
 Primitives operate at the code-point level (a base character plus combining mark is two code points). For grapheme clusters, compose them with a library such as [uuseg](https://erratique.ch/software/uuseg).
-
 
 ## Primitives
 
@@ -26,6 +24,7 @@ module Slice : sig
   val take_while : (Uchar.t -> bool) -> Slice.t
 end
 ```
+
 - `Parseff.Utf8.satisfy` decodes the next code point (1–4 bytes) and tests the predicate, failing with `expected <label>` (default `"matching character"`).
 - `Parseff.Utf8.char` matches an exact `Uchar.t`.
 - `Parseff.Utf8.any_char` decodes and returns the next code point, failing at EOF or on invalid UTF-8.
@@ -62,6 +61,7 @@ val is_whitespace : Uchar.t -> bool
 val whitespace : ?at_least:int -> unit -> string
 val skip_whitespace : unit -> unit
 ```
+
 - `Parseff.Utf8.letter`: matches Unicode alphabetic code points (`Uucp.Alpha.is_alphabetic` across Latin, Greek, Cyrillic, CJK, Arabic, Devanagari, etc.).
 - `Parseff.Utf8.alphanum`: matches a Unicode alphabetic code point or ASCII digit.
 - `Parseff.Utf8.is_whitespace`, `Parseff.Utf8.whitespace`, and `Parseff.Utf8.skip_whitespace`: match the Unicode `White_Space` property (`Uucp.White.is_white_space`, including `U+00A0`, `U+2002`, `U+2003`, `U+3000`). `~at_least` on `whitespace` counts code points.
@@ -69,7 +69,6 @@ val skip_whitespace : unit -> unit
 ## Invalid UTF-8
 
 All `Utf8` primitives fail with `expected valid UTF-8` on bare continuation bytes (`0x80`–`0xBF`), invalid lead bytes (`0xFE`, `0xFF`), overlong encodings, and truncated sequences, pointing at the first invalid byte (`expected valid UTF-8, found '\xFF'`). Invalid UTF-8 always reports `valid UTF-8` regardless of `~label`.
-
 
 ## Positions, columns, and streaming
 
@@ -80,4 +79,5 @@ input.json:1:6: [error] expected ',' or ']', found '"'
 1 | ["é" "b"]
   |      ^
 ```
+
 - **Streaming**: all `Utf8` primitives work across chunk boundaries in `Parseff.Source.parse` and `Parseff.Push`.
