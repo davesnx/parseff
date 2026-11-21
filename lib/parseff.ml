@@ -3223,16 +3223,26 @@ let repeat_fail st frame =
   end;
   repeat_stop st frame
 
-let rec many_required p acc n =
+let required st p =
+  let frame = State.push_rewind_frame st frame_last_branch in
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      v
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let rec many_required st p acc n =
   if n <= 0 then
     acc
   else
-    many_required p (p () :: acc) (n - 1)
+    many_required st p (required st p :: acc) (n - 1)
 
 let[@inline never] rec many_at_most st at_least at_most p =
   if at_most < 0 || at_most < at_least then
     invalid_arg "Parseff.many: at_most must be at least 0 and at least at_least";
-  let acc = ref (many_required p [] at_least) in
+  let acc = ref (many_required st p [] at_least) in
   let n = ref (imax 0 at_least) in
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
@@ -3267,7 +3277,7 @@ let[@inline never] rec many_at_most st at_least at_most p =
 
 let rec many_loop at_least (p : unit -> 'a) : 'a list =
   let st = get_state () in
-  let acc = ref (many_required p [] at_least) in
+  let acc = ref (many_required st p [] at_least) in
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
   match
@@ -3345,7 +3355,7 @@ let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
         State.pop_rewind_frame st frame;
         raise exn
   ) else
-    let first = p () in
+    let first = required st p in
     let sep_then_p () =
       let _ = sep () in
       p ()
@@ -3383,7 +3393,7 @@ let give st f v =
 
 let rec iter_elements st ~at_least ~progress_first first next f =
   for _ = 1 to at_least do
-    give st f (first ())
+    give st f (required st first)
   done;
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
@@ -3438,7 +3448,7 @@ let sep_by_iter ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b)
   if at_least <= 0 then
     iter_elements st ~at_least:0 ~progress_first:false p next f
   else begin
-    give st f (p ());
+    give st f (required st p);
     iter_elements st ~at_least:(at_least - 1) ~progress_first:true next next f
   end
 
@@ -3573,6 +3583,8 @@ let fold_left ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) : 'a =
 let fold_right_limit =
   match (Gc.get ()).stack_limit with n when n > 0 -> n / 32 | _ -> max_int
 
+exception Fold_right_later_step
+
 let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
     : 'a =
   let frame = State.push_rewind_frame st frame_step in
@@ -3590,7 +3602,11 @@ let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
       restore_rewind_frame st frame;
       first
     end else
-      f first (fold_right_from st p op rhs)
+      let rest =
+        try fold_right_from st p op rhs
+        with Fail -> raise_notrace Fold_right_later_step
+      in
+      f first rest
   with
   | v ->
       State.pop_rewind_frame st frame;
@@ -3605,6 +3621,9 @@ let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       first
+  | exception Fold_right_later_step ->
+      State.pop_rewind_frame st frame;
+      raise_notrace Fail
   | exception exn ->
       State.pop_rewind_frame st frame;
       raise exn

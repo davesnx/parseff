@@ -643,8 +643,10 @@ let rec required env body acc n st =
     let v, st = body env st in
     required env body (v :: acc) (n - 1) st
 
+let element env body st = body (snd (flag ~last:true env st)) st
+
 let many env n body st =
-  let acc, st = required env body [] n st in
+  let acc, st = required env (fun env -> element env body) [] n st in
   repeat env body acc st
 
 let then_ a b env st =
@@ -715,7 +717,7 @@ let rec ev m env g st =
           (List [], st)
     )
   | Sep_by (n, a, s) ->
-      let v, st = ev m env a st in
+      let v, st = element env (fun env -> ev m env a) st in
       let l, st = many env (n - 1) (sep_then m a s) st in
       (List (v :: l), st)
   | End_by (n, a, s) ->
@@ -746,17 +748,18 @@ let rec ev m env g st =
       otherwise env d (fun env -> ev m env a) rest st
   | Fold_right (a, o, d) ->
       let rec rest env first st =
-        choice env
-          (fun env st ->
-            let ov, st = ev m env o st in
-            let rhs, st = one env st in
-            (Bin (ov, first, rhs), st)
-          )
-          (fun _ st -> (first, st))
-          st
-      and one env st =
-        let first, st = ev m env a st in
-        rest env first st
+        let f, envf = flag env st in
+        match
+          let ov, st = ev m envf o st in
+          let rhs, st = ev m envf a st in
+          (ov, rhs, st)
+        with
+        | ov, rhs, st ->
+            let r, st = rest envf rhs st in
+            (Bin (ov, first, r), st)
+        | exception M_fail s ->
+            if !f then raise (M_fail s);
+            (first, st)
       in
       otherwise env d (fun env -> ev m env a) rest st
   | Count (n, a) ->

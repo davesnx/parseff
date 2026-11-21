@@ -570,6 +570,123 @@ let test_fold_otherwise_releases_input () =
     "fold_left without commit: a chain longer than the window" "Ok 201"
     (show string_of_int r)
 
+let test_fold_later_step_commit () =
+  let digit_s () = String.make 1 (Parseff.digit ()) in
+  let op () =
+    match Parseff.peek_char () with
+    | Some '*' ->
+        ignore (Parseff.any_char ());
+        Parseff.commit ();
+        fun a b -> "(" ^ a ^ "*" ^ b ^ ")"
+    | _ ->
+        ignore (Parseff.char '+');
+        fun a b -> "(" ^ a ^ "+" ^ b ^ ")"
+  in
+  let expected = "Error@4 Expected \"expected digit, found 'x'\"" in
+  List.iter
+    (fun (name, fold) ->
+      Alcotest.(check string)
+        name expected
+        (show show_string
+           (Parseff.parse ~consume:`Partial "1+2*x" (fun () -> fold digit_s op))
+        )
+    )
+    [
+      ("fold_left", fun p op -> Parseff.fold_left p op);
+      ("fold_right", fun p op -> Parseff.fold_right p op);
+      ("fold_left ~otherwise", fun p op -> Parseff.fold_left ~otherwise:"" p op);
+      ( "fold_right ~otherwise",
+        fun p op -> Parseff.fold_right ~otherwise:"" p op
+      );
+    ];
+  Alcotest.(check string)
+    "fold_right without commit" "Ok \"(1+(2+3))\""
+    (show show_string
+       (Parseff.parse ~consume:`Partial "1+2+3*x" (fun () ->
+            Parseff.fold_right digit_s (fun () ->
+                ignore (Parseff.char '+');
+                fun a b -> "(" ^ a ^ "+" ^ b ^ ")"
+            )
+        )
+       )
+    )
+
+let test_required_element_commit () =
+  let elem () =
+    ignore (Parseff.char 'a');
+    Parseff.commit ()
+  in
+  let failing_elem () =
+    elem ();
+    ignore (Parseff.char 'z')
+  in
+  let sep () = ignore (Parseff.char ',') in
+  List.iter
+    (fun (name, rep) ->
+      Alcotest.(check string)
+        name "Ok \"right\""
+        (show show_string
+           (Parseff.parse "ac" (fun () ->
+                Parseff.or_
+                  (fun () ->
+                    rep ();
+                    ignore (Parseff.char 'b');
+                    "left"
+                  )
+                  (fun () ->
+                    Parseff.literal "ac";
+                    "right"
+                  )
+            )
+           )
+        )
+    )
+    [
+      ("many", fun () -> ignore (Parseff.many elem));
+      ("many ~at_least:1", fun () -> ignore (Parseff.many ~at_least:1 elem));
+      ( "many ~at_least:1 ~at_most:3",
+        fun () -> ignore (Parseff.many ~at_least:1 ~at_most:3 elem)
+      );
+      ( "sep_by ~at_least:1",
+        fun () -> ignore (Parseff.sep_by ~at_least:1 elem sep)
+      );
+      ( "end_by ~at_least:1",
+        fun () -> ignore (Parseff.end_by ~at_least:1 elem (fun () -> ()))
+      );
+      ( "many ~at_least:1, failing element",
+        fun () -> ignore (Parseff.many ~at_least:1 failing_elem)
+      );
+      ( "many_iter ~at_least:1",
+        fun () -> Parseff.many_iter ~at_least:1 failing_elem ignore
+      );
+      ( "sep_by_iter ~at_least:1",
+        fun () -> Parseff.sep_by_iter ~at_least:1 failing_elem sep ignore
+      );
+    ]
+
+let test_required_element_failure () =
+  let elem () = ignore (Parseff.char 'a') in
+  List.iter
+    (fun (name, rep, expected) ->
+      Alcotest.(check string)
+        name expected
+        (show (fun () -> "()") (Parseff.parse ~consume:`Partial "aab" rep))
+    )
+    [
+      ( "many ~at_least:3",
+        (fun () -> ignore (Parseff.many ~at_least:3 elem)),
+        "Error@2 Expected \"expected 'a', found 'b'\""
+      );
+      ( "many ~at_least:3 ~at_most:4",
+        (fun () -> ignore (Parseff.many ~at_least:3 ~at_most:4 elem)),
+        "Error@2 Expected \"expected 'a', found 'b'\""
+      );
+      ( "many ~at_least:2",
+        (fun () -> ignore (Parseff.many ~at_least:2 elem)),
+        "Ok ()"
+      );
+    ]
+
 let () =
   let open Alcotest in
   run "Combinators"
@@ -606,6 +723,14 @@ let () =
           test_case "failure after commit or cut" `Quick
             test_fold_otherwise_commit;
           test_case "stream window" `Quick test_fold_otherwise_releases_input;
+        ]
+      );
+      ( "commit in repetition",
+        [
+          test_case "fold later step" `Quick test_fold_later_step_commit;
+          test_case "required element" `Quick test_required_element_commit;
+          test_case "required element failure" `Quick
+            test_required_element_failure;
         ]
       );
       ( "take",
