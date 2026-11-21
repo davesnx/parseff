@@ -1423,7 +1423,9 @@ val expression :
     - Tries {!prefix} operators in table order before [operand]; each prefix
       uses one {!rec_} depth level (infix chains use none). A prefix operator is
       an open choice for its operand: call {!commit} in its token parser if you
-      use recovery inside its operand.
+      use recovery inside its operand. A prefix token that consumes no input is
+      skipped, even after {!commit} or {!cut}, and the next prefix or [operand]
+      is tried; a {!cut} there still seals the frames outside the expression.
     - Build-function failures fail the whole expression (as in {!precedence}).
     - Avoid mixing {!infix_left} and {!infix_right} in one level: the right
       operand of an [infix_right] operator takes the rest of that level's chain,

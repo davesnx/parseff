@@ -352,6 +352,39 @@ let test_prefix_no_progress_sealed () =
     )
     [ Parseff.commit; Parseff.cut ]
 
+let test_prefix_no_progress_sealed_outer () =
+  let sealed seal () =
+    seal ();
+    fun a -> "<" ^ a ^ ">"
+  in
+  let outer ?context seal () =
+    let e () = expr Parseff.[ [ prefix (sealed seal) ] ] () in
+    Parseff.or_
+      (fun () ->
+        match context with None -> e () | Some name -> Parseff.context name e
+      )
+      (fun () ->
+        Parseff.literal "x";
+        "alt"
+      )
+  in
+  let check name parser input expected =
+    Alcotest.(check string)
+      (name ^ " " ^ input)
+      expected
+      (show (Parseff.parse input parser))
+  in
+  check "commit" (outer Parseff.commit) "1" "Ok 1";
+  check "commit" (outer Parseff.commit) "x" "Ok alt";
+  check "commit in context" (outer ~context:"e" Parseff.commit) "x" "Ok alt";
+  check "cut" (outer Parseff.cut) "1" "Ok 1";
+  check "cut" (outer Parseff.cut) "x"
+    "Error@0 expected digit or \"(\", found 'x'";
+  check "cut in context" (outer ~context:"e" Parseff.cut) "1" "Ok 1";
+  check "cut in context"
+    (outer ~context:"e" Parseff.cut)
+    "x" "Error@0 expected digit or \"(\", found 'x'"
+
 let int_op c f () =
   ignore (Parseff.char c);
   f
@@ -1693,6 +1726,8 @@ let () =
             test_infix_right_no_progress_undo;
           test_case "prefix without progress, committed" `Quick
             test_prefix_no_progress_sealed;
+          test_case "prefix without progress, sealed inside a choice" `Quick
+            test_prefix_no_progress_sealed_outer;
           test_case "long flat chain" `Quick test_long_flat;
           test_case "zero-width steps" `Quick test_zero_width_steps;
           test_case "annotated operators" `Quick test_annotation_example;
