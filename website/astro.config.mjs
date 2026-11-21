@@ -23,20 +23,22 @@ function staticOnly(integration) {
 	return integration;
 }
 
-function fixOgImageBase(base) {
+function fixOgImageBase(site, base) {
 	return {
 		name: 'fix-og-image-base',
 		hooks: {
 			async 'astro:build:done'({ dir }) {
 				if (!base || base === '/') return;
 				const prefix = base.replace(/\/$/, '');
+				const from = `<meta property="og:image" content="${site}/_og/`;
+				const to = `<meta property="og:image" content="${site}${prefix}/_og/`;
 				const dirPath = fileURLToPath(dir);
 				const files = await readdir(dirPath, { recursive: true });
 				for (const file of files) {
 					if (!file.endsWith('.html')) continue;
 					const filePath = join(dirPath, file);
 					const html = await readFile(filePath, 'utf-8');
-					const fixed = html.replaceAll('/_og/', `${prefix}/_og/`);
+					const fixed = html.replaceAll(from, to);
 					if (fixed !== html) {
 						await writeFile(filePath, fixed);
 					}
@@ -162,6 +164,6 @@ export default defineConfig({
 			},
 		],
 		})),
-		fixOgImageBase(base),
+		fixOgImageBase(site, base),
 	],
 });
