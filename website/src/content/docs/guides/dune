@@ -1,9 +1,3 @@
-; Promote generated guide markdown from odoc into the website.
-; Each rule adds Starlight frontmatter, appends the full odoc output,
-; then runs fix-odoc-md.sh to normalise cross-references, escapes,
-; and whitespace.
-; Source of truth: doc/guides/*.mld files.
-
 (rule
  (alias generate-markdown)
  (enabled_if

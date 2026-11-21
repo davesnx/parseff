@@ -56,9 +56,6 @@ type endian = Big | Little
 
 type custom_error = ..
 
-(* The public trace event [Fail], added at the end of this file, is an
-   extension constructor too, and a structure cannot define two extension
-   constructors with one name. *)
 module Fail_exception = struct
   exception Fail
 end
@@ -368,21 +365,6 @@ let rec running_empty =
       next = running_empty;
     }
 
-(* Absolute offset [p] is [input.[p - base]]. Bytes at absolute offsets
-   [base, input_len) are buffered. While a source is open, [input] can be
-   longer than [input_len - base]: the bytes after that length are not input,
-   and a refill writes there. Buffered bytes are never changed. [input] is
-   full when it has no such room; a full [input] is never written again, so
-   only a full [input] is shared as a string. A chunk from [Source.of_chunks]
-   becomes [input] only when it is all buffered, so it is full and is never
-   written. Memory input is the caller's string, with [base = 0] and no
-   source. While within runs, [source] is a frame: a source whose feed is
-   [Frame] and that keeps the source around it and the end that source
-   shows. [input_len] is then [min outer_len limit], and the frame has ended
-   ([eof]) when that reaches [limit] or the source around it has ended. A
-   refill of a frame refills the source around it. On memory input the
-   frame has ended from the start, so every primitive takes its bounded
-   path. *)
 type state = {
   mutable input : bytes;
   mutable pos : int;
@@ -419,8 +401,6 @@ let[@inline always] imax (a : int) b =
     b
 let default_buf_size = 4096
 
-(* OCaml's Max_young_wosize is 256 words (runtime/caml/config.h); not exposed
-   by Stdlib. Largest word-multiple Bytes whose block stays on the minor heap. *)
 let max_young_wosize = 256
 let young_buf_size = (max_young_wosize - 1) * (Sys.word_size / 8)
 let default_backtrack_window = 65_536
@@ -1967,7 +1947,6 @@ let[@inline never] match_char_slow st c =
   end else
     fail_int st st.pos (char_kind c)
 
-(* dedicated char handler it avoids closure + String.make allocation *)
 let[@inline] handle_match_char st c =
   let p = st.pos in
   if p < st.input_len then
@@ -3527,9 +3506,6 @@ let[@inline always] fold_left_from st (p : unit -> 'a)
     let f = ref (op ()) in
     let rhs = ref (p ()) in
     while st.pos <> !start do
-      (* Lowering the top lets [!f] overwrite this frame's slots. That is safe:
-         [reset_repeat_frame] rewrites every slot below, and a [Fail] from [!f]
-         leaves without reading the frame. *)
       st.frames_top <- frame;
       acc := !f !acc !rhs;
       st.frames_top <- top;
@@ -3594,8 +3570,6 @@ let fold_left ?otherwise (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) : 'a =
   | Some d ->
       fold_left_or p op d
 
-(* A level takes 10 stack words native, 15 bytecode (OCaml 5.3). js_of_ocaml
-   and wasm_of_ocaml report [stack_limit = 0] (runtime gc.js, gc.wat). *)
 let fold_right_limit =
   match (Gc.get ()).stack_limit with n when n > 0 -> n / 32 | _ -> max_int
 

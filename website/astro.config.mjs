@@ -11,8 +11,6 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { base, channel, contentDir, root, version } from './site.mjs';
 
-/** Wrap an integration so that any routes it injects are forced to prerender.
- *  This avoids the "no adapter installed" warning for purely-static sites. */
 function staticOnly(integration) {
 	const orig = integration.hooks['astro:config:setup'];
 	if (orig) {
@@ -25,7 +23,6 @@ function staticOnly(integration) {
 	return integration;
 }
 
-/** Fix og:image URLs when using a base path (astro-opengraph-image doesn't account for it). */
 function fixOgImageBase(base) {
 	return {
 		name: 'fix-og-image-base',
@@ -54,7 +51,6 @@ const pageExists = (slug) =>
 		['', '/index'].some((suffix) => existsSync(join(contentDir, `${slug}${suffix}.${ext}`))),
 	);
 
-/** Drop sidebar entries whose page is missing from the content being built. */
 function existingPages(items) {
 	return items.flatMap((item) => {
 		if (item.items) {
@@ -67,7 +63,6 @@ function existingPages(items) {
 
 const site = 'https://davesnx.github.io';
 
-// https://astro.build/config
 export default defineConfig({
 	site,
 	base,
