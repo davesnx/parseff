@@ -78,7 +78,11 @@ type expected = private
 type found = private
   | Text of string
       (** Input text at the failure position. Tokens longer than 32 bytes are
-          truncated with [...]. *)
+          truncated with [...]. Under {!Source.parse} and {!Push}, covers only
+          whole characters already buffered, so it can be a prefix of the text
+          {!parse} reports. There, [Text ""] means the failure is at the end of
+          the input read so far and more input may follow: [range] is empty and
+          {!error_message} omits [", found ..."]. *)
   | End  (** End of input. *)
   | Short of int
       (** A fixed-size read (such as {!val:take}) reached end of input with only
@@ -138,7 +142,10 @@ type error = private {
   severity : severity;
   kind : error_kind;
   range : range;
-      (** Covered byte range, never reversed; empty at end of input. *)
+      (** Covered byte range, never reversed; empty at end of input. Under
+          {!Source.parse} and {!Push}, [stop] can be smaller than under {!parse}
+          because [found] text covers only buffered bytes; [start] is the same.
+      *)
   location : location option;
       (** 1-based line and [byte_col] of [range.start], or [None] in streaming
           when [range.start] precedes the buffered input. *)
@@ -592,7 +599,8 @@ val location : unit -> location
 
 val location_of_position : string -> int -> location
 (** [location_of_position input pos] converts a byte offset in [input] to a
-    {!type:location}. *)
+    {!type:location}. Requires [0 <= pos <= String.length input]; other values
+    return a meaningless location without raising. *)
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only when no input remains. {!parse} and
@@ -758,10 +766,11 @@ val skip_to : int -> unit
 
 val commit : unit -> unit
 (** [commit ()] seals the nearest enclosing choice or repetition frame ({!or_},
-    {!one_of}, {!many}, {!sep_by}, {!optional}, or fold): it will no longer
-    rewind on failure, and streaming sources can drop input pinned only by that
-    frame. Also clears failures recorded at or beyond the current position so
-    errors report only the committed branch.
+    {!one_of}, {!many}, {!sep_by}, {!optional}, or fold; see {!fold_left} for
+    its first element): it will no longer rewind on failure, and streaming
+    sources can drop input pinned only by that frame. Also clears failures
+    recorded at or beyond the current position so errors report only the
+    committed branch.
 
     Does nothing outside any frame or inside {!look_ahead}/{!peek_with}, and
     does not affect outer frames. To seal a whole construct, use {!cut}; see
@@ -1324,6 +1333,10 @@ val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
     [op] and combines them left-associatively. Stops without applying an [op]
     and [element] that together consume no input.
 
+    Without [~otherwise], the first [element] runs outside the fold's frame, so
+    a {!commit} in it seals the enclosing frame (such as an outer {!or_}); the
+    first operand of {!expression} behaves the same way.
+
     With [~otherwise], returns [otherwise] if the first [element] fails (leaving
     position unchanged); later failures after {!commit} or {!cut} still fail. To
     fall back on any failure, wrap in {!or_}. *)
@@ -1412,6 +1425,9 @@ val expression :
       an open choice for its operand: call {!commit} in its token parser if you
       use recovery inside its operand.
     - Build-function failures fail the whole expression (as in {!precedence}).
+    - Avoid mixing {!infix_left} and {!infix_right} in one level: the right
+      operand of an [infix_right] operator takes the rest of that level's chain,
+      so with [+] left and [^] right, [1+2^3+4] parses as [(1+2)^(3+4)].
 
     {@ocaml[
     let token c () =
@@ -1457,6 +1473,8 @@ val precedence :
     - [operator ()] returns [Some (prec, op)] (higher [prec] binds tighter; any
       [int] is valid) or [None]. Returning [None] adds no expectations.
     - [~min] sets the minimum [prec] accepted (default: all operators).
+    - Mixing {!infix_left} and {!infix_right} at one [prec] behaves as in
+      {!expression}.
     - Parse prefix operators inside [operand] by calling [precedence ~min]
       inside {!rec_} (call {!commit} after the prefix token if inside {!or_} and
       using recovery).
@@ -1680,7 +1698,9 @@ val take_iter : int -> (Slice.t -> unit) -> unit
     - Each piece borrows the input buffer and is valid only during [f]; call
       {!Slice.to_string} to retain it.
     - Sealing, callback, and [Invalid_argument] rules match {!many_iter}. On
-      premature EOF, fails after [f] has received the available bytes. Negative
+      premature EOF, fails after [f] has received the available bytes, with an
+      empty range at end of input and [found = End], expecting the missing byte
+      count ({!take} instead reports [Short] over the remaining bytes). Negative
       [n] fails like {!take}.
 
     {@ocaml[
@@ -1919,8 +1939,9 @@ module Push : sig
   val feed : 'a t -> string -> 'a step
   [@@alert unstable "This value can change in a 1.x release."]
   (** [feed t chunk] supplies [chunk] and runs until the parser needs more input
-      or completes. Empty chunks return [Await]. [chunk] must not be mutated
-      while in use (see {!Source.of_chunks}).
+      or completes. An empty chunk adds no input: it returns [Await] unless the
+      parser completes without more bytes. [chunk] must not be mutated while in
+      use (see {!Source.of_chunks}).
 
       Exceptions from the parser propagate out and terminate [t]. Raises
       [Invalid_argument] if [t] has already ended, if called from inside a
