@@ -5,14 +5,11 @@ description: Looping constructs for parsing repeated and separated patterns
 
 <!-- This file is generated from doc/repetition.mld. Do not edit directly. -->
 
-
 # Repetition and separation
 
 Combinators for repeated items, separated lists, delimited blocks, streaming iteration, and operator-precedence expressions.
 
-
 ## Basic repetition
-
 
 ### `many`
 
@@ -21,6 +18,7 @@ Combinators for repeated items, separated lists, delimited blocks, streaming ite
 ```ocaml
 val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
 ```
+
 - `~at_least` requires at least that many matches.
 - `~at_most` caps the count (unstable: may change in 1\.x), failing with `Limit_exceeded { limit = at_most }` if another match consumes input.
 ```ocaml
@@ -35,6 +33,7 @@ let digits1 () = Parseff.many ~at_least:1 Parseff.digit
 ```ocaml
 val count : int -> (unit -> 'a) -> 'a list
 ```
+
 ```ocaml
 let hex_digit () =
   Parseff.satisfy ~label:"hex digit" (fun c ->
@@ -54,9 +53,7 @@ let hex_color () =
 
 The failure that stops a repetition loop is still recorded for furthest-failure reporting. On `"12x"`, `many digit` stops at `'x'` and a following `end_of_input` fails at the same offset, producing `expected digit or end of input`. If a loop stops partway through an element (such as `"ab,ab,ax"` for `sep_by (fun () -> literal "ab") (fun () -> char ',')`), the deeper failure (`expected "b"` at offset 7\) wins over `end_of_input` at offset 5\.
 
-
 ## Separated and delimited lists
-
 
 ### `sep_by` and `end_by`
 
@@ -66,6 +63,7 @@ The failure that stops a repetition loop is still recorded for furthest-failure 
 val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 ```
+
 ```ocaml
 let csv_line () =
   Parseff.sep_by ~at_least:1
@@ -89,6 +87,7 @@ let statements () =
 ```ocaml
 val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
 ```
+
 ```ocaml
 let parens p =
   Parseff.between (fun () -> Parseff.char '(') (fun () -> Parseff.char ')') p
@@ -99,7 +98,6 @@ let brackets p =
 
 ## Streaming iteration
 
-
 ### `many_iter` and `sep_by_iter`
 
 `Parseff.many_iter` and `Parseff.sep_by_iter` (unstable: may change in 1\.x) behave like `many` and `sep_by` without building a list, passing each parsed element directly to a callback `f`.
@@ -109,6 +107,7 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
 val sep_by_iter :
   ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
 ```
+
 Before each callback call, they seal every open backtracking frame so streaming sources can drop earlier bytes and keep memory bounded by one element. Calling them inside frames that cannot be sealed (such as `Parseff.look_ahead` or `Parseff.capture` without `~release:true`) raises `Invalid_argument`. See `Parseff.many_iter` for the complete callback and sealing rules.
 
 ```ocaml
@@ -124,7 +123,6 @@ let sum_ints input =
 
 ## Operator chains and expressions
 
-
 ### `fold_left` and `fold_right`
 
 `Parseff.fold_left` and `Parseff.fold_right` parse one or more elements separated by an operator parser returning a combine function, folding left- or right-associatively. Pass `~otherwise` to return a default when the first element fails (later failures after `commit`/`cut` still fail). Both stop if an operator and element together consume no input.
@@ -133,6 +131,7 @@ let sum_ints input =
 val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 val fold_right : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 ```
+
 ```ocaml
 let subtraction () =
   Parseff.fold_left ~otherwise:0
@@ -167,8 +166,8 @@ val precedence :
   (unit -> 'a) ->
   'a
 ```
-See the [Expressions with precedence](../guides/expression-parser.md) guide for complete examples.
 
+See the [Expressions with precedence](../guides/expression-parser.md) guide for complete examples.
 
 ## Complete example: JSON integer array
 

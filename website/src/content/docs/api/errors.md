@@ -5,7 +5,6 @@ description: Building better error messages in Parseff
 
 <!-- This file is generated from doc/errors.mld. Do not edit directly. -->
 
-
 # Error handling
 
 Parseff exposes four main APIs for errors:
@@ -47,6 +46,7 @@ val fail :
 val error :
   ?from:int -> ?upto:int -> ?notes:note list -> ?help:string -> custom_error -> 'a
 ```
+
 - `~from` and `~upto` (both default to the current position) set the underlined byte range.
 - `~notes` attaches annotations: a note with `at = Some range` underlines that range in the excerpt; `at = None` prints a `* note:` line.
 - `~help` prints a `* help:` line after any notes.
@@ -75,6 +75,7 @@ let () =
   | Error e -> print_endline (Parseff.render_error ~name:"address" e)
   | Ok _ -> ()
 ```
+
 Output:
 
 ```
@@ -91,6 +92,7 @@ address:1:4: [error] octet out of range
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
 ```
+
 ```ocaml
 let dot () = Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
 ```
@@ -100,7 +102,6 @@ let dot () = Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
 `Parseff.context` names a grammar construct so failures inside it report `* while parsing <name>`. `Parseff.cut` seals backtracking frames inside the enclosing `context` so a later failure becomes the parse error instead of retrying outer alternatives. See [`combinators`](./combinators.md).
 
 To collect multiple errors and keep parsing, see the [Error recovery](../guides/error-recovery.md) guide.
-
 
 ## Furthest-failure selection
 
@@ -126,6 +127,7 @@ type error = private {
   excerpt : excerpt;
 }
 ```
+
 `error` and its nested types are `private` (readable and matchable, not constructible), except `Parseff.range` and `Parseff.note`.
 
 `kind` cases:
@@ -151,6 +153,7 @@ input.json:4:5: [error] expected ',' or '}', found '"'
   * while parsing object, from 2:13
   * while parsing object, from 1:1
 ```
+
 Formatting details:
 
 - **Header**: `name:line:col: [error] message` (or `line:col` without `~name`; `byte N` with no excerpt when the line is unknown in streaming). Lists up to 8 expected items before `, or N more alternatives`.
@@ -177,4 +180,5 @@ Formatting details:
 | Error { kind = Failed msg; _ } -> ...
 | Error { kind = Expected { found = End; _ }; _ } -> ...
 ```
+
 Declare custom errors via `type Parseff.custom_error += Too_large of int`. Invalid UTF-8 and mismatched binary integers (`BE.int16`, etc.) are now `Expected` items (`valid UTF-8`, `int16be 0xFFFE`), EOF errors preserve expectations, and the failure offset is `e.range.start`.

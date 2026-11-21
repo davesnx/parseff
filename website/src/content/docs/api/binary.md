@@ -5,11 +5,9 @@ description: Big-endian and little-endian integers, floats and varints
 
 <!-- This file is generated from doc/binary.mld. Do not edit directly. -->
 
-
 # Binary parsing
 
 `Parseff.BE` (big-endian) and `Parseff.LE` (little-endian) provide multi-byte integer and IEEE 754 float parsers. Single-byte readers (`Parseff.any_uint8`, `Parseff.any_int8`) and `Parseff.any_varint` live at the top level of `Parseff`.
-
 
 ## Integer parsers
 
@@ -27,6 +25,7 @@ val any_int32 : unit -> int32  (* 4 bytes, signed *)
 val any_uint32 : unit -> int   (* 4 bytes, 0..4294967295 *)
 val any_int64 : unit -> int64  (* 8 bytes, signed *)
 ```
+
 - `Parseff.any_varint` reads an unsigned LEB128 varint (7 bits per byte, LSB first; `"\xAC\x02"` is `300`). Fails if longer than 9 bytes or above `max_int` (rejecting negative Protobuf `int32`/`int64`). Decode zigzag values manually with `(n lsr 1) lxor (-(n land 1))`.
 - On platforms where `int` has fewer than 63 bits (such as `js_of_ocaml`), large values in `any_varint` or `any_uint32` overflow silently.
 ```ocaml
@@ -49,6 +48,7 @@ Inside both `Parseff.BE` and `Parseff.LE`:
 val any_float : unit -> float   (* 4 bytes, IEEE 754 single precision *)
 val any_double : unit -> float  (* 8 bytes, IEEE 754 double precision *)
 ```
+
 ```ocaml
 let coordinates () =
   let lat = Parseff.BE.any_double () in
@@ -65,6 +65,7 @@ val int16 : int -> unit
 val int32 : int32 -> unit
 val int64 : int64 -> unit
 ```
+
 ```ocaml
 let png_magic () = Parseff.BE.int32 0x89504E47l
 

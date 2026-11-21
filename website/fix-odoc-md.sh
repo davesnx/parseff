@@ -9,6 +9,7 @@ sedi() {
 
 sedi 's|\[`\([^`]*\)`\](\./Parseff[^)]*)|`\1`|g' "$FILE"
 sedi 's|\\+|+|g' "$FILE"
+sedi 's|\\=|=|g' "$FILE"
 "$(dirname "$0")/fix-code-spans.sh" "$FILE"
 
 awk '
