@@ -6,7 +6,7 @@
 #
 # Transformations applied:
 #  1. Replace odoc cross-reference links with plain code spans
-#  2. Unescape \= to = and \_ to _
+#  2. Unescape \+ to +
 #  3. Fix code spans that contain backticks (fix-code-spans.sh)
 #  4. Add blank line after closing code fences before text
 #  5. Add blank line after bullet lists before paragraphs
@@ -24,22 +24,7 @@ sedi() {
 
 # 1-2. sed text replacements
 sedi 's|\[`\([^`]*\)`\](\./Parseff[^)]*)|`\1`|g' "$FILE"
-sedi 's|\\=|=|g' "$FILE"
-sedi 's|\\_|_|g' "$FILE"
-sedi 's|\\--|--|g' "$FILE"
 sedi 's|\\+|+|g' "$FILE"
-sedi 's|\\-\\>|→|g' "$FILE"
-# 3. Replace placeholder text with proper markdown
-sedi 's|`backslash-quote`|`\\"`|g' "$FILE"
-sedi 's|`backslash-backslash`|`\\\\`|g' "$FILE"
-sedi 's|`LBRACE`|`{`|g' "$FILE"
-sedi 's|`LBRACKET`|`[`|g' "$FILE"
-# Tag plain ``` blocks that contain OCaml code with the ocaml language
-# (for {v ... v} blocks used to work around odoc code block escaping)
-sedi '/^```$/{N;/^```\nlet /s/^```/```ocaml/;}' "$FILE"
-sedi '/^```$/{N;/^```\n(\*/s/^```/```ocaml/;}' "$FILE"
-sedi '/^```$/{N;/^```\nParseff\./s/^```/```ocaml/;}' "$FILE"
-sedi '/^```$/{N;/^```\nand /s/^```/```ocaml/;}' "$FILE"
 "$(dirname "$0")/fix-code-spans.sh" "$FILE"
 
 # 4-6. awk whitespace normalisation

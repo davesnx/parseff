@@ -553,6 +553,12 @@ module State = struct
         active
     )
 
+  (* Shared by all domains, so reads and writes race. This is safe because the
+     cache is only a hint: a slot's fields are written only by the domain that
+     owns it, [dls] holds that domain's DLS array, and readers use a slot only
+     when [slot.dls == dls_state ()]. A foreign or stale slot fails that check
+     and falls back to [Domain.DLS]. The OCaml 5 memory model guarantees that a
+     racy read returns a fully initialised slot. *)
   let cache : slot ref =
     let rec unset =
       { dls = [| Obj.repr 0 |]; state = none; live = false; peer = unset }
