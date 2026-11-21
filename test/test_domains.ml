@@ -1,13 +1,5 @@
-(* Tests for multi-domain (OCaml 5) safety.
-
-   All mutable parser state is local to each [parse] / [Source.parse] call.
-   These tests verify that independent parses can run concurrently in separate
-   domains without interference. *)
-
 let num_domains = Domain.recommended_domain_count () |> min 8 |> max 2
 
-(** Spawn [n] domains, each running [f i] for i in 0..n-1, and collect the
-    results. *)
 let parallel n f =
   let domains = List.init n (fun i -> Domain.spawn (fun () -> f i)) in
   List.map Domain.join domains
@@ -115,7 +107,6 @@ and key_value () =
   (key, value)
 
 let test_basic_parallel_parsing () =
-  (* Each domain parses a distinct simple input. *)
   let inputs =
     [| "hello"; "world"; "foo"; "bar"; "baz"; "qux"; "abc"; "xyz" |]
   in
@@ -141,7 +132,6 @@ let test_basic_parallel_parsing () =
     results
 
 let test_same_parser_many_domains () =
-  (* All domains run the exact same parser on different inputs. *)
   let digit_list_parser () = Parseff.many Parseff.digit in
   let results =
     parallel num_domains (fun i ->
@@ -162,7 +152,6 @@ let test_same_parser_many_domains () =
     results
 
 let test_alternation_across_domains () =
-  (* Each domain exercises or_ / one_of backtracking concurrently. *)
   let parser () =
     Parseff.one_of
       [
@@ -203,7 +192,6 @@ let test_alternation_across_domains () =
     results
 
 let test_json_across_domains () =
-  (* Each domain parses a different JSON document. *)
   let docs =
     [|
       {|null|};
@@ -236,7 +224,6 @@ let test_json_across_domains () =
     results
 
 let test_streaming_across_domains () =
-  (* Each domain creates its own Source.t and parses through it. *)
   let results =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "item%d" i in
@@ -261,8 +248,6 @@ let test_streaming_across_domains () =
     results
 
 let test_high_contention () =
-  (* Each domain runs many parses in a tight loop to increase the chance of
-     catching any shared-state issues. *)
   let iterations = 1000 in
   let results =
     parallel num_domains (fun domain_id ->
@@ -286,12 +271,9 @@ let test_high_contention () =
     results
 
 let test_errors_isolated_across_domains () =
-  (* Half the domains parse valid input, half parse invalid input. Errors in
-     one domain must not affect results in another. *)
   let results =
     parallel num_domains (fun i ->
         if i mod 2 = 0 then
-          (* Valid parse *)
           let input = "hello" in
           ( i,
             true,
@@ -301,7 +283,6 @@ let test_errors_isolated_across_domains () =
             )
           )
         else
-          (* Invalid parse — should fail *)
           let input = "xyz" in
           ( i,
             false,
@@ -329,8 +310,6 @@ let test_errors_isolated_across_domains () =
     results
 
 let test_complex_combinators_across_domains () =
-  (* Each domain exercises a different set of combinators to verify that the
-     full combinator machinery works correctly in parallel. *)
   let results =
     parallel num_domains (fun i ->
         let input = Printf.sprintf "%d,%d,%d" i (i + 1) (i + 2) in
@@ -354,7 +333,6 @@ let test_complex_combinators_across_domains () =
     results
 
 let test_streaming_json_across_domains () =
-  (* Streaming (via Source.of_string) + JSON + multiple domains. *)
   let docs =
     [|
       ({|{"name": "alice", "age": 30}|}, "alice");
@@ -397,7 +375,6 @@ let test_streaming_json_across_domains () =
     results
 
 let test_chunked_streaming_across_domains () =
-  (* Streaming with Source.of_function (chunked reads) across domains. *)
   let chunked_source chunk_size input =
     let pos = ref 0 in
     Parseff.Source.of_function (fun buf off len ->

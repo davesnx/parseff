@@ -711,7 +711,6 @@ let test_streaming_location_basic () =
       Alcotest.fail "Expected success"
 
 let test_streaming_location_across_chunks () =
-  (* Chunk boundary falls in the middle of a line *)
   let input = "ab\ncd\nef" in
   let src = chunked_source ~chunk_size:2 input in
   let parser () =
@@ -741,7 +740,6 @@ let test_streaming_location_multiple_calls () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* Helper: chunked source using of_chunks instead of of_function *)
 let chunked_source_chunks ?(chunk_size = 1) input =
   let pos = ref 0 in
   Parseff.Source.of_chunks (fun () ->
@@ -778,7 +776,6 @@ let test_of_chunks_json () =
       Alcotest.fail "Expected success"
 
 let test_of_chunks_single_shot () =
-  (* Deliver entire input in one chunk, like an Eio promise *)
   let delivered = ref false in
   let src =
     Parseff.Source.of_chunks (fun () ->
@@ -802,7 +799,6 @@ let test_of_chunks_single_shot () =
       Alcotest.fail "Expected success"
 
 let test_of_chunks_empty_skipped () =
-  (* Empty Some "" chunks should be silently skipped, not treated as EOF *)
   let calls = ref 0 in
   let src =
     Parseff.Source.of_chunks (fun () ->
@@ -1163,7 +1159,6 @@ let test_of_seq_basic () =
 
 let test_of_seq_json () =
   let input = "{\"key\": \"value\"}" in
-  (* Split into 2-char chunks via Seq *)
   let len = String.length input in
   let rec chunks pos () =
     if pos >= len then

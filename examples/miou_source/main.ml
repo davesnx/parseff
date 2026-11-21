@@ -1,8 +1,3 @@
-(* Miou + parseff: parallel log parsing across domains.
-
-   Three batches of structured log entries are parsed simultaneously on
-   separate Miou domains using Miou.parallel *)
-
 type level = Info | Warn | Error
 
 let string_of_level = function

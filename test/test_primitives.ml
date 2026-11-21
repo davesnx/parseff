@@ -1395,8 +1395,6 @@ let test_skip_while () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- expect --- *)
-
 let test_expect_relabels_parse_error () =
   match
     Parseff.parse "abc" (fun () -> Parseff.expect "a digit (0-9)" Parseff.digit)
@@ -1472,8 +1470,6 @@ let test_expect_relabels_or_error () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* --- one_of_labeled --- *)
-
 let test_one_of_labeled_success () =
   match
     Parseff.parse "hello" (fun () ->
@@ -1543,8 +1539,6 @@ let test_one_of_labeled_custom_error_passthrough () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* --- error --- *)
-
 let test_error_custom_type () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1580,9 +1574,6 @@ let test_error_distinct_from_fail () =
   | _ ->
       Alcotest.fail "Expected `Boom from error"
 
-(* --- fail / Failed semantics --- *)
-
-(* fail produces `Failed, not `Expected *)
 let test_fail_produces_failure () =
   match Parseff.parse "abc" (fun () -> Parseff.fail "bad value") with
   | Error { kind = Failed msg; _ } ->
@@ -1592,7 +1583,6 @@ let test_fail_produces_failure () =
   | _ ->
       Alcotest.fail "Expected Failed error"
 
-(* Failed punches through or_ *)
 let test_failure_punches_through_or () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1614,7 +1604,6 @@ let test_failure_punches_through_or () =
   | Error _ ->
       Alcotest.fail "Expected Failed error"
 
-(* Expected IS caught by or_ (backtracking still works for Expected) *)
 let test_expected_caught_by_or () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1634,7 +1623,6 @@ let test_expected_caught_by_or () =
   | Error _ ->
       Alcotest.fail "Expected success from or_ backtracking"
 
-(* Failed punches through many *)
 let test_failure_punches_through_many () =
   let counter = ref 0 in
   match
@@ -1655,7 +1643,6 @@ let test_failure_punches_through_many () =
   | Error _ ->
       Alcotest.fail "Expected Failed error"
 
-(* Failed punches through optional *)
 let test_failure_punches_through_optional () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1673,7 +1660,6 @@ let test_failure_punches_through_optional () =
   | Error _ ->
       Alcotest.fail "Expected Failed error"
 
-(* Failed punches through look_ahead *)
 let test_failure_punches_through_look_ahead () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1691,7 +1677,6 @@ let test_failure_punches_through_look_ahead () =
   | Error _ ->
       Alcotest.fail "Expected Failed error"
 
-(* Failed punches through expect *)
 let test_failure_punches_through_expect () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1710,7 +1695,6 @@ let test_failure_punches_through_expect () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* Failed punches through one_of_labeled *)
 let test_failure_punches_through_one_of_labeled () =
   match
     Parseff.parse "abc" (fun () ->
@@ -1734,7 +1718,6 @@ let test_failure_punches_through_one_of_labeled () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* Internal combinators still produce Expected *)
 let test_literal_produces_expected () =
   match Parseff.parse "abc" (fun () -> Parseff.literal "xyz") with
   | Error { kind = Expected { found = Text _; _ }; _ } ->
@@ -1781,7 +1764,6 @@ let test_take_while_at_least_produces_expected () =
   | _ ->
       Alcotest.fail "take_while ~at_least failure should produce `Expected"
 
-(* Failed works with Source.parse (streaming) *)
 let test_failure_with_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
@@ -1797,7 +1779,6 @@ let test_failure_with_streaming () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* Failed punches through or_ in streaming mode *)
 let test_failure_punches_through_or_streaming () =
   let src = Parseff.Source.of_string "abc" in
   match
@@ -1817,8 +1798,6 @@ let test_failure_punches_through_or_streaming () =
         "Expected Failed — or_ should not catch Failed in streaming mode"
   | Error _ ->
       Alcotest.fail "Unexpected error type"
-
-(* --- whitespace / whitespace1 --- *)
 
 let test_whitespace () =
   match
@@ -1862,8 +1841,6 @@ let test_whitespace1_failure () =
   | Error _ ->
       Alcotest.fail "Unexpected error type"
 
-(* --- alphanum --- *)
-
 let test_alphanum_letter () =
   match Parseff.parse "a" Parseff.alphanum with
   | Ok c ->
@@ -1890,8 +1867,6 @@ let test_alphanum_failure () =
         "error message" "expected alphanumeric, found '!'" expected
   | Error _ ->
       Alcotest.fail "Unexpected error type"
-
-(* --- sep_by_take --- *)
 
 let test_sep_by_take_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
@@ -1929,8 +1904,6 @@ let test_sep_by_take_several () =
   | Error _ ->
       Alcotest.fail "Expected success"
 
-(* --- Slice.sep_by_take --- *)
-
 let test_sep_by_take_span_empty () =
   let is_alpha c = c >= 'a' && c <= 'z' in
   match
@@ -1957,8 +1930,6 @@ let test_sep_by_take_span_several () =
       Alcotest.(check (list int)) "lengths" [ 2; 2; 2 ] lengths
   | Error _ ->
       Alcotest.fail "Expected success"
-
-(* --- Slice.take_while --- *)
 
 let test_take_while_span () =
   match

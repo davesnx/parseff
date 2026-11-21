@@ -158,7 +158,6 @@ let test_int64_eof () =
       Alcotest.fail "Expected an end of input error"
 
 let test_be_any_float () =
-  (* IEEE 754: 1.0f = 0x3F800000 *)
   match
     Parseff.parse "\x3F\x80\x00\x00" (fun () -> Parseff.BE.any_float ())
   with
@@ -168,7 +167,6 @@ let test_be_any_float () =
       Alcotest.fail "Expected success"
 
 let test_le_any_float () =
-  (* IEEE 754: 1.0f = 0x3F800000, little-endian: 00 00 80 3F *)
   match
     Parseff.parse "\x00\x00\x80\x3F" (fun () -> Parseff.LE.any_float ())
   with
@@ -178,7 +176,6 @@ let test_le_any_float () =
       Alcotest.fail "Expected success"
 
 let test_be_any_double () =
-  (* IEEE 754: 1.0 = 0x3FF0000000000000 *)
   match
     Parseff.parse "\x3F\xF0\x00\x00\x00\x00\x00\x00" (fun () ->
         Parseff.BE.any_double ()
@@ -190,7 +187,6 @@ let test_be_any_double () =
       Alcotest.fail "Expected success"
 
 let test_le_any_double () =
-  (* IEEE 754: 1.0 = 0x3FF0000000000000, little-endian *)
   match
     Parseff.parse "\x00\x00\x00\x00\x00\x00\xF0\x3F" (fun () ->
         Parseff.LE.any_double ()
@@ -211,7 +207,6 @@ let test_be_any_float_zero () =
       Alcotest.fail "Expected success"
 
 let test_be_any_float_neg () =
-  (* IEEE 754: -1.0f = 0xBF800000 *)
   match
     Parseff.parse "\xBF\x80\x00\x00" (fun () -> Parseff.BE.any_float ())
   with
@@ -475,7 +470,6 @@ let test_take_negative_untrusted_length () =
       Alcotest.(check int) "offset" 4 e.range.start
 
 let test_tlv_header () =
-  (* TLV: magic "TL", version u8, count u16-be, one field: tag u8, len u16-be, payload *)
   let input = "TL\x01\x00\x01\x0A\x00\x03foo" in
   let parser () =
     Parseff.literal "TL";
@@ -511,7 +505,6 @@ let test_backtracking () =
         "matched_first"
       )
       (fun () ->
-        (* Should backtrack, re-read from position 0 *)
         let v = Parseff.BE.any_uint16 () in
         Printf.sprintf "got_%04X" v
       )

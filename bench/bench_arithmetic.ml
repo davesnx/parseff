@@ -2,8 +2,6 @@ open Benchmark
 
 let arith_input = "1+2*3+4"
 
-(** {1 Angstrom} *)
-
 module Angstrom_Arith = struct
   open Angstrom
 
@@ -23,14 +21,11 @@ module Angstrom_Arith = struct
   let parse input = parse_string ~consume:All expr input |> Result.to_option
 end
 
-(** {1 Angstrom (optimized)} *)
-
 module Angstrom_Arith_Optimized = struct
   open Angstrom
 
   let is_digit c = c >= '0' && c <= '9'
 
-  (* Zero-copy integer parsing via Unsafe *)
   let number =
     Unsafe.take_while1 is_digit (fun bs ~off ~len ->
         let rec go acc i =
@@ -43,7 +38,6 @@ module Angstrom_Arith_Optimized = struct
         go 0 off
     )
 
-  (* Manual precedence loop with peek_char — no chainl1/<|> backtracking *)
   let term =
     number >>= fun init ->
     let rec loop acc =
@@ -73,8 +67,6 @@ module Angstrom_Arith_Optimized = struct
   let parse input = parse_string ~consume:All expr input |> Result.to_option
 end
 
-(** {1 MParser} *)
-
 module MParser_Arith = struct
   open MParser
 
@@ -97,8 +89,6 @@ module MParser_Arith = struct
     | MParser.Failed _ ->
         None
 end
-
-(** {1 Parseff (generic)} *)
 
 module Parseff_Arith_Generic = struct
   let number () =
@@ -205,9 +195,7 @@ module Parseff_Arith_Fused = struct
       int_of_span span
 
   let expr () =
-    (* Parse the full expression as: number (op number)* using bulk reads *)
     let first = number () in
-    (* Collect all (op, number) pairs *)
     let rec collect_ops nums ops =
       match Parseff.peek_char () with
       | Some (('+' | '-' | '*' | '/') as op_char) ->
@@ -220,8 +208,6 @@ module Parseff_Arith_Fused = struct
     let nums_rev, ops_rev = collect_ops [] [] in
     let nums = List.rev nums_rev in
     let ops = List.rev ops_rev in
-    (* Two-pass evaluation respecting precedence *)
-    (* Pass 1: evaluate * and / left-to-right, collecting + and - *)
     let rec pass1 acc nums ops =
       match (nums, ops) with
       | n :: rest_nums, '*' :: rest_ops ->
@@ -286,7 +272,6 @@ let () =
       );
     ]
   in
-  (* warmup *)
   for _ = 1 to 1000 do
     List.iter Bench_case.run benches
   done;

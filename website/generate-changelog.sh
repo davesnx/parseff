@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Generates website/src/content/docs/changelog.md from the root CHANGES.md.
-# Each "## <version>" heading becomes a link to the GitHub release tag.
 
 set -euo pipefail
 
@@ -20,7 +18,6 @@ FRONTMATTER
   echo "All notable changes to Parseff. See [all releases on GitHub](${REPO_URL}/releases)."
   echo ""
 
-  # Transform "## <version>" lines into linked headings, skip "Unreleased"
   skip=0
   while IFS= read -r line; do
     if [[ "$line" =~ ^##[[:space:]]+(.*) ]]; then

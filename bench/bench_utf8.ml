@@ -1,20 +1,15 @@
 open Benchmark
 
-(* Single 3-byte UTF-8 char: U+4E16 (CJK "world") = 0xE4 0xB8 0x96 *)
 let cjk_1 = "\xE4\xB8\x96"
 
-(* 10 ASCII chars for take_while comparison *)
 let ascii_for_take = "abcdefghij"
 
-(* Mixed multibyte: 3 ASCII + 2-byte (U+00E9 = e-acute) + 3-byte (U+4E16) + ASCII
-   = "abc" + "\xC3\xA9" + "\xE4\xB8\x96" + "xyz" = 11 bytes, 7 codepoints *)
 let mixed_utf8 = "abc\xC3\xA9\xE4\xB8\x96xyz"
 
 let is_alpha_ascii c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 
 let is_alpha_uchar u =
   let i = Uchar.to_int u in
-  (* Accept ASCII alpha + any non-ASCII (Latin, CJK, etc.) *)
   (i >= 0x61 && i <= 0x7A) || (i >= 0x41 && i <= 0x5A) || i > 0x7F
 
 let bench_utf8_satisfy_ascii () =
@@ -138,7 +133,6 @@ let () =
     ]
   in
   let all_cases = codepoint_cases @ scanning_cases in
-  (* Warmup *)
   for _ = 1 to 1000 do
     List.iter Bench_case.run all_cases
   done;

@@ -2,8 +2,6 @@ open Benchmark
 
 let csv_input = "hello,world,foo,bar,baz,qux,quux,corge,grault,garply"
 
-(** {1 Angstrom} *)
-
 module Angstrom_CSV = struct
   open Angstrom
 
@@ -12,14 +10,11 @@ module Angstrom_CSV = struct
   let parse input = parse_string ~consume:All csv input |> Result.to_option
 end
 
-(** {1 Angstrom (optimized)} *)
-
 module Angstrom_CSV_Optimized = struct
   open Angstrom
 
   let field = take_while (function ',' -> false | _ -> true)
 
-  (* Manual loop with peek_char — no sep_by backtracking *)
   let csv =
     field >>= fun first ->
     let rec loop acc =
@@ -34,8 +29,6 @@ module Angstrom_CSV_Optimized = struct
   let parse input = parse_string ~consume:All csv input |> Result.to_option
 end
 
-(** {1 MParser} *)
-
 module MParser_CSV = struct
   open MParser
 
@@ -49,8 +42,6 @@ module MParser_CSV = struct
     | MParser.Failed _ ->
         None
 end
-
-(** {1 Parseff (generic)} *)
 
 module Parseff_CSV_Generic = struct
   let field () = Parseff.take_while (fun c -> c <> ',')
@@ -104,7 +95,6 @@ let () =
       );
     ]
   in
-  (* warmup *)
   for _ = 1 to 1000 do
     List.iter Bench_case.run benches
   done;
