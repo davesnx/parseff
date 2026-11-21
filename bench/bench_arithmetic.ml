@@ -187,20 +187,23 @@ module Parseff_Arith_Fused = struct
     in
     go 0 0
 
-  let is_arith_op c = c = '+' || c = '-' || c = '*' || c = '/'
+  let number () =
+    let span = Parseff.Slice.take_while is_digit in
+    if Parseff.Slice.length span = 0 then
+      Parseff.fail "expected digit"
+    else
+      int_of_span span
 
   let expr () =
-    let first_span = Parseff.Slice.take_while is_digit in
-    let first = int_of_span first_span in
+    let first = number () in
     let rec collect_ops nums ops =
-      let op_span = Parseff.Slice.take_while is_arith_op in
-      if Parseff.Slice.length op_span = 0 then
-        (nums, ops)
-      else
-        let op_char = Parseff.Slice.get op_span 0 in
-        let num_span = Parseff.Slice.take_while is_digit in
-        let num = int_of_span num_span in
-        collect_ops (num :: nums) (op_char :: ops)
+      match Parseff.peek_char () with
+      | Some (('+' | '-' | '*' | '/') as op_char) ->
+          let _ = Parseff.any_char () in
+          let num = number () in
+          collect_ops (num :: nums) (op_char :: ops)
+      | _ ->
+          (nums, ops)
     in
     let nums_rev, ops_rev = collect_ops [] [] in
     let nums = List.rev nums_rev in
