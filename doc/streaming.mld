@@ -42,8 +42,11 @@ result
   backtracking (default: [65536] bytes; minimum [2]). Exceeding it fails with
   [Backtrack_window_exceeded].
 - Error positions are absolute byte offsets from the start of the stream.
-  [found] text reflects only bytes already buffered (Parseff does not pull more
-  bytes just to lengthen a snippet).
+  [found] text covers only whole characters already buffered (Parseff does not
+  pull more bytes just to lengthen a snippet), so it can be a prefix of the
+  text {!val:Parseff.parse} reports and [range.stop] can be smaller. [Text ""]
+  means the failure is at the end of the input read so far: the range is empty
+  and the message has no [found] part.
 - [~diagnostics] collects diagnostics as in {!val:Parseff.parse}. See
   {!page:diagnostics}.
 
