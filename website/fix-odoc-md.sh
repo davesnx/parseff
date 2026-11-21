@@ -8,19 +8,7 @@ sedi() {
 }
 
 sedi 's|\[`\([^`]*\)`\](\./Parseff[^)]*)|`\1`|g' "$FILE"
-sedi 's|\\=|=|g' "$FILE"
-sedi 's|\\_|_|g' "$FILE"
-sedi 's|\\--|--|g' "$FILE"
 sedi 's|\\+|+|g' "$FILE"
-sedi 's|\\-\\>|→|g' "$FILE"
-sedi 's|`backslash-quote`|`\\"`|g' "$FILE"
-sedi 's|`backslash-backslash`|`\\\\`|g' "$FILE"
-sedi 's|`LBRACE`|`{`|g' "$FILE"
-sedi 's|`LBRACKET`|`[`|g' "$FILE"
-sedi '/^```$/{N;/^```\nlet /s/^```/```ocaml/;}' "$FILE"
-sedi '/^```$/{N;/^```\n(\*/s/^```/```ocaml/;}' "$FILE"
-sedi '/^```$/{N;/^```\nParseff\./s/^```/```ocaml/;}' "$FILE"
-sedi '/^```$/{N;/^```\nand /s/^```/```ocaml/;}' "$FILE"
 "$(dirname "$0")/fix-code-spans.sh" "$FILE"
 
 awk '
