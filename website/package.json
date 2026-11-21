@@ -14,8 +14,9 @@
     "@astrojs/starlight": "^0.37.6",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/instrument-sans": "^5.2.8",
+    "@resvg/resvg-js": "^2.6.2",
     "astro": "^5.6.1",
-    "astro-opengraph-image": "^0.2.2",
+    "satori": "^0.12.2",
     "sharp": "^0.34.2",
     "starlight-theme-flexoki": "^0.2.2"
   }

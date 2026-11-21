@@ -4,49 +4,9 @@ import starlight from '@astrojs/starlight';
 import starlightThemeFlexoki from 'starlight-theme-flexoki';
 import remarkBoldAsides from './src/plugins/remark-bold-asides.mjs';
 import remarkRebaseLinks from './src/plugins/remark-rebase-links.mjs';
-import opengraphImage from 'astro-opengraph-image';
-import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { base, channel, contentDir, root, version } from './site.mjs';
-
-function staticOnly(integration) {
-	const orig = integration.hooks['astro:config:setup'];
-	if (orig) {
-		integration.hooks['astro:config:setup'] = (options) => {
-			const realInject = options.injectRoute;
-			options.injectRoute = (route) => realInject({ ...route, prerender: true });
-			return orig(options);
-		};
-	}
-	return integration;
-}
-
-function fixOgImageBase(site, base) {
-	return {
-		name: 'fix-og-image-base',
-		hooks: {
-			async 'astro:build:done'({ dir }) {
-				if (!base || base === '/') return;
-				const prefix = base.replace(/\/$/, '');
-				const from = `<meta property="og:image" content="${site}/_og/`;
-				const to = `<meta property="og:image" content="${site}${prefix}/_og/`;
-				const dirPath = fileURLToPath(dir);
-				const files = await readdir(dirPath, { recursive: true });
-				for (const file of files) {
-					if (!file.endsWith('.html')) continue;
-					const filePath = join(dirPath, file);
-					const html = await readFile(filePath, 'utf-8');
-					const fixed = html.replaceAll(from, to);
-					if (fixed !== html) {
-						await writeFile(filePath, fixed);
-					}
-				}
-			},
-		},
-	};
-}
 
 const pageExists = (slug) =>
 	['md', 'mdx'].some((ext) =>
@@ -132,38 +92,5 @@ export default defineConfig({
 			{ label: 'Credits', slug: 'credits' },
 			]),
 		}),
-		staticOnly(opengraphImage({
-			background: '#101014',
-			width: 1200,
-			height: 630,
-			scale: 3,
-			fonts: [
-				{
-					name: 'Instrument Sans',
-					data: await readFile(
-						'node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff',
-					),
-					style: 'normal',
-					weight: 400,
-				},
-			{
-				name: 'Instrument Sans',
-				data: await readFile(
-					'node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-700-normal.woff',
-				),
-				style: 'normal',
-				weight: 700,
-			},
-			{
-				name: 'IBM Plex Mono',
-				data: await readFile(
-					'node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff',
-				),
-				style: 'normal',
-				weight: 400,
-			},
-		],
-		})),
-		fixOgImageBase(site, base),
 	],
 });

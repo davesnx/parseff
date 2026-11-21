@@ -1,6 +1,4 @@
 ---
-import { OgImage } from 'astro-opengraph-image/components';
-
 import instrumentSans400 from '@fontsource/instrument-sans/files/instrument-sans-latin-400-normal.woff2?url';
 import instrumentSans500 from '@fontsource/instrument-sans/files/instrument-sans-latin-500-normal.woff2?url';
 import instrumentSans600 from '@fontsource/instrument-sans/files/instrument-sans-latin-600-normal.woff2?url';
@@ -9,18 +7,11 @@ import ibmPlexMono400 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-
 import ibmPlexMono500 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2?url';
 import ibmPlexMono700 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-700-normal.woff2?url';
 
-const dotSvg = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="12" cy="12" r="1" fill="rgba(124,172,248,0.2)"/></svg>`)}`;
-
-const { head, title, description } = Astro.locals.starlightRoute.entry
-	? {
-			head: Astro.locals.starlightRoute.head,
-			title: Astro.locals.starlightRoute.entry.data.title,
-		description: ((d) => d.length > 120 ? d.slice(0, 120) + '...' : d)(Astro.locals.starlightRoute.entry.data.description || ''),
-	}
-	: { head: Astro.locals.starlightRoute.head, title: 'Parseff', description: '' };
+const { entry, head } = Astro.locals.starlightRoute;
 
 const canonicalRoot = `${Astro.site?.origin}${__DOCS_ROOT__}/`;
 const canonicalBase = `${Astro.site?.origin}${import.meta.env.BASE_URL.replace(/\/$/, '')}/`;
+const ogImage = new URL(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/og/${entry.id || 'index'}.png`, Astro.site);
 const pageHead =
 	__DOCS_CHANNEL__ === 'alias'
 		? head.map((entry) =>
@@ -64,26 +55,7 @@ const fontFaceCss = fontFaces
 	.join('\n');
 ---
 
-<OgImage>
-	<div style="display: flex; position: relative; width: 100%; height: 100%;">
-		<div style={`display: flex; position: absolute; top: 12px; left: 12px; bottom: 12px; right: 12px; background-image: url('${dotSvg}'); background-size: 12px 12px; background-repeat: repeat;`}></div>
-		<div style="display: flex; flex-direction: column; justify-content: space-between; width: 100%; height: 100%; padding: 30px; font-family: 'Instrument Sans', sans-serif; gap: 0px; position: relative;">
-			<div style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; gap: 12px;">
-				<span style="font-size: 20px; font-weight: 700; color: #7CACF8; line-height: 1;">Parseff</span>
-				<span style="font-size: 12px; color: #455E86; line-height: 1; border: 1px solid #455E86; padding: 4px 5px; border-radius: 8px; background-color: #101014">documentation</span>
-			</div>
-			<div style="display: flex; flex-direction: column; justify-content: flex-end; width: 100%; height: 100%; font-family: 'Instrument Sans', sans-serif; padding-bottom: 20px;">
-				<span style="font-size: 18px; font-weight: 700; color: #ffffff; line-height: 1;">{title}</span>
-				{description && (
-					<span style="font-size: 14px; font-weight: 400; color: #b4b4be; line-height: 1.5; margin-top: 12px;">{description}</span>
-				)}
-			</div>
-		</div>
-	</div>
-	<style is:inline>
-		* { margin: 0; padding: 0; }
-	</style>
-</OgImage>
+<meta property="og:image" content={ogImage} />
 {preloadFonts.map((href) => (
 	<link rel="preload" href={href} as="font" type="font/woff2" crossorigin />
 ))}
