@@ -7,7 +7,6 @@ const title = route.entry.data.title;
 const body = route.entry.body ?? '';
 const markdown = `# ${title}\n\n${body}`;
 
-// Build the "Edit this page" URL from the entry's file path
 const editUrl = `https://github.com/davesnx/parseff/edit/main/website/src/content/docs/${route.entry.id}`;
 ---
 
@@ -83,7 +82,6 @@ const editUrl = `https://github.com/davesnx/parseff/edit/main/website/src/conten
 </script>
 
 <style>
-	/* Preserve the default Starlight right-sidebar styles we replaced */
 	@layer starlight.core {
 		.right-sidebar-panel {
 			padding: 1rem var(--sl-sidebar-pad-x);
@@ -150,7 +148,6 @@ const editUrl = `https://github.com/davesnx/parseff/edit/main/website/src/conten
 		color: var(--sl-color-white);
 	}
 
-	/* Copy button states */
 	.copy-md-btn .icon-check,
 	.copy-md-btn .label-copied {
 		display: none;

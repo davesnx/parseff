@@ -34,26 +34,22 @@
   (uucp
    (>= 16.0.0))
 
-   ;; Test dependencies
    (alcotest :with-test)
    (eio :with-test)
    (eio_main :with-test)
    (miou :with-test)
 
-   ;; Benchmark dependencies
    (benchmark :with-dev-setup)
    (angstrom :with-dev-setup)
    (bigstringaf :with-dev-setup)
    (mparser :with-dev-setup)
 
-  ;; Dev dependencies
   (ocamlformat
    (and
     (>= 0.29.0)
     :with-dev-setup))
   (ocaml-lsp-server :with-dev-setup)
 
-  ;; Documentation dependencies
   (odoc
    (and
     (>= 3.2.1)

@@ -1,7 +1,4 @@
 #!/bin/sh
-# Rewrite flat odoc page links (./foo.md) that cross between api/ and guides/
-# so generated markdown resolves on GitHub, in editors, and in Starlight.
-
 set -e
 
 FILE="$1"

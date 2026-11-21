@@ -21,7 +21,6 @@ let test_satisfy_ascii () =
       Alcotest.fail "Expected success"
 
 let test_satisfy_multibyte () =
-  (* λ = U+03BB, encoded as 0xCE 0xBB (2 bytes) *)
   match
     parse_with_pos "\xCE\xBB" (fun () ->
         Parseff.Utf8.satisfy ~label:"lambda" (fun u -> Uchar.to_int u = 0x03BB)
@@ -34,7 +33,6 @@ let test_satisfy_multibyte () =
       Alcotest.fail "Expected success"
 
 let test_satisfy_3byte () =
-  (* 中 = U+4E2D, encoded as 0xE4 0xB8 0xAD (3 bytes) *)
   match
     parse_with_pos "\xE4\xB8\xAD" (fun () ->
         Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
@@ -47,7 +45,6 @@ let test_satisfy_3byte () =
       Alcotest.fail "Expected success"
 
 let test_satisfy_4byte () =
-  (* 😀 = U+1F600, encoded as 0xF0 0x9F 0x98 0x80 (4 bytes) *)
   match
     parse_with_pos "\xF0\x9F\x98\x80" (fun () ->
         Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
@@ -107,7 +104,6 @@ let test_satisfy_eof () =
       Alcotest.fail "Expected an end of input error"
 
 let test_satisfy_invalid_utf8 () =
-  (* 0xFF is never valid in UTF-8 *)
   match
     Parseff.parse "\xFF" (fun () ->
         Parseff.Utf8.satisfy ~label:"any" (fun _ -> true)
@@ -135,7 +131,6 @@ let test_char_ascii () =
       Alcotest.fail "Expected success"
 
 let test_char_multibyte () =
-  (* é = U+00E9 *)
   match
     parse_with_pos "\xC3\xA9" (fun () -> Parseff.Utf8.char (Uchar.of_int 0xE9))
   with
@@ -163,7 +158,6 @@ let test_any_char_ascii () =
       Alcotest.fail "Expected success"
 
 let test_any_char_multibyte () =
-  (* ñ = U+00F1 *)
   match Parseff.parse "\xC3\xB1" Parseff.Utf8.any_char with
   | Ok u ->
       Alcotest.(check uchar_testable) "matched" (Uchar.of_int 0xF1) u
@@ -198,7 +192,6 @@ let test_take_while_ascii () =
       Alcotest.fail "Expected success"
 
 let test_take_while_unicode () =
-  (* "こんにちは世界" = 7 CJK characters, each 3 bytes = 21 bytes *)
   let input = "こんにちは世界!" in
   match
     parse_with_pos input (fun () ->
@@ -288,7 +281,6 @@ let test_take_while_at_least_without_label () =
       Alcotest.fail "Unexpected error type"
 
 let test_take_while_at_least_counts_codepoints () =
-  (* "éà" = 2 code points, 4 bytes. at_least:2 should succeed *)
   match
     Parseff.parse "\xC3\xA9\xC3\xA0" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
@@ -301,7 +293,6 @@ let test_take_while_at_least_counts_codepoints () =
       Alcotest.fail "Expected success"
 
 let test_take_while_at_least_codepoint_count_fail () =
-  (* "é" = 1 code point, 2 bytes. at_least:2 should fail *)
   match
     Parseff.parse "\xC3\xA9" (fun () ->
         Parseff.Utf8.take_while ~at_least:2 ~label:"letters"
@@ -319,7 +310,6 @@ let test_take_while_at_least_codepoint_count_fail () =
       Alcotest.fail "Unexpected error type"
 
 let test_take_while_invalid_utf8 () =
-  (* Valid ASCII then invalid byte *)
   match
     Parseff.parse "a\xFF" (fun () -> Parseff.Utf8.take_while (fun _ -> true))
   with
@@ -349,7 +339,6 @@ let test_skip_while () =
       Alcotest.fail "Expected success"
 
 let test_skip_while_unicode_whitespace () =
-  (* NO-BREAK SPACE U+00A0 = 0xC2 0xA0 (2 bytes) *)
   match
     parse_with_pos "\xC2\xA0hello" (fun () ->
         Parseff.Utf8.skip_while Uucp.White.is_white_space;
@@ -376,7 +365,6 @@ let test_take_while_span () =
   with
   | Ok ((s, len), pos) ->
       Alcotest.(check string) "span string" "héllo" s;
-      (* "héllo" = 6 bytes: é is 2 bytes + 4 ASCII *)
       Alcotest.(check int) "span length" 6 len;
       Alcotest.(check int) "parser position" 6 pos
   | Error _ ->
@@ -390,7 +378,6 @@ let test_letter_ascii () =
       Alcotest.fail "Expected success"
 
 let test_letter_accented () =
-  (* é = U+00E9 *)
   match Parseff.parse "\xC3\xA9" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "accented letter" (Uchar.of_int 0xE9) u
@@ -398,7 +385,6 @@ let test_letter_accented () =
       Alcotest.fail "Expected success"
 
 let test_letter_cjk () =
-  (* 中 = U+4E2D *)
   match Parseff.parse "\xE4\xB8\xAD" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "CJK letter" (Uchar.of_int 0x4E2D) u
@@ -406,7 +392,6 @@ let test_letter_cjk () =
       Alcotest.fail "Expected success"
 
 let test_letter_cyrillic () =
-  (* д = U+0434 *)
   match Parseff.parse "\xD0\xB4" Parseff.Utf8.letter with
   | Ok u ->
       Alcotest.(check uchar_testable) "Cyrillic letter" (Uchar.of_int 0x434) u
@@ -465,7 +450,6 @@ let test_whitespace_ascii () =
       Alcotest.fail "Expected success"
 
 let test_whitespace_unicode () =
-  (* NBSP (U+00A0) + EM SPACE (U+2003) + ASCII space *)
   let input = "\xC2\xA0\xE2\x80\x83 X" in
   match
     Parseff.parse ~consume:`Partial input (fun () -> Parseff.Utf8.whitespace ())
@@ -515,7 +499,6 @@ let test_skip_whitespace () =
       Alcotest.fail "Expected success"
 
 let test_mix_byte_and_utf8 () =
-  (* Parse: key=value where key is ASCII, value is Unicode *)
   let input = "name=こんにちは" in
   match
     parse_with_pos input (fun () ->
@@ -532,7 +515,6 @@ let test_mix_byte_and_utf8 () =
   | Ok ((key, value), pos) ->
       Alcotest.(check string) "key" "name" key;
       Alcotest.(check string) "value" "こんにちは" value;
-      (* "name" (4) + "=" (1) + 5 * 3 bytes = 20 *)
       Alcotest.(check int) "position" 20 pos
   | Error _ ->
       Alcotest.fail "Expected success"
@@ -562,7 +544,6 @@ let test_streaming_satisfy () =
       Alcotest.fail "Expected success"
 
 let test_streaming_take_while () =
-  (* Feed "éàü" as individual bytes to test buffer boundary handling *)
   let data = "\xC3\xA9\xC3\xA0\xC3\xBC" in
   let pos_ref = ref 0 in
   let source =
@@ -570,10 +551,9 @@ let test_streaming_take_while () =
         if !pos_ref >= String.length data then
           0
         else begin
-          (* One byte at a time *)
-            Bytes.set buf off (String.get data !pos_ref);
-            incr pos_ref;
-            1
+          Bytes.set buf off (String.get data !pos_ref);
+          incr pos_ref;
+          1
         end
     )
   in

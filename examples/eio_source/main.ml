@@ -1,10 +1,3 @@
-(* Eio + parseff: Source.of_chunks that awaits an Eio promise.
-
-   The callback inside Source.of_chunks performs an Eio effect
-   (Promise.await) which suspends the fiber until data arrives.
-   This works because only the source's read function suspends. Parseff
-   installs its parse state again each time read returns. *)
-
 open Eio.Std
 
 let entry () =
@@ -21,7 +14,6 @@ let () =
       let clock = Eio.Stdenv.clock env in
 
       Switch.run (fun sw ->
-          (* Kick off an async fetch — in real code this would be an HTTP call. *)
           let promise =
             Fiber.fork_promise ~sw (fun () ->
                 Eio.Time.sleep clock 0.05;
@@ -29,7 +21,6 @@ let () =
             )
           in
 
-          (* Source.of_chunks that awaits the Eio promise on first read. *)
           let fetched = ref false in
           let source =
             Parseff.Source.of_chunks (fun () ->

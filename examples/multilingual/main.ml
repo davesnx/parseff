@@ -1,11 +1,3 @@
-(* A parser for multilingual key-value records.
-     name: 田中太郎
-     city: 東京
-     greeting: Привет мир
-
-   Keys are ASCII identifiers. Values are Unicode text (any non-newline
-   characters). Fields are separated by newlines. *)
-
 let key () =
   Parseff.take_while ~at_least:1
     (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_')

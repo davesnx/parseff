@@ -41,19 +41,16 @@ let color_type_to_string = function
   | Unknown n ->
       Printf.sprintf "Unknown(%d)" n
 
-(* Each PNG chunk has: 4-byte length, 4-byte type, data, 4-byte CRC *)
 let chunk_header () =
   let length = Parseff.BE.any_int32 () in
   let chunk_type = Parseff.take 4 in
   (length, chunk_type)
 
-(* The IHDR chunk contains the image dimensions and format *)
 let ihdr_data () =
   let width = Parseff.BE.any_int32 () in
   let height = Parseff.BE.any_int32 () in
   let bit_depth = Parseff.any_uint8 () in
   let color_type = color_type_of_int (Parseff.any_uint8 ()) in
-  (* Skip compression method, filter method, interlace method, CRC *)
   let _compression = Parseff.any_uint8 () in
   let _filter = Parseff.any_uint8 () in
   let _interlace = Parseff.any_uint8 () in
@@ -61,7 +58,6 @@ let ihdr_data () =
   { width; height; bit_depth; color_type }
 
 let parse_png_header () =
-  (* PNG files start with an 8-byte magic signature *)
   let expected = "\x89PNG\r\n\x1a\n" in
   let actual = Parseff.take 8 in
   if actual <> expected then Parseff.fail "PNG signature";

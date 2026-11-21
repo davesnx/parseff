@@ -190,8 +190,6 @@ let show_error (e : Parseff.error) =
   in
   Printf.sprintf "%d %s [%s]" e.range.start message (String.concat ", " contexts)
 
-(* Interpreter (a): the real combinators. *)
-
 type cx = {
   diags : Parseff.Diagnostics.t;
   cell : int Parseff.Ref.t;
@@ -512,26 +510,12 @@ let run_real ?(traced = false) ~partial runner g input =
     trace = List.rev !events;
   }
 
-(* Interpreter (b): a pure backtracking model. A state is a position, the
-   diagnostics recorded so far (newest first) and the value of the one Ref
-   cell. Every backtracking point saves the state and gets back to it
-   explicitly. A frame is a [bool ref] committed flag, so [commit] and [cut]
-   can seal the frames that are open around them. A [capture] is a barrier
-   that goes back to its start. A [capture ~release:true] frame holds the state
-   it goes back to, which [commit] and [cut] replace. A [cut] that replaces it
-   also gives that state to the sealed frames above the [capture]: a frame that
-   then drops a step without progress goes back to it, so nothing recorded
-   before the cut is lost. *)
-
 type mst = { pos : int; diags : (int * int) list; cell : int }
 
 exception M_fail of mst
 exception M_boom of mst
 exception M_depth of int * mst
 
-(* The first step of the right operand of an [infix_right] whose operator and
-   operand consumed nothing stops at an [infix_right] operator that consumes
-   nothing, so that the pair does not nest until the depth limit. *)
 exception Expression_stop
 
 type frame =
@@ -606,10 +590,6 @@ let seal ?captures frames n =
   in
   go [] frames n
 
-(* [Source.parse] must keep the bytes from the oldest position that a frame
-   can still rewind to. A read that needs the bytes up to [need] checks the
-   window while fewer than [need] bytes are buffered, so it fails only if
-   [need - 1 - oldest] reaches the window. *)
 let read m env st need =
   let oldest =
     List.fold_left
@@ -1162,9 +1142,6 @@ let rec gen rs size =
     | _ ->
         leaf rs
 
-(* A prefix token that seals a frame with commit or cut and then consumes
-   nothing makes [parse] raise [Failure "Parseff: internal error: failure
-   without a recorded position"], so prefix tokens neither commit nor cut. *)
 and unseal = function
   | Commit | Cut ->
       Eps

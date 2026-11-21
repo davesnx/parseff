@@ -1,13 +1,3 @@
-; Promote generated API markdown from odoc into the website.
-; Each rule adds Starlight frontmatter, appends the full odoc output,
-; and rewrites cross-reference links (./Parseff.md#...) to plain code spans.
-; Source of truth: doc/*.mld files.
-;
-; TODO: The sed post-processing for cross-reference links is a workaround.
-; odoc's markdown backend has remap support stubbed out in link.ml but not
-; wired up. Once odoc gains -R / --remap-file support for markdown-generate,
-; the sed step can be removed. See doc/odoc-remap-plan.md for details.
-
 (rule
  (alias generate-markdown)
  (enabled_if

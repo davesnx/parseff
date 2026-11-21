@@ -35,7 +35,6 @@ let abstr parse_body () =
   literal ")";
   Abs (l, r)
 
-(* naive parser, without sugar *)
 let rec parse_lambda () =
   let open Parseff in
   one_of
@@ -54,7 +53,6 @@ let rec parse_lambda () =
       (fun () -> Var (atom ()));
     ]
 
-(* Sugared: some parenthesis could be omitted *)
 let parse_lambda_sugared () =
   let open Parseff in
   let rec longapp () =
