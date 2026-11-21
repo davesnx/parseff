@@ -80,9 +80,11 @@ type found = private
       (** Input text at the failure position. Tokens longer than 32 bytes are
           truncated with [...]. Under {!Source.parse} and {!Push}, covers only
           whole characters already buffered, so it can be a prefix of the text
-          {!parse} reports. There, [Text ""] means the failure is at the end of
-          the input read so far and more input may follow: [range] is empty and
-          {!error_message} omits [", found ..."]. *)
+          {!parse} reports. There, [Text ""] means no whole character is
+          buffered at the failure position (it is at the end of the input read
+          so far, or the character there is incomplete) and more input may
+          follow: [range] is empty and {!error_message} omits [", found ..."].
+      *)
   | End  (** End of input. *)
   | Short of int
       (** A fixed-size read (such as {!val:take}) reached end of input with only
@@ -1423,7 +1425,9 @@ val expression :
     - Tries {!prefix} operators in table order before [operand]; each prefix
       uses one {!rec_} depth level (infix chains use none). A prefix operator is
       an open choice for its operand: call {!commit} in its token parser if you
-      use recovery inside its operand.
+      use recovery inside its operand. A prefix token that consumes no input is
+      skipped, even after {!commit} or {!cut}, and the next prefix or [operand]
+      is tried; a {!cut} there still seals the frames outside the expression.
     - Build-function failures fail the whole expression (as in {!precedence}).
     - Avoid mixing {!infix_left} and {!infix_right} in one level: the right
       operand of an [infix_right] operator takes the rest of that level's chain,
