@@ -883,7 +883,10 @@ and expression m env atom table st =
         | Prefix t :: ops -> (
             match
               let ov, s1 = ev m envf t st in
-              if s1.pos = st.pos then raise (M_fail s1);
+              if s1.pos = st.pos then begin
+                f := false;
+                raise (M_fail s1)
+              end;
               let v, s2 = rec_ envf s1 (fun env -> parse_levels env rest) in
               (Pre (ov, v), s2)
             with
@@ -1145,71 +1148,6 @@ let rec gen rs size =
     | _ ->
         leaf rs
 
-and unseal = function
-  | Commit | Cut ->
-      Eps
-  | ( Eps
-    | Char _
-    | Consume _
-    | Any
-    | Soft_error
-    | Warn _
-    | Set _
-    | Get
-    | Fail_msg
-    | Raise ) as g ->
-      g
-  | Seq (a, b) ->
-      Seq (unseal a, unseal b)
-  | Or (a, b) ->
-      Or (unseal a, unseal b)
-  | One_of l ->
-      One_of (List.map unseal l)
-  | Optional a ->
-      Optional (unseal a)
-  | Many (n, a) ->
-      Many (n, unseal a)
-  | Sep_by (n, a, b) ->
-      Sep_by (n, unseal a, unseal b)
-  | End_by (n, a, b) ->
-      End_by (n, unseal a, unseal b)
-  | Fold_left (a, b, d) ->
-      Fold_left (unseal a, unseal b, d)
-  | Fold_right (a, b, d) ->
-      Fold_right (unseal a, unseal b, d)
-  | Count (n, a) ->
-      Count (n, unseal a)
-  | Look_ahead a ->
-      Look_ahead (unseal a)
-  | Context (name, d, a) ->
-      Context (name, d, unseal a)
-  | Expect a ->
-      Expect (unseal a)
-  | With_range a ->
-      With_range (unseal a)
-  | Recognize a ->
-      Recognize (unseal a)
-  | Expression (a, t) ->
-      let op = function
-        | Infix_l g ->
-            Infix_l (unseal g)
-        | Infix_r g ->
-            Infix_r (unseal g)
-        | Prefix g ->
-            Prefix (unseal g)
-        | Postfix g ->
-            Postfix (unseal g)
-      in
-      Expression (unseal a, List.map (List.map op) t)
-  | Capture a ->
-      Capture (unseal a)
-  | Capture_release a ->
-      Capture_release (unseal a)
-  | Try (a, b) ->
-      Try (unseal a, unseal b)
-  | Rec a ->
-      Rec (unseal a)
-
 and gen_expression rs n =
   let token () =
     if int rs 3 = 0 then
@@ -1224,7 +1162,7 @@ and gen_expression rs n =
     | 1 ->
         Infix_r (token ())
     | 2 ->
-        Prefix (unseal (token ()))
+        Prefix (token ())
     | _ ->
         Postfix (token ())
   in
