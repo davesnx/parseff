@@ -375,8 +375,8 @@ let test_record_arguments () =
   Alcotest.(check string)
     "value" "Ok"
     (match r with Ok _ -> "Ok" | Error _ -> "Error");
-  Alcotest.check errs "the failure, then the removed entries in order"
-    [ (4, "expected '!', found '?'"); (3, "first"); (0, "second") ]
+  Alcotest.check errs "the failure, then the removed entries in source order"
+    [ (4, "expected '!', found '?'"); (0, "second"); (3, "first") ]
     !seen;
   Alcotest.check errs "nothing recorded" [] (errors d)
 

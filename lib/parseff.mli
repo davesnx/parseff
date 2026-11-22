@@ -231,8 +231,8 @@ module Diagnostics : sig
   val create : unit -> t
 
   val to_list : t -> entry list
-  (** Diagnostics in emission order. Readable after the parse on both [Ok] and
-      [Error]. *)
+  (** Diagnostics in source order by [pos]; entries at the same [pos] keep their
+      emission order. Readable after the parse on both [Ok] and [Error]. *)
 
   val length : t -> int
   val is_empty : t -> bool
@@ -993,10 +993,10 @@ val recover :
       end of input.
     - {b [~keep].} By default, inner diagnostics recorded by [parser] before it
       failed are discarded and only [e] is recorded. Pass [~keep] (a pure
-      function receiving [entry] and the discarded [inner] list in emission
-      order) to return the exact entries to record. [keep] may be called more
-      than once for the same error inside a loop; exceptions raised by [keep]
-      escape the parse.
+      function receiving [entry] and the discarded [inner] list in source order,
+      like {!Diagnostics.to_list}) to return the exact entries to record. [keep]
+      may be called more than once for the same error inside a loop; exceptions
+      raised by [keep] escape the parse.
     - {b [~release] and [~contexts]} are forwarded to {!capture}; with
       [~release:true], [sync] starts from the last release point and [inner]
       holds only entries recorded after it.
@@ -1252,10 +1252,15 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
     let digits1 () = many ~at_least:1 digit
     ]} *)
 
-val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
-(** [sep_by ?at_least element separator] parses zero or more [element]s
-    separated by [separator] (discarding separator values). Stops and drops the
-    last element if a separator and element together consume no input.
+val sep_by :
+  ?at_least:int -> ?trailing:bool -> (unit -> 'a) -> (unit -> 'b) -> 'a list
+(** [sep_by ?at_least ?trailing element separator] parses zero or more
+    [element]s separated by [separator] (discarding separator values). Stops and
+    drops the last element if a separator and element together consume no input.
+    Accepts an optional trailing separator when [~trailing:true]. An element
+    that matches empty input still matches after a trailing separator, so make
+    it fail at end of input, as a CSV record does with
+    [not_followed_by end_of_input].
 
     {@ocaml[
     let csv_line () =
@@ -1318,10 +1323,15 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
     ]} *)
 
 val sep_by_iter :
-  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
+  ?at_least:int ->
+  ?trailing:bool ->
+  (unit -> 'a) ->
+  (unit -> 'b) ->
+  ('a -> unit) ->
+  unit
 [@@alert unstable "This value can change in any minor release."]
-(** [sep_by_iter ?at_least element separator f] runs like {!sep_by} without
-    building a list, passing each [element] to [f]. Sealing, callback,
+(** [sep_by_iter ?at_least ?trailing element separator f] runs like {!sep_by}
+    without building a list, passing each [element] to [f]. Sealing, callback,
     zero-width, and [Invalid_argument] rules match {!many_iter}; a failure in
     [separator] after a value is yielded cannot rewind before that value.
 
@@ -1432,6 +1442,10 @@ val expression :
       most once per operand. If a token parser or its right operand fails, tries
       the next operator unless the token parser called {!commit}. List longer
       postfix tokens before shorter prefixes (e.g. [!=] before [!]).
+    - In streaming, a source keeps the input from each open operator whose token
+      parser did not call {!commit}, so a long nested or {!infix_right} chain
+      needs a [~backtrack_window] as large as the chain. A token parser that
+      calls {!commit} after its symbol releases that input.
     - Stops a group when an operator and its right operand (including operators
       binding to it) consume no input.
     - Tries {!prefix} operators in table order before [operand]; each prefix
