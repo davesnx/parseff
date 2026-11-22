@@ -3375,9 +3375,37 @@ let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) : 'a list =
   | Some at_most ->
       many_at_most (get_state ()) at_least at_most p
 
-let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
+let rec optional (p : unit -> 'a) : 'a option =
   let st = get_state () in
-  if at_least <= 0 then (
+  let frame = State.push_rewind_frame st frame_alternative in
+  match p () with
+  | v ->
+      State.pop_rewind_frame st frame;
+      Some v
+  | exception Fail ->
+      if State.frame_settled st frame then
+        if State.frame_committed st frame then begin
+          State.pop_rewind_frame st frame;
+          raise_notrace Fail
+        end else
+          replay st frame (fun () -> optional p)
+      else begin
+        restore_rewind_frame st frame;
+        State.pop_rewind_frame st frame;
+        None
+      end
+  | exception exn ->
+      State.pop_rewind_frame st frame;
+      raise exn
+
+let rec sep_by ?(at_least = 0) ?(trailing = false) (p : unit -> 'a)
+    (sep : unit -> 'b) : 'a list =
+  let st = get_state () in
+  if trailing then begin
+    let xs = sep_by ~at_least p sep in
+    if xs <> [] then ignore (optional sep);
+    xs
+  end else if at_least <= 0 then (
     let acc = ref [] in
     let frame = State.push_rewind_frame st frame_repeat in
     let base = frame * frame_stride in
@@ -3502,15 +3530,22 @@ let many_iter ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) =
   check_sealable st "many_iter";
   iter_elements st ~at_least ~progress_first:true p p f
 
-let sep_by_iter ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b)
-    (f : 'a -> unit) =
+let rec sep_by_iter ?(at_least = 0) ?(trailing = false) (p : unit -> 'a)
+    (sep : unit -> 'b) (f : 'a -> unit) =
   let st = get_state () in
   check_sealable st "sep_by_iter";
   let next () =
     let _ = sep () in
     p ()
   in
-  if at_least <= 0 then
+  if trailing then begin
+    let given = ref false in
+    sep_by_iter ~at_least p sep (fun v ->
+        given := true;
+        f v
+    );
+    if !given then ignore (optional sep)
+  end else if at_least <= 0 then
     iter_elements st ~at_least:0 ~progress_first:false p next f
   else begin
     give st f (required st p);
@@ -4345,29 +4380,6 @@ let expression ~operand table =
       v
   | exception Prec_build ->
       raise_notrace Fail
-
-let rec optional (p : unit -> 'a) : 'a option =
-  let st = get_state () in
-  let frame = State.push_rewind_frame st frame_alternative in
-  match p () with
-  | v ->
-      State.pop_rewind_frame st frame;
-      Some v
-  | exception Fail ->
-      if State.frame_settled st frame then
-        if State.frame_committed st frame then begin
-          State.pop_rewind_frame st frame;
-          raise_notrace Fail
-        end else
-          replay st frame (fun () -> optional p)
-      else begin
-        restore_rewind_frame st frame;
-        State.pop_rewind_frame st frame;
-        None
-      end
-  | exception exn ->
-      State.pop_rewind_frame st frame;
-      raise exn
 
 let count n (p : unit -> 'a) : 'a list =
   let rec loop acc i =
