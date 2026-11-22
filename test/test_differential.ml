@@ -929,15 +929,13 @@ and expression m env atom table st =
                     let ov, s1 = ev m envr t st in
                     if s1.pos = stop_at then raise Expression_stop;
                     let rhs, s2 =
-                      rec_ envr s1 (fun env s1 ->
-                          let o, s2 = operand env s1 in
-                          loop env here o s2
-                            ( if s2.pos = st.pos then
-                                st.pos
-                              else
-                                -1
-                            )
-                      )
+                      let o, s2 = operand envr s1 in
+                      loop envr here o s2
+                        ( if s2.pos = st.pos then
+                            st.pos
+                          else
+                            -1
+                        )
                     in
                     (Bin (ov, lhs, rhs), s2)
                 | Postfix t ->
