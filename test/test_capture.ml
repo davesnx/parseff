@@ -2322,6 +2322,78 @@ let test_release_clamps_the_capture () =
       warn (Warning.Recorded w)
   )
 
+let zero_width_cut ~release body =
+  let d = Diagnostics.create () in
+  let cell = Ref.create 0 in
+  let w = release_warning () in
+  let effects k =
+    Ref.set cell k;
+    warn (Warning.Recorded w)
+  in
+  let r =
+    parse ~diagnostics:d ~consume:`Partial "" (fun () ->
+        match capture ~release (fun () -> body effects) with
+        | Ok () ->
+            "Ok"
+        | Error e ->
+            error_message e
+    )
+  in
+  ( (match r with Ok v -> v | Error e -> "parse error " ^ error_message e),
+    Diagnostics.length d,
+    Ref.get cell
+  )
+
+let release_cut_in_zero_width_step =
+  let constructs =
+    [
+      ( "many",
+        fun effects ->
+          ignore
+            (many (fun () ->
+                 effects 8;
+                 cut ()
+             )
+            )
+      );
+      ("sep_by", fun effects -> ignore (sep_by cut (fun () -> effects 1)));
+      ("end_by", fun effects -> ignore (end_by (fun () -> effects 4) cut));
+      ( "fold_left",
+        fun effects ->
+          fold_left cut (fun () ->
+              effects 2;
+              fun () () -> ()
+          )
+      );
+      ( "expression infix_right",
+        fun effects ->
+          expression
+            ~operand:(fun () -> ())
+            [
+              [
+                infix_right (fun () ->
+                    effects 3;
+                    cut ();
+                    fun () () -> ()
+                );
+              ];
+            ]
+      );
+    ]
+  in
+  List.map
+    (fun (name, body) ->
+      Alcotest.test_case
+        ("release: a dropped zero-width step undoes its cut, " ^ name) `Quick
+        (fun () ->
+          Alcotest.check release_outcome "capture ~release:true" ("Ok", 0, 0)
+            (zero_width_cut ~release:true body);
+          Alcotest.check release_outcome "capture" ("Ok", 0, 0)
+            (zero_width_cut ~release:false body)
+      )
+    )
+    constructs
+
 let test_release_construct_rewinds () =
   let x () = ignore (optional (fun () -> char 'x')) in
   let num () =
@@ -2563,5 +2635,6 @@ let () =
           test_case "streaming nested release" `Quick
             test_streaming_nested_release;
         ]
+        @ release_cut_in_zero_width_step
       );
     ]

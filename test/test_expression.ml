@@ -239,6 +239,69 @@ let test_commit_in_operator () =
     "committed fails, fold_left" "Error@2 expected digit or \"(\", found 'x'"
     (partial_hand (committed "+") "1+x")
 
+let test_commit_in_nested_token () =
+  let run outer input =
+    let d = Parseff.Diagnostics.create () in
+    let cell = Parseff.Ref.create 0 in
+    let infix () =
+      ignore (Parseff.char 'a');
+      Parseff.Ref.set cell 1;
+      Parseff.warn (Warning.W "outer");
+      fun a b -> "(" ^ a ^ "+" ^ b ^ ")"
+    in
+    let committed () =
+      ignore (Parseff.char 'y');
+      Parseff.commit ();
+      ignore (Parseff.char 'c');
+      fun a b -> "(" ^ a ^ "*" ^ b ^ ")"
+    in
+    let table =
+      Parseff.
+        [
+          [
+            outer infix;
+            postfix (fun () ->
+                ignore (char 'a');
+                fun a -> "(" ^ a ^ "!)"
+            );
+          ];
+          [ infix_left committed ];
+        ]
+    in
+    let p () =
+      let e =
+        Parseff.expression
+          ~operand:(fun () -> String.make 1 (Parseff.char 'x'))
+          table
+      in
+      e ^ "@" ^ string_of_int (Parseff.position ())
+    in
+    let outcome r =
+      Printf.sprintf "%s, %d notes, ref %d" (show r)
+        (Parseff.Diagnostics.length d)
+        (Parseff.Ref.get cell)
+    in
+    let parsed =
+      outcome (Parseff.parse ~diagnostics:d ~consume:`Partial input p)
+    in
+    Parseff.Diagnostics.clear d;
+    let streamed =
+      outcome
+        (Parseff.Source.parse ~diagnostics:d ~consume:`Partial
+           (chunked_source input) p
+        )
+    in
+    (parsed, streamed)
+  in
+  List.iter
+    (fun (name, outer) ->
+      let parsed, streamed = run outer "xaxy" in
+      Alcotest.(check string)
+        (name ^ ", parse") "Ok (x!)@2, 0 notes, ref 0" parsed;
+      Alcotest.(check string) (name ^ ", Source.parse") parsed streamed
+    )
+    [ ("infix_left", Parseff.infix_left); ("infix_right", Parseff.infix_right) ]
+
 let test_depth_limit () =
   let input = String.concat "" (List.init 200 (fun _ -> "-")) ^ "1" in
   match Parseff.parse input (expr with_neg) with
@@ -704,6 +767,34 @@ let test_streaming_window () =
         string_of_int n
     | Error e ->
         Parseff.error_message e
+    )
+
+let test_committed_long_chains () =
+  let op c f () =
+    ignore (Parseff.char c);
+    Parseff.commit ();
+    f
+  in
+  let stream table input =
+    match
+      Parseff.Source.parse ~backtrack_window:64 (chunked_source input)
+        (fun () -> Parseff.expression ~operand:digit_value table
+      )
+    with
+    | Ok n ->
+        string_of_int n
+    | Error e ->
+        Parseff.error_message e
+  in
+  let ones sep = String.concat sep (List.init 2_000 (fun _ -> "1")) in
+  Alcotest.(check string)
+    "infix_right chain" "2000"
+    (stream Parseff.[ [ infix_right (op '^' ( + )) ] ] (ones "^"));
+  Alcotest.(check string)
+    "nested infix_left chain" "2001"
+    (stream
+       Parseff.[ [ infix_left (op '+' ( + )) ]; [ infix_left (op '*' ( + )) ] ]
+       ("1+" ^ ones "*")
     )
 
 module Doc_example = struct
@@ -1719,6 +1810,8 @@ let () =
           test_case "commit in operator" `Quick test_commit_in_operator;
           test_case "depth limit" `Quick test_depth_limit;
           test_case "commit in operand" `Quick test_commit_in_operand;
+          test_case "commit in a nested token" `Quick
+            test_commit_in_nested_token;
           test_case "prefix without progress" `Quick test_prefix_no_progress;
           test_case "infix_right without progress" `Quick
             test_infix_right_no_progress;
@@ -1740,6 +1833,8 @@ let () =
           test_case "shared prefix across levels" `Quick
             test_shared_prefix_levels;
           test_case "streaming window" `Quick test_streaming_window;
+          test_case "committed long chains, streaming" `Quick
+            test_committed_long_chains;
           test_case "doc example" `Quick test_doc_example;
           test_case "guide example" `Quick test_guide_example;
         ]

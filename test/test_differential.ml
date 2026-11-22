@@ -521,7 +521,7 @@ exception Expression_stop
 type frame =
   | Flag of {
       committed : bool ref;
-      kept : mst option ref;
+      advanced : mst ref list ref;
       start : int;
       last : bool;
     }
@@ -544,15 +544,17 @@ let push f env =
 let flag ?(last = false) env st =
   let committed = ref false in
   ( committed,
-    push (Flag { committed; kept = ref None; start = st.pos; last }) env
+    push (Flag { committed; advanced = ref []; start = st.pos; last }) env
   )
 
 let back env st =
-  match env.frames with
-  | Flag { kept = { contents = Some s }; _ } :: _ ->
-      { s with pos = st.pos }
+  ( match env.frames with
+  | Flag { advanced; _ } :: _ ->
+      List.iter (fun saved -> saved := { st with pos = !saved.pos }) !advanced
   | _ ->
-      st
+      ()
+  );
+  st
 
 let rec commit_top st = function
   | Pin _ :: rest ->
@@ -575,14 +577,14 @@ let seal ?captures frames n =
         match captures with
         | Some st ->
             saved := st;
-            List.iter (fun kept -> kept := Some st) above;
+            List.iter (fun advanced -> advanced := saved :: !advanced) above;
             go above rest (n - 1)
         | None ->
             false
       )
     | Flag f :: rest ->
         f.committed := true;
-        go (f.kept :: above) rest (n - 1)
+        go (f.advanced :: above) rest (n - 1)
     | Pin _ :: rest ->
         go above rest (n - 1)
     | [] ->
@@ -927,15 +929,13 @@ and expression m env atom table st =
                     let ov, s1 = ev m envr t st in
                     if s1.pos = stop_at then raise Expression_stop;
                     let rhs, s2 =
-                      rec_ envr s1 (fun env s1 ->
-                          let o, s2 = operand env s1 in
-                          loop env here o s2
-                            ( if s2.pos = st.pos then
-                                st.pos
-                              else
-                                -1
-                            )
-                      )
+                      let o, s2 = operand envr s1 in
+                      loop envr here o s2
+                        ( if s2.pos = st.pos then
+                            st.pos
+                          else
+                            -1
+                        )
                     in
                     (Bin (ov, lhs, rhs), s2)
                 | Postfix t ->

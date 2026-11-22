@@ -209,7 +209,9 @@ val render_error :
     backtracking: when a branch of {!or_}, {!one_of}, {!many}, {!optional},
     {!capture}, or {!recover} fails, or when {!look_ahead}, {!peek_with},
     {!not_followed_by}, or a zero-width repetition step rewinds, any diagnostics
-    and {!Ref.set} writes made after the rewind point are discarded. *)
+    and {!Ref.set} writes made after the rewind point are discarded. A dropped
+    zero-width step discards all of its writes, even those before a {!cut} that
+    advanced a [capture ~release:true]. *)
 
 module Diagnostics : sig
   type entry = { pos : int; value : error }
@@ -823,7 +825,9 @@ val cut : unit -> unit
     repetition frame opened inside that context, stopping at {!look_ahead},
     {!peek_with}, or {!capture} (with [capture ~release:true], advances the
     release point and continues). If the enclosing context later fails, outer
-    frames are sealed too; if it succeeds, outer frames are unaffected.
+    frames are sealed too; if it succeeds, outer frames are unaffected. A
+    zero-width repetition step that is dropped also undoes a release advanced
+    inside it.
 
     Without an enclosing {!val:context}, seals frames back to the start of the
     parse (stopping at the same boundaries). Sealed frames also release pinned
@@ -936,8 +940,10 @@ val capture :
       {!commit}, {!cut}, or value yielded by a [*_iter] combinator that reaches
       [capture], keeping earlier diagnostics and {!Ref} writes and allowing
       streaming sources to drop earlier input. A {!cut} also continues to outer
-      frames. After [Error e] with [~release:true], skip from the current
-      position (or [e.range.start] if later) rather than reparsing.
+      frames. A zero-width repetition step that is dropped also undoes a cut
+      made inside it, so a recovery that warns and then cuts must consume input
+      to keep its warning. After [Error e] with [~release:true], skip from the
+      current position (or [e.range.start] if later) rather than reparsing.
     - [~contexts:`Inner] (default [`All]) keeps only contexts opened inside
       [parser] in [e.contexts].
     - Suppresses recovery inside [parser] and contains {!commit}/{!cut} (unless
@@ -1420,6 +1426,10 @@ val expression :
       most once per operand. If a token parser or its right operand fails, tries
       the next operator unless the token parser called {!commit}. List longer
       postfix tokens before shorter prefixes (e.g. [!=] before [!]).
+    - In streaming, a source keeps the input from each open operator whose token
+      parser did not call {!commit}, so a long nested or {!infix_right} chain
+      needs a [~backtrack_window] as large as the chain. A token parser that
+      calls {!commit} after its symbol releases that input.
     - Stops a group when an operator and its right operand (including operators
       binding to it) consume no input.
     - Tries {!prefix} operators in table order before [operand]; each prefix
