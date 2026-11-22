@@ -93,7 +93,7 @@ val skip_while : ?set:Charset.t -> (char -> bool) -> unit
 ```
 
 - `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match.
-- `~at_most` caps the byte count (unstable: may change in 1\.x), failing with `Limit_exceeded { limit = at_most }` if another matching byte follows.
+- `~at_most` caps the byte count (unstable: may change in any minor release), failing with `Limit_exceeded { limit = at_most }` if another matching byte follows.
 - `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
 ```ocaml
 let digits () =
