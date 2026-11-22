@@ -289,8 +289,10 @@ type trace_event = private ..
 
     Each {!val:context} emits one [Enter], any nested events, and one [Return]
     or [Fail]. Abandoned branches still emit their events, so backtracking
-    appears as a new [Enter] at an earlier byte offset. All offsets are absolute
-    byte positions.
+    appears as a new [Enter] at an earlier byte offset. All offsets are byte
+    positions from the start of the input. Under {!Source.parse} and
+    {!Source.parse_each} they count from where the parse starts in the source,
+    and restart after a {!Source.parse} between elements.
 
     Match with a catch-all [_] case: 1.x releases may add new events. *)
 
@@ -567,7 +569,10 @@ val warn :
     ]} *)
 
 val position : unit -> int
-(** [position ()] returns the current byte offset from the start of input. *)
+(** [position ()] returns the current byte offset from the start of input. Under
+    {!Source.parse} and {!Source.parse_each} it counts from where the parse
+    starts in the source, and restarts after a {!Source.parse} between elements.
+*)
 
 val with_range : (unit -> 'a) -> 'a * range
 (** [with_range parser] runs [parser] and returns its result paired with the
@@ -1760,7 +1765,7 @@ module Source : sig
 
   val of_string : string -> t
   (** [of_string s] creates a source from a complete string (useful for testing
-      streaming code paths). *)
+      streaming code paths). Every parse of it starts at offset 0. *)
 
   val of_channel : ?buf_size:int -> in_channel -> t
   (** [of_channel ?buf_size ic] reads from [ic] using an internal buffer of
@@ -1839,6 +1844,13 @@ module Source : sig
       - With [`All] (default), pulls one byte after [parser] returns to verify
         EOF without reading the rest of [source]. With [`Partial], reads only as
         far as [parser] requires.
+      - The next parse of [source] starts where this one stopped and counts
+        positions from there: after [Ok], at the first byte not consumed; after
+        [Error e], where the parser failed, which is usually [e.range.start]
+        ([~from], [~upto] or a limit can move [e.range.start] away from it);
+        after an exception, where the parser was when the exception left it (for
+        an exception from the read function, this depends on when the read
+        happened). A source from {!of_string} restarts at offset 0 instead.
       - Only [source]'s read function may suspend (e.g., Eio fibers), allowing
         multiple concurrent parses on one domain. Suspending inside a parser
         callback or sharing one domain across system threads that parse
@@ -1870,8 +1882,15 @@ module Source : sig
         between elements. The sequence is ephemeral (forcing an element twice
         raises [Invalid_argument]).
       - [parser] must consume its trailing separator; a zero-width run yields an
-        [Error]. Positions count from the start of [source]. [~diagnostics] is
-        cleared on each forced element, so inspect it before advancing.
+        [Error]. Positions count from where the sequence starts reading
+        [source], and restart after a {!Source.parse} between elements.
+        [~diagnostics] is cleared on each forced element, so inspect it before
+        advancing.
+      - The sequence reads [source] at the first forced element, and each
+        element leaves [source] as {!Source.parse} does, so a later parse, or a
+        {!Source.parse} between elements, continues in order even if the
+        sequence is not forced to the end. A sequence stopped before its end
+        keeps its current input buffer alive until the next parse of [source].
       - Pass [~pending] if [parser] buffers lookahead past its value: called
         when no input remains, and if it returns [true], runs [parser] once more
         (allowing zero-width consumption). Must return [false] once drained; an

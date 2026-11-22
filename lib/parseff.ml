@@ -136,7 +136,11 @@ type bigstring =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 type source = {
-  initial : string;
+  mutable unread : bytes;
+  mutable unread_off : int;
+  mutable unread_len : int;
+  restarts : bool;
+  mutable stamp : int;
   feed : feed;
   mutable eof : bool;
   mutable window : int;
@@ -415,11 +419,20 @@ module Byte_source = struct
   type t = source
   type nonrec bigstring = bigstring
 
-  let make ~initial ~eof feed : t =
-    { initial; feed; eof; window = default_backtrack_window }
+  let make ?(restarts = false) ~initial ~eof feed : t =
+    {
+      unread = Bytes.unsafe_of_string initial;
+      unread_off = 0;
+      unread_len = String.length initial;
+      restarts;
+      stamp = 0;
+      feed;
+      eof;
+      window = default_backtrack_window;
+    }
 
   let of_string s =
-    make ~initial:s ~eof:true
+    make ~restarts:true ~initial:s ~eof:true
       (Read
          {
            read = (fun _ _ _ -> 0);
@@ -510,9 +523,36 @@ module State = struct
   let for_input ~input ~max_depth ~trace =
     make ~input ~max_depth ~source:None ~trace
 
+  let set_unread (src : source) buf off len =
+    src.unread <- buf;
+    src.unread_off <- off;
+    src.unread_len <- len;
+    src.stamp <- src.stamp + 1
+
+  let drop_unread (src : source) =
+    if not src.restarts then set_unread src Bytes.empty 0 0
+
+  let keep_unread ~copy (t : t) (src : source) =
+    if not src.restarts then
+      let off = t.pos - t.base in
+      let len = imax 0 (t.input_len - t.pos) in
+      if len = 0 then
+        set_unread src Bytes.empty 0 0
+      else if copy && 2 * len < Bytes.length t.input then
+        set_unread src (Bytes.sub t.input off len) 0 len
+      else
+        set_unread src t.input off len
+
   let for_source ~(src : source) ~max_depth ~backtrack_window ~trace =
     src.window <- backtrack_window;
-    make ~input:src.initial ~max_depth ~source:(Some src) ~trace
+    let input =
+      if src.unread_off = 0 && src.unread_len = Bytes.length src.unread then
+        Bytes.unsafe_to_string src.unread
+      else
+        Bytes.sub_string src.unread src.unread_off src.unread_len
+    in
+    drop_unread src;
+    make ~input ~max_depth ~source:(Some src) ~trace
 
   let none = for_input ~input:"" ~max_depth:0 ~trace:None
 
@@ -2627,7 +2667,11 @@ let[@inline never] limited st stop f =
   st.source <-
     Some
       {
-        initial = "";
+        unread = Bytes.empty;
+        unread_off = 0;
+        unread_len = 0;
+        restarts = false;
+        stamp = 0;
         feed = Frame fr;
         eof = ended || outer_len >= limit;
         window;
@@ -7086,6 +7130,12 @@ let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
           xs
     )
 
+let resume_at st pos e =
+  if pos < st.base then
+    failwith "Parseff: internal error: the failure position is not buffered";
+  st.pos <- pos;
+  Stdlib.Error e
+
 let run_detailed st ~all thunk =
   let previous = State.enter st in
   match
@@ -7097,15 +7147,15 @@ let run_detailed st ~all thunk =
     | v ->
         Stdlib.Ok v
     | exception Fail ->
-        Stdlib.Error (error_of_far ~last:true st [])
+        resume_at st st.far.pos (error_of_far ~last:true st [])
     | exception Depth_limit_exceeded (limit, a) ->
-        Stdlib.Error
+        resume_at st a.at
           (error_plain ~last:true st a.at
              (Depth_limit_exceeded { limit })
              a.open_frames
           )
     | exception Backtrack_window_exceeded (info, a) ->
-        Stdlib.Error
+        resume_at st a.at
           (error_plain ~last:true st a.at
              (Backtrack_window_exceeded
                 { limit = info.limit; oldest = info.oldest }
@@ -7147,21 +7197,37 @@ let parse ?(max_depth = 128) ?diagnostics ?trace ?(consume = `All) input
     (parser : unit -> 'a) =
   run (State.for_input ~input ~max_depth ~trace) ~consume ~diagnostics parser
 
+let run_source ~copy st src ~consume ~diagnostics parser =
+  match run st ~consume ~diagnostics parser with
+  | r ->
+      State.keep_unread ~copy st src;
+      r
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.keep_unread ~copy:true st src;
+      Printexc.raise_with_backtrace exn bt
+
 let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
     ?(consume = `All) (src : Byte_source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  run
-    (State.for_source ~src ~max_depth ~backtrack_window ~trace)
-    ~consume ~diagnostics parser
+  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  run_source ~copy:true st src ~consume ~diagnostics parser
 
 let parse_source_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     (src : Byte_source.t) (parser : unit -> 'a) =
   check_backtrack_window ~name:"Source.parse_each" backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let current = ref State.none in
+  let stamp = ref (-1) in
+  let state () =
+    if src.stamp <> !stamp then
+      current := State.for_source ~src ~max_depth ~backtrack_window ~trace;
+    !current
+  in
   let held = ref false in
   let element () =
+    let st = !current in
     if have st 1 then
       Some (parser ())
     else
@@ -7175,6 +7241,11 @@ let parse_source_each ?(max_depth = 128)
   let forced = ref 0 in
   let ended = ref false in
   let raised = ref false in
+  let finish st =
+    ended := true;
+    State.keep_unread ~copy:true st src;
+    stamp := src.stamp
+  in
   let rec node i () =
     if !raised then
       invalid_arg
@@ -7186,18 +7257,22 @@ let parse_source_each ?(max_depth = 128)
       Option.iter diagnostics_clear diagnostics;
       Seq.Nil
     end else begin
+      let st = state () in
       st.far <- far_none;
       let start = st.pos in
       held := false;
       raised := true;
-      let r = run st ~consume:`Partial ~diagnostics element in
+      let r =
+        run_source ~copy:false st src ~consume:`Partial ~diagnostics element
+      in
+      stamp := src.stamp;
       raised := false;
       match r with
       | Ok None ->
-          ended := true;
+          finish st;
           Seq.Nil
       | Ok (Some _) when st.pos = start && not !held ->
-          ended := true;
+          finish st;
           Seq.Cons
             ( Error
                 (error_plain ~last:false st start
@@ -7208,7 +7283,7 @@ let parse_source_each ?(max_depth = 128)
       | Ok (Some v) ->
           Seq.Cons (Ok v, node (i + 1))
       | Error e ->
-          ended := true;
+          finish st;
           Seq.Cons (Error e, node (i + 1))
     end
   in

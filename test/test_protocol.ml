@@ -398,7 +398,7 @@ let test_within_read_raises () =
   | exception Read_failed ->
       ()
   );
-  check_ok "the same source after the exception" Alcotest.string "def!"
+  check_ok "the same source after the exception" Alcotest.string "abcdef!"
     (Parseff.Source.parse src (fun () -> Parseff.take_while always))
 
 type _ Effect.t += Pause : unit Effect.t

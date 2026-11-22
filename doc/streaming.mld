@@ -41,7 +41,7 @@ result
 - [~backtrack_window] bounds how much buffered history Parseff retains for
   backtracking (default: [65536] bytes; minimum [2]). Exceeding it fails with
   [Backtrack_window_exceeded].
-- Error positions are absolute byte offsets from the start of the stream.
+- Error positions are byte offsets from where this parse starts in the stream.
   [found] text covers only whole characters already buffered (Parseff does not
   pull more bytes just to lengthen a snippet), so it can be a prefix of the
   text {!val:Parseff.parse} reports and [range.stop] can be smaller. [Text ""]
@@ -90,9 +90,10 @@ let () =
 
 {1 Source constructors}
 
-A {!type:Parseff.Source.t} is for a single [Source.parse] or
-[Source.parse_each] call (only [of_string] restarts from offset 0; other
-sources continue where the last read stopped and drop buffered lookahead).
+The next [Source.parse] or [Source.parse_each] on the same source starts where
+the last one stopped (see {!val:Parseff.Source.parse}), so a message head and
+its body can be parsed in turn, and a bad record can be skipped. Only [of_string]
+restarts from offset 0.
 
 {2 [Source.of_string]}
 

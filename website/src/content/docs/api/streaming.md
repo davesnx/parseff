@@ -40,7 +40,7 @@ result
 
 - `~consume` defaults to `` `All ``, pulling one extra byte after the parser returns to check EOF without reading the rest of the source. Pass `` ~consume:`Partial `` to leave remaining bytes unread.
 - `~backtrack_window` bounds how much buffered history Parseff retains for backtracking (default: `65536` bytes; minimum `2`). Exceeding it fails with `Backtrack_window_exceeded`.
-- Error positions are absolute byte offsets from the start of the stream. `found` text covers only whole characters already buffered (Parseff does not pull more bytes just to lengthen a snippet), so it can be a prefix of the text `Parseff.parse` reports and `range.stop` can be smaller. `Text ""` means no whole character is buffered at the failure position (it is at the end of the input read so far, or the character there is incomplete): the range is empty and the message has no `found` part.
+- Error positions are byte offsets from where this parse starts in the stream. `found` text covers only whole characters already buffered (Parseff does not pull more bytes just to lengthen a snippet), so it can be a prefix of the text `Parseff.parse` reports and `range.stop` can be smaller. `Text ""` means no whole character is buffered at the failure position (it is at the end of the input read so far, or the character there is incomplete): the range is empty and the message has no `found` part.
 - `~diagnostics` collects diagnostics as in `Parseff.parse`. See [`diagnostics`](./diagnostics.md).
 
 ## Streaming multiple values: `Source.parse_each`
@@ -76,7 +76,7 @@ let () =
 
 ## Source constructors
 
-A `Parseff.Source.t` is for a single `Source.parse` or `Source.parse_each` call (only `of_string` restarts from offset 0; other sources continue where the last read stopped and drop buffered lookahead).
+The next `Source.parse` or `Source.parse_each` on the same source starts where the last one stopped (see `Parseff.Source.parse`), so a message head and its body can be parsed in turn, and a bad record can be skipped. Only `of_string` restarts from offset 0\.
 
 ### `Source.of_string`
 
