@@ -687,6 +687,172 @@ let test_required_element_failure () =
       );
     ]
 
+let in_every_mode input parser =
+  let with_pos () =
+    let v = parser () in
+    (v, Parseff.position ())
+  in
+  let show_vp (v, p) = Printf.sprintf "(%s, %d)" v p in
+  let push size =
+    let t = Parseff.Push.parse with_pos in
+    let rec go at =
+      if at >= String.length input then
+        Result.map fst (Parseff.Push.finish t)
+      else
+        let n = min size (String.length input - at) in
+        match Parseff.Push.feed t (String.sub input at n) with
+        | Parseff.Push.Await ->
+            go (at + n)
+        | Parseff.Push.Done r ->
+            Result.map fst r
+    in
+    go 0
+  in
+  ("parse", Parseff.parse ~consume:`Partial input with_pos)
+  :: List.concat_map
+       (fun size ->
+         [
+           ( Printf.sprintf "Source, %d-byte reads" size,
+             Parseff.Source.parse ~consume:`Partial (sized_source size input)
+               with_pos
+           );
+           (Printf.sprintf "Push, %d-byte chunks" size, push size);
+         ]
+       )
+       [ 1; 2; 3 ]
+  |> List.map (fun (mode, r) -> (mode, show show_vp r))
+
+let check_sep_by_trailing ?at_least ?trailing element sep input expected =
+  let show_strings xs =
+    let show_one s =
+      if s = "" then
+        "_"
+      else
+        s
+    in
+    "[" ^ String.concat ";" (List.map show_one xs) ^ "]"
+  in
+  let as_list () =
+    show_strings (Parseff.sep_by ?at_least ?trailing element sep)
+  in
+  let as_iter () =
+    let acc = ref [] in
+    Parseff.sep_by_iter ?at_least ?trailing element sep (fun v ->
+        acc := v :: !acc
+    );
+    show_strings (List.rev !acc)
+  in
+  List.iter
+    (fun (name, parser) ->
+      List.iter
+        (fun (mode, actual) ->
+          Alcotest.(check string)
+            (Printf.sprintf "%s %S, %s" name input mode)
+            expected actual
+        )
+        (in_every_mode input parser)
+    )
+    [ ("sep_by", as_list); ("sep_by_iter", as_iter) ]
+
+let is_digit c = c >= '0' && c <= '9'
+let digits1 () = Parseff.take_while ~at_least:1 ~label:"digit" is_digit
+let digits0 () = Parseff.take_while is_digit
+let comma () = ignore (Parseff.char ',')
+
+let test_sep_by_trailing () =
+  let check = check_sep_by_trailing ~trailing:true digits1 comma in
+  check "1,2," "Ok ([1;2], 4)";
+  check "1,2" "Ok ([1;2], 3)";
+  check "1,2,x" "Ok ([1;2], 4)";
+  check "1,," "Ok ([1], 2)";
+  check "" "Ok ([], 0)";
+  check "," "Ok ([], 0)"
+
+let test_sep_by_trailing_default () =
+  let check = check_sep_by_trailing digits1 comma in
+  check "1,2," "Ok ([1;2], 3)";
+  check_sep_by_trailing ~trailing:false digits1 comma "1,2," "Ok ([1;2], 3)"
+
+let test_sep_by_trailing_at_least () =
+  let check = check_sep_by_trailing ~at_least:2 ~trailing:true digits1 comma in
+  check "1,2," "Ok ([1;2], 4)";
+  check "1,2,3," "Ok ([1;2;3], 6)";
+  check "1," "Error@2 Expected \"expected digit, found end of input\"";
+  check_sep_by_trailing ~at_least:2 digits1 comma "1,"
+    "Error@2 Expected \"expected digit, found end of input\""
+
+let test_sep_by_trailing_zero_width_element () =
+  let check = check_sep_by_trailing ~trailing:true digits0 comma in
+  check "1,2," "Ok ([1;2;_], 4)";
+  check "1,,2," "Ok ([1;_;2;_], 5)";
+  check "1,," "Ok ([1;_;_], 3)";
+  check "" "Ok ([_], 0)";
+  check "," "Ok ([_;_], 1)";
+  check_sep_by_trailing digits0 comma "1,2," "Ok ([1;2;_], 4)";
+  check_sep_by_trailing ~at_least:2 ~trailing:true digits0 comma "1,"
+    "Ok ([1;_], 2)"
+
+let test_sep_by_trailing_same_as_list () =
+  let show_strings xs =
+    "[" ^ String.concat ";" (List.map (Printf.sprintf "%S") xs) ^ "]"
+  in
+  List.iter
+    (fun (element_name, element) ->
+      List.iter
+        (fun input ->
+          let via_sep_by () =
+            show_strings (Parseff.sep_by ~trailing:true element comma)
+          in
+          let via_list () =
+            show_strings
+              (Parseff.list ~sep:comma ~trailing:true
+                 ~close:(fun () -> false)
+                 ~sync:(fun () -> ())
+                 element
+                 (fun _ -> "hole")
+              )
+          in
+          List.iter2
+            (fun (mode, expected) (_, actual) ->
+              Alcotest.(check string)
+                (Printf.sprintf "%s %S, %s" element_name input mode)
+                expected actual
+            )
+            (in_every_mode input via_list)
+            (in_every_mode input via_sep_by)
+        )
+        [ "1,2,"; "1,,2,"; ""; ","; "1,2"; "1,,"; "1,2,x" ]
+    )
+    [ ("digits0", digits0); ("digits1", digits1) ]
+
+let test_sep_by_trailing_zero_width_separator () =
+  let one_digit () = String.make 1 (Parseff.digit ()) in
+  let spaces () = Parseff.skip_while (fun c -> c = ' ') in
+  check_sep_by_trailing ~trailing:true digits1 spaces "1 2 " "Ok ([1;2], 4)";
+  check_sep_by_trailing digits1 spaces "1 2 " "Ok ([1;2], 3)";
+  check_sep_by_trailing ~trailing:true one_digit
+    (fun () -> ())
+    "12" "Ok ([1;2], 2)";
+  check_sep_by_trailing ~trailing:true
+    (fun () ->
+      Option.fold ~none:"-" ~some:(String.make 1) (Parseff.peek_char ())
+    )
+    (fun () -> ())
+    "abc" "Ok ([a], 0)"
+
+let test_sep_by_trailing_csv () =
+  let field () = Parseff.take_while (fun c -> c <> ',' && c <> '\r') in
+  let record () =
+    Parseff.not_followed_by Parseff.end_of_input;
+    String.concat "|" (Parseff.sep_by ~at_least:1 field comma)
+  in
+  let eol () = Parseff.literal "\r\n" in
+  let check = check_sep_by_trailing ~trailing:true record eol in
+  check "a,b\r\nc,d\r\n" "Ok ([a|b;c|d], 10)";
+  check "a,b\r\nc,d" "Ok ([a|b;c|d], 8)";
+  check "a,b\r\n\r\nc,d\r\n" "Ok ([a|b;_;c|d], 12)";
+  check_sep_by_trailing record eol "a,b\r\nc,d\r\n" "Ok ([a|b;c|d], 8)"
+
 let () =
   let open Alcotest in
   run "Combinators"
@@ -731,6 +897,19 @@ let () =
           test_case "required element" `Quick test_required_element_commit;
           test_case "required element failure" `Quick
             test_required_element_failure;
+        ]
+      );
+      ( "sep_by ~trailing",
+        [
+          test_case "accepts one trailing separator" `Quick test_sep_by_trailing;
+          test_case "default leaves it" `Quick test_sep_by_trailing_default;
+          test_case "at_least" `Quick test_sep_by_trailing_at_least;
+          test_case "zero-width element" `Quick
+            test_sep_by_trailing_zero_width_element;
+          test_case "same as list" `Quick test_sep_by_trailing_same_as_list;
+          test_case "zero-width separator" `Quick
+            test_sep_by_trailing_zero_width_separator;
+          test_case "csv rows" `Quick test_sep_by_trailing_csv;
         ]
       );
       ( "take",

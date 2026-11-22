@@ -7,6 +7,7 @@
 - [BREAKING] Remove `regex` and `match_regex`, and drop the `re` dependency ([#100](https://github.com/davesnx/parseff/pull/100)) (@davesnx)
 - [BREAKING] Rename `consume` to `literal` and return `unit` ([#98](https://github.com/davesnx/parseff/pull/98)) (@davesnx)
 - [BREAKING] Settle the API before 1.0: `fail` backtracks as `error` does, `span` is abstract, `location` is private, `digit` returns a `char`, `satisfy` takes `?label` first, `Failure` is `Failed`, `skip_while_then_char` and `fused_sep_take` are removed, and errors compare by their fields; also add `Push`, `many_iter`, `take_iter`, `within`, `?at_most`, `Source.of_bigstring_chunks`, `require` and `list` ([#76](https://github.com/davesnx/parseff/pull/76)) (@davesnx)
+- [FEATURE] Add `?trailing` to `sep_by` and `sep_by_iter`, with the meaning it has on `list`: one optional separator after the last element ([#129](https://github.com/davesnx/parseff/pull/129)) (@davesnx)
 - [FEATURE] Add `Push.parse_each`, a push parse of a stream of values in one fiber ([#111](https://github.com/davesnx/parseff/pull/111)) (@davesnx)
 - [FEATURE] Add `not_followed_by` ([#107](https://github.com/davesnx/parseff/pull/107)) (@davesnx)
 - [FEATURE] Pass a `Charset` to `take_while`, `skip_while`, `Slice.take_while` and `take_while_iter` as `?set` ([#104](https://github.com/davesnx/parseff/pull/104)) (@davesnx)
