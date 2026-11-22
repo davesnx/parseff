@@ -290,10 +290,12 @@ let diagnostics_create () =
   let t = { busy = Atomic.make false; rev = []; self = No_sink } in
   t.self <- Sink t;
   t
-let diagnostics_to_list t =
+let in_source_order entries =
   List.stable_sort
     (fun (a : diagnostic_entry) b -> Int.compare a.pos b.pos)
-    (List.rev t.rev)
+    entries
+
+let diagnostics_to_list t = in_source_order (List.rev t.rev)
 let diagnostics_length t = List.length t.rev
 let diagnostics_is_empty t = t.rev = []
 
@@ -6576,7 +6578,8 @@ let rec take_entries l k acc =
 
 let removed_entries st frame c =
   if st.diag == c.self then
-    take_entries c.rev (st.diag_len - State.frame_diag_len st frame) []
+    in_source_order
+      (take_entries c.rev (st.diag_len - State.frame_diag_len st frame) [])
   else
     []
 
