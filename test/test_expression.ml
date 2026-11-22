@@ -769,6 +769,34 @@ let test_streaming_window () =
         Parseff.error_message e
     )
 
+let test_committed_long_chains () =
+  let op c f () =
+    ignore (Parseff.char c);
+    Parseff.commit ();
+    f
+  in
+  let stream table input =
+    match
+      Parseff.Source.parse ~backtrack_window:64 (chunked_source input)
+        (fun () -> Parseff.expression ~operand:digit_value table
+      )
+    with
+    | Ok n ->
+        string_of_int n
+    | Error e ->
+        Parseff.error_message e
+  in
+  let ones sep = String.concat sep (List.init 2_000 (fun _ -> "1")) in
+  Alcotest.(check string)
+    "infix_right chain" "2000"
+    (stream Parseff.[ [ infix_right (op '^' ( + )) ] ] (ones "^"));
+  Alcotest.(check string)
+    "nested infix_left chain" "2001"
+    (stream
+       Parseff.[ [ infix_left (op '+' ( + )) ]; [ infix_left (op '*' ( + )) ] ]
+       ("1+" ^ ones "*")
+    )
+
 module Doc_example = struct
   open Parseff
 
@@ -1805,6 +1833,8 @@ let () =
           test_case "shared prefix across levels" `Quick
             test_shared_prefix_levels;
           test_case "streaming window" `Quick test_streaming_window;
+          test_case "committed long chains, streaming" `Quick
+            test_committed_long_chains;
           test_case "doc example" `Quick test_doc_example;
           test_case "guide example" `Quick test_guide_example;
         ]
