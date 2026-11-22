@@ -225,8 +225,8 @@ module Diagnostics : sig
   val create : unit -> t
 
   val to_list : t -> entry list
-  (** Diagnostics in emission order. Readable after the parse on both [Ok] and
-      [Error]. *)
+  (** Diagnostics in source order by [pos]; entries at the same [pos] keep their
+      emission order. Readable after the parse on both [Ok] and [Error]. *)
 
   val length : t -> int
   val is_empty : t -> bool

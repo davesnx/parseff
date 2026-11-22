@@ -641,7 +641,7 @@ let test_sync_before_element () =
     "value" "Ok a_"
     (show_result (fun l -> String.of_seq (List.to_seq l)) r);
   Alcotest.check errs "errors"
-    [ (4, "expected ')', found ';'"); (2, "expected ',', found '('") ]
+    [ (2, "expected ',', found '('"); (4, "expected ')', found ';'") ]
     (entries d)
 
 type item = Num of int | Sum of int * int | Gap
@@ -701,7 +701,7 @@ let test_recover_in_element () =
   check "[1, (2 + ?), 4]" ("Ok 1,_,4", [ (9, "expected integer, found '?'") ]);
   check "[1 (2 + ?)]"
     ( "Ok 1,_",
-      [ (8, "expected integer, found '?'"); (3, "expected ',', found '('") ]
+      [ (3, "expected ',', found '('"); (8, "expected integer, found '?'") ]
     )
 
 let test_list_in_or_branch () =
@@ -1172,10 +1172,11 @@ let test_trace_order () =
   in
   Alcotest.(check string) "value" "Ok 1!" (show_result Fun.id r);
   Alcotest.check errs "entries"
-    [ (4, "expected ';', found ')'"); (3, "expected ',', found 'x'") ]
+    [ (3, "expected ',', found 'x'"); (4, "expected ';', found ')'") ]
     (entries d);
   Alcotest.(check (list string))
-    "the event of the inner recover, then one event for each entry, in order"
+    "the event of the inner recover, then one event for each entry, in \
+     emission order"
     [
       "expected digit, found 'x'";
       "expected ';', found ')'";

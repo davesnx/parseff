@@ -1166,7 +1166,7 @@ let test_warn_range () =
     );
   Alcotest.(check (list (triple string int int)))
     "ranges"
-    [ ("here", 3, 3); ("from", 1, 3); ("upto", 3, 5); ("swapped", 1, 5) ]
+    [ ("from", 1, 3); ("swapped", 1, 5); ("here", 3, 3); ("upto", 3, 5) ]
     (List.map
        (fun ({ pos; value } : Parseff.Diagnostics.entry) ->
          Alcotest.(check int) "pos is the range start" value.range.start pos;
@@ -1358,6 +1358,29 @@ let test_warn_pos_nonzero () =
         "diagnostics"
         [ (5, "at-five") ]
         got
+  | Error _ ->
+      Alcotest.fail "Expected success"
+
+let test_diagnostics_in_source_order () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  let outcome =
+    Parseff.parse ~diagnostics "abcd" (fun () ->
+        Parseff.literal "abcd";
+        Parseff.warn ~from:3 (Warning.W "third");
+        Parseff.warn ~from:1 (Warning.W "first");
+        Parseff.warn ~from:2 (Warning.W "same-a");
+        Parseff.warn ~from:2 (Warning.W "same-b");
+        Parseff.warn ~from:0 (Warning.W "zero")
+    )
+  in
+  match outcome with
+  | Ok () ->
+      Alcotest.(check (list (pair int string)))
+        "diagnostics"
+        [
+          (0, "zero"); (1, "first"); (2, "same-a"); (2, "same-b"); (3, "third");
+        ]
+        (diag_list diagnostics)
   | Error _ ->
       Alcotest.fail "Expected success"
 
@@ -2342,6 +2365,8 @@ let () =
           test_case "preserves end_of_input semantics" `Quick
             test_parse_consume_all_preserves_end_of_input_semantics;
           test_case "warn after the position" `Quick test_warn_pos_nonzero;
+          test_case "source order, stable at equal positions" `Quick
+            test_diagnostics_in_source_order;
           test_case "warn without a collector" `Quick
             test_warn_without_collector;
           test_case "warning next to a recovered error" `Quick

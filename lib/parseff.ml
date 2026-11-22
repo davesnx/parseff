@@ -290,7 +290,10 @@ let diagnostics_create () =
   let t = { busy = Atomic.make false; rev = []; self = No_sink } in
   t.self <- Sink t;
   t
-let diagnostics_to_list t = List.rev t.rev
+let diagnostics_to_list t =
+  List.stable_sort
+    (fun (a : diagnostic_entry) b -> Int.compare a.pos b.pos)
+    (List.rev t.rev)
 let diagnostics_length t = List.length t.rev
 let diagnostics_is_empty t = t.rev = []
 
