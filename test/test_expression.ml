@@ -239,6 +239,69 @@ let test_commit_in_operator () =
     "committed fails, fold_left" "Error@2 expected digit or \"(\", found 'x'"
     (partial_hand (committed "+") "1+x")
 
+let test_commit_in_nested_token () =
+  let run outer input =
+    let d = Parseff.Diagnostics.create () in
+    let cell = Parseff.Ref.create 0 in
+    let infix () =
+      ignore (Parseff.char 'a');
+      Parseff.Ref.set cell 1;
+      Parseff.warn (Warning.W "outer");
+      fun a b -> "(" ^ a ^ "+" ^ b ^ ")"
+    in
+    let committed () =
+      ignore (Parseff.char 'y');
+      Parseff.commit ();
+      ignore (Parseff.char 'c');
+      fun a b -> "(" ^ a ^ "*" ^ b ^ ")"
+    in
+    let table =
+      Parseff.
+        [
+          [
+            outer infix;
+            postfix (fun () ->
+                ignore (char 'a');
+                fun a -> "(" ^ a ^ "!)"
+            );
+          ];
+          [ infix_left committed ];
+        ]
+    in
+    let p () =
+      let e =
+        Parseff.expression
+          ~operand:(fun () -> String.make 1 (Parseff.char 'x'))
+          table
+      in
+      e ^ "@" ^ string_of_int (Parseff.position ())
+    in
+    let outcome r =
+      Printf.sprintf "%s, %d notes, ref %d" (show r)
+        (Parseff.Diagnostics.length d)
+        (Parseff.Ref.get cell)
+    in
+    let parsed =
+      outcome (Parseff.parse ~diagnostics:d ~consume:`Partial input p)
+    in
+    Parseff.Diagnostics.clear d;
+    let streamed =
+      outcome
+        (Parseff.Source.parse ~diagnostics:d ~consume:`Partial
+           (chunked_source input) p
+        )
+    in
+    (parsed, streamed)
+  in
+  List.iter
+    (fun (name, outer) ->
+      let parsed, streamed = run outer "xaxy" in
+      Alcotest.(check string)
+        (name ^ ", parse") "Ok (x!)@2, 0 notes, ref 0" parsed;
+      Alcotest.(check string) (name ^ ", Source.parse") parsed streamed
+    )
+    [ ("infix_left", Parseff.infix_left); ("infix_right", Parseff.infix_right) ]
+
 let test_depth_limit () =
   let input = String.concat "" (List.init 200 (fun _ -> "-")) ^ "1" in
   match Parseff.parse input (expr with_neg) with
@@ -1719,6 +1782,8 @@ let () =
           test_case "commit in operator" `Quick test_commit_in_operator;
           test_case "depth limit" `Quick test_depth_limit;
           test_case "commit in operand" `Quick test_commit_in_operand;
+          test_case "commit in a nested token" `Quick
+            test_commit_in_nested_token;
           test_case "prefix without progress" `Quick test_prefix_no_progress;
           test_case "infix_right without progress" `Quick
             test_infix_right_no_progress;

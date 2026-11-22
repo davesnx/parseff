@@ -3971,11 +3971,20 @@ type ('a, 'k) expr_table = {
   mutable unary : 'a -> 'a;
 }
 
-type 'a expr_zero = {
-  mutable node : 'a prec_node;
-  right : bool;
-  mutable zero : bool;
-}
+type ('a, 'k) expr_node =
+  | Expr_base of { min : int }
+  | Expr_node of {
+      min : int;
+      lhs : 'a;
+      build : 'a -> 'a -> 'a;
+      op : ('a, 'k) operator;
+      hi : int;
+      below : ('a, 'k) expr_node;
+    }
+
+let expr_root = Expr_base { min = min_int }
+
+let[@inline] expr_min = function Expr_base b -> b.min | Expr_node n -> n.min
 
 let rec expr_scan st t frame start level hi = function
   | ops :: rest when level < hi ->
@@ -4052,56 +4061,59 @@ let expr_unwind st base =
     State.pop_rewind_frame st (st.frames_top - 1)
   done
 
-let[@inline] expr_with top value =
-  if prec_value top == value then
-    top
-  else
-    prec_with top value
+let expr_stop_at st = function
+  | Expr_node { op = Infix_right _; _ } ->
+      State.frame_pos st (st.frames_top - 2) = st.pos
+  | _ ->
+      false
 
-let expr_stop_at zeros top =
-  match zeros with z :: _ -> z.node == top && z.zero && z.right | [] -> false
+let rec expr_look st operand t base top value =
+  expr_band st operand t base top value (imax 0 (expr_min top)) max_int
 
-let rec expr_retarget top below = function
-  | [] ->
-      ()
-  | z :: zeros ->
-      if z.node == top then z.node <- below;
-      expr_retarget top below zeros
-
-let rec expr_mark = function
-  | [] ->
-      ()
-  | z :: zeros ->
-      z.zero <- false;
-      expr_mark zeros
-
-let rec expr_look st operand t base top value zeros =
-  expr_band st operand t base top value zeros (imax 0 (prec_min top)) max_int
-
-and expr_band st operand t base top value zeros low hi =
+and expr_band st operand t base top value low hi =
   let frame = st.frames_top - 1 in
   match expr_scan st t frame st.pos low hi (expr_drop low t.levels) with
   | op ->
       if op == expr_none then
-        expr_end st operand t base top value zeros
+        expr_end st operand t base top value
       else
-        expr_step st operand t base top value zeros hi op
+        expr_step st operand t base top value hi op
+  | exception Fail ->
+      expr_escape st operand t base top
   | exception exn ->
       expr_unwind st base;
       raise exn
 
-and expr_step st operand t base top value zeros hi op =
+and expr_escape st operand t base top =
+  match top with
+  | Expr_node n ->
+      State.pop_rewind_frame st (st.frames_top - 1);
+      let frame = st.frames_top - 1 in
+      if State.frame_committed st frame then
+        expr_escape st operand t base n.below
+      else if State.frame_recovered st frame then
+        expr_rerun st operand t base n.below n.lhs n.hi
+      else begin
+        restore_rewind_frame st frame;
+        let level = match n.op with Infix_right _ -> n.min | _ -> n.min - 1 in
+        expr_retry st operand t base n.below n.lhs n.hi level n.op
+      end
+  | Expr_base _ ->
+      expr_unwind st base;
+      raise_notrace Fail
+
+and expr_step st operand t base top value hi op =
   let frame = st.frames_top - 1 in
   let start = State.frame_pos st frame in
   match op with
   | Postfix _ ->
       if st.pos = start then begin
         restore_rewind_frame st frame;
-        expr_end st operand t base top value zeros
+        expr_end st operand t base top value
       end else
         begin match t.unary value with
         | value ->
-            expr_moved st operand t base top value zeros
+            expr_moved st operand t base top value
         | exception Fail ->
             expr_unwind st base;
             raise_notrace Prec_build
@@ -4112,17 +4124,15 @@ and expr_step st operand t base top value zeros hi op =
   | Infix_left _ | Infix_right _ -> (
       let level = t.found in
       let right = match op with Infix_right _ -> true | _ -> false in
-      if right && st.pos = start && expr_stop_at zeros top then begin
+      if right && st.pos = start && expr_stop_at st top then begin
         restore_rewind_frame st frame;
-        expr_end st operand t base top value zeros
+        expr_end st operand t base top value
       end else
         let build = t.binary in
         match operand () with
         | rhs ->
-            let below = expr_with top value in
-            if below != top && zeros != [] then expr_retarget top below zeros;
             let node =
-              Prec_node
+              Expr_node
                 {
                   min =
                     ( if right then
@@ -4130,48 +4140,44 @@ and expr_step st operand t base top value zeros hi op =
                       else
                         level + 1
                     );
-                  value = rhs;
+                  lhs = value;
                   build;
-                  below;
+                  op;
+                  hi;
+                  below = top;
                 }
             in
-            if st.pos = start then begin
-              ignore (State.push_rewind_frame st frame_repeat);
-              expr_look st operand t base node rhs
-                ({ node; right; zero = true } :: zeros)
-            end else
-              expr_moved st operand t base node rhs zeros
+            ignore (State.push_rewind_frame st frame_repeat);
+            expr_look st operand t base node rhs
         | exception Fail ->
             if State.frame_settled st frame then
-              if State.frame_committed st frame then begin
-                expr_unwind st base;
-                raise_notrace Fail
-              end else
-                expr_rerun st operand t base top value zeros hi
+              if State.frame_committed st frame then
+                expr_escape st operand t base top
+              else
+                expr_rerun st operand t base top value hi
             else begin
               restore_rewind_frame st frame;
-              expr_retry st operand t base top value zeros hi level op
+              expr_retry st operand t base top value hi level op
             end
         | exception exn ->
             expr_unwind st base;
             raise exn
     )
   | Prefix _ ->
-      expr_end st operand t base top value zeros
+      expr_end st operand t base top value
 
-and expr_rerun st operand t base top value zeros hi =
+and expr_rerun st operand t base top value hi =
   restore_rewind_frame st (st.frames_top - 1);
   State.clear_recovered st (st.frames_top - 1);
   without_recovery st (fun () ->
-      expr_band st operand t base top value zeros (imax 0 (prec_min top)) hi
+      expr_band st operand t base top value (imax 0 (expr_min top)) hi
   )
 
-and expr_moved st operand t base top value zeros =
-  expr_mark zeros;
+and expr_moved st operand t base top value =
   State.reset_frame st (st.frames_top - 1) frame_repeat;
-  expr_look st operand t base top value zeros
+  expr_look st operand t base top value
 
-and expr_retry st operand t base top value zeros hi level op =
+and expr_retry st operand t base top value hi level op =
   let frame = st.frames_top - 1 in
   match
     match expr_drop level t.levels with
@@ -4182,41 +4188,41 @@ and expr_retry st operand t base top value zeros hi level op =
   with
   | op ->
       if op == expr_none then
-        expr_end st operand t base top value zeros
+        expr_end st operand t base top value
       else
-        expr_step st operand t base top value zeros hi op
+        expr_step st operand t base top value hi op
+  | exception Fail ->
+      expr_escape st operand t base top
   | exception exn ->
       expr_unwind st base;
       raise exn
 
-and expr_end st operand t base top value zeros =
-  match (zeros, top) with
-  | z :: rest, Prec_node n when z.node == top ->
-      if z.zero then begin
-        let frame = st.frames_top - 1 in
+and expr_end st operand t base top value =
+  match top with
+  | Expr_node n ->
+      let frame = st.frames_top - 1 in
+      if State.frame_pos st (frame - 1) = st.pos then begin
         restore_rewind_frame st frame;
         State.pop_rewind_frame st frame;
         restore_rewind_frame st (st.frames_top - 1);
-        expr_end st operand t base n.below (prec_value n.below) rest
+        expr_end st operand t base n.below n.lhs
       end else
-        expr_reduce st operand t base top value rest true
-  | _, Prec_node _ ->
-      expr_reduce st operand t base top value zeros false
-  | _, Prec_base _ ->
+        expr_reduce st operand t base top value
+  | Expr_base _ ->
       let frame = st.frames_top - 1 in
       prec_base_stop st frame (State.frame_pos st frame) value
 
-and expr_reduce st operand t base top value zeros pop =
+and expr_reduce st operand t base top value =
   match top with
-  | Prec_base _ ->
-      expr_end st operand t base top value zeros
-  | Prec_node n -> (
-      match n.build (prec_value n.below) value with
+  | Expr_base _ ->
+      expr_end st operand t base top value
+  | Expr_node n -> (
+      match n.build n.lhs value with
       | value ->
-          if pop then State.pop_rewind_frame st (st.frames_top - 1);
+          State.pop_rewind_frame st (st.frames_top - 1);
           State.reset_frame st (st.frames_top - 1) frame_repeat;
-          expr_band st operand t base n.below value zeros
-            (imax 0 (prec_min n.below))
+          expr_band st operand t base n.below value
+            (imax 0 (expr_min n.below))
             n.min
       | exception Fail ->
           expr_unwind st base;
@@ -4236,8 +4242,12 @@ let expr_run st min operand t =
         prec_base_stop st base (State.frame_pos st base) value
       else
         expr_step st operand t base
-          (Prec_base { min; value })
-          value [] max_int op
+          ( if min = min_int then
+              expr_root
+            else
+              Expr_base { min }
+          )
+          value max_int op
   | exception exn ->
       expr_unwind st base;
       raise exn
