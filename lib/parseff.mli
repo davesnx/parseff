@@ -1952,14 +1952,12 @@ module Push : sig
     ?trace:(trace_event -> unit) ->
     (unit -> 'a) ->
     'a t
-  [@@alert unstable "This value can change in any minor release."]
   (** [parse parser] creates a push parse that starts on the first {!Push.feed}
       or {!Push.finish}. Options match {!Source.parse} (without [~consume]).
       [~diagnostics] remains reserved from the first {!Push.feed} until the
       parse ends. *)
 
   val feed : 'a t -> string -> 'a step
-  [@@alert unstable "This value can change in any minor release."]
   (** [feed t chunk] supplies [chunk] and runs until the parser needs more input
       or completes. An empty chunk adds no input: it returns [Await] unless the
       parser completes without more bytes. [chunk] must not be mutated while in
@@ -1971,7 +1969,6 @@ module Push : sig
       push parse. *)
 
   val finish : 'a t -> ('a * string, error) Stdlib.result
-  [@@alert unstable "This value can change in any minor release."]
   (** [finish t] signals EOF and runs [t] to completion ([finish] with no prior
       chunks parses [""]). Dropping an unfinished [t] without calling [finish]
       leaves its {!Ref} cells and [~diagnostics] collector locked and runs no

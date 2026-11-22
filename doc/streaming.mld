@@ -244,7 +244,7 @@ end
 ]}
 
 {!val:Parseff.Push.parse}, {!val:Parseff.Push.feed}, and
-{!val:Parseff.Push.finish} (unstable) parse a single value and return any
+{!val:Parseff.Push.finish} parse a single value and return any
 leftover bytes in [Done (Ok (value, leftover))]. End your parser with
 {!val:Parseff.end_of_input} if you want to require full consumption. Always
 call [Push.finish] on an unfinished parse if you passed [~diagnostics] or
