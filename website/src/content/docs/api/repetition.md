@@ -20,7 +20,7 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
 ```
 
 - `~at_least` requires at least that many matches.
-- `~at_most` caps the count (unstable: may change in 1\.x), failing with `Limit_exceeded { limit = at_most }` if another match consumes input.
+- `~at_most` caps the count (unstable: may change in any minor release), failing with `Limit_exceeded { limit = at_most }` if another match consumes input.
 ```ocaml
 let digits () = Parseff.many Parseff.digit
 let digits1 () = Parseff.many ~at_least:1 Parseff.digit
@@ -100,7 +100,7 @@ let brackets p =
 
 ### `many_iter` and `sep_by_iter`
 
-`Parseff.many_iter` and `Parseff.sep_by_iter` (unstable: may change in 1\.x) behave like `many` and `sep_by` without building a list, passing each parsed element directly to a callback `f`.
+`Parseff.many_iter` and `Parseff.sep_by_iter` (unstable: may change in any minor release) behave like `many` and `sep_by` without building a list, passing each parsed element directly to a callback `f`.
 
 ```ocaml
 val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit

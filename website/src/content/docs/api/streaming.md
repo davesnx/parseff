@@ -221,7 +221,7 @@ module Push : sig
 end
 ```
 
-`Parseff.Push.parse`, `Parseff.Push.feed`, and `Parseff.Push.finish` (unstable) parse a single value and return any leftover bytes in `Done (Ok (value, leftover))`. End your parser with `Parseff.end_of_input` if you want to require full consumption. Always call `Push.finish` on an unfinished parse if you passed `~diagnostics` or mutated `Parseff.Ref` cells so those resources are released.
+`Parseff.Push.parse`, `Parseff.Push.feed`, and `Parseff.Push.finish` parse a single value and return any leftover bytes in `Done (Ok (value, leftover))`. End your parser with `Parseff.end_of_input` if you want to require full consumption. Always call `Push.finish` on an unfinished parse if you passed `~diagnostics` or mutated `Parseff.Ref` cells so those resources are released.
 
 `Parseff.Push.parse_each` parses a stream of values on a single effect fiber (the push counterpart of `Parseff.Source.parse_each`). Push `Some chunk` for data and `None` at EOF:
 

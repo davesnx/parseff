@@ -30,11 +30,17 @@
 
     {1 Stability}
 
-    1.x releases preserve backwards compatibility except for items marked with
+    Before 1.0, any minor release (such as 0.6 to 0.7) may break any part of the
+    API. [CHANGES.md] marks each break with [[BREAKING]].
+
+    From 1.0, releases keep backwards compatibility except for items marked with
     the [unstable] alert and the [~at_most] arguments on {!val:take_while},
-    {!val:take_until}, and {!val:many}. Enable [-alert +unstable] in your dune
-    [flags] to audit unstable uses, or silence it per file with
-    [[@@@alert "-unstable"]].
+    {!val:take_until}, and {!val:many}. Those may change in any minor release,
+    before or after 1.0.
+
+    The compiler does not show the [unstable] alert by default. Add
+    [-alert +unstable] to your dune [flags] to see each unstable use, and
+    silence it per file with [[@@@alert "-unstable"]].
 
     1.x releases may add constructors to {!type:trace_event} and fields to
     {!type:location}, {!type:context}, and {!type:error} (match those records
@@ -292,7 +298,7 @@ type trace_event = private ..
     appears as a new [Enter] at an earlier byte offset. All offsets are absolute
     byte positions.
 
-    Match with a catch-all [_] case: 1.x releases may add new events. *)
+    Match with a catch-all [_] case: a minor release may add new events. *)
 
 type trace_event +=
   private
@@ -419,8 +425,8 @@ val take_while :
     - [~at_least] requires at least that many matching bytes, failing at the end
       of the matched prefix with [expected <label>] (default
       ["at least n characters"]).
-    - [~at_most] caps the run length (unstable: may change in 1.x). Reading a
-      [(at_most + 1)]-th matching byte fails with
+    - [~at_most] caps the run length (unstable: may change in any minor
+      release). Reading a [(at_most + 1)]-th matching byte fails with
       [Limit_exceeded { limit = at_most }] covering those [at_most + 1] bytes.
       In streaming, those bytes must fit in [~backtrack_window]. Call {!commit}
       beforehand inside an active frame if the limit error must win over earlier
@@ -449,9 +455,9 @@ val take_until : ?at_most:int -> ?label:string -> string -> string
 
     - Fails at end of input with [expected "<terminator>"] (or
       [expected <label>]) if [terminator] never appears.
-    - [~at_most] caps the returned byte count (unstable: may change in 1.x).
-      Fails with [Limit_exceeded { limit = at_most }] if [terminator] does not
-      start within [at_most + 1] bytes (reads at most
+    - [~at_most] caps the returned byte count (unstable: may change in any minor
+      release). Fails with [Limit_exceeded { limit = at_most }] if [terminator]
+      does not start within [at_most + 1] bytes (reads at most
       [at_most + String.length terminator] bytes; if input ends earlier, fails
       as unterminated).
     - In streaming, the result must fit in [~backtrack_window].
@@ -1231,12 +1237,12 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
     the matched values.
 
     - [~at_least] requires at least that many matches.
-    - [~at_most] caps the number of matches (unstable: may change in 1.x). After
-      [at_most] matches, runs [parser] once more; if it succeeds and consumes
-      input, fails with [Limit_exceeded { limit = at_most }] covering the extra
-      item. Follows furthest-failure selection like {!take_while}; call
-      {!commit} inside [parser] once decided if abandoned branches shouldn't
-      override the limit.
+    - [~at_most] caps the number of matches (unstable: may change in any minor
+      release). After [at_most] matches, runs [parser] once more; if it succeeds
+      and consumes input, fails with [Limit_exceeded { limit = at_most }]
+      covering the extra item. Follows furthest-failure selection like
+      {!take_while}; call {!commit} inside [parser] once decided if abandoned
+      branches shouldn't override the limit.
     - Raises [Invalid_argument] if [at_most < 0] or [at_most < at_least].
     - For error recovery inside a delimited loop, use {!list} with [~close] (see
       {!section-recovery}).
@@ -1272,7 +1278,7 @@ val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
     followed by [separator]. Stops on a zero-width iteration like {!many}. *)
 
 val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
-[@@alert unstable "This value can change in a 1.x release."]
+[@@alert unstable "This value can change in any minor release."]
 (** [many_iter ?at_least parser f] runs [parser] like {!many} without building a
     list, passing each value to [f] in order.
 
@@ -1323,7 +1329,7 @@ val sep_by_iter :
   (unit -> 'b) ->
   ('a -> unit) ->
   unit
-[@@alert unstable "This value can change in a 1.x release."]
+[@@alert unstable "This value can change in any minor release."]
 (** [sep_by_iter ?at_least ?trailing element separator f] runs like {!sep_by}
     without building a list, passing each [element] to [f]. Sealing, callback,
     zero-width, and [Invalid_argument] rules match {!many_iter}; a failure in
@@ -1690,7 +1696,7 @@ val take : int -> string
     [n < 0] (an ordinary [Expected] failure, never raising). *)
 
 val within : int -> (unit -> 'a) -> 'a
-[@@alert unstable "This value can change in a 1.x release."]
+[@@alert unstable "This value can change in any minor release."]
 (** [within n parser] runs [parser] bounded to the next [n] bytes (such as a
     length-prefixed frame payload).
 
@@ -1713,7 +1719,7 @@ val within : int -> (unit -> 'a) -> 'a
     ]} *)
 
 val take_iter : int -> (Slice.t -> unit) -> unit
-[@@alert unstable "This value can change in a 1.x release."]
+[@@alert unstable "This value can change in any minor release."]
 (** [take_iter n f] reads [n] bytes like {!take} and passes them to [f] as
     non-empty {!Slice.t} pieces in order without holding all [n] bytes in memory
     (under {!Source.parse}, [n] can exceed [~backtrack_window], except inside
@@ -1739,7 +1745,7 @@ val take_iter : int -> (Slice.t -> unit) -> unit
 
 val take_while_iter :
   ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
-[@@alert unstable "This value can change in a 1.x release."]
+[@@alert unstable "This value can change in any minor release."]
 (** [take_while_iter ?set pred f] reads bytes while [pred] holds (or using
     [~set], as in {!take_while}) and passes them to [f] in pieces like
     {!take_iter}. Never fails; does not call [f] if the first byte does not
@@ -1934,18 +1940,24 @@ module Push : sig
               match Push.feed t chunk with
               | Push.Await ->
                   go t rest
-              | Push.Done r ->
-                  r
+              | Push.Done (Ok (s, leftover)) ->
+                  Ok (s, String.concat "" (leftover :: rest))
+              | Push.Done (Error _ as e) ->
+                  e
             )
         in
         go (Push.parse line) chunks
+
+      let () = assert (lines [ "ab"; "c\nd"; "e"; "f" ] = Ok ("abc", "def"))
       ]} *)
 
   type 'a step =
     | Await  (** More input required: call {!Push.feed} or {!Push.finish}. *)
     | Done of ('a * string, error) Stdlib.result
         (** Completed with [Ok (value, leftover)] (pass [leftover] to the next
-            parse in pipelined protocols) or [Error err]. *)
+            parse in pipelined protocols) or [Error err]. [leftover] holds only
+            the unread bytes of chunks already fed; chunks not yet fed follow
+            it. *)
 
   val parse :
     ?max_depth:int ->
@@ -1954,14 +1966,12 @@ module Push : sig
     ?trace:(trace_event -> unit) ->
     (unit -> 'a) ->
     'a t
-  [@@alert unstable "This value can change in a 1.x release."]
   (** [parse parser] creates a push parse that starts on the first {!Push.feed}
       or {!Push.finish}. Options match {!Source.parse} (without [~consume]).
       [~diagnostics] remains reserved from the first {!Push.feed} until the
       parse ends. *)
 
   val feed : 'a t -> string -> 'a step
-  [@@alert unstable "This value can change in a 1.x release."]
   (** [feed t chunk] supplies [chunk] and runs until the parser needs more input
       or completes. An empty chunk adds no input: it returns [Await] unless the
       parser completes without more bytes. [chunk] must not be mutated while in
@@ -1973,7 +1983,6 @@ module Push : sig
       push parse. *)
 
   val finish : 'a t -> ('a * string, error) Stdlib.result
-  [@@alert unstable "This value can change in a 1.x release."]
   (** [finish t] signals EOF and runs [t] to completion ([finish] with no prior
       chunks parses [""]). Dropping an unfinished [t] without calling [finish]
       leaves its {!Ref} cells and [~diagnostics] collector locked and runs no

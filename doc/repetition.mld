@@ -13,7 +13,7 @@ consumes no input (dropping that zero-width result), returning the matched list.
 {@ocaml skip[val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list]}
 
 - [~at_least] requires at least that many matches.
-- [~at_most] caps the count (unstable: may change in 1.x), failing with
+- [~at_most] caps the count (unstable: may change in any minor release), failing with
   [Limit_exceeded { limit = at_most }] if another match consumes input.
 
 {@ocaml[
@@ -103,7 +103,7 @@ let brackets p =
 {2 [many_iter] and [sep_by_iter]}
 
 {!val:Parseff.many_iter} and {!val:Parseff.sep_by_iter} (unstable: may change
-in 1.x) behave like [many] and [sep_by] without building a list, passing each
+in any minor release) behave like [many] and [sep_by] without building a list, passing each
 parsed element directly to a callback [f].
 
 {@ocaml skip[

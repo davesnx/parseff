@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 type value =
   | Unit
   | Chr of char
