@@ -1481,8 +1481,42 @@ let test_recover_record_order () =
     )
   in
   Alcotest.(check string) "value" "Ok" (show_error r);
-  Alcotest.check entry_list "in the order recorded"
-    [ (1, (1, "first")); (0, (0, "second")) ]
+  Alcotest.check entry_list "in source order"
+    [ (0, (0, "second")); (1, (1, "first")) ]
+    !seen
+
+let test_recover_keep_source_order () =
+  let d = Diagnostics.create () in
+  let seen = ref [] in
+  let r =
+    parse ~diagnostics:d ~consume:`Partial "abcd?" (fun () ->
+        recover
+          ~keep:(fun _ inner ->
+            seen := show_entries inner;
+            []
+          )
+          ~sync:(fun () -> ())
+          (fun () ->
+            ignore (take_while (fun c -> c <> '?'));
+            warn ~from:3 (Warning.W "third");
+            warn ~from:1 (Warning.W "first");
+            warn ~from:2 (Warning.W "same-a");
+            warn ~from:2 (Warning.W "same-b");
+            warn ~from:0 (Warning.W "zero");
+            ignore (char '!')
+          )
+          ignore
+    )
+  in
+  Alcotest.(check string) "value" "Ok" (show_error r);
+  Alcotest.check entry_list "source order, stable at equal positions"
+    [
+      (0, (0, "zero"));
+      (1, (1, "first"));
+      (2, (2, "same-a"));
+      (2, (2, "same-b"));
+      (3, (3, "third"));
+    ]
     !seen
 
 let test_recover_record_release () =
@@ -2576,6 +2610,7 @@ let () =
           test_case "keep: scope" `Quick test_recover_record_scope;
           test_case "keep" `Quick test_recover_record;
           test_case "keep: order" `Quick test_recover_record_order;
+          test_case "keep: source order" `Quick test_recover_keep_source_order;
           test_case "keep: release" `Quick test_recover_record_release;
           test_case "keep: nested recover" `Quick test_recover_record_nested;
           test_case "keep: not called on success" `Quick

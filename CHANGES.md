@@ -1,5 +1,6 @@
 ## Unreleased
 
+- [BREAKING] Read diagnostics in source order: `Diagnostics.to_list` and the `inner` list given to `~keep` sort by `pos`, and entries at the same position keep the order they were recorded in ([#128](https://github.com/davesnx/parseff/pull/128)) (@davesnx)
 - [BREAKING] Name every runner `parse`: `parse_source` is `Source.parse`, and the push runners move into the new module `Push` ([#113](https://github.com/davesnx/parseff/pull/113)) (@davesnx)
 - [BREAKING] Polish the API: combinators run with no trailing `()`, spans move into `Slice`, `fold_left` and `fold_right` take `?otherwise` first, and `literal` takes `?case_sensitive` ([#112](https://github.com/davesnx/parseff/pull/112)) (@davesnx)
 - [BREAKING] Change the error and recovery API before 1.0: `recover`, `require` and `list` use the collector of the runner, `Limit_exceeded` is an `error_kind`, and `location.col` is `byte_col` ([#110](https://github.com/davesnx/parseff/pull/110)) (@davesnx)

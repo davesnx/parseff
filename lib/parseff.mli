@@ -225,8 +225,8 @@ module Diagnostics : sig
   val create : unit -> t
 
   val to_list : t -> entry list
-  (** Diagnostics in emission order. Readable after the parse on both [Ok] and
-      [Error]. *)
+  (** Diagnostics in source order by [pos]; entries at the same [pos] keep their
+      emission order. Readable after the parse on both [Ok] and [Error]. *)
 
   val length : t -> int
   val is_empty : t -> bool
@@ -987,10 +987,10 @@ val recover :
       end of input.
     - {b [~keep].} By default, inner diagnostics recorded by [parser] before it
       failed are discarded and only [e] is recorded. Pass [~keep] (a pure
-      function receiving [entry] and the discarded [inner] list in emission
-      order) to return the exact entries to record. [keep] may be called more
-      than once for the same error inside a loop; exceptions raised by [keep]
-      escape the parse.
+      function receiving [entry] and the discarded [inner] list in source order,
+      like {!Diagnostics.to_list}) to return the exact entries to record. [keep]
+      may be called more than once for the same error inside a loop; exceptions
+      raised by [keep] escape the parse.
     - {b [~release] and [~contexts]} are forwarded to {!capture}; with
       [~release:true], [sync] starts from the last release point and [inner]
       holds only entries recorded after it.
