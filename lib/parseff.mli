@@ -1436,6 +1436,10 @@ val expression :
       most once per operand. If a token parser or its right operand fails, tries
       the next operator unless the token parser called {!commit}. List longer
       postfix tokens before shorter prefixes (e.g. [!=] before [!]).
+    - In streaming, a source keeps the input from each open operator whose token
+      parser did not call {!commit}, so a long nested or {!infix_right} chain
+      needs a [~backtrack_window] as large as the chain. A token parser that
+      calls {!commit} after its symbol releases that input.
     - Stops a group when an operator and its right operand (including operators
       binding to it) consume no input.
     - Tries {!prefix} operators in table order before [operand]; each prefix
