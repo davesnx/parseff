@@ -57,7 +57,7 @@ The failure that stops a repetition loop is still recorded for furthest-failure 
 
 ### `sep_by` and `end_by`
 
-`Parseff.sep_by` parses zero or more elements separated by a separator (discarding separator results). `Parseff.end_by` expects the separator *after* every element, including the last. Pass `~at_least:1` to require at least one element; both stop on zero-width steps.
+`Parseff.sep_by` parses zero or more elements separated by a separator (discarding separator results). `Parseff.end_by` expects the separator *after* every element, including the last. Pass `~at_least:1` to require at least one element; both stop on zero-width steps. An element that matches empty input also matches after the last separator, so rows separated by line ends give an extra empty row after a final line end, unless the row fails at end of input with `Parseff.not_followed_by` `Parseff.end_of_input`.
 
 ```ocaml
 val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
