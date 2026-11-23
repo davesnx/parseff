@@ -239,6 +239,41 @@ let test_commit_in_operator () =
     "committed fails, fold_left" "Error@2 expected digit or \"(\", found 'x'"
     (partial_hand (committed "+") "1+x")
 
+let test_duplicate_operator () =
+  let calls = ref 0 in
+  let plus () =
+    incr calls;
+    if !calls > 100 then failwith "plus runs without end";
+    bin "+" ()
+  in
+  let star () =
+    tok "*" ();
+    Parseff.commit ();
+    tok "c" ();
+    fun a b -> "(" ^ a ^ "*c" ^ b ^ ")"
+  in
+  let partial table input =
+    calls := 0;
+    show
+      (Parseff.parse ~consume:`Partial input (fun () ->
+           let e = expr table () in
+           e ^ "@" ^ string_of_int (Parseff.position ())
+       )
+      )
+  in
+  let plus = Parseff.infix_left plus in
+  let both = [ [ plus; plus ] ] in
+  let with_star = both @ Parseff.[ [ infix_left star ] ] in
+  Alcotest.(check string) "operand fails" "Ok 1@1" (partial both "1+x");
+  Alcotest.(check string)
+    "committed operator fails" "Ok 1@1" (partial with_star "1+1*");
+  Alcotest.(check string)
+    "committed operator, operand fails" "Ok 1@1"
+    (partial with_star "1+1*c");
+  Alcotest.(check string)
+    "committed operator succeeds" "Ok (1+(1*c2))@6"
+    (partial with_star "1+1*c2")
+
 let test_commit_in_nested_token () =
   let run outer input =
     let d = Parseff.Diagnostics.create () in
@@ -1808,6 +1843,8 @@ let () =
           test_case "inside many" `Quick test_inside_many;
           test_case "inside look_ahead" `Quick test_inside_look_ahead;
           test_case "commit in operator" `Quick test_commit_in_operator;
+          test_case "duplicate operator in a level" `Quick
+            test_duplicate_operator;
           test_case "depth limit" `Quick test_depth_limit;
           test_case "commit in operand" `Quick test_commit_in_operand;
           test_case "commit in a nested token" `Quick

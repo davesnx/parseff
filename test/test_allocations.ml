@@ -559,7 +559,7 @@ let test_operators () =
     [
       ("expression", 46., "1", fun () -> Parseff.expression ~operand:digit table);
       ( "expression",
-        62.,
+        60.,
         "1+2+3",
         fun () -> Parseff.expression ~operand:digit table
       );
