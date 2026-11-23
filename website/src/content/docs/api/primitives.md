@@ -157,7 +157,7 @@ val end_of_input : unit -> unit
 
 ### `position`, `with_range`, and `location`
 
-- `Parseff.position` returns the current byte offset from the start of the input.
+- `Parseff.position` returns the current byte offset from the start of the input. Under `Parseff.Source.parse` it counts from where the parse starts in the source; add `Parseff.Source.offset`, read before the parse, to get an absolute offset.
 - `Parseff.with_range` runs a parser and returns its result alongside the `Parseff.range` of bytes it consumed.
 - `Parseff.location` returns a 1-based `Parseff.location` record (`byte_col` counts bytes, not Unicode code points). The line index is built lazily on first call. Outside a parser, use `Parseff.location_of_position`.
 ```ocaml

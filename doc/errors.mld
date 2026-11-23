@@ -197,6 +197,9 @@ Formatting details:
   to [location.byte_col], and contexts in that prefix show [from byte N]). The
   excerpt prefixes [...] and places carets only under retained bytes. Pass
   [~source] if you have the full input.
+- {b Sources}: line and column restart at each {!val:Parseff.Source.parse}, so
+  for its errors pass as [~source] the input from
+  {!val:Parseff.Source.offset}, read before the parse, onward.
 - {b Contexts}: prints up to 5 innermost [* while parsing] lines (plus one more
   rather than hiding a single line). Delimited constructs spanning lines render
   the [╭─╯] / [│] / [╰──^] bar, collapsing multi-line gaps to [...].

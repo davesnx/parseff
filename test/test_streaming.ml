@@ -2346,6 +2346,508 @@ let test_read_ahead_discontinue () =
   in
   Alcotest.(check (result string reject)) "rest" (Ok "1234 x") result
 
+let split n s =
+  List.init
+    ((String.length s + n - 1) / n)
+    (fun i -> String.sub s (i * n) (min n (String.length s - (i * n))))
+
+let pull xs =
+  let r = ref xs in
+  fun () ->
+    match !r with
+    | [] ->
+        None
+    | x :: rest ->
+        r := rest;
+        Some x
+
+let with_channel input f =
+  let path = Filename.temp_file "parseff" ".txt" in
+  Out_channel.with_open_bin path (fun oc -> output_string oc input);
+  Fun.protect
+    ~finally:(fun () -> Sys.remove path)
+    (fun () -> In_channel.with_open_bin path f)
+
+let keep_sizes = [ 1; 3; 7; 64; 65536 ]
+
+let sources n input k =
+  let bigstring s =
+    let b = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 64 in
+    String.iteri (fun i c -> b.{i + 3} <- c) s;
+    (b, 3, String.length s)
+  in
+  k "of_string" (Parseff.Source.of_string input);
+  k "of_function" (chunked_source ~chunk_size:n input);
+  k "of_chunks" (Parseff.Source.of_chunks (pull (split n input)));
+  k "of_seq" (Parseff.Source.of_seq (List.to_seq (split n input)));
+  k "of_bigstring_chunks"
+    (Parseff.Source.of_bigstring_chunks
+       (pull (List.map bigstring (split (min n 61) input)))
+    );
+  with_channel input (fun ic ->
+      k "of_channel"
+        (Parseff.Source.of_channel ?buf_size:Buf_size_env.buf_size ic)
+  )
+
+let head_input = "GET / HTTP/1.1\r\nHost: a\r\n\r\nBODY and more"
+
+let head () =
+  let line () =
+    let l = Parseff.take_while (fun c -> c <> '\r') in
+    Parseff.literal "\r\n";
+    l
+  in
+  let request = line () in
+  let headers =
+    Parseff.many ~at_least:1 (fun () ->
+        let l = line () in
+        if l = "" then
+          Parseff.fail "end of headers"
+        else
+          l
+    )
+  in
+  Parseff.literal "\r\n";
+  (request, headers)
+
+let rest () = Parseff.take_while (fun _ -> true)
+
+let ok what = function
+  | Ok v ->
+      v
+  | Error e ->
+      Alcotest.failf "%s: %s" what (Parseff.render_error e)
+
+let test_next_parse_starts_with_unread_bytes () =
+  List.iter
+    (fun n ->
+      sources n head_input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let h = ok what (Parseff.Source.parse ~consume:`Partial src head) in
+          Alcotest.(check (pair string (list string)))
+            (what ^ " head")
+            ("GET / HTTP/1.1", [ "Host: a" ])
+            h;
+          Alcotest.(check string)
+            (what ^ " body") "BODY and more"
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let test_three_parses_on_one_source () =
+  let word () =
+    let w = Parseff.take_while ~at_least:1 (fun c -> c <> ' ') in
+    let _ = Parseff.char ' ' in
+    w
+  in
+  List.iter
+    (fun n ->
+      sources n "one two three" (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let a = ok what (Parseff.Source.parse ~consume:`Partial src word) in
+          let b = ok what (Parseff.Source.parse ~consume:`Partial src word) in
+          let c = ok what (Parseff.Source.parse src rest) in
+          Alcotest.(check (list string))
+            what [ "one"; "two"; "three" ] [ a; b; c ];
+          Alcotest.(check string)
+            (what ^ " after `All") ""
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let digits_line () =
+  let d = Parseff.take_while ~at_least:1 (fun c -> c >= '0' && c <= '9') in
+  let _ = Parseff.char '\n' in
+  d
+
+let test_parse_each_keeps_unread_bytes () =
+  List.iter
+    (fun n ->
+      let input = "1\n22\n333\n4444\n55555\ntail" in
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          Alcotest.(check string)
+            (what ^ " first parse") "1"
+            (ok what (Parseff.Source.parse ~consume:`Partial src digits_line));
+          let firsts =
+            Parseff.Source.parse_each src digits_line
+            |> Seq.take 2
+            |> Seq.map (ok what)
+            |> List.of_seq
+          in
+          Alcotest.(check (list string))
+            (what ^ " first two") [ "22"; "333" ] firsts;
+          let next =
+            Parseff.Source.parse_each src digits_line
+            |> Seq.take 2
+            |> Seq.map (ok what)
+            |> List.of_seq
+          in
+          Alcotest.(check (list string))
+            (what ^ " next") [ "4444"; "55555" ] next;
+          Alcotest.(check string)
+            (what ^ " rest") "tail"
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let test_parse_each_to_the_end_keeps_nothing () =
+  List.iter
+    (fun n ->
+      sources n "1\n22\n" (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let all =
+            Parseff.Source.parse_each src digits_line
+            |> Seq.map (ok what)
+            |> List.of_seq
+          in
+          Alcotest.(check (list string)) what [ "1"; "22" ] all;
+          Alcotest.(check string)
+            (what ^ " rest") ""
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let test_zero_width_element_keeps_its_bytes () =
+  List.iter
+    (fun n ->
+      sources n "1\nabc" (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let results =
+            List.of_seq
+              (Parseff.Source.parse_each src (fun () ->
+                   Parseff.optional digits_line
+               )
+              )
+          in
+          Alcotest.(check int) (what ^ " results") 2 (List.length results);
+          Alcotest.(check bool)
+            (what ^ " second is the zero-width error")
+            true
+            (Result.is_error (List.nth results 1));
+          Alcotest.(check string)
+            (what ^ " rest") "abc"
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let is_digit c = c >= '0' && c <= '9'
+
+let resumes ?backtrack_window ~input ~start ~next parser =
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          ( match
+              Parseff.Source.parse ?backtrack_window ~consume:`Partial src
+                parser
+            with
+          | Ok _ ->
+              Alcotest.failf "%s: expected an Error" what
+          | Error e ->
+              Alcotest.(check int) (what ^ " range.start") start e.range.start
+          );
+          Alcotest.(check string)
+            (what ^ " next parse") next
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let test_error_resumes_at_failure () =
+  let input = "1\n2x\n33\n" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          Alcotest.(check string)
+            (what ^ " first line") "1"
+            (ok what (Parseff.Source.parse ~consume:`Partial src digits_line));
+          ( match Parseff.Source.parse ~consume:`Partial src digits_line with
+          | Ok _ ->
+              Alcotest.failf "%s: expected an Error" what
+          | Error e ->
+              Alcotest.(check int) (what ^ " range.start") 1 e.range.start
+          );
+          let skip_line () =
+            Parseff.skip_until "\n";
+            Parseff.literal "\n"
+          in
+          ok what (Parseff.Source.parse ~consume:`Partial src skip_line);
+          Alcotest.(check string)
+            (what ^ " after resync") "33"
+            (ok what (Parseff.Source.parse ~consume:`Partial src digits_line))
+      )
+    )
+    keep_sizes
+
+let test_error_after_commit_resumes_at_failure () =
+  resumes ~input:"GET 123!rest" ~start:7 ~next:"!rest" (fun () ->
+      Parseff.literal "GET ";
+      Parseff.commit ();
+      Parseff.skip_while is_digit;
+      Parseff.literal ";"
+  )
+
+let test_error_near_window_limit_resumes_at_failure () =
+  let ahead = String.make 1000 'x' in
+  resumes ~backtrack_window:1024
+    ~input:("ab" ^ ahead ^ "rest")
+    ~start:2 ~next:(ahead ^ "rest")
+    (fun () ->
+      Parseff.literal "ab";
+      Parseff.look_ahead (fun () ->
+          Parseff.skip_while (fun c -> c = 'x');
+          Parseff.literal "rest"
+      );
+      Parseff.literal "y"
+    )
+
+let long_digits = String.make 100 '7'
+
+let test_fail_from_resumes_at_failure () =
+  resumes
+    ~input:("ab" ^ long_digits ^ ";rest")
+    ~start:2 ~next:";rest"
+    (fun () ->
+      Parseff.literal "ab";
+      let start = Parseff.position () in
+      Parseff.skip_while is_digit;
+      Parseff.fail ~from:start "number too long"
+    )
+
+let test_later_range_resumes_at_failure () =
+  resumes ~input:"abcdefgh" ~start:5 ~next:"cdefgh" (fun () ->
+      Parseff.literal "ab";
+      let p = Parseff.position () in
+      Parseff.fail ~from:(p + 3) ~upto:(p + 5) "later range"
+  )
+
+let test_limit_resumes_at_failure () =
+  resumes
+    ~input:("ab" ^ long_digits ^ "END rest")
+    ~start:2
+    ~next:(String.make 49 '7' ^ "END rest")
+    (fun () ->
+      Parseff.literal "ab";
+      Parseff.skip_until ~at_most:50 "END"
+    )
+
+let test_parse_each_error_resumes_at_failure () =
+  let input = "1\n2x\n33\n" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let results =
+            List.of_seq (Parseff.Source.parse_each src digits_line)
+          in
+          Alcotest.(check int) (what ^ " results") 2 (List.length results);
+          Alcotest.(check bool)
+            (what ^ " second is an Error")
+            true
+            (Result.is_error (List.nth results 1));
+          Alcotest.(check string)
+            (what ^ " rest") "x\n33\n"
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let raises ~input ~next parser =
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          ( match Parseff.Source.parse ~consume:`Partial src parser with
+          | _ ->
+              Alcotest.failf "%s: expected Exit" what
+          | exception Exit ->
+              ()
+          );
+          Alcotest.(check string)
+            (what ^ " next parse") next
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let test_exception_resumes_where_raised () =
+  raises
+    ~input:("ab" ^ long_digits ^ ";rest")
+    ~next:";rest"
+    (fun () ->
+      Parseff.literal "ab";
+      Parseff.skip_while is_digit;
+      raise Exit
+    )
+
+let test_exception_in_look_ahead_resumes_at_its_start () =
+  raises
+    ~input:("ab" ^ long_digits ^ ";rest")
+    ~next:(long_digits ^ ";rest")
+    (fun () ->
+      Parseff.literal "ab";
+      Parseff.look_ahead (fun () ->
+          Parseff.skip_while is_digit;
+          raise Exit
+      )
+    )
+
+let line () =
+  let l = Parseff.take_while (fun c -> c <> '\n') in
+  let _ = Parseff.char '\n' in
+  l
+
+let force what next =
+  match next () with
+  | Seq.Cons (r, next) ->
+      (ok what r, next)
+  | Seq.Nil ->
+      Alcotest.failf "%s: the sequence ended" what
+
+let test_unforced_parse_each_keeps_bytes () =
+  let input = "a\nb\nc\n" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          Alcotest.(check string)
+            (what ^ " first") "a"
+            (ok what (Parseff.Source.parse ~consume:`Partial src line));
+          let (_ : (string, Parseff.error) result Seq.t) =
+            Parseff.Source.parse_each src line
+          in
+          Alcotest.(check string)
+            (what ^ " rest") "b\nc\n"
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let test_parse_between_elements () =
+  let input = "a\nb\nc\n" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let a, next = force what (Parseff.Source.parse_each src line) in
+          let b = ok what (Parseff.Source.parse ~consume:`Partial src line) in
+          let c, _ = force what next in
+          Alcotest.(check (list string)) what [ "a"; "b"; "c" ] [ a; b; c ];
+          Alcotest.(check string)
+            (what ^ " rest") ""
+            (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let request () =
+  Parseff.literal "GET ";
+  line ()
+
+let test_parse_loop_moves_forward () =
+  let wire = "GET /a\nGET /b\nGET /c\n" in
+  List.iter
+    (fun n ->
+      sources n wire (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let rec loop acc guard =
+            if guard = 0 || Parseff.Source.offset src = String.length wire then
+              List.rev acc
+            else
+              let r =
+                ok what (Parseff.Source.parse ~consume:`Partial src request)
+              in
+              loop ((r, Parseff.Source.offset src) :: acc) (guard - 1)
+          in
+          Alcotest.(check (list (pair string int)))
+            what
+            [ ("/a", 7); ("/b", 14); ("/c", 21) ]
+            (loop [] 10)
+      )
+    )
+    keep_sizes
+
+let test_offset_after_each_outcome () =
+  let input = "1\n2x\n33\n44\nab" ^ long_digits ^ ";rest" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let offset label expected =
+            Alcotest.(check int)
+              (what ^ " " ^ label)
+              expected
+              (Parseff.Source.offset src)
+          in
+          offset "before any parse" 0;
+          let _ =
+            ok what (Parseff.Source.parse ~consume:`Partial src digits_line)
+          in
+          offset "after Ok" 2;
+          ( match Parseff.Source.parse ~consume:`Partial src digits_line with
+          | Ok _ ->
+              Alcotest.failf "%s: expected an Error" what
+          | Error e ->
+              Alcotest.(check int) (what ^ " range.start") 1 e.range.start
+          );
+          offset "after Error" 3;
+          ok what
+            (Parseff.Source.parse ~consume:`Partial src (fun () ->
+                 Parseff.literal "x\n"
+             )
+            );
+          offset "after resync" 5;
+          let each = Parseff.Source.parse_each src digits_line in
+          let a, next = force what each in
+          Alcotest.(check string) (what ^ " element") "33" a;
+          offset "after a parse_each element" 8;
+          let b, _ = force what next in
+          Alcotest.(check string) (what ^ " element") "44" b;
+          offset "after the next element" 11;
+          ( match
+              Parseff.Source.parse ~consume:`Partial src (fun () ->
+                  Parseff.literal "ab";
+                  Parseff.skip_while is_digit;
+                  raise Exit
+              )
+            with
+          | _ ->
+              Alcotest.failf "%s: expected Exit" what
+          | exception Exit ->
+              ()
+          );
+          offset "after an exception" (13 + String.length long_digits);
+          Alcotest.(check string)
+            (what ^ " rest") ";rest"
+            (ok what (Parseff.Source.parse src rest));
+          offset "at the end" (String.length input)
+      )
+    )
+    keep_sizes
+
+let test_offset_between_parse_each_elements () =
+  let input = "a\nb\nc\n" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let _, next = force what (Parseff.Source.parse_each src line) in
+          Alcotest.(check int) (what ^ " after a") 2 (Parseff.Source.offset src);
+          let _ = ok what (Parseff.Source.parse ~consume:`Partial src line) in
+          Alcotest.(check int) (what ^ " after b") 4 (Parseff.Source.offset src);
+          let _ = force what next in
+          Alcotest.(check int) (what ^ " after c") 6 (Parseff.Source.offset src)
+      )
+    )
+    keep_sizes
+
 let () =
   let open Alcotest in
   run "Streaming"
@@ -2544,6 +3046,48 @@ let () =
           test_case "sets the read lengths of take_while" `Quick
             test_scan_read_lengths;
           test_case "below 1 is rejected" `Quick test_buf_size_rejected;
+        ]
+      );
+      ( "source keeps unread bytes",
+        [
+          test_case "next parse starts with them" `Quick
+            test_next_parse_starts_with_unread_bytes;
+          test_case "three parses on one source" `Quick
+            test_three_parses_on_one_source;
+          test_case "parse_each stopped early" `Quick
+            test_parse_each_keeps_unread_bytes;
+          test_case "parse_each to the end" `Quick
+            test_parse_each_to_the_end_keeps_nothing;
+          test_case "zero-width parse_each element" `Quick
+            test_zero_width_element_keeps_its_bytes;
+          test_case "Error resumes at the failure" `Quick
+            test_error_resumes_at_failure;
+          test_case "Error after commit" `Quick
+            test_error_after_commit_resumes_at_failure;
+          test_case "Error near the window limit" `Quick
+            test_error_near_window_limit_resumes_at_failure;
+          test_case "fail ~from resumes at the failure" `Quick
+            test_fail_from_resumes_at_failure;
+          test_case "limit span resumes at the failure" `Quick
+            test_limit_resumes_at_failure;
+          test_case "range after the failure" `Quick
+            test_later_range_resumes_at_failure;
+          test_case "parse_each Error" `Quick
+            test_parse_each_error_resumes_at_failure;
+          test_case "exception resumes where raised" `Quick
+            test_exception_resumes_where_raised;
+          test_case "exception in look_ahead" `Quick
+            test_exception_in_look_ahead_resumes_at_its_start;
+          test_case "parse_each not forced" `Quick
+            test_unforced_parse_each_keeps_bytes;
+          test_case "Source.parse between parse_each elements" `Quick
+            test_parse_between_elements;
+          test_case "a parse loop moves forward" `Quick
+            test_parse_loop_moves_forward;
+          test_case "Source.offset after each outcome" `Quick
+            test_offset_after_each_outcome;
+          test_case "Source.offset between parse_each elements" `Quick
+            test_offset_between_parse_each_elements;
         ]
       );
       ( "read-ahead raise",

@@ -570,6 +570,247 @@ let test_found_with_truncated_character () =
        )
     )
 
+exception Alloc_failed
+
+let fail_at_words = ref max_int
+
+let fail_large (info : Gc.Memprof.allocation) =
+  if info.size >= !fail_at_words then begin
+    fail_at_words := max_int;
+    raise Alloc_failed
+  end;
+  None
+
+let failing_tracker =
+  {
+    Gc.Memprof.null_tracker with
+    alloc_minor = fail_large;
+    alloc_major = fail_large;
+  }
+
+let with_failing_alloc f =
+  fail_at_words := max_int;
+  let profile = Gc.Memprof.start ~sampling_rate:1.0 failing_tracker in
+  Fun.protect
+    ~finally:(fun () ->
+      fail_at_words := max_int;
+      Gc.Memprof.stop ();
+      Gc.Memprof.discard profile
+    )
+    f
+
+let rest () = Parseff.take_while (fun _ -> true)
+
+let test_alloc_fails_in_slice_append () =
+  let data =
+    String.init 5000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
+  in
+  let slice =
+    Bigarray.Array1.init Bigarray.char Bigarray.c_layout 5000 (String.get data)
+  in
+  let sent = ref false in
+  let src =
+    Parseff.Source.of_bigstring_chunks (fun () ->
+        if !sent then
+          None
+        else begin
+          sent := true;
+          Some (slice, 0, 5000)
+        end
+    )
+  in
+  with_failing_alloc (fun () ->
+      Alcotest.check_raises "allocation fails" Alloc_failed (fun () ->
+          ignore
+            (Parseff.Source.parse ~consume:`Partial src (fun () ->
+                 fail_at_words := 250;
+                 Parseff.any_char ()
+             )
+            )
+      )
+  );
+  Alcotest.(check int) "offset" 0 (Parseff.Source.offset src);
+  Alcotest.(check (result string string))
+    "next parse" (Ok data)
+    (Result.map_error Parseff.render_error (Parseff.Source.parse src rest))
+
+let test_reraised_failure_past_window () =
+  let input = "BAD" ^ String.make 2000 'x' ^ "\nGOOD\n" in
+  let pos = ref 0 in
+  let src =
+    Parseff.Source.of_chunks (fun () ->
+        if !pos >= String.length input then
+          None
+        else begin
+          let k = min 512 (String.length input - !pos) in
+          let c = String.sub input !pos k in
+          pos := !pos + k;
+          Some c
+        end
+    )
+  in
+  let parser () =
+    try Parseff.literal "GOOD"
+    with e ->
+      Parseff.skip_until "\n";
+      raise e
+  in
+  ( match Parseff.Source.parse ~consume:`Partial src parser with
+  | Ok () ->
+      Alcotest.fail "expected an error"
+  | Error e ->
+      Alcotest.(check bool)
+        "expected GOOD" true
+        (String.starts_with ~prefix:"expected \"GOOD\"" (Parseff.error_message e)
+        )
+  );
+  Alcotest.(check (result unit string))
+    "next parse" (Ok ())
+    (Result.map_error Parseff.render_error
+       (Parseff.Source.parse ~consume:`Partial src (fun () ->
+            Parseff.skip_until "\n";
+            Parseff.literal "\nGOOD\n"
+        )
+       )
+    )
+
+let test_reraised_from_another_parse () =
+  let saved = ref None in
+  let rec deep n () =
+    if n = 0 then
+      Parseff.take 1
+    else
+      Parseff.rec_ (deep (n - 1))
+  in
+  ignore
+    (Parseff.parse ~max_depth:3 ~consume:`Partial (String.make 500 'x')
+       (fun () ->
+         ignore (Parseff.take 400);
+         try ignore (deep 10 ()) with e -> saved := Some e
+     )
+    );
+  let e = Option.get !saved in
+  match Parseff.parse ~consume:`Partial "ab" (fun () -> raise e) with
+  | Ok () ->
+      Alcotest.fail "expected an error"
+  | Error e ->
+      Alcotest.(check string)
+        "message" "maximum nesting depth 3 exceeded" (Parseff.error_message e)
+
+let in_use name =
+  Invalid_argument (name ^ ": the source is in use by another parse")
+
+let three_lines () = Parseff.Source.of_string "a\nb\nc\n"
+
+let line () =
+  let l = Parseff.take_while (fun c -> c <> '\n') in
+  ignore (Parseff.char '\n');
+  l
+
+let check_next_line src expected =
+  Alcotest.(check (result string string))
+    "next parse" (Ok expected)
+    (Result.map_error Parseff.render_error
+       (Parseff.Source.parse ~consume:`Partial src line)
+    )
+
+let test_nested_parse () =
+  let src = three_lines () in
+  Alcotest.check_raises "inner parse" (in_use "Parseff.Source.parse") (fun () ->
+      ignore
+        (Parseff.Source.parse ~consume:`Partial src (fun () ->
+             ignore (line ());
+             Parseff.Source.parse ~consume:`Partial src line
+         )
+        )
+  );
+  check_next_line src "b"
+
+let test_nested_parse_in_element () =
+  let src = three_lines () in
+  let seq =
+    Parseff.Source.parse_each src (fun () ->
+        ignore (line ());
+        Parseff.Source.parse ~consume:`Partial src line
+    )
+  in
+  Alcotest.check_raises "inner parse" (in_use "Parseff.Source.parse") (fun () ->
+      ignore (seq ())
+  );
+  check_next_line src "b"
+
+let test_nested_parse_each () =
+  let src = three_lines () in
+  Alcotest.check_raises "inner parse_each" (in_use "Parseff.Source.parse_each")
+    (fun () ->
+      ignore
+        (Parseff.Source.parse ~consume:`Partial src (fun () ->
+             ignore (Parseff.Source.parse_each src line ())
+         )
+        )
+  );
+  check_next_line src "a"
+
+let test_nested_parse_in_pending () =
+  let src = Parseff.Source.of_string "" in
+  let seq =
+    Parseff.Source.parse_each
+      ~pending:(fun () ->
+        ignore (Parseff.Source.parse src line);
+        false
+      )
+      src line
+  in
+  Alcotest.check_raises "parse in pending" (in_use "Parseff.Source.parse")
+    (fun () -> ignore (seq ())
+  );
+  Alcotest.(check (result string string))
+    "next parse" (Ok "")
+    (Result.map_error Parseff.render_error (Parseff.Source.parse src rest))
+
+let test_retry_after_busy () =
+  let src = three_lines () in
+  let seq = Parseff.Source.parse_each src line in
+  Alcotest.check_raises "node while the source is in use"
+    (in_use "Parseff.Source.parse_each") (fun () ->
+      ignore
+        (Parseff.Source.parse ~consume:`Partial src (fun () -> ignore (seq ())))
+  );
+  match seq () with
+  | Seq.Cons (Ok v, _) ->
+      Alcotest.(check string) "retried node" "a" v
+  | Seq.Cons (Error e, _) ->
+      Alcotest.fail (Parseff.render_error e)
+  | Seq.Nil ->
+      Alcotest.fail "no value"
+
+let test_parse_while_other_fiber_reads () =
+  let src = yielding_source ~chunk:1 "aaaa\nbbbb\n" in
+  let first = ref "unset" and second = ref "unset" in
+  spawn (fun () ->
+      first :=
+        match Parseff.Source.parse ~consume:`Partial src line with
+        | Ok s ->
+            s
+        | Error e ->
+            Parseff.render_error e
+  );
+  spawn (fun () ->
+      second :=
+        match Parseff.Source.parse ~consume:`Partial src line with
+        | _ ->
+            "no error"
+        | exception Invalid_argument msg ->
+            msg
+  );
+  run ();
+  Alcotest.(check string) "first" "aaaa" !first;
+  Alcotest.(check string)
+    "second" "Parseff.Source.parse: the source is in use by another parse"
+    !second;
+  spawn (fun () -> check_next_line src "bbbb");
+  run ()
+
 let () =
   let open Alcotest in
   run "Streaming robustness"
@@ -624,6 +865,31 @@ let () =
             test_found_at_within_end_after_overflow;
           test_case "inside within with unread input" `Quick
             test_found_inside_within_with_unread_input;
+        ]
+      );
+      ( "allocation failure",
+        [
+          test_case "in a slice append" `Quick test_alloc_fails_in_slice_append;
+        ]
+      );
+      ( "reraised failure",
+        [
+          test_case "past the window" `Quick test_reraised_failure_past_window;
+          test_case "from another parse" `Quick test_reraised_from_another_parse;
+        ]
+      );
+      ( "source in use",
+        [
+          test_case "nested parse" `Quick test_nested_parse;
+          test_case "nested parse in an element" `Quick
+            test_nested_parse_in_element;
+          test_case "nested parse_each" `Quick test_nested_parse_each;
+          test_case "nested parse in pending" `Quick
+            test_nested_parse_in_pending;
+          test_case "retry after the source was in use" `Quick
+            test_retry_after_busy;
+          test_case "parse while another fiber reads" `Quick
+            test_parse_while_other_fiber_reads;
         ]
       );
     ]

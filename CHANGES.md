@@ -1,5 +1,6 @@
 ## Unreleased
 
+- [BREAKING] Keep the bytes `Source.parse` and `Source.parse_each` read but did not consume, so the next parse of the same source starts after the consumed input, where the parser failed after an `Error`, or where it was when an exception left it; `Source.of_string` continues the same way instead of restarting at offset 0, and `Source.offset` gives the absolute offset where the next parse starts ([#131](https://github.com/davesnx/parseff/pull/131)) (@davesnx)
 - [BREAKING] Read diagnostics in source order: `Diagnostics.to_list` and the `inner` list given to `~keep` sort by `pos`, and entries at the same position keep the order they were recorded in ([#128](https://github.com/davesnx/parseff/pull/128)) (@davesnx)
 - [BREAKING] Name every runner `parse`: `parse_source` is `Source.parse`, and the push runners move into the new module `Push` ([#113](https://github.com/davesnx/parseff/pull/113)) (@davesnx)
 - [BREAKING] Polish the API: combinators run with no trailing `()`, spans move into `Slice`, `fold_left` and `fold_right` take `?otherwise` first, and `literal` takes `?case_sensitive` ([#112](https://github.com/davesnx/parseff/pull/112)) (@davesnx)

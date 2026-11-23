@@ -167,7 +167,9 @@ unless [~consume:`Partial] is passed, so top-level parsers rarely need it.
 {2 [position], [with_range], and [location]}
 
 - {!val:Parseff.position} returns the current byte offset from the start of the
-  input.
+  input. Under {!val:Parseff.Source.parse} it counts from where the parse starts
+  in the source; add {!val:Parseff.Source.offset}, read before the parse, to get
+  an absolute offset.
 - {!val:Parseff.with_range} runs a parser and returns its result alongside the
   {!type:Parseff.range} of bytes it consumed.
 - {!val:Parseff.location} returns a 1-based {!type:Parseff.location} record

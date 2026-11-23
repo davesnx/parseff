@@ -136,10 +136,16 @@ type bigstring =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 type source = {
-  initial : string;
+  mutable unread : bytes;
+  mutable unread_off : int;
+  mutable unread_len : int;
+  mutable stamp : int;
+  mutable origin : int;
+  mutable offset : int;
   feed : feed;
   mutable eof : bool;
   mutable window : int;
+  mutable busy : bool;
 }
 
 and feed =
@@ -148,6 +154,7 @@ and feed =
       mutable tmp : bytes;
       tmp_cap : int;
       mutable grow : bool;
+      mutable held : int;
     }
   | Chunks of chunks
   | Bigstrings of bigstrings
@@ -423,7 +430,18 @@ module Byte_source = struct
   type nonrec bigstring = bigstring
 
   let make ~initial ~eof feed : t =
-    { initial; feed; eof; window = default_backtrack_window }
+    {
+      unread = Bytes.unsafe_of_string initial;
+      unread_off = 0;
+      unread_len = String.length initial;
+      stamp = 0;
+      origin = 0;
+      offset = 0;
+      feed;
+      eof;
+      window = default_backtrack_window;
+      busy = false;
+    }
 
   let of_string s =
     make ~initial:s ~eof:true
@@ -433,6 +451,7 @@ module Byte_source = struct
            tmp = Bytes.empty;
            tmp_cap = 0;
            grow = false;
+           held = 0;
          }
       )
 
@@ -446,6 +465,7 @@ module Byte_source = struct
            tmp = Bytes.create buf_size;
            tmp_cap = buf_size;
            grow = false;
+           held = 0;
          }
       )
 
@@ -460,6 +480,7 @@ module Byte_source = struct
            tmp = Bytes.create initial_buffer_size;
            tmp_cap = imax initial_buffer_size default_buf_size;
            grow = false;
+           held = 0;
          }
       )
 
@@ -519,9 +540,36 @@ module State = struct
   let for_input ~input ~max_depth ~trace =
     make ~input ~max_depth ~source:None ~trace
 
+  let set_unread (src : source) buf off len =
+    src.unread <- buf;
+    src.unread_off <- off;
+    src.unread_len <- len;
+    src.stamp <- src.stamp + 1
+
+  let keep_unread ~copy (t : t) (src : source) =
+    let off = t.pos - t.base in
+    let len = imax 0 (t.input_len - t.pos) in
+    if len = 0 then
+      set_unread src Bytes.empty 0 0
+    else
+      set_unread src t.input off len;
+    src.offset <- src.origin + t.pos;
+    if copy && len > 0 && 2 * len < Bytes.length t.input then
+      set_unread src (Bytes.sub t.input off len) 0 len
+
   let for_source ~(src : source) ~max_depth ~backtrack_window ~trace =
     src.window <- backtrack_window;
-    make ~input:src.initial ~max_depth ~source:(Some src) ~trace
+    let buf = src.unread and off = src.unread_off and len = src.unread_len in
+    set_unread src Bytes.empty 0 0;
+    src.origin <- src.offset;
+    let t =
+      make
+        ~input:(Bytes.unsafe_to_string buf)
+        ~max_depth ~source:(Some src) ~trace
+    in
+    t.base <- -off;
+    t.input_len <- len;
+    t
 
   let none = for_input ~input:"" ~max_depth:0 ~trace:None
 
@@ -1288,13 +1336,14 @@ let[@inline never] relocate st ~floor ~adopt n =
       drop
   in
   let kept = cur_len - drop in
-  st.base <- st.base + drop;
   if kept = 0 && String.length adopt = n then begin
+    st.base <- st.base + drop;
     st.input <- Bytes.unsafe_of_string adopt;
     true
   end else begin
     let buf = Bytes.create (kept + n + buffer_room kept n) in
     if kept > 0 then Bytes.blit st.input drop buf 0 kept;
+    st.base <- st.base + drop;
     st.input <- buf;
     false
   end
@@ -1439,16 +1488,21 @@ let[@inline never] rec fill st ~keep_from need =
           let n =
             match src.feed with
             | Read r ->
-                if r.grow then begin
-                  r.grow <- false;
-                  r.tmp <- Bytes.create r.tmp_cap
+                if r.held = 0 then begin
+                  if r.grow then begin
+                    r.grow <- false;
+                    r.tmp <- Bytes.create r.tmp_cap
+                  end;
+                  r.held <-
+                    read_source st r.read r.tmp 0
+                      (imin room (Bytes.length r.tmp))
                 end;
                 let tmp = r.tmp in
-                let n =
-                  read_source st r.read tmp 0 (imin room (Bytes.length tmp))
-                in
+                let n = imin r.held room in
                 if n > 0 then begin
                   append st ~floor ~own:false (Bytes.unsafe_to_string tmp) 0 n;
+                  r.held <- r.held - n;
+                  if r.held > 0 then Bytes.blit tmp n tmp 0 r.held;
                   if n = Bytes.length tmp && n < r.tmp_cap then r.grow <- true
                 end;
                 n
@@ -1466,8 +1520,8 @@ let[@inline never] rec fill st ~keep_from need =
                 end else begin
                   let n = imin avail default_buf_size in
                   if n > 0 then begin
-                    c.pending_pos <- off + n;
-                    append st ~floor ~own:true c.pending off n
+                    append st ~floor ~own:true c.pending off n;
+                    c.pending_pos <- off + n
                   end;
                   n
                 end
@@ -1480,8 +1534,8 @@ let[@inline never] rec fill st ~keep_from need =
                       imin room (imin (b.slice_stop - off) young_buf_size)
                     in
                     if n > 0 then begin
-                      b.slice_pos <- off + n;
-                      append_bigstring st ~floor b.slice off n
+                      append_bigstring st ~floor b.slice off n;
+                      b.slice_pos <- off + n
                     end;
                     n
                 | Frame fr ->
@@ -2664,10 +2718,16 @@ let[@inline never] limited st stop f =
   st.source <-
     Some
       {
-        initial = "";
+        unread = Bytes.empty;
+        unread_off = 0;
+        unread_len = 0;
+        stamp = 0;
+        origin = 0;
+        offset = 0;
         feed = Frame fr;
         eof = ended || outer_len >= limit;
         window;
+        busy = false;
       };
   st.input_len <- imin outer_len limit;
   let leave () =
@@ -2697,7 +2757,7 @@ let[@inline never] scan_until st ~keep_from start stop pred =
   while !continue_loop do
     let base = st.base in
     let inp = st.input in
-    let len = imin (st.input_len - base) (stop - base) in
+    let len = imin st.input_len stop - base in
     let i = ref (!p - base) in
     while !i < len && pred (Bytes.unsafe_get inp !i) do
       incr i
@@ -2714,7 +2774,7 @@ let[@inline never] scan_set_until st ~keep_from start stop set =
   while !continue_loop do
     let base = st.base in
     let inp = st.input in
-    let len = imin (st.input_len - base) (stop - base) in
+    let len = imin st.input_len stop - base in
     let i = ref (!p - base) in
     while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
       incr i
@@ -2765,8 +2825,7 @@ let[@inline never] find_terminator st ~name ~keep_from ~at_most ?label t =
   while !scanning do
     let base = st.base in
     let inp = st.input in
-    let len = st.input_len - base in
-    let lim = imin (len - m + 1) (stop - base) in
+    let lim = imin (st.input_len - m + 1) stop - base in
     let i = ref (!p - base) in
     while
       !i < lim
@@ -7115,6 +7174,10 @@ let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
           xs
     )
 
+let resume_at st pos e =
+  st.pos <- imax st.base (imin pos st.input_len);
+  Stdlib.Error e
+
 let run_detailed st ~all thunk =
   let previous = State.enter st in
   match
@@ -7126,15 +7189,15 @@ let run_detailed st ~all thunk =
     | v ->
         Stdlib.Ok v
     | exception Fail ->
-        Stdlib.Error (error_of_far ~last:true st [])
+        resume_at st st.far.pos (error_of_far ~last:true st [])
     | exception Depth_limit_exceeded (limit, a) ->
-        Stdlib.Error
+        resume_at st a.at
           (error_plain ~last:true st a.at
              (Depth_limit_exceeded { limit })
              a.open_frames
           )
     | exception Backtrack_window_exceeded (info, a) ->
-        Stdlib.Error
+        resume_at st a.at
           (error_plain ~last:true st a.at
              (Backtrack_window_exceeded
                 { limit = info.limit; oldest = info.oldest }
@@ -7176,21 +7239,52 @@ let parse ?(max_depth = 128) ?diagnostics ?trace ?(consume = `All) input
     (parser : unit -> 'a) =
   run (State.for_input ~input ~max_depth ~trace) ~consume ~diagnostics parser
 
+let run_source ~copy st src ~consume ~diagnostics parser =
+  match run st ~consume ~diagnostics parser with
+  | r ->
+      State.keep_unread ~copy st src;
+      r
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      State.keep_unread ~copy:false st src;
+      Printexc.raise_with_backtrace exn bt
+
+let with_source name (src : Byte_source.t) f =
+  if src.busy then
+    invalid_arg ("Parseff." ^ name ^ ": the source is in use by another parse");
+  src.busy <- true;
+  match f () with
+  | v ->
+      src.busy <- false;
+      v
+  | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      src.busy <- false;
+      Printexc.raise_with_backtrace exn bt
+
 let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
     ?(consume = `All) (src : Byte_source.t) (parser : unit -> 'a) =
   check_backtrack_window backtrack_window;
-  run
-    (State.for_source ~src ~max_depth ~backtrack_window ~trace)
-    ~consume ~diagnostics parser
+  with_source "Source.parse" src (fun () ->
+      let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+      run_source ~copy:true st src ~consume ~diagnostics parser
+  )
 
 let parse_source_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     (src : Byte_source.t) (parser : unit -> 'a) =
   check_backtrack_window ~name:"Source.parse_each" backtrack_window;
-  let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
+  let current = ref State.none in
+  let stamp = ref (-1) in
+  let state () =
+    if src.stamp <> !stamp then
+      current := State.for_source ~src ~max_depth ~backtrack_window ~trace;
+    !current
+  in
   let held = ref false in
   let element () =
+    let st = !current in
     if have st 1 then
       Some (parser ())
     else
@@ -7204,29 +7298,40 @@ let parse_source_each ?(max_depth = 128)
   let forced = ref 0 in
   let ended = ref false in
   let raised = ref false in
+  let finish st =
+    ended := true;
+    State.keep_unread ~copy:true st src;
+    stamp := src.stamp
+  in
   let rec node i () =
     if !raised then
       invalid_arg
         "Parseff.Source.parse_each: the sequence stopped after an exception";
     if !forced <> i then
       invalid_arg "Parseff.Source.parse_each: a node was forced twice";
-    forced := i + 1;
     if !ended then begin
+      forced := i + 1;
       Option.iter diagnostics_clear diagnostics;
       Seq.Nil
-    end else begin
+    end else
+      with_source "Source.parse_each" src @@ fun () ->
+      forced := i + 1;
+      let st = state () in
       st.far <- far_none;
       let start = st.pos in
       held := false;
       raised := true;
-      let r = run st ~consume:`Partial ~diagnostics element in
+      let r =
+        run_source ~copy:false st src ~consume:`Partial ~diagnostics element
+      in
+      stamp := src.stamp;
       raised := false;
       match r with
       | Ok None ->
-          ended := true;
+          finish st;
           Seq.Nil
       | Ok (Some _) when st.pos = start && not !held ->
-          ended := true;
+          finish st;
           Seq.Cons
             ( Error
                 (error_plain ~last:false st start
@@ -7237,9 +7342,8 @@ let parse_source_each ?(max_depth = 128)
       | Ok (Some v) ->
           Seq.Cons (Ok v, node (i + 1))
       | Error e ->
-          ended := true;
+          finish st;
           Seq.Cons (Error e, node (i + 1))
-    end
   in
   node 0
 
@@ -7513,6 +7617,8 @@ end
 
 module Source = struct
   include Byte_source
+
+  let offset (src : t) = src.offset
 
   let parse = parse_source
   let parse_each = parse_source_each
