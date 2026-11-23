@@ -577,8 +577,8 @@ val warn :
 val position : unit -> int
 (** [position ()] returns the current byte offset from the start of input. Under
     {!Source.parse} and {!Source.parse_each} it counts from where the parse
-    starts in the source, and restarts after a {!Source.parse} between elements.
-*)
+    starts in the source, and restarts after a {!Source.parse} between elements;
+    add {!Source.offset} read before the parse to get an absolute offset. *)
 
 val with_range : (unit -> 'a) -> 'a * range
 (** [with_range parser] runs [parser] and returns its result paired with the
@@ -1785,7 +1785,7 @@ module Source : sig
 
   val of_string : string -> t
   (** [of_string s] creates a source from a complete string (useful for testing
-      streaming code paths). Every parse of it starts at offset 0. *)
+      streaming code paths). *)
 
   val of_channel : ?buf_size:int -> in_channel -> t
   (** [of_channel ?buf_size ic] reads from [ic] using an internal buffer of
@@ -1848,6 +1848,12 @@ module Source : sig
       let source = Source.of_seq (List.to_seq [ "chunk1"; "chunk2"; "chunk3" ])
       ]} *)
 
+  val offset : t -> int
+  (** [offset source] is the absolute byte offset in [source] of the next byte
+      the next parse will read: [0] before any parse, then the point where the
+      last {!parse} or {!parse_each} element stopped (after [Ok], [Error], or an
+      exception, as described in {!parse}). *)
+
   val parse :
     ?max_depth:int ->
     ?backtrack_window:int ->
@@ -1870,7 +1876,7 @@ module Source : sig
         ([~from], [~upto] or a limit can move [e.range.start] away from it);
         after an exception, where the parser was when the exception left it (for
         an exception from the read function, this depends on when the read
-        happened). A source from {!of_string} restarts at offset 0 instead.
+        happened). {!val:offset} gives that point as an absolute offset.
       - Only [source]'s read function may suspend (e.g., Eio fibers), allowing
         multiple concurrent parses on one domain. Suspending inside a parser
         callback or sharing one domain across system threads that parse

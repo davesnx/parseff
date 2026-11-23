@@ -76,7 +76,7 @@ let () =
 
 ## Source constructors
 
-The next `Source.parse` or `Source.parse_each` on the same source starts where the last one stopped (see `Parseff.Source.parse`), so a message head and its body can be parsed in turn, and a bad record can be skipped. Only `of_string` restarts from offset 0\.
+The next `Source.parse` or `Source.parse_each` on the same source starts where the last one stopped (see `Parseff.Source.parse`), so a message head and its body can be parsed in turn, and a bad record can be skipped. Positions restart at each parse; `Parseff.Source.offset` gives the absolute byte offset where the next parse starts.
 
 ### `Source.of_string`
 

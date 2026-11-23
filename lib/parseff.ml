@@ -139,8 +139,9 @@ type source = {
   mutable unread : bytes;
   mutable unread_off : int;
   mutable unread_len : int;
-  restarts : bool;
   mutable stamp : int;
+  mutable origin : int;
+  mutable offset : int;
   feed : feed;
   mutable eof : bool;
   mutable window : int;
@@ -424,20 +425,21 @@ module Byte_source = struct
   type t = source
   type nonrec bigstring = bigstring
 
-  let make ?(restarts = false) ~initial ~eof feed : t =
+  let make ~initial ~eof feed : t =
     {
       unread = Bytes.unsafe_of_string initial;
       unread_off = 0;
       unread_len = String.length initial;
-      restarts;
       stamp = 0;
+      origin = 0;
+      offset = 0;
       feed;
       eof;
       window = default_backtrack_window;
     }
 
   let of_string s =
-    make ~restarts:true ~initial:s ~eof:true
+    make ~initial:s ~eof:true
       (Read
          {
            read = (fun _ _ _ -> 0);
@@ -534,19 +536,16 @@ module State = struct
     src.unread_len <- len;
     src.stamp <- src.stamp + 1
 
-  let drop_unread (src : source) =
-    if not src.restarts then set_unread src Bytes.empty 0 0
-
   let keep_unread ~copy (t : t) (src : source) =
-    if not src.restarts then
-      let off = t.pos - t.base in
-      let len = imax 0 (t.input_len - t.pos) in
-      if len = 0 then
-        set_unread src Bytes.empty 0 0
-      else if copy && 2 * len < Bytes.length t.input then
-        set_unread src (Bytes.sub t.input off len) 0 len
-      else
-        set_unread src t.input off len
+    src.offset <- src.origin + t.pos;
+    let off = t.pos - t.base in
+    let len = imax 0 (t.input_len - t.pos) in
+    if len = 0 then
+      set_unread src Bytes.empty 0 0
+    else if copy && 2 * len < Bytes.length t.input then
+      set_unread src (Bytes.sub t.input off len) 0 len
+    else
+      set_unread src t.input off len
 
   let for_source ~(src : source) ~max_depth ~backtrack_window ~trace =
     src.window <- backtrack_window;
@@ -556,7 +555,8 @@ module State = struct
       else
         Bytes.sub_string src.unread src.unread_off src.unread_len
     in
-    drop_unread src;
+    set_unread src Bytes.empty 0 0;
+    src.origin <- src.offset;
     make ~input ~max_depth ~source:(Some src) ~trace
 
   let none = for_input ~input:"" ~max_depth:0 ~trace:None
@@ -2675,8 +2675,9 @@ let[@inline never] limited st stop f =
         unread = Bytes.empty;
         unread_off = 0;
         unread_len = 0;
-        restarts = false;
         stamp = 0;
+        origin = 0;
+        offset = 0;
         feed = Frame fr;
         eof = ended || outer_len >= limit;
         window;
@@ -7149,7 +7150,7 @@ let list ?(release = false) ?(contexts = `All) ?keep ?sep ?(trailing = false)
     )
 
 let resume_at st pos e =
-  if pos < st.base then
+  if pos < st.base || pos > st.input_len then
     failwith "Parseff: internal error: the failure position is not buffered";
   st.pos <- pos;
   Stdlib.Error e
@@ -7577,6 +7578,8 @@ end
 
 module Source = struct
   include Byte_source
+
+  let offset (src : t) = src.offset
 
   let parse = parse_source
   let parse_each = parse_source_each

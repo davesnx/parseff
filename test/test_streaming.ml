@@ -2412,12 +2412,6 @@ let head () =
 
 let rest () = Parseff.take_while (fun _ -> true)
 
-let after name ~kept ~restart =
-  if name = "of_string" then
-    restart
-  else
-    kept
-
 let ok what = function
   | Ok v ->
       v
@@ -2435,8 +2429,7 @@ let test_next_parse_starts_with_unread_bytes () =
             ("GET / HTTP/1.1", [ "Host: a" ])
             h;
           Alcotest.(check string)
-            (what ^ " body")
-            (after name ~kept:"BODY and more" ~restart:head_input)
+            (what ^ " body") "BODY and more"
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2456,14 +2449,9 @@ let test_three_parses_on_one_source () =
           let b = ok what (Parseff.Source.parse ~consume:`Partial src word) in
           let c = ok what (Parseff.Source.parse src rest) in
           Alcotest.(check (list string))
-            what
-            (after name ~kept:[ "one"; "two"; "three" ]
-               ~restart:[ "one"; "one"; "one two three" ]
-            )
-            [ a; b; c ];
+            what [ "one"; "two"; "three" ] [ a; b; c ];
           Alcotest.(check string)
-            (what ^ " after `All")
-            (after name ~kept:"" ~restart:"one two three")
+            (what ^ " after `All") ""
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2490,9 +2478,7 @@ let test_parse_each_keeps_unread_bytes () =
             |> List.of_seq
           in
           Alcotest.(check (list string))
-            (what ^ " first two")
-            (after name ~kept:[ "22"; "333" ] ~restart:[ "1"; "22" ])
-            firsts;
+            (what ^ " first two") [ "22"; "333" ] firsts;
           let next =
             Parseff.Source.parse_each src digits_line
             |> Seq.take 2
@@ -2500,12 +2486,9 @@ let test_parse_each_keeps_unread_bytes () =
             |> List.of_seq
           in
           Alcotest.(check (list string))
-            (what ^ " next")
-            (after name ~kept:[ "4444"; "55555" ] ~restart:[ "1"; "22" ])
-            next;
+            (what ^ " next") [ "4444"; "55555" ] next;
           Alcotest.(check string)
-            (what ^ " rest")
-            (after name ~kept:"tail" ~restart:input)
+            (what ^ " rest") "tail"
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2523,8 +2506,7 @@ let test_parse_each_to_the_end_keeps_nothing () =
           in
           Alcotest.(check (list string)) what [ "1"; "22" ] all;
           Alcotest.(check string)
-            (what ^ " rest")
-            (after name ~kept:"" ~restart:"1\n22\n")
+            (what ^ " rest") ""
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2548,8 +2530,7 @@ let test_zero_width_element_keeps_its_bytes () =
             true
             (Result.is_error (List.nth results 1));
           Alcotest.(check string)
-            (what ^ " rest")
-            (after name ~kept:"abc" ~restart:"1\nabc")
+            (what ^ " rest") "abc"
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2572,8 +2553,7 @@ let resumes ?backtrack_window ~input ~start ~next parser =
               Alcotest.(check int) (what ^ " range.start") start e.range.start
           );
           Alcotest.(check string)
-            (what ^ " next parse")
-            (after name ~kept:next ~restart:input)
+            (what ^ " next parse") next
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2589,8 +2569,6 @@ let test_error_resumes_at_failure () =
             (what ^ " first line") "1"
             (ok what (Parseff.Source.parse ~consume:`Partial src digits_line));
           ( match Parseff.Source.parse ~consume:`Partial src digits_line with
-          | Ok v when name = "of_string" ->
-              Alcotest.(check string) (what ^ " restart") "1" v
           | Ok _ ->
               Alcotest.failf "%s: expected an Error" what
           | Error e ->
@@ -2602,8 +2580,7 @@ let test_error_resumes_at_failure () =
           in
           ok what (Parseff.Source.parse ~consume:`Partial src skip_line);
           Alcotest.(check string)
-            (what ^ " after resync")
-            (after name ~kept:"33" ~restart:"1")
+            (what ^ " after resync") "33"
             (ok what (Parseff.Source.parse ~consume:`Partial src digits_line))
       )
     )
@@ -2676,8 +2653,7 @@ let test_parse_each_error_resumes_at_failure () =
             true
             (Result.is_error (List.nth results 1));
           Alcotest.(check string)
-            (what ^ " rest")
-            (after name ~kept:"x\n33\n" ~restart:input)
+            (what ^ " rest") "x\n33\n"
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2695,8 +2671,7 @@ let raises ~input ~next parser =
               ()
           );
           Alcotest.(check string)
-            (what ^ " next parse")
-            (after name ~kept:next ~restart:input)
+            (what ^ " next parse") next
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2749,8 +2724,7 @@ let test_unforced_parse_each_keeps_bytes () =
             Parseff.Source.parse_each src line
           in
           Alcotest.(check string)
-            (what ^ " rest")
-            (after name ~kept:"b\nc\n" ~restart:input)
+            (what ^ " rest") "b\nc\n"
             (ok what (Parseff.Source.parse src rest))
       )
     )
@@ -2765,14 +2739,111 @@ let test_parse_between_elements () =
           let a, next = force what (Parseff.Source.parse_each src line) in
           let b = ok what (Parseff.Source.parse ~consume:`Partial src line) in
           let c, _ = force what next in
-          Alcotest.(check (list string))
-            what
-            (after name ~kept:[ "a"; "b"; "c" ] ~restart:[ "a"; "a"; "b" ])
-            [ a; b; c ];
+          Alcotest.(check (list string)) what [ "a"; "b"; "c" ] [ a; b; c ];
           Alcotest.(check string)
-            (what ^ " rest")
-            (after name ~kept:"" ~restart:input)
+            (what ^ " rest") ""
             (ok what (Parseff.Source.parse src rest))
+      )
+    )
+    keep_sizes
+
+let request () =
+  Parseff.literal "GET ";
+  line ()
+
+let test_parse_loop_moves_forward () =
+  let wire = "GET /a\nGET /b\nGET /c\n" in
+  List.iter
+    (fun n ->
+      sources n wire (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let rec loop acc guard =
+            if guard = 0 || Parseff.Source.offset src = String.length wire then
+              List.rev acc
+            else
+              let r =
+                ok what (Parseff.Source.parse ~consume:`Partial src request)
+              in
+              loop ((r, Parseff.Source.offset src) :: acc) (guard - 1)
+          in
+          Alcotest.(check (list (pair string int)))
+            what
+            [ ("/a", 7); ("/b", 14); ("/c", 21) ]
+            (loop [] 10)
+      )
+    )
+    keep_sizes
+
+let test_offset_after_each_outcome () =
+  let input = "1\n2x\n33\n44\nab" ^ long_digits ^ ";rest" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let offset label expected =
+            Alcotest.(check int)
+              (what ^ " " ^ label)
+              expected
+              (Parseff.Source.offset src)
+          in
+          offset "before any parse" 0;
+          let _ =
+            ok what (Parseff.Source.parse ~consume:`Partial src digits_line)
+          in
+          offset "after Ok" 2;
+          ( match Parseff.Source.parse ~consume:`Partial src digits_line with
+          | Ok _ ->
+              Alcotest.failf "%s: expected an Error" what
+          | Error e ->
+              Alcotest.(check int) (what ^ " range.start") 1 e.range.start
+          );
+          offset "after Error" 3;
+          ok what
+            (Parseff.Source.parse ~consume:`Partial src (fun () ->
+                 Parseff.literal "x\n"
+             )
+            );
+          offset "after resync" 5;
+          let each = Parseff.Source.parse_each src digits_line in
+          let a, next = force what each in
+          Alcotest.(check string) (what ^ " element") "33" a;
+          offset "after a parse_each element" 8;
+          let b, _ = force what next in
+          Alcotest.(check string) (what ^ " element") "44" b;
+          offset "after the next element" 11;
+          ( match
+              Parseff.Source.parse ~consume:`Partial src (fun () ->
+                  Parseff.literal "ab";
+                  Parseff.skip_while is_digit;
+                  raise Exit
+              )
+            with
+          | _ ->
+              Alcotest.failf "%s: expected Exit" what
+          | exception Exit ->
+              ()
+          );
+          offset "after an exception" (13 + String.length long_digits);
+          Alcotest.(check string)
+            (what ^ " rest") ";rest"
+            (ok what (Parseff.Source.parse src rest));
+          offset "at the end" (String.length input)
+      )
+    )
+    keep_sizes
+
+let test_offset_between_parse_each_elements () =
+  let input = "a\nb\nc\n" in
+  List.iter
+    (fun n ->
+      sources n input (fun name src ->
+          let what = Printf.sprintf "%s, chunk %d" name n in
+          let _, next = force what (Parseff.Source.parse_each src line) in
+          Alcotest.(check int) (what ^ " after a") 2 (Parseff.Source.offset src);
+          let _ = ok what (Parseff.Source.parse ~consume:`Partial src line) in
+          Alcotest.(check int) (what ^ " after b") 4 (Parseff.Source.offset src);
+          let _ = force what next in
+          Alcotest.(check int) (what ^ " after c") 6 (Parseff.Source.offset src)
       )
     )
     keep_sizes
@@ -3011,6 +3082,12 @@ let () =
             test_unforced_parse_each_keeps_bytes;
           test_case "Source.parse between parse_each elements" `Quick
             test_parse_between_elements;
+          test_case "a parse loop moves forward" `Quick
+            test_parse_loop_moves_forward;
+          test_case "Source.offset after each outcome" `Quick
+            test_offset_after_each_outcome;
+          test_case "Source.offset between parse_each elements" `Quick
+            test_offset_between_parse_each_elements;
         ]
       );
       ( "read-ahead raise",
