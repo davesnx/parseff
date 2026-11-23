@@ -258,6 +258,43 @@ f(1, 2)
 - : unit = ()
 ```
 
+### A broken last element at end of input
+
+`recover` and `list` do not recover a failure at end of input. That failure ends the whole parse with `Error`, so the elements already recovered are lost. Parse the closing token with `Parseff.require`: a missing one is recorded as a diagnostic, and the parse returns `Ok`.
+
+```ocaml
+let quoted close () =
+  let _ = Parseff.char '"' in
+  let s = Parseff.take_while (fun c -> c <> '"' && c <> '\n') in
+  close ();
+  let _ = Parseff.optional (fun () -> Parseff.char '\n') in
+  s
+
+let strings close input =
+  let errors = Parseff.Diagnostics.create () in
+  let sync () =
+    Parseff.skip_while (fun c -> c <> '\n');
+    let _ = Parseff.optional (fun () -> Parseff.char '\n') in
+    ()
+  in
+  let file () =
+    Parseff.list ~close:(fun () -> false) ~sync (quoted close) (fun _ -> "")
+  in
+  let result = Parseff.parse ~diagnostics:errors input file in
+  (Result.to_option result, Parseff.Diagnostics.length errors)
+
+let plain () =
+  let _ = Parseff.char '"' in
+  ()
+
+let required () =
+  let _ = Parseff.require (fun () -> Parseff.char '"') (fun _ -> '"') in
+  ()
+
+let () = assert (strings plain "\"a\"\n\"b" = (None, 0))
+let () = assert (strings required "\"a\"\n\"b" = (Some [ "a"; "b" ], 1))
+```
+
 ## An expression that recovers
 
 When combining `Parseff.expression` with `Parseff.require` on operands, follow two rules:
