@@ -260,7 +260,7 @@ let () = assert (push_lines [ "ab"; "c\nde\n" ] = Ok [ "abc"; "de" ])
 Parseff retains buffered bytes from the oldest active rewind point to the newest read byte. Two things pin earlier bytes:
 
 - Open backtracking frames (`or_`, `one_of`, `look_ahead`, repetition loops).
-- Primitives building a single value across chunks (`take_while`, `recognize`).
+- Primitives building a single value across chunks (`take`, `take_while`, `recognize`), even after `Parseff.commit` or `Parseff.cut`.
 
 To stay within `~backtrack_window`:
 

@@ -984,7 +984,9 @@ val recover :
 
     - {b End of input.} Failures where both the raise point and [e.range.start]
       are at end of input are not recovered (preventing duplicate errors). A
-      {!fail} [~from] an earlier offset is recovered.
+      {!fail} [~from] an earlier offset is recovered. An unrecovered failure
+      ends the parse with [Error] and loses the recovered values. Parse a
+      closing token with {!require} to record a missing one instead.
     - {b Guaranteed progress.} If [sync ()] consumes nothing, [recover] advances
       one byte past [e.range.start] (capped at end of input). To continue
       without consuming input, use {!capture}.
@@ -1694,7 +1696,8 @@ val take : int -> string
 (** [take n] reads exactly [n] bytes as a string. Fails with
     [expected n bytes, found only k (end of input)] (or [found end of input]) if
     fewer than [n] bytes remain, and with [expected non-negative length] if
-    [n < 0] (an ordinary [Expected] failure, never raising). *)
+    [n < 0] (an ordinary [Expected] failure, never raising). In streaming, keep
+    [n] within [~backtrack_window], or use {!take_iter}. *)
 
 val within : int -> (unit -> 'a) -> 'a
 [@@alert unstable "This value can change in any minor release."]
