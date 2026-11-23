@@ -1935,7 +1935,8 @@ module Source : sig
         element leaves [source] as {!Source.parse} does, so a later parse, or a
         {!Source.parse} between elements, continues in order even if the
         sequence is not forced to the end. A sequence stopped before its end
-        keeps its current input buffer alive until the next parse of [source].
+        keeps its current input buffer alive until the sequence is forced again
+        or dropped.
       - Pass [~pending] if [parser] buffers lookahead past its value: called
         when no input remains, and if it returns [true], runs [parser] once more
         (allowing zero-width consumption). Must return [false] once drained; an
