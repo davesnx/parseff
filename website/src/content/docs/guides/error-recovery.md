@@ -258,6 +258,10 @@ f(1, 2)
 - : unit = ()
 ```
 
+### A broken last element at end of input
+
+A failure at end of input is not recovered. The parse returns `Error` and loses the recovered values. Parse the closing token with `Parseff.require` to record a missing one instead.
+
 ## An expression that recovers
 
 When combining `Parseff.expression` with `Parseff.require` on operands, follow two rules:
