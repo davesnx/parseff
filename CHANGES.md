@@ -38,6 +38,7 @@
 - [FEATURE] Add `lexeme` and `keyword` ([#27](https://github.com/davesnx/parseff/pull/27)) (@davesnx)
 - [FEATURE] Add `any_uint32`, `any_varint` and `Slice.take` ([#26](https://github.com/davesnx/parseff/pull/26)) (@davesnx)
 - [FEATURE] Add `capture` and `recover` for error recovery ([#24](https://github.com/davesnx/parseff/pull/24)) (@davesnx)
+- [FIX] Stop `expression` from looping when one level lists the same operator value twice and that operator fails after it reads its token (@davesnx)
 - [FIX] A `commit` in a nested `expression` operator fails only that operator, so the enclosing operator tries the next one, as property fuzzing found ([#126](https://github.com/davesnx/parseff/pull/126)) (@davesnx)
 - [FIX] Fix commit sealing and error positions found by property fuzzing: a `commit` in `fold_right` or in a required element of `many` no longer seals the wrong frame ([#121](https://github.com/davesnx/parseff/pull/121)) (@davesnx)
 - [FIX] Read the longest valid number in `number`, and fail when it is out of float range ([#99](https://github.com/davesnx/parseff/pull/99)) (@davesnx)

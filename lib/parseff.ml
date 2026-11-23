@@ -4007,6 +4007,7 @@ let expr_none = Prefix (fun () -> expr_no_build)
 type ('a, 'k) expr_table = {
   levels : ('a, 'k) operator list list;
   mutable found : int;
+  mutable next : ('a, 'k) operator list;
   mutable binary : 'a -> 'a -> 'a;
   mutable unary : 'a -> 'a;
 }
@@ -4018,6 +4019,7 @@ type ('a, 'k) expr_node =
       lhs : 'a;
       build : 'a -> 'a -> 'a;
       op : ('a, 'k) operator;
+      next : ('a, 'k) operator list;
       hi : int;
       below : ('a, 'k) expr_node;
     }
@@ -4041,6 +4043,7 @@ and expr_scan_ops st t frame start level hi rest = function
           match f () with
           | build ->
               t.found <- level;
+              t.next <- ops;
               if t.binary != build then t.binary <- build;
               op
           | exception Fail ->
@@ -4087,15 +4090,6 @@ let rec expr_drop n levels =
   else
     match levels with [] -> [] | _ :: rest -> expr_drop (n - 1) rest
 
-let rec expr_after op = function
-  | [] ->
-      []
-  | o :: ops ->
-      if o == op then
-        ops
-      else
-        expr_after op ops
-
 let expr_unwind st base =
   while st.frames_top > base do
     State.pop_rewind_frame st (st.frames_top - 1)
@@ -4136,7 +4130,7 @@ and expr_escape st operand t base top =
       else begin
         restore_rewind_frame st frame;
         let level = match n.op with Infix_right _ -> n.min | _ -> n.min - 1 in
-        expr_retry st operand t base n.below n.lhs n.hi level n.op
+        expr_retry st operand t base n.below n.lhs n.hi level n.next
       end
   | Expr_base _ ->
       expr_unwind st base;
@@ -4163,6 +4157,7 @@ and expr_step st operand t base top value hi op =
       end
   | Infix_left _ | Infix_right _ -> (
       let level = t.found in
+      let next = t.next in
       let right = match op with Infix_right _ -> true | _ -> false in
       if right && st.pos = start && expr_stop_at st top then begin
         restore_rewind_frame st frame;
@@ -4183,6 +4178,7 @@ and expr_step st operand t base top value hi op =
                   lhs = value;
                   build;
                   op;
+                  next;
                   hi;
                   below = top;
                 }
@@ -4197,7 +4193,7 @@ and expr_step st operand t base top value hi op =
                 expr_rerun st operand t base top value hi
             else begin
               restore_rewind_frame st frame;
-              expr_retry st operand t base top value hi level op
+              expr_retry st operand t base top value hi level next
             end
         | exception exn ->
             expr_unwind st base;
@@ -4217,12 +4213,12 @@ and expr_moved st operand t base top value =
   State.reset_frame st (st.frames_top - 1) frame_repeat;
   expr_look st operand t base top value
 
-and expr_retry st operand t base top value hi level op =
+and expr_retry st operand t base top value hi level next =
   let frame = st.frames_top - 1 in
   match
     match expr_drop level t.levels with
-    | ops :: rest ->
-        expr_scan_ops st t frame st.pos level hi rest (expr_after op ops)
+    | _ :: rest ->
+        expr_scan_ops st t frame st.pos level hi rest next
     | [] ->
         expr_none
   with
@@ -4367,7 +4363,13 @@ and expr_prefix_ops st t operand frame start level rest = function
 let expression ~operand table =
   let st = get_state () in
   let t =
-    { levels = table; found = 0; binary = expr_no_build; unary = expr_no_build }
+    {
+      levels = table;
+      found = 0;
+      next = [];
+      binary = expr_no_build;
+      unary = expr_no_build;
+    }
   in
   let operand =
     if expr_has_prefix table then

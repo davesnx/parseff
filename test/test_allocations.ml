@@ -557,14 +557,14 @@ let test_operators () =
           name input actual maximum
     )
     [
-      ("expression", 46., "1", fun () -> Parseff.expression ~operand:digit table);
+      ("expression", 47., "1", fun () -> Parseff.expression ~operand:digit table);
       ( "expression",
-        62.,
+        63.,
         "1+2+3",
         fun () -> Parseff.expression ~operand:digit table
       );
       ( "expression",
-        67.,
+        71.,
         "1+2*3+4",
         fun () -> Parseff.expression ~operand:digit table
       );
