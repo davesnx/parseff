@@ -389,6 +389,8 @@ type state = {
   mutable source : source option;
   mutable frames : int array;
   mutable frames_top : int;
+  mutable floor_clean : int;
+  mutable floor_prefix : int array;
   mutable recovery_off : int;
   mutable replay_far : far array;
   mutable held_far : far array;
@@ -505,6 +507,8 @@ module State = struct
       source;
       frames = [||];
       frames_top = 0;
+      floor_clean = 0;
+      floor_prefix = [||];
       recovery_off = 0;
       replay_far = [||];
       held_far = [||];
@@ -651,10 +655,14 @@ module State = struct
     t.frames_top <- index + 1;
     index
 
+  let[@inline always] touch_frame (t : t) frame =
+    if frame < t.floor_clean then t.floor_clean <- frame
+
   let pop_rewind_frame (t : t) frame =
-    if t.frames_top - 1 = frame then
-      t.frames_top <- frame
-    else
+    if t.frames_top - 1 = frame then begin
+      t.frames_top <- frame;
+      touch_frame t frame
+    end else
       invalid_arg "Parseff.State.pop_rewind_frame"
 
   let[@inline always] frame_committed (t : t) frame =
@@ -663,12 +671,14 @@ module State = struct
     <> 0
 
   let[@inline always] set_frame_kind (t : t) frame kind =
+    touch_frame t frame;
     let slot = (frame * frame_stride) + 1 in
     let flags = Array.unsafe_get t.frames slot in
     Array.unsafe_set t.frames slot
       (flags land lnot (frame_kind_mask lor frame_committed_bit) lor kind)
 
-  let[@inline always] reset_repeat_frame (t : t) base pos =
+  let[@inline always] reset_repeat_frame (t : t) frame base pos =
+    touch_frame t frame;
     let frames = t.frames in
     Array.unsafe_set frames base pos;
     Array.unsafe_set frames (base + 1)
@@ -676,6 +686,7 @@ module State = struct
     Array.unsafe_set frames (base + 2) t.diag_len
 
   let[@inline always] reset_frame (t : t) frame kind =
+    touch_frame t frame;
     let base = frame * frame_stride in
     let frames = t.frames in
     Array.unsafe_set frames base t.pos;
@@ -752,6 +763,7 @@ module State = struct
     if trail_depth t > saved then undo_frame_trail t frame saved
 
   let[@inline never] advance_capture_frame (t : t) i =
+    touch_frame t i;
     let base = i * frame_stride in
     let frames = t.frames in
     Array.unsafe_set frames base t.pos;
@@ -800,8 +812,10 @@ module State = struct
       if flags land frame_pin_bit <> 0 then
         commit_nearest_from t (i - 1) lowest
       else if flags land frame_kind_mask <> frame_barrier then begin
-        if flags land frame_recovered_bit = 0 then
-          Array.unsafe_set t.frames slot (flags lor frame_committed_bit);
+        if flags land frame_recovered_bit = 0 then begin
+          touch_frame t i;
+          Array.unsafe_set t.frames slot (flags lor frame_committed_bit)
+        end;
         if lowest >= 0 then keep_before_advance t lowest;
         true
       end else if flags land frame_recovery_bit <> 0 then
@@ -829,6 +843,7 @@ module State = struct
       let slot = (!i * frame_stride) + 1 in
       let flags = Array.unsafe_get t.frames slot in
       if flags land frame_kind_mask <> frame_barrier then begin
+        touch_frame t !i;
         if force then
           Array.unsafe_set t.frames slot
             (flags land lnot frame_recovered_bit lor frame_committed_bit)
@@ -926,8 +941,23 @@ module State = struct
 
   let reclaim_floor (t : t) ~keep_from =
     let frames = t.frames in
-    let floor = ref keep_from in
-    for i = t.frames_top - 1 downto 0 do
+    let top = t.frames_top in
+    let clean = t.floor_clean in
+    if Array.length t.floor_prefix < top then begin
+      let grown = Array.make (imax 8 (2 * top)) max_int in
+      Array.blit t.floor_prefix 0 grown 0 clean;
+      t.floor_prefix <- grown
+    end;
+    let prefix = t.floor_prefix in
+    let floor =
+      ref
+        ( if clean = 0 then
+            max_int
+          else
+            Array.unsafe_get prefix (clean - 1)
+        )
+    in
+    for i = clean to top - 1 do
       let base = i * frame_stride in
       let flags = Array.unsafe_get frames (base + 1) in
       let kind = flags land frame_kind_mask in
@@ -939,9 +969,11 @@ module State = struct
         )
         && start < !floor
       then
-        floor := start
+        floor := start;
+      Array.unsafe_set prefix i !floor
     done;
-    !floor
+    t.floor_clean <- top;
+    imin keep_from !floor
 end
 
 exception Not_in_parse_context
@@ -3318,7 +3350,7 @@ let[@inline never] rec many_at_most st at_least at_most p =
       acc := !v :: !acc;
       incr n;
       let pos = st.pos in
-      State.reset_repeat_frame st base pos;
+      State.reset_repeat_frame st frame base pos;
       start := pos;
       v := p ()
     done;
@@ -3351,7 +3383,7 @@ let rec many_loop at_least (p : unit -> 'a) : 'a list =
     while st.pos <> !start do
       acc := !v :: !acc;
       let pos = st.pos in
-      State.reset_repeat_frame st base pos;
+      State.reset_repeat_frame st frame base pos;
       start := pos;
       v := p ()
     done
@@ -3412,13 +3444,13 @@ let rec sep_by ?(at_least = 0) ?(trailing = false) (p : unit -> 'a)
     match
       acc := [ p () ];
       let start = ref st.pos in
-      State.reset_repeat_frame st base !start;
+      State.reset_repeat_frame st frame base !start;
       let _ = sep () in
       let v = ref (p ()) in
       while st.pos <> !start do
         acc := !v :: !acc;
         let pos = st.pos in
-        State.reset_repeat_frame st base pos;
+        State.reset_repeat_frame st frame base pos;
         start := pos;
         let _ = sep () in
         v := p ()
@@ -3505,7 +3537,7 @@ let rec iter_elements st ~at_least ~progress_first first next f =
       give st f !v;
       given := true;
       let pos = st.pos in
-      State.reset_repeat_frame st base pos;
+      State.reset_repeat_frame st frame base pos;
       start := pos;
       v := next ()
     done
@@ -3617,10 +3649,11 @@ let[@inline always] fold_left_from st (p : unit -> 'a)
     let rhs = ref (p ()) in
     while st.pos <> !start do
       st.frames_top <- frame;
+      State.touch_frame st frame;
       acc := !f !acc !rhs;
       st.frames_top <- top;
       let pos = st.pos in
-      State.reset_repeat_frame st base pos;
+      State.reset_repeat_frame st frame base pos;
       start := pos;
       f := op ();
       rhs := p ()
@@ -3875,7 +3908,7 @@ let prec_lower st frame start top prec =
       if again then
         State.pop_rewind_frame st frame
       else begin
-        State.reset_repeat_frame st (frame * frame_stride) start;
+        State.reset_repeat_frame st frame (frame * frame_stride) start;
         st.pos <- after
       end;
       top
