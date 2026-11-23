@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 type outcome = Value of string | Failed of int * string
 
 let pp_outcome ppf = function
