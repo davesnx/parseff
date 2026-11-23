@@ -5631,12 +5631,127 @@ let shown x =
     s
   end
 
-let render ?name ?source ?custom e =
+let hex_rows b e byte_at =
+  let start = e.range.start in
+  let last = imax start (e.range.stop - 1) in
+  let r0 = start / 16 * 16 in
+  let r1 = imin (r0 + 16) (last / 16 * 16) in
+  let known r = List.init 16 (fun k -> byte_at (r + k)) in
+  let has_bytes r = List.exists Option.is_some (known r) in
+  let after_last =
+    start > 0 && byte_at start = None && byte_at (start - 1) <> None
+  in
+  let rows =
+    if after_last && not (has_bytes r0) then
+      [ r0 - 16; r0 ]
+    else
+      List.filter has_bytes
+        ( if r1 > r0 then
+            [ r0; r1 ]
+          else
+            [ r0 ]
+        )
+  in
+  let w = List.fold_left (fun m r -> imax m (digits r)) 1 rows in
+  let trimmed s =
+    let n = ref (String.length s) in
+    while !n > 0 && s.[!n - 1] = ' ' do
+      decr n
+    done;
+    String.sub s 0 !n
+  in
+  List.iter
+    (fun r ->
+      let cells = known r in
+      let line = Buffer.create 80 in
+      List.iteri
+        (fun k c ->
+          if k > 0 then Buffer.add_char line ' ';
+          match c with
+          | Some c ->
+              Buffer.add_string line (Printf.sprintf "%02x" (Char.code c))
+          | None ->
+              Buffer.add_string line "  "
+        )
+        cells;
+      Buffer.add_string line "  ";
+      List.iter
+        (fun c ->
+          Buffer.add_char line
+            ( match c with
+            | Some (' ' .. '~' as c) ->
+                c
+            | Some _ ->
+                '.'
+            | None ->
+                ' '
+            )
+        )
+        cells;
+      Buffer.add_char b '\n';
+      add_padded b w r;
+      Buffer.add_string b (trimmed (" | " ^ Buffer.contents line));
+      if start <= r + 15 && last >= r then begin
+        let a = imax start r - r in
+        let z = imax a (imin last (r + 15) - r) in
+        Buffer.add_char b '\n';
+        for _ = 1 to w do
+          Buffer.add_char b ' '
+        done;
+        Buffer.add_string b " | ";
+        for _ = 1 to 3 * a do
+          Buffer.add_char b ' '
+        done;
+        for _ = 3 * a to (3 * z) + 1 do
+          Buffer.add_char b '^'
+        done
+      end
+    )
+    rows;
+  w
+
+let byte_reader ?source e =
+  match source with
+  | Some s ->
+      fun i ->
+        if i >= 0 && i < String.length s then
+          Some s.[i]
+        else
+          None
+  | None ->
+      let x = e.excerpt in
+      if x.kept_len > 0 then
+        fun i ->
+      if i >= 0 && i < x.kept_len then
+        Some (Bytes.get x.kept i)
+      else
+        None
+      else
+        let views = (shown x).views in
+        fun i ->
+          List.find_map
+            (fun (v : view) ->
+              let j = i - v.first in
+              if j >= 0 && j < String.length v.text then
+                Some v.text.[j]
+              else
+                None
+            )
+            views
+
+let render ?name ?source ?custom ?(positions = `Line_col) e =
+  let bytes = positions = `Byte_offset in
   let src =
-    match source with Some s -> Some (s, source_line_starts s) | None -> None
+    match source with
+    | Some s when not bytes ->
+        Some (s, source_line_starts s)
+    | _ ->
+        None
   in
   let where =
     match (src, e.location) with
+    | _ when bytes ->
+        None
     | Some (s, starts), _ ->
         let l = location_of_position s e.range.start in
         Some
@@ -5658,6 +5773,8 @@ let render ?name ?source ?custom e =
   in
   let frame_loc i (f : context) =
     match src with
+    | _ when bytes ->
+        None
     | Some (s, starts) ->
         let l = location_of_position s f.start in
         let shown =
@@ -5752,6 +5869,8 @@ let render ?name ?source ?custom e =
   in
   let w =
     match error_view with
+    | None when bytes ->
+        hex_rows b e (byte_reader ?source e)
     | None ->
         1
     | Some error_view ->

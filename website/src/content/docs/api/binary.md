@@ -116,4 +116,25 @@ let tlv_message () =
 - **Short reads**: fail at the start of the field with `expected N bytes, found only K (end of input)` (or `found end of input` if no bytes remain).
 - **Exact-match mismatches**: fail at the start of the field with an `Expected` error formatted in hexadecimal, e.g. `expected int32be 0x01020304, found 0xDE000000`, merging with other alternatives at the same offset.
 - **Positions**: always byte offsets, advancing by the field width.
+- **Rendering**: `Parseff.render_error` prints line and column by default. Pass `` ~positions:`Byte_offset `` to print the byte offset and a hex excerpt instead.
 - **Streaming and performance**: multi-byte reads use the stdlib's `String.get_int16_be`/`String.get_int32_le` primitives directly on the buffer and work across chunk boundaries in `Parseff.Source.parse` and `Parseff.Push`.
+```ocaml
+let frame () =
+  let len = Parseff.BE.any_uint32 () in
+  Parseff.take len
+
+let () =
+  match Parseff.parse "\x00\x00\x00\x05\x0ahi" frame with
+  | Ok _ -> assert false
+  | Error e ->
+      print_endline
+        (Parseff.render_error ~name:"frame.bin" ~positions:`Byte_offset e)
+```
+
+Output:
+
+```
+frame.bin: byte 4: [error] expected 5 bytes, found only 3 (end of input)
+0 | 00 00 00 05 0a 68 69                             .....hi
+  |             ^^^^^^^^
+```
