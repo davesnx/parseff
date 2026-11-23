@@ -1,6 +1,5 @@
 ## Unreleased
 
-- [BREAKING] `sep_by ~trailing:true` and `sep_by_iter ~trailing:true` drop an element that reads no input after the final separator, unlike `list` ([#133](https://github.com/davesnx/parseff/pull/133)) (@davesnx)
 - [BREAKING] Read diagnostics in source order: `Diagnostics.to_list` and the `inner` list given to `~keep` sort by `pos`, and entries at the same position keep the order they were recorded in ([#128](https://github.com/davesnx/parseff/pull/128)) (@davesnx)
 - [BREAKING] Name every runner `parse`: `parse_source` is `Source.parse`, and the push runners move into the new module `Push` ([#113](https://github.com/davesnx/parseff/pull/113)) (@davesnx)
 - [BREAKING] Polish the API: combinators run with no trailing `()`, spans move into `Slice`, `fold_left` and `fold_right` take `?otherwise` first, and `literal` takes `?case_sensitive` ([#112](https://github.com/davesnx/parseff/pull/112)) (@davesnx)
@@ -10,7 +9,6 @@
 - [BREAKING] Rename `consume` to `literal` and return `unit` ([#98](https://github.com/davesnx/parseff/pull/98)) (@davesnx)
 - [BREAKING] Settle the API before 1.0: `fail` backtracks as `error` does, `span` is abstract, `location` is private, `digit` returns a `char`, `satisfy` takes `?label` first, `Failure` is `Failed`, `skip_while_then_char` and `fused_sep_take` are removed, and errors compare by their fields; also add `Push`, `many_iter`, `take_iter`, `within`, `?at_most`, `Source.of_bigstring_chunks`, `require` and `list` ([#76](https://github.com/davesnx/parseff/pull/76)) (@davesnx)
 - [FEATURE] Make `Push.parse`, `Push.feed` and `Push.finish` stable, keep the chunks not yet fed after `Done` in the `Push` example, and state what 0.x releases promise and how to show the `unstable` alert ([#127](https://github.com/davesnx/parseff/pull/127)) (@davesnx)
-- [FEATURE] Add `?trailing` to `sep_by` and `sep_by_iter`, with the meaning it has on `list`: one optional separator after the last element ([#129](https://github.com/davesnx/parseff/pull/129)) (@davesnx)
 - [FEATURE] Add `Push.parse_each`, a push parse of a stream of values in one fiber ([#111](https://github.com/davesnx/parseff/pull/111)) (@davesnx)
 - [FEATURE] Add `not_followed_by` ([#107](https://github.com/davesnx/parseff/pull/107)) (@davesnx)
 - [FEATURE] Pass a `Charset` to `take_while`, `skip_while`, `Slice.take_while` and `take_while_iter` as `?set` ([#104](https://github.com/davesnx/parseff/pull/104)) (@davesnx)

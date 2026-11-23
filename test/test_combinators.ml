@@ -722,158 +722,42 @@ let in_every_mode input parser =
        [ 1; 2; 3 ]
   |> List.map (fun (mode, r) -> (mode, show show_vp r))
 
-let check_sep_by_trailing ?at_least ?trailing element sep input expected =
-  let show_strings xs =
-    let show_one s =
-      if s = "" then
-        "_"
-      else
-        s
-    in
-    "[" ^ String.concat ";" (List.map show_one xs) ^ "]"
-  in
-  let as_list () =
-    show_strings (Parseff.sep_by ?at_least ?trailing element sep)
-  in
-  let as_iter () =
-    let acc = ref [] in
-    Parseff.sep_by_iter ?at_least ?trailing element sep (fun v ->
-        acc := v :: !acc
-    );
-    show_strings (List.rev !acc)
-  in
-  List.iter
-    (fun (name, parser) ->
-      List.iter
-        (fun (mode, actual) ->
-          Alcotest.(check string)
-            (Printf.sprintf "%s %S, %s" name input mode)
-            expected actual
-        )
-        (in_every_mode input parser)
-    )
-    [ ("sep_by", as_list); ("sep_by_iter", as_iter) ]
-
-let is_digit c = c >= '0' && c <= '9'
-let digits1 () = Parseff.take_while ~at_least:1 ~label:"digit" is_digit
-let digits0 () = Parseff.take_while is_digit
-let comma () = ignore (Parseff.char ',')
-
-let test_sep_by_trailing () =
-  let check = check_sep_by_trailing ~trailing:true digits1 comma in
-  check "1,2," "Ok ([1;2], 4)";
-  check "1,2" "Ok ([1;2], 3)";
-  check "1,2,x" "Ok ([1;2], 4)";
-  check "1,," "Ok ([1], 2)";
-  check "" "Ok ([], 0)";
-  check "," "Ok ([], 0)"
-
-let test_sep_by_trailing_default () =
-  let check = check_sep_by_trailing digits1 comma in
-  check "1,2," "Ok ([1;2], 3)";
-  check_sep_by_trailing ~trailing:false digits1 comma "1,2," "Ok ([1;2], 3)"
-
-let test_sep_by_trailing_at_least () =
-  let check = check_sep_by_trailing ~at_least:2 ~trailing:true digits1 comma in
-  check "1,2," "Ok ([1;2], 4)";
-  check "1,2,3," "Ok ([1;2;3], 6)";
-  check "1," "Error@2 Expected \"expected digit, found end of input\"";
-  check_sep_by_trailing ~at_least:2 digits1 comma "1,"
-    "Error@2 Expected \"expected digit, found end of input\""
-
-let test_sep_by_trailing_zero_width_element () =
-  let check = check_sep_by_trailing ~trailing:true digits0 comma in
-  check "1,2," "Ok ([1;2], 4)";
-  check "1,,2," "Ok ([1;_;2], 5)";
-  check "1,," "Ok ([1;_], 3)";
-  check "1,,," "Ok ([1;_;_], 4)";
-  check "" "Ok ([_], 0)";
-  check "," "Ok ([_], 1)";
-  check_sep_by_trailing digits0 comma "1,2," "Ok ([1;2;_], 4)";
-  check_sep_by_trailing ~at_least:2 ~trailing:true digits0 comma "1,"
-    "Ok ([1;_], 2)"
-
-let test_sep_by_trailing_versus_list () =
-  let show_strings xs =
-    let show_one s =
-      if s = "" then
-        "_"
-      else
-        s
-    in
-    "[" ^ String.concat ";" (List.map show_one xs) ^ "]"
-  in
-  let check element_name element input ~sep_by ~list =
-    check_sep_by_trailing ~trailing:true element comma input sep_by;
-    let via_list () =
-      show_strings
-        (Parseff.list ~sep:comma ~trailing:true
-           ~close:(fun () -> false)
-           ~sync:(fun () -> ())
-           element
-           (fun _ -> "hole")
-        )
-    in
-    List.iter
-      (fun (mode, actual) ->
-        Alcotest.(check string)
-          (Printf.sprintf "list %s %S, %s" element_name input mode)
-          list actual
-      )
-      (in_every_mode input via_list)
-  in
-  let same element_name element input expected =
-    check element_name element input ~sep_by:expected ~list:expected
-  in
-  List.iter
-    (fun (input, expected) -> same "digits1" digits1 input expected)
-    [
-      ("1,2,", "Ok ([1;2], 4)");
-      ("1,,2,", "Ok ([1], 2)");
-      ("", "Ok ([], 0)");
-      (",", "Ok ([], 0)");
-      ("1,2", "Ok ([1;2], 3)");
-      ("1,2,x", "Ok ([1;2], 4)");
-    ];
-  List.iter
-    (fun (input, expected) -> same "digits0" digits0 input expected)
-    [
-      ("1,2", "Ok ([1;2], 3)"); ("", "Ok ([_], 0)"); ("1,,2", "Ok ([1;_;2], 4)");
-    ];
-  let zero_width_after_final_separator = check "digits0" digits0 in
-  zero_width_after_final_separator "1,2," ~sep_by:"Ok ([1;2], 4)"
-    ~list:"Ok ([1;2;_], 4)";
-  zero_width_after_final_separator "1,,2," ~sep_by:"Ok ([1;_;2], 5)"
-    ~list:"Ok ([1;_;2;_], 5)";
-  zero_width_after_final_separator "," ~sep_by:"Ok ([_], 1)"
-    ~list:"Ok ([_;_], 1)";
-  zero_width_after_final_separator "1,2,x" ~sep_by:"Ok ([1;2], 4)"
-    ~list:"Ok ([1;2;_], 4)"
-
-let test_sep_by_trailing_zero_width_separator () =
-  let one_digit () = String.make 1 (Parseff.digit ()) in
-  let spaces () = Parseff.skip_while (fun c -> c = ' ') in
-  check_sep_by_trailing ~trailing:true digits1 spaces "1 2 " "Ok ([1;2], 4)";
-  check_sep_by_trailing digits1 spaces "1 2 " "Ok ([1;2], 3)";
-  check_sep_by_trailing ~trailing:true one_digit
-    (fun () -> ())
-    "12" "Ok ([1;2], 2)";
-  check_sep_by_trailing ~trailing:true
-    (fun () ->
-      Option.fold ~none:"-" ~some:(String.make 1) (Parseff.peek_char ())
-    )
-    (fun () -> ())
-    "abc" "Ok ([a], 0)"
-
-let test_sep_by_trailing_csv () =
+let test_sep_by_csv_trailing_eol () =
   let field () = Parseff.take_while (fun c -> c <> ',' && c <> '\r') in
-  let record () = String.concat "|" (Parseff.sep_by ~at_least:1 field comma) in
+  let record () =
+    Parseff.not_followed_by Parseff.end_of_input;
+    String.concat "|" (Parseff.sep_by field (fun () -> Parseff.char ','))
+  in
   let eol () = Parseff.literal "\r\n" in
-  let check = check_sep_by_trailing ~trailing:true record eol in
-  check "a,b\r\nc,d\r\n" "Ok ([a|b;c|d], 10)";
-  check "a,b\r\nc,d" "Ok ([a|b;c|d], 8)";
-  check "a,b\r\n\r\nc,d\r\n" "Ok ([a|b;_;c|d], 12)";
-  check_sep_by_trailing record eol "a,b\r\nc,d\r\n" "Ok ([a|b;c|d;_], 10)"
+  let rows () =
+    let xs = Parseff.sep_by record eol in
+    ignore (Parseff.optional eol);
+    "[" ^ String.concat ";" xs ^ "]"
+  in
+  let iter_rows () =
+    let acc = ref [] in
+    Parseff.sep_by_iter record eol (fun v -> acc := v :: !acc);
+    ignore (Parseff.optional eol);
+    "[" ^ String.concat ";" (List.rev !acc) ^ "]"
+  in
+  List.iter
+    (fun (input, expected) ->
+      List.iter
+        (fun (name, parser) ->
+          List.iter
+            (fun (mode, actual) ->
+              Alcotest.(check string)
+                (Printf.sprintf "%s %S, %s" name input mode)
+                expected actual
+            )
+            (in_every_mode input parser)
+        )
+        [ ("sep_by", rows); ("sep_by_iter", iter_rows) ]
+    )
+    [
+      ("a,b\r\nc,d\r\n", "Ok ([a|b;c|d], 10)");
+      ("a,b\r\nc,d", "Ok ([a|b;c|d], 8)");
+    ]
 
 let () =
   let open Alcotest in
@@ -921,17 +805,10 @@ let () =
             test_required_element_failure;
         ]
       );
-      ( "sep_by ~trailing",
+      ( "sep_by",
         [
-          test_case "accepts one trailing separator" `Quick test_sep_by_trailing;
-          test_case "default leaves it" `Quick test_sep_by_trailing_default;
-          test_case "at_least" `Quick test_sep_by_trailing_at_least;
-          test_case "zero-width element" `Quick
-            test_sep_by_trailing_zero_width_element;
-          test_case "versus list" `Quick test_sep_by_trailing_versus_list;
-          test_case "zero-width separator" `Quick
-            test_sep_by_trailing_zero_width_separator;
-          test_case "csv rows" `Quick test_sep_by_trailing_csv;
+          test_case "csv rows with a trailing line end" `Quick
+            test_sep_by_csv_trailing_eol;
         ]
       );
       ( "take",

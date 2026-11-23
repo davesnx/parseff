@@ -1112,9 +1112,7 @@ val list :
       After a zero-width element, a missing or zero-width separator ends the
       list immediately.
     - {b Without [~diagnostics].} Runs {!many} (or {!sep_by}, plus an optional
-      trailing separator when [~trailing:true]) and ignores [~close]. With
-      [~trailing:true], [list] keeps an element that reads no input after the
-      final separator, where {!sep_by} drops it.
+      trailing separator when [~trailing:true]) and ignores [~close].
     - [~release], [~contexts], [~keep], and end-of-input non-recovery match
       {!recover}. A {!commit} in [element] stays within [list]; {!cut} reaches
       outer frames.
@@ -1256,20 +1254,29 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
     let digits1 () = many ~at_least:1 digit
     ]} *)
 
-val sep_by :
-  ?at_least:int -> ?trailing:bool -> (unit -> 'a) -> (unit -> 'b) -> 'a list
-(** [sep_by ?at_least ?trailing element separator] parses zero or more
-    [element]s separated by [separator] (discarding separator values). Stops and
-    drops the last element if a separator and element together consume no input.
-    Accepts an optional trailing separator when [~trailing:true], and drops an
-    element that reads no input after the final separator, unless [~at_least]
-    requires it, where {!list} keeps it.
+val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
+(** [sep_by ?at_least element separator] parses zero or more [element]s
+    separated by [separator] (discarding separator values). Stops and drops the
+    last element if a separator and element together consume no input.
+
+    An [element] that matches empty input also matches after the last separator.
+    To accept a trailing separator, make [element] fail at end of input with
+    {!not_followed_by} {!end_of_input}, then parse the separator with
+    {!optional}:
 
     {@ocaml[
-    let csv_line () =
-      sep_by
-        (fun () -> take_while ~at_least:1 (fun c -> c <> ','))
-        (fun () -> char ',')
+    let csv () =
+      let field () = take_while (fun c -> c <> ',' && c <> '\r') in
+      let record () =
+        not_followed_by end_of_input;
+        sep_by field (fun () -> char ',')
+      in
+      let rows = sep_by record (fun () -> literal "\r\n") in
+      ignore (optional (fun () -> literal "\r\n"));
+      rows
+
+    let () =
+      assert (parse "a,b\r\nc,d\r\n" csv = Ok [ [ "a"; "b" ]; [ "c"; "d" ] ])
     ]} *)
 
 val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
@@ -1326,15 +1333,10 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
     ]} *)
 
 val sep_by_iter :
-  ?at_least:int ->
-  ?trailing:bool ->
-  (unit -> 'a) ->
-  (unit -> 'b) ->
-  ('a -> unit) ->
-  unit
+  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
 [@@alert unstable "This value can change in any minor release."]
-(** [sep_by_iter ?at_least ?trailing element separator f] runs like {!sep_by}
-    without building a list, passing each [element] to [f]. Sealing, callback,
+(** [sep_by_iter ?at_least element separator f] runs like {!sep_by} without
+    building a list, passing each [element] to [f]. Sealing, callback,
     zero-width, and [Invalid_argument] rules match {!many_iter}; a failure in
     [separator] after a value is yielded cannot rewind before that value.
 
