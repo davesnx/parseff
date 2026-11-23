@@ -260,20 +260,7 @@ let () = assert (push_lines [ "ab"; "c\nde\n" ] = Ok [ "abc"; "de" ])
 Parseff retains buffered bytes from the oldest active rewind point to the newest read byte. Two things pin earlier bytes:
 
 - Open backtracking frames (`or_`, `one_of`, `look_ahead`, repetition loops).
-- Primitives building a single value across chunks (`take`, `take_while`, `recognize`). `Parseff.commit` and `Parseff.cut` do not release these bytes, so `take n` needs `n <= ~backtrack_window`; `Parseff.take_iter` does not.
-```ocaml
-let window_error = function
-  | Error { Parseff.kind = Backtrack_window_exceeded _; _ } -> true
-  | _ -> false
-
-let source () = Parseff.Source.of_seq (Seq.init 8 (fun _ -> "xxxx"))
-
-let () =
-  let big () = Parseff.take 32 in
-  assert (window_error (Parseff.Source.parse ~backtrack_window:16 (source ()) big));
-  let streamed () = Parseff.take_iter 32 ignore in
-  assert (Parseff.Source.parse ~backtrack_window:16 (source ()) streamed = Ok ())
-```
+- Primitives building a single value across chunks (`take`, `take_while`, `recognize`), even after `Parseff.commit` or `Parseff.cut`.
 
 To stay within `~backtrack_window`:
 

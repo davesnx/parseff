@@ -63,7 +63,7 @@
 - [PERF] Read into spare room, so a stream does not copy all kept input on each read: 8 MB kept in 4 KB reads takes 0.016 s, down from 1.3 s ([#45](https://github.com/davesnx/parseff/pull/45)) (@davesnx)
 - [PERF] Inline six primitives at call sites, and require odoc 3.2.1 for the docs ([#44](https://github.com/davesnx/parseff/pull/44)) (@davesnx)
 - [PERF] Reduce the cost of the generic combinators ([#35](https://github.com/davesnx/parseff/pull/35)) (@davesnx)
-- [DOCS] State that `take` and `Slice.take` must fit in `~backtrack_window` even after `commit` or `cut`, and that a failure at end of input loses every recovered value unless the closing token goes through `require` ([#132](https://github.com/davesnx/parseff/pull/132)) (@davesnx)
+- [DOCS] Document the `take` window limit, and that a failure at end of input loses recovered values ([#132](https://github.com/davesnx/parseff/pull/132)) (@davesnx)
 - [DOCS] Document the zero-width prefix rule and fuzz committing prefix tokens ([#125](https://github.com/davesnx/parseff/pull/125)) (@davesnx)
 - [DOCS] Render og:images in a static endpoint of the website, so the docs base needs no HTML rewrite ([#123](https://github.com/davesnx/parseff/pull/123)) (@davesnx)
 - [DOCS] Generate the API pages through `fix-odoc-md.sh` instead of a copied `sed` in each dune rule ([#122](https://github.com/davesnx/parseff/pull/122)) (@davesnx)
