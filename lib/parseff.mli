@@ -1110,7 +1110,9 @@ val list :
       After a zero-width element, a missing or zero-width separator ends the
       list immediately.
     - {b Without [~diagnostics].} Runs {!many} (or {!sep_by}, plus an optional
-      trailing separator when [~trailing:true]) and ignores [~close].
+      trailing separator when [~trailing:true]) and ignores [~close]. With
+      [~trailing:true], [list] keeps an element that reads no input after the
+      final separator, where {!sep_by} drops it.
     - [~release], [~contexts], [~keep], and end-of-input non-recovery match
       {!recover}. A {!commit} in [element] stays within [list]; {!cut} reaches
       outer frames.
@@ -1257,10 +1259,9 @@ val sep_by :
 (** [sep_by ?at_least ?trailing element separator] parses zero or more
     [element]s separated by [separator] (discarding separator values). Stops and
     drops the last element if a separator and element together consume no input.
-    Accepts an optional trailing separator when [~trailing:true]. An element
-    that matches empty input still matches after a trailing separator, so make
-    it fail at end of input, as a CSV record does with
-    [not_followed_by end_of_input].
+    Accepts an optional trailing separator when [~trailing:true], and drops an
+    element that reads no input after the final separator, unless [~at_least]
+    requires it, where {!list} keeps it.
 
     {@ocaml[
     let csv_line () =

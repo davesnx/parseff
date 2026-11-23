@@ -783,47 +783,72 @@ let test_sep_by_trailing_at_least () =
 
 let test_sep_by_trailing_zero_width_element () =
   let check = check_sep_by_trailing ~trailing:true digits0 comma in
-  check "1,2," "Ok ([1;2;_], 4)";
-  check "1,,2," "Ok ([1;_;2;_], 5)";
-  check "1,," "Ok ([1;_;_], 3)";
+  check "1,2," "Ok ([1;2], 4)";
+  check "1,,2," "Ok ([1;_;2], 5)";
+  check "1,," "Ok ([1;_], 3)";
+  check "1,,," "Ok ([1;_;_], 4)";
   check "" "Ok ([_], 0)";
-  check "," "Ok ([_;_], 1)";
+  check "," "Ok ([_], 1)";
   check_sep_by_trailing digits0 comma "1,2," "Ok ([1;2;_], 4)";
   check_sep_by_trailing ~at_least:2 ~trailing:true digits0 comma "1,"
     "Ok ([1;_], 2)"
 
-let test_sep_by_trailing_same_as_list () =
+let test_sep_by_trailing_versus_list () =
   let show_strings xs =
-    "[" ^ String.concat ";" (List.map (Printf.sprintf "%S") xs) ^ "]"
+    let show_one s =
+      if s = "" then
+        "_"
+      else
+        s
+    in
+    "[" ^ String.concat ";" (List.map show_one xs) ^ "]"
+  in
+  let check element_name element input ~sep_by ~list =
+    check_sep_by_trailing ~trailing:true element comma input sep_by;
+    let via_list () =
+      show_strings
+        (Parseff.list ~sep:comma ~trailing:true
+           ~close:(fun () -> false)
+           ~sync:(fun () -> ())
+           element
+           (fun _ -> "hole")
+        )
+    in
+    List.iter
+      (fun (mode, actual) ->
+        Alcotest.(check string)
+          (Printf.sprintf "list %s %S, %s" element_name input mode)
+          list actual
+      )
+      (in_every_mode input via_list)
+  in
+  let same element_name element input expected =
+    check element_name element input ~sep_by:expected ~list:expected
   in
   List.iter
-    (fun (element_name, element) ->
-      List.iter
-        (fun input ->
-          let via_sep_by () =
-            show_strings (Parseff.sep_by ~trailing:true element comma)
-          in
-          let via_list () =
-            show_strings
-              (Parseff.list ~sep:comma ~trailing:true
-                 ~close:(fun () -> false)
-                 ~sync:(fun () -> ())
-                 element
-                 (fun _ -> "hole")
-              )
-          in
-          List.iter2
-            (fun (mode, expected) (_, actual) ->
-              Alcotest.(check string)
-                (Printf.sprintf "%s %S, %s" element_name input mode)
-                expected actual
-            )
-            (in_every_mode input via_list)
-            (in_every_mode input via_sep_by)
-        )
-        [ "1,2,"; "1,,2,"; ""; ","; "1,2"; "1,,"; "1,2,x" ]
-    )
-    [ ("digits0", digits0); ("digits1", digits1) ]
+    (fun (input, expected) -> same "digits1" digits1 input expected)
+    [
+      ("1,2,", "Ok ([1;2], 4)");
+      ("1,,2,", "Ok ([1], 2)");
+      ("", "Ok ([], 0)");
+      (",", "Ok ([], 0)");
+      ("1,2", "Ok ([1;2], 3)");
+      ("1,2,x", "Ok ([1;2], 4)");
+    ];
+  List.iter
+    (fun (input, expected) -> same "digits0" digits0 input expected)
+    [
+      ("1,2", "Ok ([1;2], 3)"); ("", "Ok ([_], 0)"); ("1,,2", "Ok ([1;_;2], 4)");
+    ];
+  let zero_width_after_final_separator = check "digits0" digits0 in
+  zero_width_after_final_separator "1,2," ~sep_by:"Ok ([1;2], 4)"
+    ~list:"Ok ([1;2;_], 4)";
+  zero_width_after_final_separator "1,,2," ~sep_by:"Ok ([1;_;2], 5)"
+    ~list:"Ok ([1;_;2;_], 5)";
+  zero_width_after_final_separator "," ~sep_by:"Ok ([_], 1)"
+    ~list:"Ok ([_;_], 1)";
+  zero_width_after_final_separator "1,2,x" ~sep_by:"Ok ([1;2], 4)"
+    ~list:"Ok ([1;2;_], 4)"
 
 let test_sep_by_trailing_zero_width_separator () =
   let one_digit () = String.make 1 (Parseff.digit ()) in
@@ -842,16 +867,13 @@ let test_sep_by_trailing_zero_width_separator () =
 
 let test_sep_by_trailing_csv () =
   let field () = Parseff.take_while (fun c -> c <> ',' && c <> '\r') in
-  let record () =
-    Parseff.not_followed_by Parseff.end_of_input;
-    String.concat "|" (Parseff.sep_by ~at_least:1 field comma)
-  in
+  let record () = String.concat "|" (Parseff.sep_by ~at_least:1 field comma) in
   let eol () = Parseff.literal "\r\n" in
   let check = check_sep_by_trailing ~trailing:true record eol in
   check "a,b\r\nc,d\r\n" "Ok ([a|b;c|d], 10)";
   check "a,b\r\nc,d" "Ok ([a|b;c|d], 8)";
   check "a,b\r\n\r\nc,d\r\n" "Ok ([a|b;_;c|d], 12)";
-  check_sep_by_trailing record eol "a,b\r\nc,d\r\n" "Ok ([a|b;c|d], 8)"
+  check_sep_by_trailing record eol "a,b\r\nc,d\r\n" "Ok ([a|b;c|d;_], 10)"
 
 let () =
   let open Alcotest in
@@ -906,7 +928,7 @@ let () =
           test_case "at_least" `Quick test_sep_by_trailing_at_least;
           test_case "zero-width element" `Quick
             test_sep_by_trailing_zero_width_element;
-          test_case "same as list" `Quick test_sep_by_trailing_same_as_list;
+          test_case "versus list" `Quick test_sep_by_trailing_versus_list;
           test_case "zero-width separator" `Quick
             test_sep_by_trailing_zero_width_separator;
           test_case "csv rows" `Quick test_sep_by_trailing_csv;
