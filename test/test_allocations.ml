@@ -577,6 +577,41 @@ let test_operators () =
       );
     ]
 
+let short_lines = 80_000
+
+let line_input =
+  String.concat ""
+    (List.init short_lines (fun i -> Printf.sprintf "line %07d\n" i))
+
+let check_bytes_per_line ?backtrack_window name src =
+  let line () =
+    Parseff.skip_while (fun c -> c <> '\n');
+    ignore (Parseff.char '\n')
+  in
+  let before = Gc.allocated_bytes () in
+  let lines = ref 0 in
+  while Parseff.Source.offset src < String.length line_input do
+    match Parseff.Source.parse ?backtrack_window ~consume:`Partial src line with
+    | Ok () ->
+        incr lines
+    | Error e ->
+        Alcotest.fail (Parseff.render_error e)
+  done;
+  let per_line = (Gc.allocated_bytes () -. before) /. Float.of_int !lines in
+  Alcotest.(check int) (name ^ " lines") short_lines !lines;
+  if per_line > 1024. then
+    Alcotest.failf
+      "%s allocated %.0f bytes per Source.parse of a 13-byte line, expected at \
+       most 1024"
+      name per_line
+
+let test_parse_loop_of_string () =
+  check_bytes_per_line "of_string" (Parseff.Source.of_string line_input)
+
+let test_parse_loop_large_window () =
+  check_bytes_per_line ~backtrack_window:(1 lsl 21) "one chunk"
+    (Parseff.Source.of_seq (Seq.return line_input))
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -613,6 +648,10 @@ let () =
           Alcotest.test_case "full first read" `Quick test_full_first_read;
           Alcotest.test_case "words on reads of 1 byte" `Quick
             test_one_byte_reads;
+          Alcotest.test_case "Source.parse loop on of_string" `Quick
+            test_parse_loop_of_string;
+          Alcotest.test_case "Source.parse loop with a large window" `Quick
+            test_parse_loop_large_window;
         ]
       );
     ]

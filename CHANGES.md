@@ -1,5 +1,6 @@
 ## Unreleased
 
+- [BREAKING] Keep the bytes `Source.parse` and `Source.parse_each` read but did not consume, so the next parse of the same source starts after the consumed input, where the parser failed after an `Error`, or where it was when an exception left it; `Source.of_string` continues the same way instead of restarting at offset 0, and `Source.offset` gives the absolute offset where the next parse starts ([#131](https://github.com/davesnx/parseff/pull/131)) (@davesnx)
 - [BREAKING] Read diagnostics in source order: `Diagnostics.to_list` and the `inner` list given to `~keep` sort by `pos`, and entries at the same position keep the order they were recorded in ([#128](https://github.com/davesnx/parseff/pull/128)) (@davesnx)
 - [BREAKING] Name every runner `parse`: `parse_source` is `Source.parse`, and the push runners move into the new module `Push` ([#113](https://github.com/davesnx/parseff/pull/113)) (@davesnx)
 - [BREAKING] Polish the API: combinators run with no trailing `()`, spans move into `Slice`, `fold_left` and `fold_right` take `?otherwise` first, and `literal` takes `?case_sensitive` ([#112](https://github.com/davesnx/parseff/pull/112)) (@davesnx)
@@ -38,7 +39,6 @@
 - [FEATURE] Add `lexeme` and `keyword` ([#27](https://github.com/davesnx/parseff/pull/27)) (@davesnx)
 - [FEATURE] Add `any_uint32`, `any_varint` and `Slice.take` ([#26](https://github.com/davesnx/parseff/pull/26)) (@davesnx)
 - [FEATURE] Add `capture` and `recover` for error recovery ([#24](https://github.com/davesnx/parseff/pull/24)) (@davesnx)
-- [BREAKING] Keep the bytes `Source.parse` and `Source.parse_each` read but did not consume, so the next parse of the same source starts after the consumed input, where the parser failed after an `Error`, or where it was when an exception left it; `Source.of_string` continues the same way instead of restarting at offset 0, and `Source.offset` gives the absolute offset where the next parse starts ([#131](https://github.com/davesnx/parseff/pull/131)) (@davesnx)
 - [FIX] A `commit` in a nested `expression` operator fails only that operator, so the enclosing operator tries the next one, as property fuzzing found ([#126](https://github.com/davesnx/parseff/pull/126)) (@davesnx)
 - [FIX] Fix commit sealing and error positions found by property fuzzing: a `commit` in `fold_right` or in a required element of `many` no longer seals the wrong frame ([#121](https://github.com/davesnx/parseff/pull/121)) (@davesnx)
 - [FIX] Read the longest valid number in `number`, and fail when it is out of float range ([#99](https://github.com/davesnx/parseff/pull/99)) (@davesnx)

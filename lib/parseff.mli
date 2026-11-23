@@ -52,7 +52,10 @@
 type location = private { offset : int; line : int; byte_col : int }
 (** Source location with 1-based [line] and [byte_col]. [byte_col] counts bytes
     from the start of the line, not Unicode code points, so on non-ASCII lines
-    it is larger than the column printed by {!render_error}. *)
+    it is larger than the column printed by {!render_error}. Under
+    {!Source.parse} and {!Source.parse_each}, [offset], [line] and [byte_col]
+    count from where the parse starts in the source, as {!position} does: [line]
+    restarts at 1 there. *)
 
 (** {1:errors Errors}
 
@@ -195,7 +198,9 @@ val render_error :
     - [~name] prefixes the header; [`Warning] prints [[warning]] instead of
       [[error]].
     - [~source] supplies the full input; when omitted, [render_error] uses the
-      excerpt stored in [e].
+      excerpt stored in [e]. For an error from {!Source.parse} or
+      {!Source.parse_each}, pass the input from {!Source.offset}, read before
+      the parse, onward: line and column restart at each parse.
     - Header and [* while parsing] columns count Unicode code points, whereas
       [location.byte_col] counts bytes. Carets count terminal cells (wide
       characters take 2 cells, combining marks take 0, and control/invalid UTF-8
@@ -298,7 +303,7 @@ type trace_event = private ..
     appears as a new [Enter] at an earlier byte offset. All offsets are byte
     positions from the start of the input. Under {!Source.parse} and
     {!Source.parse_each} they count from where the parse starts in the source,
-    and restart after a {!Source.parse} between elements.
+    and restart after any other parse of the source between elements.
 
     Match with a catch-all [_] case: a minor release may add new events. *)
 
@@ -577,8 +582,10 @@ val warn :
 val position : unit -> int
 (** [position ()] returns the current byte offset from the start of input. Under
     {!Source.parse} and {!Source.parse_each} it counts from where the parse
-    starts in the source, and restarts after a {!Source.parse} between elements;
-    add {!Source.offset} read before the parse to get an absolute offset. *)
+    starts in the source. To get an absolute offset, add {!Source.offset} read
+    before the parse. In {!Source.parse_each}, read it before the first element,
+    and again after any other parse of the source between elements: positions
+    restart there. *)
 
 val with_range : (unit -> 'a) -> 'a * range
 (** [with_range parser] runs [parser] and returns its result paired with the
@@ -772,8 +779,10 @@ val not_followed_by : ?label:string -> (unit -> 'a) -> unit
     ]} *)
 
 val skip_to : int -> unit
-(** [skip_to target] advances the position to absolute byte offset [target]
-    (typically returned by {!peek_with}) without reading input.
+(** [skip_to target] advances the position to byte offset [target] (typically
+    returned by {!peek_with}) without reading input. Under {!Source.parse} and
+    {!Source.parse_each}, [target] counts from where the parse starts in the
+    source, as {!position} does.
 
     Raises [Invalid_argument] if [target] precedes the current position or
     exceeds the already-read input (or the end of an enclosing {!within} frame,
@@ -1776,10 +1785,11 @@ val take_while_iter :
     {!recognize}/{!Slice.recognize}, which retain their input). *)
 
 (** Pull-based streaming sources. A source wraps a readable byte stream behind a
-    uniform interface for one {!Source.parse} or {!Source.parse_each} call.
-    (Only {!Source.of_string} can be reused from the start; other sources
-    continue from where the previous read stopped and discard buffered
-    lookahead.) *)
+    uniform interface for {!Source.parse} and {!Source.parse_each}. The next
+    parse on the same source starts where the last one stopped, so a message
+    head and its body can be parsed in turn, and a bad record can be skipped.
+    Positions restart at each parse; {!Source.offset} gives the absolute byte
+    offset where the next parse starts. *)
 module Source : sig
   type t
 
@@ -1876,11 +1886,19 @@ module Source : sig
         ([~from], [~upto] or a limit can move [e.range.start] away from it);
         after an exception, where the parser was when the exception left it (for
         an exception from the read function, this depends on when the read
-        happened). {!val:offset} gives that point as an absolute offset.
+        happened). {!val:offset} gives that point as an absolute offset. If the
+        failure point is no longer buffered (only when the parser raises again
+        an exception it caught from the library), the next parse starts at the
+        oldest buffered byte.
       - Only [source]'s read function may suspend (e.g., Eio fibers), allowing
         multiple concurrent parses on one domain. Suspending inside a parser
         callback or sharing one domain across system threads that parse
         concurrently is not supported.
+      - One parse at a time per source: a parse of [source] that starts while
+        another parse or {!parse_each} element of [source] runs (from a parser,
+        a [~trace] or [~pending] callback, or another fiber) raises
+        [Invalid_argument]. Using one source from two domains at once is not
+        supported.
 
       {@ocaml[
       let read_json () =
@@ -1909,9 +1927,10 @@ module Source : sig
         raises [Invalid_argument]).
       - [parser] must consume its trailing separator; a zero-width run yields an
         [Error]. Positions count from where the sequence starts reading
-        [source], and restart after a {!Source.parse} between elements.
-        [~diagnostics] is cleared on each forced element, so inspect it before
-        advancing.
+        [source], and restart after any other parse of [source] between
+        elements, such as a {!Source.parse} or an element of another
+        [parse_each]. [~diagnostics] is cleared on each forced element, so
+        inspect it before advancing.
       - The sequence reads [source] at the first forced element, and each
         element leaves [source] as {!Source.parse} does, so a later parse, or a
         {!Source.parse} between elements, continues in order even if the
