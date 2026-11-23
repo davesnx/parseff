@@ -832,6 +832,55 @@ let test_committed_long_chains () =
        ("1+" ^ ones "*")
     )
 
+let test_open_chain_refill_cost () =
+  let n = 100_000 in
+  let input = String.concat "^" (List.init n (fun _ -> "1")) in
+  let op commits () =
+    ignore (Parseff.char '^');
+    if commits then Parseff.commit ();
+    ( + )
+  in
+  let check name commits =
+    let t0 = Sys.time () in
+    let result =
+      Parseff.Source.parse ~backtrack_window:(4 * n) (chunked_source input)
+        (fun () ->
+          Parseff.expression ~operand:digit_value
+            Parseff.[ [ infix_right (op commits) ] ]
+      )
+    in
+    let elapsed = Sys.time () -. t0 in
+    Alcotest.(check (result int string))
+      name (Ok n)
+      (Result.map_error Parseff.error_message result);
+    if elapsed > 1.0 then
+      Alcotest.failf "%s: %d operands took %.2f s of CPU time" name n elapsed
+  in
+  check "plain tokens" false;
+  check "committing tokens" true
+
+let test_fold_left_combine_refill_window () =
+  let lookahead () = ignore (Parseff.literal "+1+1+z") in
+  let result =
+    Parseff.Source.parse ~backtrack_window:6 (chunked_source "1+1+1+1+1+1+1+1")
+      (fun () ->
+        Parseff.fold_left
+          (fun () ->
+            ignore (Parseff.char '1');
+            1
+          )
+          (fun () ->
+            ignore (Parseff.char '+');
+            fun a b ->
+              Parseff.or_ lookahead (fun () -> ());
+              a + b
+          )
+    )
+  in
+  Alcotest.(check (result int string))
+    "window counts from the lookahead start" (Ok 8)
+    (Result.map_error Parseff.error_message result)
+
 module Doc_example = struct
   open Parseff
 
@@ -1872,6 +1921,10 @@ let () =
           test_case "streaming window" `Quick test_streaming_window;
           test_case "committed long chains, streaming" `Quick
             test_committed_long_chains;
+          test_case "open chain refill cost, streaming" `Quick
+            test_open_chain_refill_cost;
+          test_case "fold_left combine refills, streaming" `Quick
+            test_fold_left_combine_refill_window;
           test_case "doc example" `Quick test_doc_example;
           test_case "guide example" `Quick test_guide_example;
         ]
