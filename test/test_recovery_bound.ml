@@ -669,7 +669,7 @@ module T2 = struct
                     fun () -> ()
                 );
                 infix_right (fun () ->
-                    take_while_iter (fun c -> c = 'a') (fun _ -> ());
+                    Iter.take_while (fun c -> c = 'a') (fun _ -> ());
                     fun () () -> ()
                 );
               ];
@@ -938,7 +938,7 @@ module V2 = struct
           [ infix_left (fun () -> fun () () -> ()) ];
           [
             prefix (fun () ->
-                many_iter inner (fun () -> ());
+                Iter.many inner (fun () -> ());
                 fun () -> ()
             );
             infix_right (fun () ->
@@ -1064,7 +1064,7 @@ module C2 = struct
           [
             [
               infix_left (fun () ->
-                  take_while_iter (fun c -> c = 'a') (fun _ -> ());
+                  Iter.take_while (fun c -> c = 'a') (fun _ -> ());
                   fun () () -> ()
               );
             ];

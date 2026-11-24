@@ -20,7 +20,7 @@ parse_value ()
 {1 Precompute byte sets with [Charset]}
 
 {!val:Parseff.take_while}, {!val:Parseff.skip_while},
-{!val:Parseff.Slice.take_while}, and {!val:Parseff.take_while_iter} accept a
+{!val:Parseff.Slice.take_while}, and {!val:Parseff.Iter.take_while} accept a
 precomputed {!module:Parseff.Charset} via [~set], replacing per-byte closure
 calls with a 256-byte table lookup. Build the set once outside the parser:
 
