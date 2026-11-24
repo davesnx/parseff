@@ -23,9 +23,12 @@ type g =
   | Or of g * g
   | One_of of g list
   | Optional of g
-  | Many of int * g
-  | Sep_by of int * g * g
-  | End_by of int * g * g
+  | Many of int * int option * g
+  | Sep_by of int * int option * g * g
+  | End_by of int * int option * g * g
+  | Take_while of int option
+  | Take_until of int option * string
+  | Skip_until of int option * string
   | Fold_left of g * g * bool
   | Fold_right of g * g * bool
   | Count of int * g
@@ -80,6 +83,12 @@ let rec show_value = function
   | Cap_err s ->
       Printf.sprintf "Cap_err %S" s
 
+let show_limit = function
+  | None ->
+      "None"
+  | Some k ->
+      Printf.sprintf "(Some %d)" k
+
 let rec show_g = function
   | Eps ->
       "Eps"
@@ -99,12 +108,20 @@ let rec show_g = function
       "One_of [" ^ String.concat "; " (List.map show_g l) ^ "]"
   | Optional a ->
       Printf.sprintf "Optional (%s)" (show_g a)
-  | Many (n, a) ->
-      Printf.sprintf "Many (%d, %s)" n (show_g a)
-  | Sep_by (n, a, b) ->
-      Printf.sprintf "Sep_by (%d, %s, %s)" n (show_g a) (show_g b)
-  | End_by (n, a, b) ->
-      Printf.sprintf "End_by (%d, %s, %s)" n (show_g a) (show_g b)
+  | Many (n, k, a) ->
+      Printf.sprintf "Many (%d, %s, %s)" n (show_limit k) (show_g a)
+  | Sep_by (n, k, a, b) ->
+      Printf.sprintf "Sep_by (%d, %s, %s, %s)" n (show_limit k) (show_g a)
+        (show_g b)
+  | End_by (n, k, a, b) ->
+      Printf.sprintf "End_by (%d, %s, %s, %s)" n (show_limit k) (show_g a)
+        (show_g b)
+  | Take_while k ->
+      Printf.sprintf "Take_while %s" (show_limit k)
+  | Take_until (k, t) ->
+      Printf.sprintf "Take_until (%s, %S)" (show_limit k) t
+  | Skip_until (k, t) ->
+      Printf.sprintf "Skip_until (%s, %S)" (show_limit k) t
   | Fold_left (a, b, o) ->
       Printf.sprintf "Fold_left (%s, %s, %b)" (show_g a) (show_g b) o
   | Fold_right (a, b, o) ->
@@ -221,12 +238,27 @@ let rec run cx g =
       Parseff.one_of (List.map (fun g () -> run cx g) l)
   | Optional a ->
       Opt (Parseff.optional (fun () -> run cx a))
-  | Many (n, a) ->
-      List (Parseff.many ~at_least:n (fun () -> run cx a))
-  | Sep_by (n, a, s) ->
-      List (Parseff.sep_by ~at_least:n (fun () -> run cx a) (fun () -> run cx s))
-  | End_by (n, a, s) ->
-      List (Parseff.end_by ~at_least:n (fun () -> run cx a) (fun () -> run cx s))
+  | Many (n, at_most, a) ->
+      List (Parseff.many ~at_least:n ?at_most (fun () -> run cx a))
+  | Sep_by (n, at_most, a, s) ->
+      List
+        (Parseff.sep_by ~at_least:n ?at_most
+           (fun () -> run cx a)
+           (fun () -> run cx s)
+        )
+  | End_by (n, at_most, a, s) ->
+      List
+        (Parseff.end_by ~at_least:n ?at_most
+           (fun () -> run cx a)
+           (fun () -> run cx s)
+        )
+  | Take_while at_most ->
+      Str (Parseff.take_while ?at_most (fun c -> c = 'a'))
+  | Take_until (at_most, t) ->
+      Str (Parseff.take_until ?at_most t)
+  | Skip_until (at_most, t) ->
+      Parseff.skip_until ?at_most t;
+      Unit
   | Fold_left (a, o, d) ->
       Parseff.fold_left
         (fun () -> run cx a)
@@ -590,6 +622,17 @@ let seal ?captures frames n =
   in
   go [] frames n
 
+let cut env st =
+  match env.ctx with
+  | None ->
+      ignore (seal ~captures:st env.frames env.nframes)
+  | Some (floor, cut) ->
+      if seal ~captures:st env.frames (env.nframes - floor) then cut := true
+
+let limit_exceeded env st =
+  cut env st;
+  raise (M_fail st)
+
 let read m env st need =
   let oldest =
     List.fold_left
@@ -621,20 +664,22 @@ let choice env left right st =
       if !f then raise (M_fail s);
       right (snd (flag ~last:true env st)) st
 
-let repeat env body acc st =
-  let rec loop acc st =
+let repeat ?(at_most = max_int) ?(seen = 0) env body acc st =
+  let rec loop n acc st =
     let f, envf = flag env st in
     match body envf st with
     | v, st' ->
         if st'.pos = st.pos then
           (List.rev acc, back envf st)
+        else if n >= at_most then
+          limit_exceeded env st'
         else
-          loop (v :: acc) st'
+          loop (n + 1) (v :: acc) st'
     | exception M_fail s ->
         if !f then raise (M_fail s);
         (List.rev acc, st)
   in
-  loop acc st
+  loop seen acc st
 
 let rec required env body acc n st =
   if n <= 0 then
@@ -645,9 +690,9 @@ let rec required env body acc n st =
 
 let element env body st = body (snd (flag ~last:true env st)) st
 
-let many env n body st =
+let many ?at_most ?(seen = 0) env n body st =
   let acc, st = required env (fun env -> element env body) [] n st in
-  repeat env body acc st
+  repeat ?at_most ~seen:(seen + n) env body acc st
 
 let then_ a b env st =
   let v, st = a env st in
@@ -703,28 +748,47 @@ let rec ev m env g st =
           if !f then raise (M_fail s);
           (Opt None, st)
     )
-  | Many (n, a) ->
-      let l, st = many env n (fun env -> ev m env a) st in
+  | Many (n, at_most, a) ->
+      let l, st = many ?at_most env n (fun env -> ev m env a) st in
       (List l, st)
-  | Sep_by (0, a, s) -> (
+  | Sep_by (_, Some 0, a, _) ->
+      let l, st = many ~at_most:0 env 0 (fun env -> ev m env a) st in
+      (List l, st)
+  | Sep_by (0, at_most, a, s) -> (
       let f, envf = flag env st in
       match ev m envf a st with
       | v, st ->
-          let l, st = repeat env (sep_then m a s) [ v ] st in
+          let l, st = repeat ?at_most ~seen:1 env (sep_then m a s) [ v ] st in
           (List l, st)
       | exception M_fail failed ->
           if !f then raise (M_fail failed);
           (List [], st)
     )
-  | Sep_by (n, a, s) ->
+  | Sep_by (n, at_most, a, s) ->
       let v, st = element env (fun env -> ev m env a) st in
-      let l, st = many env (n - 1) (sep_then m a s) st in
+      let l, st = many ?at_most ~seen:1 env (n - 1) (sep_then m a s) st in
       (List (v :: l), st)
-  | End_by (n, a, s) ->
+  | End_by (n, at_most, a, s) ->
       let l, st =
-        many env n (then_ (fun env -> ev m env a) (fun env -> ev m env s)) st
+        many ?at_most env n
+          (then_ (fun env -> ev m env a) (fun env -> ev m env s))
+          st
       in
       (List l, st)
+  | Take_while at_most ->
+      let limit = Option.value at_most ~default:max_int in
+      let r = ref 0 in
+      while st.pos + !r < len && m.input.[st.pos + !r] = 'a' && !r <= limit do
+        incr r
+      done;
+      read m env st (st.pos + min !r limit + 1);
+      if !r > limit then limit_exceeded env { st with pos = st.pos + limit + 1 };
+      (Str (String.sub m.input st.pos !r), { st with pos = st.pos + !r })
+  | Take_until (at_most, t) ->
+      let k = until m env st at_most t in
+      (Str (String.sub m.input st.pos (k - st.pos)), { st with pos = k })
+  | Skip_until (at_most, t) ->
+      (Unit, { st with pos = until m env st at_most t })
   | Fold_left (a, o, d) ->
       let rest env acc st =
         let rec loop acc st =
@@ -780,12 +844,7 @@ let rec ev m env g st =
       commit_top st env.frames;
       (Unit, st)
   | Cut ->
-      ( match env.ctx with
-      | None ->
-          ignore (seal ~captures:st env.frames env.nframes)
-      | Some (floor, cut) ->
-          if seal ~captures:st env.frames (env.nframes - floor) then cut := true
-      );
+      cut env st;
       (Unit, st)
   | Context (_, _, a) -> (
       let cut = ref false in
@@ -836,6 +895,27 @@ let rec ev m env g st =
     )
   | Rec a ->
       rec_ env st (fun env -> ev m env a)
+
+and until m env st at_most t =
+  let len = String.length m.input in
+  let n = String.length t in
+  let limit = Option.value at_most ~default:max_int in
+  let exceeded () = limit_exceeded env { st with pos = st.pos + limit + 1 } in
+  let rec find k =
+    if k - st.pos > limit then begin
+      read m env st (st.pos + limit + n);
+      exceeded ()
+    end else if k + n > len then begin
+      read m env st (len + n);
+      if len - st.pos > limit then exceeded ();
+      raise (M_fail st)
+    end else if String.sub m.input k n = t then begin
+      read m env st (k + n);
+      k
+    end else
+      find (k + 1)
+  in
+  find st.pos
 
 and sep_then m a s env st =
   let _, st = ev m env s st in
@@ -1061,8 +1141,14 @@ let alphabet = [| 'a'; 'b'; 'c' |]
 let int rs n = Random.State.int rs n
 let letter rs = alphabet.(int rs (Array.length alphabet))
 
+let gen_limit rs at_least =
+  if int rs 3 = 0 then
+    Some (at_least + int rs 3)
+  else
+    None
+
 let leaf rs =
-  match int rs 22 with
+  match int rs 25 with
   | 0 | 1 | 2 ->
       Eps
   | 3 | 4 | 5 | 6 | 7 | 8 ->
@@ -1083,9 +1169,17 @@ let leaf rs =
       Set (int rs 10)
   | 20 ->
       Get
-  | _ -> (
+  | 21 -> (
       match int rs 3 with 0 -> Fail_msg | 1 -> Raise | _ -> Get
     )
+  | 22 ->
+      Take_while (gen_limit rs 0)
+  | 23 ->
+      Take_until
+        (gen_limit rs 0, String.init (1 + int rs 2) (fun _ -> letter rs))
+  | _ ->
+      Skip_until
+        (gen_limit rs 0, String.init (1 + int rs 2) (fun _ -> letter rs))
 
 let rec gen rs size =
   if size <= 1 then
@@ -1103,11 +1197,14 @@ let rec gen rs size =
     | 9 ->
         Optional (gen rs n)
     | 10 | 11 ->
-        Many (int rs 2, gen rs n)
+        let k = int rs 2 in
+        Many (k, gen_limit rs k, gen rs n)
     | 12 ->
-        Sep_by (int rs 3, gen rs h, gen rs h)
+        let k = int rs 3 in
+        Sep_by (k, gen_limit rs k, gen rs h, gen rs h)
     | 13 ->
-        End_by (int rs 2, gen rs h, gen rs h)
+        let k = int rs 2 in
+        End_by (k, gen_limit rs k, gen rs h, gen rs h)
     | 14 ->
         Fold_left (gen rs h, gen rs h, int rs 2 = 0)
     | 15 ->

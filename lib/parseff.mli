@@ -34,9 +34,8 @@
     API. [CHANGES.md] marks each break with [[BREAKING]].
 
     From 1.0, releases keep backwards compatibility except for items marked with
-    the [unstable] alert and the [~at_most] arguments on {!val:take_while},
-    {!val:take_until}, {!val:skip_until}, and {!val:many}. Those may change in
-    any minor release, before or after 1.0.
+    the [unstable] alert. Those may change in any minor release, before or after
+    1.0.
 
     The compiler does not show the [unstable] alert by default. Add
     [-alert +unstable] to your dune [flags] to see each unstable use, and
@@ -134,10 +133,15 @@ type error_kind = private
   | Custom of custom_error  (** Value passed to {!val-error}. *)
   | Limit_exceeded of { limit : int }
       (** Input exceeded an [~at_most] bound on {!val:take_while},
-          {!val:take_until}, {!val:skip_until}, or {!val:many}. The range covers
-          the run or item that crossed [limit]. Participates in furthest-failure
-          selection like any other failure; call {!commit} beforehand to keep
-          it. *)
+          {!val:skip_while}, {!Slice.take_while}, {!val:take_until},
+          {!val:skip_until}, {!Utf8.take_while}, {!Utf8.skip_while},
+          {!Utf8.Slice.take_while}, {!val:many}, {!val:sep_by}, or
+          {!val:end_by}. The range covers the run or item that crossed [limit].
+          Fatal like [cut (); fail]: no enclosing choice or repetition tries
+          another option, up to the nearest {!look_ahead}, {!peek_with} or
+          {!capture}. A farther failure recorded earlier still wins. Use
+          {!capture} to recover; with [~release:true] it resumes at
+          [range.stop]. *)
   | Depth_limit_exceeded of { limit : int }
       (** {!val:rec_} exceeded [~max_depth] or a {!val:fold_right} chain
           exceeded its stack-depth limit. *)
@@ -434,12 +438,10 @@ val take_while :
     - [~at_least] requires at least that many matching bytes, failing at the end
       of the matched prefix with [expected <label>] (default
       ["at least n characters"]).
-    - [~at_most] caps the run length (unstable: may change in any minor
-      release). Reading a [(at_most + 1)]-th matching byte fails with
-      [Limit_exceeded { limit = at_most }] covering those [at_most + 1] bytes.
-      In streaming, those bytes must fit in [~backtrack_window]. Call {!commit}
-      beforehand inside an active frame if the limit error must win over earlier
-      farther failures or alternatives.
+    - [~at_most] caps the run length. Reading a [(at_most + 1)]-th matching byte
+      fails with [Limit_exceeded { limit = at_most }] covering those
+      [at_most + 1] bytes. In streaming, those bytes must fit in
+      [~backtrack_window]. The failure is fatal (see [Limit_exceeded]).
     - Raises [Invalid_argument] if [at_least < 0], [at_most < 0], or
       [at_most < at_least].
 
@@ -454,10 +456,18 @@ val take_while :
     ]} *)
 
 val skip_while :
-  ?at_least:int -> ?label:string -> ?set:Charset.t -> (char -> bool) -> unit
-(** [skip_while ?at_least ?label ?set pred] advances past bytes while [pred]
-    holds without allocating a string. [~at_least], [~label], and [~set] work as
-    in {!take_while}; without [~at_least], always succeeds. *)
+  ?at_least:int ->
+  ?at_most:int ->
+  ?label:string ->
+  ?set:Charset.t ->
+  (char -> bool) ->
+  unit
+(** [skip_while ?at_least ?at_most ?label ?set pred] advances past bytes while
+    [pred] holds without allocating a string. [~at_least], [~at_most], [~label],
+    and [~set] work as in {!take_while}; without [~at_least] or [~at_most],
+    always succeeds. On a stream, it does not keep the skipped bytes unless an
+    outer frame does, so [at_most] can exceed [~backtrack_window] and the range
+    of a [Limit_exceeded] error can start before the kept input. *)
 
 val take_until : ?at_most:int -> ?label:string -> string -> string
 (** [take_until ?at_most ?label terminator] reads and returns all bytes before
@@ -466,11 +476,10 @@ val take_until : ?at_most:int -> ?label:string -> string -> string
 
     - Fails at end of input with [expected "<terminator>"] (or
       [expected <label>]) if [terminator] never appears.
-    - [~at_most] caps the returned byte count (unstable: may change in any minor
-      release). Fails with [Limit_exceeded { limit = at_most }] if [terminator]
-      does not start within [at_most + 1] bytes (reads at most
-      [at_most + String.length terminator] bytes; if input ends earlier, fails
-      as unterminated).
+    - [~at_most] caps the returned byte count. Fails with
+      [Limit_exceeded { limit = at_most }] if [terminator] does not start within
+      [at_most + 1] bytes, even when input ends there (reads at most
+      [at_most + String.length terminator] bytes).
     - In streaming, the result must fit in [~backtrack_window].
     - Raises [Invalid_argument] if [terminator] is empty or [at_most < 0].
 
@@ -1232,9 +1241,14 @@ module Slice : sig
       [Invalid_argument] if [i] is outside [[0, length s - 1]]. *)
 
   val take_while :
-    ?at_least:int -> ?label:string -> ?set:Charset.t -> (char -> bool) -> t
-  (** [take_while ?at_least ?label ?set pred] works like {!Parseff.take_while}
-      and returns a slice without allocating a string. *)
+    ?at_least:int ->
+    ?at_most:int ->
+    ?label:string ->
+    ?set:Charset.t ->
+    (char -> bool) ->
+    t
+  (** [take_while ?at_least ?at_most ?label ?set pred] works like
+      {!Parseff.take_while} and returns a slice without allocating a string. *)
 
   val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> t list
   (** [sep_by_take ~ws ~sep is_value_char] works like {!Parseff.sep_by_take} and
@@ -1261,12 +1275,10 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
     the matched values.
 
     - [~at_least] requires at least that many matches.
-    - [~at_most] caps the number of matches (unstable: may change in any minor
-      release). After [at_most] matches, runs [parser] once more; if it succeeds
-      and consumes input, fails with [Limit_exceeded { limit = at_most }]
-      covering the extra item. Follows furthest-failure selection like
-      {!take_while}; call {!commit} inside [parser] once decided if abandoned
-      branches shouldn't override the limit.
+    - [~at_most] caps the number of matches. After [at_most] matches, runs
+      [parser] once more; if it succeeds and consumes input, fails with
+      [Limit_exceeded { limit = at_most }] covering the extra item. The failure
+      is fatal (see [Limit_exceeded]).
     - Raises [Invalid_argument] if [at_least < 0], [at_most < 0], or
       [at_most < at_least].
     - For error recovery inside a delimited loop, use {!list} with [~close] (see
@@ -1277,11 +1289,15 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
     let digits1 () = many ~at_least:1 digit
     ]} *)
 
-val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
-(** [sep_by ?at_least element separator] parses zero or more [element]s
+val sep_by :
+  ?at_least:int -> ?at_most:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
+(** [sep_by ?at_least ?at_most element separator] parses zero or more [element]s
     separated by [separator] (discarding separator values). Stops and drops the
-    last element if a separator and element together consume no input. Raises
-    [Invalid_argument] if [at_least < 0].
+    last element if a separator and element together consume no input.
+    [~at_least] and [~at_most] count elements and work as in {!many}: the item
+    past [at_most] is a separator with the element after it, or the first
+    element when [at_most = 0]. Raises [Invalid_argument] if [at_least < 0],
+    [at_most < 0], or [at_most < at_least].
 
     An [element] that matches empty input also matches after the last separator.
     To accept a trailing separator, make [element] fail at end of input with
@@ -1307,10 +1323,13 @@ val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
 (** [between open_ close_ parser] parses [open_], then [parser], then [close_],
     returning [parser]'s result. *)
 
-val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
-(** [end_by ?at_least element separator] parses zero or more [element]s, each
-    followed by [separator]. Stops on a zero-width iteration like {!many}.
-    Raises [Invalid_argument] if [at_least < 0]. *)
+val end_by :
+  ?at_least:int -> ?at_most:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
+(** [end_by ?at_least ?at_most element separator] parses zero or more
+    [element]s, each followed by [separator]. Stops on a zero-width iteration
+    like {!many}. [~at_least] and [~at_most] work as in {!many}, where an item
+    is an element with its separator. Raises [Invalid_argument] if
+    [at_least < 0], [at_most < 0], or [at_most < at_least]. *)
 
 val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 (** [fold_left ?otherwise element op] parses one or more [element]s separated by
@@ -2272,25 +2291,41 @@ module Utf8 : sig
   (** [any_char ()] decodes and returns the next UTF-8 code point. Fails at EOF
       or on invalid UTF-8. *)
 
-  val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string
-  (** [take_while ?at_least ?label pred] consumes UTF-8 code points while [pred]
-      holds and returns the matched UTF-8 string. [~at_least] counts code points
-      (not bytes), failing with [~label] if fewer match. Fails on invalid UTF-8.
-      Raises [Invalid_argument] if [at_least < 0].
+  val take_while :
+    ?at_least:int ->
+    ?at_most:int ->
+    ?label:string ->
+    (Uchar.t -> bool) ->
+    string
+  (** [take_while ?at_least ?at_most ?label pred] consumes UTF-8 code points
+      while [pred] holds and returns the matched UTF-8 string. [~at_least] and
+      [~at_most] count code points (not bytes) and work as in
+      {!Parseff.take_while}: fewer than [at_least] fails with [~label], and a
+      [(at_most + 1)]-th matching code point fails with
+      [Limit_exceeded { limit = at_most }] covering those code points. Fails on
+      invalid UTF-8. Raises [Invalid_argument] if [at_least < 0], [at_most < 0],
+      or [at_most < at_least].
 
       {@ocaml[
       let unicode_word () =
         Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic ~label:"letter"
       ]} *)
 
-  val skip_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> unit
-  (** [skip_while ?at_least ?label pred] skips UTF-8 code points while [pred]
-      holds without allocating. [~at_least] and [~label] work as in
-      {!Utf8.take_while}. Fails on invalid UTF-8. *)
+  val skip_while :
+    ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) -> unit
+  (** [skip_while ?at_least ?at_most ?label pred] skips UTF-8 code points while
+      [pred] holds without allocating. [~at_least], [~at_most], and [~label]
+      work as in {!Utf8.take_while}. Fails on invalid UTF-8. On a stream, it
+      does not keep the skipped bytes unless an outer frame does, as
+      {!Parseff.skip_while}. *)
 
   module Slice : sig
     val take_while :
-      ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> Slice.t
+      ?at_least:int ->
+      ?at_most:int ->
+      ?label:string ->
+      (Uchar.t -> bool) ->
+      Slice.t
     (** Like {!Utf8.take_while}, returning a zero-copy {!Parseff.Slice.t}. *)
   end
 
