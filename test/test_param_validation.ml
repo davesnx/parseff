@@ -1,5 +1,8 @@
 let raises name msg f =
-  Alcotest.check_raises name (Invalid_argument msg) (fun () -> ignore (f ()))
+  Alcotest.check_raises name (Invalid_argument msg) (fun () ->
+      let _ = f () in
+      ()
+  )
 
 let in_parse p () = Parseff.parse ~consume:`Partial "abc" p
 let digit () = Parseff.digit ()

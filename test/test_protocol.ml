@@ -637,18 +637,21 @@ let test_many_at_most () =
     (check_message "expected at least 1 character, found '\\n'");
   Alcotest.check_raises "negative at_least"
     (Invalid_argument "Parseff.many: at_least must be at least 0") (fun () ->
-      ignore
-        (Parseff.parse "1" (fun () ->
-             Parseff.many ~at_least:(-1) ~at_most:0 Parseff.digit
-         )
+      let _ =
+        Parseff.parse "1" (fun () ->
+            Parseff.many ~at_least:(-1) ~at_most:0 Parseff.digit
         )
+      in
+      ()
   );
   Alcotest.check_raises "at_most below at_least"
     (Invalid_argument
        "Parseff.many: at_most must be at least 0 and at least at_least"
     ) (fun () ->
-      ignore
-        (Parseff.parse "" (fun () -> Parseff.many ~at_least:2 ~at_most:1 header))
+      let _ =
+        Parseff.parse "" (fun () -> Parseff.many ~at_least:2 ~at_most:1 header)
+      in
+      ()
   )
 
 let test_limit_is_fatal () =
