@@ -31,7 +31,7 @@ end
 
 ### `Slice.take_while`
 
-Zero-copy counterpart of `Parseff.take_while`.
+Zero-copy counterpart of `Parseff.take_while`, with the same `~at_least`, `~label`, and `~set`.
 
 ```ocaml
 let int_of_slice slice =

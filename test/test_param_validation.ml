@@ -35,7 +35,44 @@ let test_negative_at_least () =
   check "Utf8.take_while" (fun () ->
       Parseff.Utf8.take_while ~at_least:(-1) (fun _ -> true)
   );
-  check "Utf8.whitespace" (fun () -> Parseff.Utf8.whitespace ~at_least:(-1) ())
+  check "Utf8.whitespace" (fun () -> Parseff.Utf8.whitespace ~at_least:(-1) ());
+  check "Slice.take_while" (fun () ->
+      Parseff.Slice.take_while ~at_least:(-1) (fun _ -> true)
+  );
+  check "Slice.take_while" (fun () ->
+      Parseff.Slice.take_while ~at_least:(-1)
+        ~set:(Parseff.Charset.of_predicate (fun _ -> true))
+        (fun _ -> true)
+  );
+  check "skip_while" (fun () ->
+      Parseff.skip_while ~at_least:(-1) (fun _ -> true)
+  );
+  check "skip_while" (fun () ->
+      Parseff.skip_while ~at_least:(-1)
+        ~set:(Parseff.Charset.of_predicate (fun _ -> true))
+        (fun _ -> true)
+  );
+  check "Utf8.skip_while" (fun () ->
+      Parseff.Utf8.skip_while ~at_least:(-1) (fun _ -> true)
+  );
+  check "Utf8.Slice.take_while" (fun () ->
+      Parseff.Utf8.Slice.take_while ~at_least:(-1) (fun _ -> true)
+  )
+
+let test_negative_at_least_outside_parse () =
+  let check name f =
+    raises name ("Parseff." ^ name ^ ": at_least must be at least 0") f
+  in
+  let any _ = true in
+  check "take_while" (fun () -> Parseff.take_while ~at_least:(-1) any);
+  check "skip_while" (fun () -> Parseff.skip_while ~at_least:(-1) any);
+  check "Slice.take_while" (fun () ->
+      Parseff.Slice.take_while ~at_least:(-1) any
+  );
+  check "Utf8.skip_while" (fun () -> Parseff.Utf8.skip_while ~at_least:(-1) any);
+  check "Utf8.Slice.take_while" (fun () ->
+      Parseff.Utf8.Slice.take_while ~at_least:(-1) any
+  )
 
 let test_zero_at_least () =
   Alcotest.(check bool)
@@ -148,6 +185,8 @@ let () =
       ( "at_least",
         [
           test_case "negative raises" `Quick test_negative_at_least;
+          test_case "negative raises outside a parse" `Quick
+            test_negative_at_least_outside_parse;
           test_case "zero accepted" `Quick test_zero_at_least;
         ]
       );

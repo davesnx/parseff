@@ -453,10 +453,11 @@ val take_while :
     let value () = take_while ~at_most:8190 ~set:field_char is_field_char
     ]} *)
 
-val skip_while : ?set:Charset.t -> (char -> bool) -> unit
-(** [skip_while ?set pred] advances past bytes while [pred] holds without
-    allocating a string. Always succeeds. With [~set], checks [set] instead of
-    calling [pred]. *)
+val skip_while :
+  ?at_least:int -> ?label:string -> ?set:Charset.t -> (char -> bool) -> unit
+(** [skip_while ?at_least ?label ?set pred] advances past bytes while [pred]
+    holds without allocating a string. [~at_least], [~label], and [~set] work as
+    in {!take_while}; without [~at_least], always succeeds. *)
 
 val take_until : ?at_most:int -> ?label:string -> string -> string
 (** [take_until ?at_most ?label terminator] reads and returns all bytes before
@@ -1231,9 +1232,10 @@ module Slice : sig
   (** [get s i] returns the byte at 0-based index [i] of [s]. Raises
       [Invalid_argument] if [i] is outside [[0, length s - 1]]. *)
 
-  val take_while : ?set:Charset.t -> (char -> bool) -> t
-  (** [take_while ?set pred] works like {!Parseff.take_while} and returns a
-      slice without allocating a string. *)
+  val take_while :
+    ?at_least:int -> ?label:string -> ?set:Charset.t -> (char -> bool) -> t
+  (** [take_while ?at_least ?label ?set pred] works like {!Parseff.take_while}
+      and returns a slice without allocating a string. *)
 
   val sep_by_take : ws:(char -> bool) -> sep:char -> (char -> bool) -> t list
   (** [sep_by_take ~ws ~sep is_value_char] works like {!Parseff.sep_by_take} and
@@ -2282,12 +2284,14 @@ module Utf8 : sig
         Utf8.take_while ~at_least:1 Uucp.Alpha.is_alphabetic ~label:"letter"
       ]} *)
 
-  val skip_while : (Uchar.t -> bool) -> unit
-  (** [skip_while pred] skips UTF-8 code points while [pred] holds without
-      allocating. *)
+  val skip_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> unit
+  (** [skip_while ?at_least ?label pred] skips UTF-8 code points while [pred]
+      holds without allocating. [~at_least] and [~label] work as in
+      {!Utf8.take_while}. Fails on invalid UTF-8. *)
 
   module Slice : sig
-    val take_while : (Uchar.t -> bool) -> Slice.t
+    val take_while :
+      ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> Slice.t
     (** Like {!Utf8.take_while}, returning a zero-copy {!Parseff.Slice.t}. *)
   end
 
