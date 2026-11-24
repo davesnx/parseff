@@ -7532,7 +7532,9 @@ let finish t =
 
 let cancel t = cancel_pushed "Push.cancel" t
 
-type chunks_step = Await | Stopped of string | Error of error | Ended
+module Each_step = struct
+  type t = Await | Stopped of string | Error of error | Ended
+end
 
 let parse_chunks_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
@@ -7573,9 +7575,9 @@ let parse_chunks_each ?(max_depth = 128)
     held := false;
     match run st ~consume:`Partial ~diagnostics element with
     | Ok None ->
-        Ended
+        Each_step.Ended
     | Ok (Some _) when no_progress st start ~held:!held idle_at ->
-        Error
+        Each_step.Error
           (error_plain ~last:false st start
              (Failed "the parser consumed no input") []
           )
@@ -7587,14 +7589,14 @@ let parse_chunks_each ?(max_depth = 128)
             loop ()
         | `Stop ->
             in_on_value := false;
-            Stopped (leftover t st c)
+            Each_step.Stopped (leftover t st c)
         | exception exn ->
             let bt = Printexc.get_raw_backtrace () in
             in_on_value := false;
             Printexc.raise_with_backtrace exn bt
       )
     | Error e ->
-        Error e
+        Each_step.Error e
   in
   t.status <- Fresh loop;
   let outside_on_value () =
@@ -7605,7 +7607,7 @@ let parse_chunks_each ?(max_depth = 128)
     outside_on_value ();
     match step "Push.parse_each" t chunk with
     | Paused _ ->
-        Await
+        Each_step.Await
     | Finished r ->
         r
   in
@@ -7695,7 +7697,7 @@ module Push = struct
     | Await
     | Done of ('a * string, error) Stdlib.result
 
-  type each_step = chunks_step =
+  type each_step = Each_step.t =
     | Await
     | Stopped of string
     | Error of error

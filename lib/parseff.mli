@@ -2052,7 +2052,8 @@ module Push : sig
       - Unwinds the suspended parser with an exception private to Parseff. No
         trace events are emitted, but exception handlers in [parser], such as
         [Fun.protect ~finally], run. A handler that catches the exception and
-        continues parsing sees end of input.
+        continues parsing sees end of input; in {!Push.parse_each}, a value it
+        then returns still goes to [on_value] during [cancel].
       - Afterwards {!Push.feed} and {!Push.finish} raise [Invalid_argument].
         Does nothing if [t] has already ended or was cancelled. Raises
         [Invalid_argument] if called from inside a parser. *)
