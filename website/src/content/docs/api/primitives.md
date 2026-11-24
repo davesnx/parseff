@@ -96,7 +96,7 @@ val skip_while :
 
 - `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match.
 - `~at_most` caps the byte count, failing with `Limit_exceeded { limit = at_most }` if another matching byte follows. The error covers those `at_most + 1` bytes.
-- `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least` and `~at_most` too. On a stream, `skip_while` does not keep the bytes it skips, so `at_most` can exceed `~backtrack_window`.
+- `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least`, `~at_most` and `~label` too. On a stream, `skip_while` does not keep the bytes it skips, so `at_most` can exceed `~backtrack_window`.
 - `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
 ```ocaml
 let digits () =

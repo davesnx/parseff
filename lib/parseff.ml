@@ -2857,9 +2857,9 @@ let[@inline never] take_while_at_most st ~name ~keep_from at_least at_most set
   end;
   end_pos
 
-let[@inline never] scan_at_least st ~name ~keep at_least at_most label set pred
-    =
+let[@inline never] scan_at_least ~name ~keep at_least at_most label set pred =
   if at_least < 0 then invalid_at_least name;
+  let st = get_state () in
   let start = st.pos in
   let keep_from =
     if keep then
@@ -2959,34 +2959,35 @@ let[@inline] take_while ?(at_least = 0) ?at_most ?label ?set pred =
     slice st start n
 
 let[@inline] skip_while ?(at_least = 0) ?at_most ?label ?set pred =
-  let st = get_state () in
   match (at_least, at_most, set) with
   | 0, None, None ->
-      handle_skip_while st pred
+      handle_skip_while (get_state ()) pred
   | 0, None, Some set ->
+      let st = get_state () in
       st.pos <- scan_set st ~keep_from:no_keep st.pos set
   | _ ->
       let _ =
-        scan_at_least st ~name:"Parseff.skip_while" ~keep:false at_least at_most
+        scan_at_least ~name:"Parseff.skip_while" ~keep:false at_least at_most
           label set pred
       in
       ()
 
 let[@inline] take_while_span ?(at_least = 0) ?at_most ?label ?set pred =
-  let st = get_state () in
   match (at_least, at_most, set) with
   | 0, None, None ->
-      handle_take_while_span st pred
+      handle_take_while_span (get_state ()) pred
   | 0, None, Some set ->
+      let st = get_state () in
       let start = st.pos in
       let end_pos = scan_set st ~keep_from:start start set in
       st.pos <- end_pos;
       span st start (end_pos - start)
   | _ ->
       let start =
-        scan_at_least st ~name:"Parseff.Slice.take_while" ~keep:true at_least
+        scan_at_least ~name:"Parseff.Slice.take_while" ~keep:true at_least
           at_most label set pred
       in
+      let st = get_state () in
       span st start (st.pos - start)
 
 let take_until ?(at_most = max_int) ?label t =
@@ -5063,17 +5064,10 @@ module Utf8 = struct
     end else
       satisfy_uchar_slow st always_true label_any_char
 
-  let[@inline never] scan_uchar_at_least st ~name ~keep at_least at_most label
-      pred =
+  let[@inline never] scan_uchar_at_least ~name ~keep at_least at_most label pred
+      =
     if at_least < 0 then invalid_at_least name;
-    let at_most =
-      match at_most with
-      | None ->
-          max_int
-      | Some n ->
-          check_at_most name at_least n;
-          n
-    in
+    let st = get_state () in
     let start = st.pos in
     let keep_from =
       if keep then
@@ -5081,26 +5075,57 @@ module Utf8 = struct
       else
         no_keep
     in
-    let count = ref 0 in
-    let counted u =
-      pred u
-      && begin
-        incr count;
-        !count <= at_most
-      end
+    let p = ref start in
+    let n = ref 0 in
+    let bound =
+      match at_most with
+      | None ->
+          at_least
+      | Some at_most ->
+          check_at_most name at_least at_most;
+          at_most
     in
-    let end_pos = scan_while_uchar st ~keep_from start counted in
-    if !count > at_most then begin
-      st.pos <- imin keep_from end_pos;
-      let d =
-        utf8_decode st.input (end_pos - st.base) (st.input_len - st.base)
-      in
-      fail_limit st ~from:start
-        ~upto:(end_pos + Uchar.utf_decode_length d)
-        at_most
+    let scanning = ref true in
+    while !scanning && !n < bound do
+      fill_uchar st ~keep_from !p;
+      if !p >= st.input_len then
+        scanning := false
+      else begin
+        let d = utf8_decode st.input (!p - st.base) (st.input_len - st.base) in
+        if not (Uchar.utf_decode_is_valid d) then
+          fail_str st !p tag_label label_utf8;
+        if pred (Uchar.utf_decode_uchar d) then begin
+          p := !p + Uchar.utf_decode_length d;
+          incr n
+        end else
+          scanning := false
+      end
+    done;
+    if !n < at_least then begin
+      st.pos <- !p;
+      fail_too_short st at_least label
     end;
-    st.pos <- end_pos;
-    if !count < at_least then fail_too_short st at_least label;
+    ( match at_most with
+    | None ->
+        st.pos <- scan_while_uchar st ~keep_from !p pred
+    | Some at_most ->
+        if !scanning then begin
+          fill_uchar st ~keep_from !p;
+          if !p < st.input_len then begin
+            let d =
+              utf8_decode st.input (!p - st.base) (st.input_len - st.base)
+            in
+            if not (Uchar.utf_decode_is_valid d) then
+              fail_str st !p tag_label label_utf8;
+            if pred (Uchar.utf_decode_uchar d) then begin
+              let stop = !p + Uchar.utf_decode_length d in
+              st.pos <- imin keep_from !p;
+              fail_limit st ~from:start ~upto:stop at_most
+            end
+          end
+        end;
+        st.pos <- !p
+    );
     start
 
   let take_while ?(at_least = 0) ?at_most ?label pred =
@@ -5109,7 +5134,7 @@ module Utf8 = struct
     match at_most with
     | Some _ ->
         let start =
-          scan_uchar_at_least st ~name:"Parseff.Utf8.take_while" ~keep:true
+          scan_uchar_at_least ~name:"Parseff.Utf8.take_while" ~keep:true
             at_least at_most label pred
         in
         slice st start (st.pos - start)
@@ -5132,27 +5157,26 @@ module Utf8 = struct
           s
 
   let[@inline] skip_while ?(at_least = 0) ?at_most ?label pred =
-    let st = get_state () in
     match (at_least, at_most) with
     | 0, None ->
-        handle_skip_while_uchar st pred
+        handle_skip_while_uchar (get_state ()) pred
     | _ ->
         let _ =
-          scan_uchar_at_least st ~name:"Parseff.Utf8.skip_while" ~keep:false
+          scan_uchar_at_least ~name:"Parseff.Utf8.skip_while" ~keep:false
             at_least at_most label pred
         in
         ()
 
   let[@inline] take_while_span ?(at_least = 0) ?at_most ?label pred =
-    let st = get_state () in
     match (at_least, at_most) with
     | 0, None ->
-        handle_take_while_span_uchar st pred
+        handle_take_while_span_uchar (get_state ()) pred
     | _ ->
         let start =
-          scan_uchar_at_least st ~name:"Parseff.Utf8.Slice.take_while"
-            ~keep:true at_least at_most label pred
+          scan_uchar_at_least ~name:"Parseff.Utf8.Slice.take_while" ~keep:true
+            at_least at_most label pred
         in
+        let st = get_state () in
         span st start (st.pos - start)
 
   let[@inline] is_whitespace u =

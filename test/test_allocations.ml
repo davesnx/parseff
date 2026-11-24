@@ -205,10 +205,10 @@ let test_scan_success () =
   check "Utf8.Slice.take_while" 4. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.Slice.take_while uword
   );
-  check "Utf8.skip_while ~at_least" 8. "a\xc3\xa9 " (fun () ->
+  check "Utf8.skip_while ~at_least" 0. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.skip_while ~at_least:2 uword
   );
-  check "Utf8.Slice.take_while ~at_least" 12. "a\xc3\xa9 " (fun () ->
+  check "Utf8.Slice.take_while ~at_least" 4. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.Slice.take_while ~at_least:2 uword
   );
   check "take_while" 2. "abc " (fun () -> Parseff.take_while word);
@@ -227,13 +227,13 @@ let test_scan_success () =
   check "Utf8.take_while" 2. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.take_while uword
   );
-  check "Utf8.take_while ~at_most" 10. "a\xc3\xa9 " (fun () ->
+  check "Utf8.take_while ~at_most" 2. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.take_while ~at_most:8 uword
   );
-  check "Utf8.skip_while ~at_most" 8. "a\xc3\xa9 " (fun () ->
+  check "Utf8.skip_while ~at_most" 0. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.skip_while ~at_most:8 uword
   );
-  check "Utf8.Slice.take_while ~at_most" 12. "a\xc3\xa9 " (fun () ->
+  check "Utf8.Slice.take_while ~at_most" 4. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.Slice.take_while ~at_most:8 uword
   );
   let a () = Parseff.char 'a' in
@@ -247,6 +247,12 @@ let test_scan_success () =
   check "end_by" 23. "a,a,a, " (fun () -> Parseff.end_by a comma);
   check "end_by ~at_most" 25. "a,a,a, " (fun () ->
       Parseff.end_by ~at_most:8 a comma
+  );
+  check "Utf8.skip_while ~at_least, swallowed" 4. "a\xc3\xa9 " (fun () ->
+      let _ =
+        Parseff.optional (fun () -> Parseff.Utf8.skip_while ~at_least:9 uword)
+      in
+      Parseff.Utf8.skip_while uword
   )
 
 let reads = 100_000

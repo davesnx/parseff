@@ -96,7 +96,7 @@ val skip_while :
   [Limit_exceeded { limit = at_most }] if another matching byte follows. The
   error covers those [at_most + 1] bytes.
 - {!val:Parseff.skip_while} and {!val:Parseff.Slice.take_while} take
-  [~at_least] and [~at_most] too. On a stream, [skip_while] does not keep the
+  [~at_least], [~at_most] and [~label] too. On a stream, [skip_while] does not keep the
   bytes it skips, so [at_most] can exceed [~backtrack_window].
 - [~set] replaces per-byte predicate calls with a precomputed {!module:Parseff.Charset}
   lookup table.
