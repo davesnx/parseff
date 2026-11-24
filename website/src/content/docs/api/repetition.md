@@ -28,7 +28,7 @@ let digits1 () = Parseff.many ~at_least:1 Parseff.digit
 
 ### `count`
 
-`Parseff.count` runs a parser exactly `n` times, failing if any repetition fails.
+`Parseff.count` runs a parser exactly `n` times, failing if any repetition fails. It raises `Invalid_argument` if `n < 0`, so check a count decoded from the input first.
 
 ```ocaml
 val count : int -> (unit -> 'a) -> 'a list

@@ -35,8 +35,8 @@
 
     From 1.0, releases keep backwards compatibility except for items marked with
     the [unstable] alert and the [~at_most] arguments on {!val:take_while},
-    {!val:take_until}, and {!val:many}. Those may change in any minor release,
-    before or after 1.0.
+    {!val:take_until}, {!val:skip_until}, and {!val:many}. Those may change in
+    any minor release, before or after 1.0.
 
     The compiler does not show the [unstable] alert by default. Add
     [-alert +unstable] to your dune [flags] to see each unstable use, and
@@ -134,9 +134,10 @@ type error_kind = private
   | Custom of custom_error  (** Value passed to {!val-error}. *)
   | Limit_exceeded of { limit : int }
       (** Input exceeded an [~at_most] bound on {!val:take_while},
-          {!val:take_until}, or {!val:many}. The range covers the run or item
-          that crossed [limit]. Participates in furthest-failure selection like
-          any other failure; call {!commit} beforehand to keep it. *)
+          {!val:take_until}, {!val:skip_until}, or {!val:many}. The range covers
+          the run or item that crossed [limit]. Participates in furthest-failure
+          selection like any other failure; call {!commit} beforehand to keep
+          it. *)
   | Depth_limit_exceeded of { limit : int }
       (** {!val:rec_} exceeded [~max_depth] or a {!val:fold_right} chain
           exceeded its stack-depth limit. *)
@@ -357,7 +358,8 @@ val parse :
     - [~trace] receives {!type:trace_event}s from {!val:context} and recovery.
       Exceptions raised by [trace] abort the parse and propagate out of [parse].
     - [~max_depth] limits {!rec_} nesting depth (default [128]), failing with
-      [Depth_limit_exceeded] when exceeded.
+      [Depth_limit_exceeded] when exceeded. Raises [Invalid_argument] if
+      [max_depth < 1].
 
     On failure, returns [Error e] for the furthest failure (see
     {!section-errors}).
@@ -438,7 +440,8 @@ val take_while :
       In streaming, those bytes must fit in [~backtrack_window]. Call {!commit}
       beforehand inside an active frame if the limit error must win over earlier
       farther failures or alternatives.
-    - Raises [Invalid_argument] if [at_most < 0] or [at_most < at_least].
+    - Raises [Invalid_argument] if [at_least < 0], [at_most < 0], or
+      [at_most < at_least].
 
     {@ocaml[
     let digits () = take_while (fun c -> c >= '0' && c <= '9')
@@ -495,7 +498,8 @@ val fail :
 (** [fail ?from ?upto ?notes ?help msg] fails with [Failed msg].
 
     - [~from] and [~upto] set the error byte range (both default to the current
-      position; swapped if [from > upto]).
+      position; swapped if [from > upto]). Raises [Invalid_argument] if
+      [from < 0] or [upto < 0].
     - [~notes] attaches {!type:note} annotations; [~help] appends a [* help:]
       line in {!render_error}.
     - Participates in backtracking like any primitive: {!or_}, {!many},
@@ -621,8 +625,8 @@ val location : unit -> location
 
 val location_of_position : string -> int -> location
 (** [location_of_position input pos] converts a byte offset in [input] to a
-    {!type:location}. Requires [0 <= pos <= String.length input]; other values
-    return a meaningless location without raising. *)
+    {!type:location}. Raises [Invalid_argument] unless
+    [0 <= pos <= String.length input]. *)
 
 val end_of_input : unit -> unit
 (** [end_of_input ()] succeeds only when no input remains. {!parse} and
@@ -1189,9 +1193,11 @@ val skip_nested :
 
     A closing bracket that mismatches the innermost open bracket closes the
     nearest matching open bracket on the stack and discards unclosed brackets
-    inside it. Pass [~atom] (for string literals or comments) to skip atomic
-    tokens without inspecting brackets inside them; failures of [atom] are
-    discarded.
+    inside it. A pair with the same opening and closing byte (such as
+    [('"', '"')]) closes when that byte matches the innermost open bracket, so
+    it cannot nest inside itself. Pass [~atom] (for string literals or comments)
+    to skip atomic tokens without inspecting brackets inside them; failures of
+    [atom] are discarded.
 
     {@ocaml[
     let string_literal () =
@@ -1259,7 +1265,8 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
       covering the extra item. Follows furthest-failure selection like
       {!take_while}; call {!commit} inside [parser] once decided if abandoned
       branches shouldn't override the limit.
-    - Raises [Invalid_argument] if [at_most < 0] or [at_most < at_least].
+    - Raises [Invalid_argument] if [at_least < 0], [at_most < 0], or
+      [at_most < at_least].
     - For error recovery inside a delimited loop, use {!list} with [~close] (see
       {!section-recovery}).
 
@@ -1271,7 +1278,8 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
 val sep_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 (** [sep_by ?at_least element separator] parses zero or more [element]s
     separated by [separator] (discarding separator values). Stops and drops the
-    last element if a separator and element together consume no input.
+    last element if a separator and element together consume no input. Raises
+    [Invalid_argument] if [at_least < 0].
 
     An [element] that matches empty input also matches after the last separator.
     To accept a trailing separator, make [element] fail at end of input with
@@ -1299,7 +1307,8 @@ val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
 
 val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 (** [end_by ?at_least element separator] parses zero or more [element]s, each
-    followed by [separator]. Stops on a zero-width iteration like {!many}. *)
+    followed by [separator]. Stops on a zero-width iteration like {!many}.
+    Raises [Invalid_argument] if [at_least < 0]. *)
 
 val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
 [@@alert unstable "This value can change in any minor release."]
@@ -1319,12 +1328,13 @@ val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
       abort the parse and propagate out of the runner.
     - {b Zero-width elements.} A zero-width element kept by [~at_least] is still
       yielded to [f] and cannot be undone even if an outer loop drops its step.
-    - {b Raises [Invalid_argument]} when called inside a frame that cannot be
-      sealed: {!look_ahead}, {!peek_with}, {!not_followed_by}, a {!precedence}
-      lookup, {!capture} without [~release:true], or (when [~diagnostics] is
-      active) {!require}, {!recover} without [~release:true], or a {!list}
-      element without [~release:true] while [close ()] is [false] and input
-      remains. Test parsers using [many_iter] with [~diagnostics] enabled.
+    - {b Raises [Invalid_argument]} if [at_least < 0], or when called inside a
+      frame that cannot be sealed: {!look_ahead}, {!peek_with},
+      {!not_followed_by}, a {!precedence} lookup, {!capture} without
+      [~release:true], or (when [~diagnostics] is active) {!require}, {!recover}
+      without [~release:true], or a {!list} element without [~release:true]
+      while [close ()] is [false] and input remains. Test parsers using
+      [many_iter] with [~diagnostics] enabled.
 
     {@ocaml[
     let sum = ref 0
@@ -1591,7 +1601,8 @@ val optional : (unit -> 'a) -> 'a option
 
 val count : int -> (unit -> 'a) -> 'a list
 (** [count n parser] runs [parser] exactly [n] times, failing if any repetition
-    fails. *)
+    fails. Raises [Invalid_argument] if [n < 0]; check a count decoded from the
+    input before passing it to [count]. *)
 
 (** {1 Convenience} *)
 
@@ -1635,8 +1646,9 @@ val is_whitespace : char -> bool
 
 val whitespace : ?at_least:int -> unit -> string
 (** [whitespace ?at_least ()] parses zero or more ASCII whitespace bytes
-    (failing if fewer than [~at_least] match). Prefer {!skip_whitespace} when
-    you don't need the string. *)
+    (failing if fewer than [~at_least] match; raises [Invalid_argument] if
+    [at_least < 0]). Prefer {!skip_whitespace} when you don't need the string.
+*)
 
 val skip_whitespace : unit -> unit
 (** [skip_whitespace ()] skips zero or more ASCII whitespace bytes without
@@ -2259,6 +2271,7 @@ module Utf8 : sig
   (** [take_while ?at_least ?label pred] consumes UTF-8 code points while [pred]
       holds and returns the matched UTF-8 string. [~at_least] counts code points
       (not bytes), failing with [~label] if fewer match. Fails on invalid UTF-8.
+      Raises [Invalid_argument] if [at_least < 0].
 
       {@ocaml[
       let unicode_word () =
@@ -2287,7 +2300,8 @@ module Utf8 : sig
 
   val whitespace : ?at_least:int -> unit -> string
   (** [whitespace ?at_least ()] parses zero or more Unicode [White_Space] code
-      points ([~at_least] counts code points). *)
+      points ([~at_least] counts code points; raises [Invalid_argument] if
+      [at_least < 0]). *)
 
   val skip_whitespace : unit -> unit
   (** [skip_whitespace ()] skips zero or more Unicode [White_Space] code points
