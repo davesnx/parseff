@@ -404,7 +404,7 @@ val char : char -> char
 (** [char c] matches and returns the byte [c]. *)
 
 (** Precomputed 256-byte lookup table for the [~set] argument of {!take_while},
-    {!skip_while}, {!Slice.take_while}, and {!take_while_iter}. Build once
+    {!skip_while}, {!Slice.take_while}, and {!Iter.take_while}. Build once
     outside the parser. *)
 module Charset : sig
   type t
@@ -957,7 +957,7 @@ val capture :
       [Depth_limit_exceeded] and [Backtrack_window_exceeded] are not caught.
       End-of-input failures are returned like any other error.
     - [~release:true] (default [false]) advances the rewind point on each
-      {!commit}, {!cut}, or value yielded by a [*_iter] combinator that reaches
+      {!commit}, {!cut}, or value yielded by an {!Iter} combinator that reaches
       [capture], keeping earlier diagnostics and {!Ref} writes and allowing
       streaming sources to drop earlier input. A {!cut} also continues to outer
       frames. A zero-width repetition step that is dropped also undoes a cut
@@ -1108,9 +1108,9 @@ val list :
     - {b [~close].} Checked via {!look_ahead} (not called at end of input, where
       it is treated as [true]). A failing [close] fails [list]. Where [close ()]
       is [true], [element] runs once without recovery: if it consumes input,
-      parsing continues; if it fails (without {!commit}/{!cut} or [*_iter]) or
-      consumes nothing, the list ends cleanly without polluting the expected
-      set.
+      parsing continues; if it fails (without {!commit}/{!cut} or an {!Iter}
+      combinator) or consumes nothing, the list ends cleanly without polluting
+      the expected set.
     - {b Without [~sep].} [close] runs before each element. Empty [sync]
       advances one byte past the error. A zero-width element ends the list
       unless it recorded a diagnostic (such as {!require}), in which case [list]
@@ -1300,76 +1300,6 @@ val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
 val end_by : ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> 'a list
 (** [end_by ?at_least element separator] parses zero or more [element]s, each
     followed by [separator]. Stops on a zero-width iteration like {!many}. *)
-
-val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
-[@@alert unstable "This value can change in any minor release."]
-(** [many_iter ?at_least parser f] runs [parser] like {!many} without building a
-    list, passing each value to [f] in order.
-
-    - {b Sealing and streaming.} Before each call to [f], seals every open frame
-      (as {!cut} outside any {!val:context}), allowing {!Source.parse} to drop
-      earlier input so memory stays bounded by one element (except inside
-      {!recognize}/{!Slice.recognize}, which retain their input). After a value
-      is yielded, later failures are fatal unless caught by
-      {!capture}/{!recover} with [~release:true]. See {!section-streaming}.
-    - {b Callback rules.} [f] runs outside the parser: calling parsers or
-      {!warn} inside [f] raises an exception. {!Ref.get} reads the current
-      value; {!Ref.set} raises [Invalid_argument] on a cell already written by
-      the parse, and writes permanently on other cells. Exceptions from [f]
-      abort the parse and propagate out of the runner.
-    - {b Zero-width elements.} A zero-width element kept by [~at_least] is still
-      yielded to [f] and cannot be undone even if an outer loop drops its step.
-    - {b Raises [Invalid_argument]} when called inside a frame that cannot be
-      sealed: {!look_ahead}, {!peek_with}, {!not_followed_by}, a {!precedence}
-      lookup, {!capture} without [~release:true], or (when [~diagnostics] is
-      active) {!require}, {!recover} without [~release:true], or a {!list}
-      element without [~release:true] while [close ()] is [false] and input
-      remains. Test parsers using [many_iter] with [~diagnostics] enabled.
-
-    {@ocaml[
-    let sum = ref 0
-
-    let () =
-      let r =
-        parse "1 2 3 " (fun () ->
-            many_iter
-              (fun () ->
-                let n =
-                  take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
-                in
-                let _ = char ' ' in
-                int_of_string n
-              )
-              (fun n -> sum := !sum + n)
-        )
-      in
-      assert (Result.is_ok r && !sum = 6)
-    ]} *)
-
-val sep_by_iter :
-  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
-[@@alert unstable "This value can change in any minor release."]
-(** [sep_by_iter ?at_least element separator f] runs like {!sep_by} without
-    building a list, passing each [element] to [f]. Sealing, callback,
-    zero-width, and [Invalid_argument] rules match {!many_iter}; a failure in
-    [separator] after a value is yielded cannot rewind before that value.
-
-    {@ocaml[
-    let elements = ref 0
-
-    let () =
-      let r =
-        parse "[1,2,3]" (fun () ->
-            let _ = char '[' in
-            sep_by_iter
-              (fun () -> take_while ~at_least:1 (fun c -> c >= '0' && c <= '9'))
-              (fun () -> char ',')
-              (fun _ -> incr elements);
-            char ']'
-        )
-      in
-      assert (Result.is_ok r && !elements = 3)
-    ]} *)
 
 val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
 (** [fold_left ?otherwise element op] parses one or more [element]s separated by
@@ -1713,7 +1643,7 @@ val take : int -> string
     [expected n bytes, found only k (end of input)] (or [found end of input]) if
     fewer than [n] bytes remain, and with [expected non-negative length] if
     [n < 0] (an ordinary [Expected] failure, never raising). In streaming, keep
-    [n] within [~backtrack_window], or use {!take_iter}. *)
+    [n] within [~backtrack_window], or use {!Iter.take}. *)
 
 val within : int -> (unit -> 'a) -> 'a
 [@@alert unstable "This value can change in any minor release."]
@@ -1738,38 +1668,114 @@ val within : int -> (unit -> 'a) -> 'a
       within len (fun () -> (kind, take_while (fun _ -> true)))
     ]} *)
 
-val take_iter : int -> (Slice.t -> unit) -> unit
-[@@alert unstable "This value can change in any minor release."]
-(** [take_iter n f] reads [n] bytes like {!take} and passes them to [f] as
-    non-empty {!Slice.t} pieces in order without holding all [n] bytes in memory
-    (under {!Source.parse}, [n] can exceed [~backtrack_window], except inside
-    {!recognize}/{!Slice.recognize}).
+(** {1:iter Iteration} *)
 
-    - Each piece borrows the input buffer and is valid only during [f]; call
-      {!Slice.to_string} to retain it.
-    - Sealing, callback, and [Invalid_argument] rules match {!many_iter}. On
-      premature EOF, fails after [f] has received the available bytes, with an
-      empty range at end of input and [found = End], expecting the missing byte
-      count ({!take} instead reports [Short] over the remaining bytes). Negative
-      [n] fails like {!take}.
+(** Combinators that pass each value or byte piece to a callback [f] in order,
+    instead of returning it, so memory stays bounded by one element or piece.
 
-    {@ocaml[
-    let body out () =
-      let len = BE.any_uint16 () in
-      take_iter len (fun piece ->
-          for i = 0 to Slice.length piece - 1 do
-            Buffer.add_char out (Slice.get piece i)
-          done
-      )
-    ]} *)
+    - {b Sealing and streaming.} Before each call to [f], seals every open frame
+      (as {!Parseff.cut} outside any {!val:Parseff.context}), allowing
+      {!Parseff.Source.parse} to drop earlier input (except inside
+      {!Parseff.recognize}/{!Parseff.Slice.recognize}, which retain their
+      input). After a value is yielded, later failures are fatal unless caught
+      by {!Parseff.capture}/{!Parseff.recover} with [~release:true]. See
+      {!Parseff.section-streaming}.
+    - {b Callback rules.} [f] runs outside the parser: calling parsers or
+      {!Parseff.warn} inside [f] raises an exception. {!Parseff.Ref.get} reads
+      the current value; {!Parseff.Ref.set} raises [Invalid_argument] on a cell
+      already written by the parse, and writes permanently on other cells.
+      Exceptions from [f] abort the parse and propagate out of the runner.
+    - {b Zero-width elements.} A zero-width element kept by [~at_least] in
+      {!Iter.many} or {!Iter.sep_by} is still yielded to [f] and cannot be
+      undone even if an outer loop drops its step.
+    - {b Raises [Invalid_argument]} when called inside a frame that cannot be
+      sealed: {!Parseff.look_ahead}, {!Parseff.peek_with},
+      {!Parseff.not_followed_by}, a {!Parseff.precedence} lookup,
+      {!Parseff.capture} without [~release:true], or (when [~diagnostics] is
+      active) {!Parseff.require}, {!Parseff.recover} without [~release:true], or
+      a {!Parseff.list} element without [~release:true] while [close ()] is
+      [false] and input remains. Test parsers that use this module with
+      [~diagnostics] enabled. *)
+module Iter : sig
+  val many : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
+  (** [many ?at_least parser f] runs [parser] like {!Parseff.many} without
+      building a list, passing each value to [f].
 
-val take_while_iter :
-  ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
-[@@alert unstable "This value can change in any minor release."]
-(** [take_while_iter ?set pred f] reads bytes while [pred] holds (or using
-    [~set], as in {!take_while}) and passes them to [f] in pieces like
-    {!take_iter}. Never fails; does not call [f] if the first byte does not
-    match. *)
+      {@ocaml[
+      let sum = ref 0
+
+      let () =
+        let r =
+          parse "1 2 3 " (fun () ->
+              Iter.many
+                (fun () ->
+                  let n =
+                    take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+                  in
+                  let _ = char ' ' in
+                  int_of_string n
+                )
+                (fun n -> sum := !sum + n)
+          )
+        in
+        assert (Result.is_ok r && !sum = 6)
+      ]} *)
+
+  val sep_by :
+    ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
+  (** [sep_by ?at_least element separator f] runs like {!Parseff.sep_by} without
+      building a list, passing each [element] to [f]. A failure in [separator]
+      after a value is yielded cannot rewind before that value.
+
+      {@ocaml[
+      let elements = ref 0
+
+      let () =
+        let r =
+          parse "[1,2,3]" (fun () ->
+              let _ = char '[' in
+              Iter.sep_by
+                (fun () ->
+                  take_while ~at_least:1 (fun c -> c >= '0' && c <= '9')
+                )
+                (fun () -> char ',')
+                (fun _ -> incr elements);
+              char ']'
+          )
+        in
+        assert (Result.is_ok r && !elements = 3)
+      ]} *)
+
+  val take : int -> (Slice.t -> unit) -> unit
+  (** [take n f] reads [n] bytes like {!Parseff.take} and passes them to [f] as
+      non-empty {!Slice.t} pieces without holding all [n] bytes in memory (under
+      {!Parseff.Source.parse}, [n] can exceed [~backtrack_window], except inside
+      {!Parseff.recognize}/{!Parseff.Slice.recognize}).
+
+      - Each piece borrows the input buffer and is valid only during [f]; call
+        {!Slice.to_string} to retain it.
+      - On premature EOF, fails after [f] has received the available bytes, with
+        an empty range at end of input and [found = End], expecting the missing
+        byte count ({!Parseff.take} instead reports [Short] over the remaining
+        bytes). Negative [n] fails like {!Parseff.take}.
+
+      {@ocaml[
+      let body out () =
+        let len = BE.any_uint16 () in
+        Iter.take len (fun piece ->
+            for i = 0 to Slice.length piece - 1 do
+              Buffer.add_char out (Slice.get piece i)
+            done
+        )
+      ]} *)
+
+  val take_while : ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+  (** [take_while ?set pred f] reads bytes while [pred] holds (or using [~set],
+      as in {!Parseff.take_while}) and passes them to [f] in pieces like
+      {!take}. Never fails, and does not call [f] if the first byte does not
+      match. *)
+end
+[@@alert unstable "This module can change in any minor release."]
 
 (** {1:streaming Streaming}
 
@@ -1784,11 +1790,10 @@ val take_while_iter :
 
     {b Side effects and sealing.} Backtracking does not undo calls to external
     callbacks. Only emit values to external code past a point that no open frame
-    can rewind before (such as after {!cut} outside {!val:context}).
-    {!many_iter}, {!sep_by_iter}, {!take_iter}, and {!take_while_iter} enforce
-    this automatically by sealing every open frame before each yielded item,
-    letting streaming inputs exceed [~backtrack_window] (except inside
-    {!recognize}/{!Slice.recognize}, which retain their input). *)
+    can rewind before (such as after {!cut} outside {!val:context}). The {!Iter}
+    combinators do this automatically: they seal every open frame before each
+    yielded item, letting streaming inputs exceed [~backtrack_window] (except
+    inside {!recognize}/{!Slice.recognize}, which retain their input). *)
 
 (** Pull-based streaming sources. A source wraps a readable byte stream behind a
     uniform interface for {!Source.parse} and {!Source.parse_each}. The next
@@ -2031,8 +2036,7 @@ module Push : sig
 
       Exceptions from the parser propagate out and terminate [t]. Raises
       [Invalid_argument] if [t] has already ended, if called from inside a
-      parser, or if a trace/{!many_iter}/{!take_iter} callback feeds its own
-      push parse. *)
+      parser, or if a trace or {!Iter} callback feeds its own push parse. *)
 
   val finish : 'a t -> ('a * string, error) Stdlib.result
   (** [finish t] signals EOF and runs [t] to completion ([finish] with no prior
