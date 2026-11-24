@@ -108,12 +108,12 @@ let () =
 |---------|----------|
 | [Primitives](/parseff/api/primitives/) | `literal`, `char`, `satisfy`, `peek_char`, `Charset`, `take_while`, `skip_while`, `take_until`, `skip_until`, `end_of_input`, `position`, `with_range`, `location`, `recognize` |
 | [Combinators](/parseff/api/combinators/) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `peek_with`, `skip_to`, `not_followed_by`, `expect`, `context`, `commit`, `cut`, `rec_`, `parse ~trace` |
-| [Repetition and separation](/parseff/api/repetition/) | `many`, `count`, `sep_by`, `end_by`, `between`, `Iter.many`, `Iter.sep_by`, `fold_left`, `fold_right`, `expression`, `precedence` |
-| [Convenience](/parseff/api/convenience/) | `digit`, `letter`, `alphanum`, `any_char`, `integer`, `number`, `hex_integer`, `whitespace`, `skip_whitespace`, `lexeme`, `keyword`, `identifier`, `take`, `within`, `Iter.take`, `Iter.take_while` |
+| [Repetition and separation](/parseff/api/repetition/) | `many`, `count`, `sep_by`, `end_by`, `between`, `fold_left`, `fold_right`, `expression`, `precedence` |
+| [Convenience](/parseff/api/convenience/) | `digit`, `letter`, `alphanum`, `any_char`, `integer`, `number`, `hex_integer`, `whitespace`, `skip_whitespace`, `lexeme`, `keyword`, `identifier`, `take`, `within` |
 | [Errors](/parseff/api/errors/) | `fail`, `error`, `expect`, `context`, `cut`, `render_error`, `error_message` |
 | [Error recovery](/parseff/guides/error-recovery/) | `capture`, `recover`, `require`, `list`, `skip_nested` |
 | [Diagnostics](/parseff/api/diagnostics/) | `warn`, `Diagnostics`, `Ref` |
 | [Zero-copy API](/parseff/api/zero-copy/) | `Slice.take_while`, `Slice.take`, `Slice.recognize`, `Slice.sep_by_take`, `sep_by_take` |
-| [Streaming](/parseff/api/streaming/) | `Source.of_*`, `Source.parse`, `Source.parse_each`, `Push.parse`, `Push.feed`, `Push.finish`, `Push.parse_each` |
+| [Streaming](/parseff/api/streaming/) | `Source.of_*`, `Source.parse`, `Source.parse_each`, `Push.parse`, `Push.feed`, `Push.finish`, `Push.parse_each`, `Iter.many`, `Iter.sep_by`, `Iter.take`, `Iter.take_while` |
 | [Binary parsing](/parseff/api/binary/) | `any_uint8`, `any_int8`, `any_varint`, `BE.*`, `LE.*` |
 | [UTF-8 parsing](/parseff/api/utf8/) | `Utf8.satisfy`, `Utf8.char`, `Utf8.any_char`, `Utf8.take_while`, `Utf8.letter`, `Utf8.whitespace`, `Utf8.Slice.take_while` |

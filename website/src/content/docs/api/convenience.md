@@ -162,16 +162,11 @@ In streaming, `keyword` needs `String.length s + 1` bytes of `~backtrack_window`
 ```ocaml
 val take : int -> string
 val within : int -> (unit -> 'a) -> 'a
-module Iter : sig
-  val take : int -> (Slice.t -> unit) -> unit
-  val take_while :
-    ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
-end
 ```
 
 - `Parseff.take` reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
 - `Parseff.within` (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
-- `Parseff.Iter.take` and `Parseff.Iter.take_while` (unstable) stream bytes to a callback as non-empty borrowed `Parseff.Slice.t` pieces without holding the whole payload in memory (sealing open frames like the other `Parseff.Iter` combinators).
+- To stream a payload larger than `~backtrack_window` to a callback, see [`Iter`](./streaming.md#iter).
 ```ocaml
 let frame () =
   let len = Parseff.BE.any_uint16 () in

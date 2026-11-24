@@ -266,7 +266,7 @@ To stay within `~backtrack_window`:
 
 - Dispatch early with `Parseff.peek_char` rather than trying long speculative branches.
 - Call `Parseff.commit` to release the nearest frame once an alternative is chosen, or `Parseff.cut` to release every frame inside the enclosing `Parseff.context` once a construct is decided.
-- Use `Parseff.Iter.many`, `Parseff.Iter.sep_by`, `Parseff.Iter.take`, or `Parseff.Iter.take_while` to stream items or large byte payloads past `~backtrack_window`.
+- Use `Parseff.Iter` to stream items or large byte payloads past `~backtrack_window` (see [`Iter`](./#iter)).
 - Raise `~backtrack_window` only when the grammar genuinely requires longer lookahead.
 ```ocaml
 let http_method () =
@@ -280,6 +280,52 @@ let http_method () =
       Parseff.commit ();
       `POST)
 ```
+
+## `Iter`
+
+`Parseff.Iter` (unstable: may change in any minor release) passes each value or byte piece to a callback `f` instead of returning it. Memory stays bounded by one element or one piece, so the input can be much larger than `~backtrack_window`.
+
+```ocaml
+module Iter : sig
+  val many : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
+  val sep_by :
+    ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
+  val take : int -> (Slice.t -> unit) -> unit
+  val take_while :
+    ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+end
+```
+
+- `Parseff.Iter.many` and `Parseff.Iter.sep_by` work like `Parseff.many` and `Parseff.sep_by`, but give each element to `f` and do not build a list.
+- `Parseff.Iter.take` and `Parseff.Iter.take_while` work like `Parseff.take` and `Parseff.take_while`, but give the bytes to `f` as non-empty `Parseff.Slice.t` pieces. A piece borrows the input buffer and is valid only during `f`. Call `Parseff.Slice.to_string` to keep it.
+```ocaml
+let sum_ints input =
+  let total = ref 0 in
+  let r =
+    Parseff.parse input (fun () ->
+        Parseff.Iter.sep_by Parseff.integer (fun () -> Parseff.char ',')
+          (fun n -> total := !total + n))
+  in
+  Result.map (fun () -> !total) r
+```
+
+All four functions share these rules:
+
+- **Sealing.** Before each call to `f`, they seal every open backtracking frame, like `Parseff.cut` outside any `Parseff.context`. The source can then drop earlier input. A later failure cannot rewind before a value that `f` already received. `Parseff.recognize` and `Parseff.Slice.recognize` still keep all of their input.
+- **Callback.** `f` runs outside the parser. Do not call parsers or `Parseff.warn` inside `f`. An exception from `f` stops the parse and propagates out of the runner.
+- **Frames that cannot be sealed.** A call inside `Parseff.look_ahead`, `Parseff.peek_with`, `Parseff.not_followed_by`, a `Parseff.precedence` lookup, or `Parseff.capture` without `~release:true` raises `Invalid_argument`. Some other frames raise only when `~diagnostics` is active, so test these parsers with `~diagnostics`.
+
+See `Parseff.Iter` for the full contract.
+
+[`examples/streaming_json_array/main.ml`](https://github.com/davesnx/parseff/blob/main/examples/streaming_json_array/main.ml) parses 20000 array elements through `Iter.sep_by` under `Source.parse ~backtrack_window:4096`, so the input is far larger than the window.
+
+### `Iter` or `parse_each`
+
+| Input | Use |
+| --- | --- |
+| A top-level stream of values, such as NDJSON or log records. | `Parseff.Source.parse_each` or `Parseff.Push.parse_each`. |
+| Repeated items inside a larger structure, such as the elements of a JSON array between its brackets. | `Parseff.Iter.many` or `Parseff.Iter.sep_by` inside one `Parseff.Source.parse`. |
+| A body larger than `~backtrack_window`, such as a length-prefixed payload. | `Parseff.Iter.take` or `Parseff.Iter.take_while`. |
 
 ## Concurrency and domains
 
