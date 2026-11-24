@@ -511,7 +511,8 @@ val fail :
       position; swapped if [from > upto]). Raises [Invalid_argument] if
       [from < 0] or [upto < 0].
     - [~notes] attaches {!type:note} annotations; [~help] appends a [* help:]
-      line in {!render_error}.
+      line in {!render_error}. Raises [Invalid_argument] if a note's [at] has a
+      negative [start] or [stop]; swaps them if [start > stop].
     - Participates in backtracking like any primitive: {!or_}, {!many},
       {!optional}, and folds rewind and try the next option. Call {!cut} before
       [fail] to make the failure final for the enclosing construct.
