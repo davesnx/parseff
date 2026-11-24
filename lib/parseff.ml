@@ -2803,6 +2803,31 @@ let[@inline] range_bound name bound = function
       if n < 0 then invalid_range_bound name bound;
       n
 
+let[@inline never] rec note_ranges name = function
+  | [] ->
+      []
+  | (n :: rest : note_data list) as notes -> (
+      let rest' = note_ranges name rest in
+      match n.at with
+      | Some r when r.start < 0 ->
+          invalid_range_bound name "note.at.start"
+      | Some r when r.stop < 0 ->
+          invalid_range_bound name "note.at.stop"
+      | Some r when r.start > r.stop ->
+          { n with at = Some { start = r.stop; stop = r.start } } :: rest'
+      | _ ->
+          if rest' == rest then
+            notes
+          else
+            n :: rest'
+    )
+
+let[@inline] check_notes name notes =
+  if notes == [] then
+    notes
+  else
+    note_ranges name notes
+
 let[@inline never] take_while_at_most st at_least at_most set pred =
   if at_most < 0 || at_most < at_least then
     invalid_arg
@@ -2950,12 +2975,14 @@ let[@inline] sep_by_take_span ~ws:ws_pred ~sep:sep_char take_pred =
 let[@inline] fail ?from ?upto ?(notes = []) ?help msg =
   let from = range_bound "Parseff.fail" "from" from in
   let upto = range_bound "Parseff.fail" "upto" upto in
+  let notes = check_notes "Parseff.fail" notes in
   let st = get_state () in
   fail_user st st.pos (Payload_failure (msg, { from; upto; notes; help }))
 
 let[@inline] error ?from ?upto ?(notes = []) ?help e =
   let from = range_bound "Parseff.error" "from" from in
   let upto = range_bound "Parseff.error" "upto" upto in
+  let notes = check_notes "Parseff.error" notes in
   let st = get_state () in
   if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
@@ -6638,6 +6665,7 @@ let outer_contexts st pos =
 let warn ?from ?upto ?(notes = []) ?help e =
   let from = range_bound "Parseff.warn" "from" from in
   let upto = range_bound "Parseff.warn" "upto" upto in
+  let notes = check_notes "Parseff.warn" notes in
   let st = get_state () in
   match st.diag with
   | No_sink ->

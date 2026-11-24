@@ -109,7 +109,9 @@ type context = private { name : string; start : int; delimited : bool }
 type note = { at : range option; text : string }
 (** Annotation attached via [~notes] on {!val:fail}, {!val-error}, or
     {!val:warn}. [at = Some r] underlines [r] in the excerpt; [at = None] prints
-    a [* note:] line below the excerpt. *)
+    a [* note:] line below the excerpt. {!val:fail}, {!val-error}, and
+    {!val:warn} swap [r.start] and [r.stop] if [r.start > r.stop], and raise
+    [Invalid_argument] if either is negative. *)
 
 type excerpt
 (** Source lines retained for {!render_error}. Errors from {!parse} reference
@@ -501,7 +503,8 @@ val fail :
       position; swapped if [from > upto]). Raises [Invalid_argument] if
       [from < 0] or [upto < 0].
     - [~notes] attaches {!type:note} annotations; [~help] appends a [* help:]
-      line in {!render_error}.
+      line in {!render_error}. Raises [Invalid_argument] if a note's [at] has a
+      negative [start] or [stop]; swaps them if [start > stop].
     - Participates in backtracking like any primitive: {!or_}, {!many},
       {!optional}, and folds rewind and try the next option. Call {!cut} before
       [fail] to make the failure final for the enclosing construct.

@@ -36,7 +36,8 @@
   test_charset
   test_chunks_each
   test_not_followed_by
-  test_param_validation)
+  test_param_validation
+  test_note_range)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest uucp))
 
