@@ -109,9 +109,7 @@ type context = private { name : string; start : int; delimited : bool }
 type note = { at : range option; text : string }
 (** Annotation attached via [~notes] on {!val:fail}, {!val-error}, or
     {!val:warn}. [at = Some r] underlines [r] in the excerpt; [at = None] prints
-    a [* note:] line below the excerpt. {!val:fail}, {!val-error}, and
-    {!val:warn} swap [r.start] and [r.stop] if [r.start > r.stop], and raise
-    [Invalid_argument] if either is negative. *)
+    a [* note:] line below the excerpt. *)
 
 type excerpt
 (** Source lines retained for {!render_error}. Errors from {!parse} reference

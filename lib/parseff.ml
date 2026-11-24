@@ -2807,12 +2807,16 @@ let[@inline never] rec note_ranges name = function
   | [] ->
       []
   | (n :: rest : note_data list) as notes -> (
-      let rest' = note_ranges name rest in
-      match n.at with
+      ( match n.at with
       | Some r when r.start < 0 ->
           invalid_range_bound name "note.at.start"
       | Some r when r.stop < 0 ->
           invalid_range_bound name "note.at.stop"
+      | _ ->
+          ()
+      );
+      let rest' = note_ranges name rest in
+      match n.at with
       | Some r when r.start > r.stop ->
           { n with at = Some { start = r.stop; stop = r.start } } :: rest'
       | _ ->

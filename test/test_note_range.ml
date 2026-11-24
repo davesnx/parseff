@@ -80,7 +80,10 @@ let test_negative () =
             ^ " must be at least 0"
              )
           )
-          (fun () -> ignore (in_memory kind [ note start stop ]))
+          (fun () ->
+            let _ = in_memory kind [ note start stop ] in
+            ()
+          )
       in
       raises "start" (-1) 2;
       raises "stop" 6 (-1);
@@ -92,8 +95,20 @@ let test_negative_without_sink () =
   Alcotest.check_raises "warn"
     (Invalid_argument "Parseff.warn: note.at.start must be at least 0")
     (fun () ->
-      ignore
-        (Parseff.parse "" (fun () -> Parseff.warn ~notes:[ note (-1) 0 ] Bad))
+      let _ =
+        Parseff.parse "" (fun () -> Parseff.warn ~notes:[ note (-1) 0 ] Bad)
+      in
+      ()
+  );
+  Alcotest.check_raises "first bad note"
+    (Invalid_argument "Parseff.warn: note.at.start must be at least 0")
+    (fun () ->
+      let _ =
+        Parseff.parse "" (fun () ->
+            Parseff.warn ~notes:[ note (-1) 2; note 3 (-1) ] Bad
+        )
+      in
+      ()
   )
 
 let test_reversed () =

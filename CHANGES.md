@@ -1,6 +1,6 @@
 ## Unreleased
 
-- [BREAKING] `fail`, `error` and `warn` raise `Invalid_argument` on a note whose `at` has a negative `start` or `stop`, and swap `start` and `stop` when `start > stop`, as they do for `~from` and `~upto`; `render_error` printed such notes at the wrong place (@davesnx)
+- [BREAKING] `fail`, `error` and `warn` raise `Invalid_argument` on a note whose `at` has a negative `start` or `stop`, and swap `start` and `stop` when `start > stop`, as they do for `~from` and `~upto`; `render_error` printed such notes at the wrong place ([#141](https://github.com/davesnx/parseff/pull/141)) (@davesnx)
 - [BREAKING] Raise `Invalid_argument` on invalid arguments instead of clamping them: a negative `~at_least` on `take_while`, `many`, `sep_by`, `end_by`, `Iter.many`, `Iter.sep_by`, `whitespace`, `Utf8.take_while` and `Utf8.whitespace`; a `~max_depth` below 1 on `parse`, `Source.parse`, `Source.parse_each`, `Push.parse` and `Push.parse_each`; a negative `~from` or `~upto` on `fail`, `error` and `warn`; a negative `n` on `count`; and a `pos` outside the input on `location_of_position` (@davesnx)
 - [BREAKING] `skip_nested` closes a pair with the same opening and closing byte, such as `('"', '"')`, when that byte matches the innermost open bracket, instead of opening a new level each time (@davesnx)
 - [FIX] `render_error` prints `help: raise ~max_depth` for a `rec_` depth error when `~max_depth` equals the `fold_right` stack limit (@davesnx)
