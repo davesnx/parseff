@@ -277,7 +277,7 @@ let frame_payload () =
 let frame_iter () =
   let len = Parseff.any_uint8 () in
   let body =
-    Parseff.within len (fun () -> joined (fun add -> Parseff.take_iter len add))
+    Parseff.within len (fun () -> joined (fun add -> Parseff.Iter.take len add))
   in
   let _ = Parseff.char ';' in
   body
@@ -286,11 +286,11 @@ let nested_frames () =
   let outer = Parseff.any_uint8 () in
   Parseff.within outer (fun () ->
       let parts = ref [] in
-      Parseff.many_iter
+      Parseff.Iter.many
         (fun () ->
           let n = Parseff.any_uint8 () in
           Parseff.within n (fun () ->
-              joined (fun add -> Parseff.take_while_iter (fun _ -> true) add)
+              joined (fun add -> Parseff.Iter.take_while (fun _ -> true) add)
           )
         )
         (fun s -> parts := s :: !parts);
@@ -299,7 +299,7 @@ let nested_frames () =
 
 let numbers () =
   let total = ref 0 in
-  Parseff.sep_by_iter
+  Parseff.Iter.sep_by
     (fun () -> Parseff.take_while ~at_least:1 ~at_most:3 digit)
     (fun () -> Parseff.char ',')
     (fun n -> total := !total + int_of_string n);
@@ -311,11 +311,11 @@ let frame_cases =
       frame_payload,
       [ "\005hello;"; "\005hel"; "\003hello;"; "\000;"; "\005hello" ]
     );
-    ( "within and take_iter",
+    ( "within and Iter.take",
       frame_iter,
       [ "\005hello;"; "\005hel"; "\020" ^ String.make 20 'x' ^ ";" ]
     );
-    ( "nested within, many_iter, take_while_iter",
+    ( "nested within, Iter.many, Iter.take_while",
       nested_frames,
       [
         "\009\003abc\002de\001f";
@@ -324,7 +324,7 @@ let frame_cases =
         "\011\003abc\002de\001f";
       ]
     );
-    ( "sep_by_iter and take_while ~at_most",
+    ( "Iter.sep_by and take_while ~at_most",
       numbers,
       [ "1,22,333"; "1,2222,3"; "12,"; "" ]
     );
@@ -348,7 +348,7 @@ let test_frame_larger_than_window () =
     let len = Parseff.BE.any_uint16 () in
     let b = Buffer.create 16 in
     Parseff.within len (fun () ->
-        Parseff.take_iter len (fun piece ->
+        Parseff.Iter.take len (fun piece ->
             Buffer.add_string b (Parseff.Slice.to_string piece)
         )
     );
@@ -428,7 +428,7 @@ let test_dropped_in_frame () =
 let call_from_iter target =
   let raised = ref "" in
   let p self () =
-    Parseff.take_iter 2 (fun _ ->
+    Parseff.Iter.take 2 (fun _ ->
         try ignore (Parseff.Push.feed (target self) "1.2.3.4")
         with Invalid_argument msg -> raised := msg
     );

@@ -111,7 +111,7 @@ let csv_field () =
 
 ### `Charset`
 
-`Parseff.Charset` builds a 256-byte lookup table once outside your parser so `Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.take_while_iter` avoid calling an OCaml predicate closure per byte.
+`Parseff.Charset` builds a 256-byte lookup table once outside your parser so `Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.Iter.take_while` avoid calling an OCaml predicate closure per byte.
 
 ```ocaml
 module Charset : sig
