@@ -651,14 +651,42 @@ let test_many_at_most () =
         (Parseff.parse "" (fun () -> Parseff.many ~at_least:2 ~at_most:1 header))
   )
 
-let test_limit_recovered_by_or () =
-  both "or_ tries the next branch" "aaaaa"
+let test_limit_is_fatal () =
+  both "or_ does not try the next branch" "aaaaa"
     (fun () ->
       Parseff.or_
         (fun () -> Parseff.take_while ~at_most:2 always)
         (fun () -> Parseff.take 5)
     )
-    (fun name -> check_ok name Alcotest.string "aaaaa")
+    (check_message "limit of 2 exceeded");
+  both "capture recovers" "aaaaa"
+    (fun () ->
+      match
+        Parseff.capture (fun () -> Parseff.take_while ~at_most:2 always)
+      with
+      | Ok s ->
+          s
+      | Error _ ->
+          Parseff.take 5
+    )
+    (fun name -> check_ok name Alcotest.string "aaaaa");
+  let resumes name p =
+    both
+      (name ^ " in capture ~release resumes after the limit")
+      "aaaaa"
+      (fun () ->
+        let _ = Parseff.capture ~release:true p in
+        let pos = Parseff.position () in
+        let _ = Parseff.take_while always in
+        pos
+      )
+      (fun name -> check_ok name Alcotest.int 3)
+  in
+  resumes "take_while" (fun () -> ignore (Parseff.take_while ~at_most:2 always));
+  resumes "skip_while" (fun () -> Parseff.skip_while ~at_most:2 always);
+  resumes "take_until" (fun () -> ignore (Parseff.take_until ~at_most:2 ";"));
+  resumes "skip_until" (fun () -> Parseff.skip_until ~at_most:2 ";");
+  resumes "many" (fun () -> ignore (Parseff.many ~at_most:2 Parseff.any_char))
 
 let test_uint24 () =
   both "BE" "\x01\x02\x03\xFF\xFF\xFF"
@@ -750,13 +778,17 @@ let test_recovered_limit_leaves_no_trace () =
          (fun () -> "")
       );
     ignore
-      (Parseff.or_
-         (fun () -> Parseff.take_while ?at_most:lim is_a)
-         (fun () -> Parseff.take_while is_a)
+      ( match
+          Parseff.capture (fun () -> Parseff.take_while ?at_most:lim is_a)
+        with
+      | Ok s ->
+          s
+      | Error _ ->
+          Parseff.take_while is_a
       );
     String.make 1 (Parseff.char 'c')
   in
-  same_as "or_ recovers from the limit" "aaab" ~with_frame:(g (Some 1))
+  same_as "capture recovers from the limit" "aaab" ~with_frame:(g (Some 1))
     ~without:(g None);
   let h () =
     ignore
@@ -767,11 +799,10 @@ let test_recovered_limit_leaves_no_trace () =
          )
          (fun () -> "")
       );
-    ignore
-      (Parseff.optional (fun () -> Parseff.many ~at_most:1 Parseff.any_char));
+    ignore (Parseff.capture (fun () -> Parseff.many ~at_most:1 Parseff.any_char));
     String.make 1 (Parseff.char 'c')
   in
-  both "optional recovers from the limit" "aaab" h
+  both "capture recovers from the limit" "aaab" h
     (check_message "expected \"X\", found 'b'")
 
 let test_limit_through_look_ahead () =
@@ -1198,7 +1229,7 @@ let () =
           Alcotest.test_case "take_while negative" `Quick
             test_take_while_at_most_negative;
           Alcotest.test_case "many" `Quick test_many_at_most;
-          Alcotest.test_case "or_ recovers" `Quick test_limit_recovered_by_or;
+          Alcotest.test_case "fatal" `Quick test_limit_is_fatal;
           Alcotest.test_case "limit and farther failures" `Quick
             test_limit_and_farther_failures;
         ]

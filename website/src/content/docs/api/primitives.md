@@ -131,7 +131,7 @@ let fast_digits () =
 
 ### `take_until` and `skip_until`
 
-`Parseff.take_until` reads all bytes before the first occurrence of a terminator string without consuming the terminator. `Parseff.skip_until` skips them without allocating. Both fail at end of input with `expected "<terminator>"` (or `~label`) if the terminator never appears. `~at_most` caps the bytes before the terminator, failing with `Limit_exceeded { limit = at_most }` if the terminator does not start within `at_most + 1` bytes.
+`Parseff.take_until` reads all bytes before the first occurrence of a terminator string without consuming the terminator. `Parseff.skip_until` skips them without allocating. Both fail at end of input with `expected "<terminator>"` (or `~label`) if the terminator never appears. `~at_most` caps the bytes before the terminator, failing with `Limit_exceeded { limit = at_most }` if the terminator does not start within `at_most + 1` bytes, even when input ends there.
 
 ```ocaml
 val take_until : ?at_most:int -> ?label:string -> string -> string

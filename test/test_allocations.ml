@@ -99,7 +99,7 @@ let test_stopping_failures () =
   check_words "end_by" 5. (fun () ->
       Parseff.end_by (fun () -> Parseff.char 'x') (fun () -> Parseff.char ',')
   );
-  check_words "many ~at_most" 2. (fun () ->
+  check_words "many ~at_most" 0. (fun () ->
       Parseff.many ~at_most:3 (fun () -> Parseff.char 'x')
   );
   check_words "sep_by ~at_most" 7. (fun () ->

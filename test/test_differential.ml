@@ -622,6 +622,17 @@ let seal ?captures frames n =
   in
   go [] frames n
 
+let cut env st =
+  match env.ctx with
+  | None ->
+      ignore (seal ~captures:st env.frames env.nframes)
+  | Some (floor, cut) ->
+      if seal ~captures:st env.frames (env.nframes - floor) then cut := true
+
+let limit_exceeded env st =
+  cut env st;
+  raise (M_fail st)
+
 let read m env st need =
   let oldest =
     List.fold_left
@@ -661,7 +672,7 @@ let repeat ?(at_most = max_int) ?(seen = 0) env body acc st =
         if st'.pos = st.pos then
           (List.rev acc, back envf st)
         else if n >= at_most then
-          raise (M_fail st')
+          limit_exceeded env st'
         else
           loop (n + 1) (v :: acc) st'
     | exception M_fail s ->
@@ -771,7 +782,7 @@ let rec ev m env g st =
         incr r
       done;
       read m env st (st.pos + min !r limit + 1);
-      if !r > limit then raise (M_fail st);
+      if !r > limit then limit_exceeded env { st with pos = st.pos + limit + 1 };
       (Str (String.sub m.input st.pos !r), { st with pos = st.pos + !r })
   | Take_until (at_most, t) ->
       let k = until m env st at_most t in
@@ -833,12 +844,7 @@ let rec ev m env g st =
       commit_top st env.frames;
       (Unit, st)
   | Cut ->
-      ( match env.ctx with
-      | None ->
-          ignore (seal ~captures:st env.frames env.nframes)
-      | Some (floor, cut) ->
-          if seal ~captures:st env.frames (env.nframes - floor) then cut := true
-      );
+      cut env st;
       (Unit, st)
   | Context (_, _, a) -> (
       let cut = ref false in
@@ -894,12 +900,14 @@ and until m env st at_most t =
   let len = String.length m.input in
   let n = String.length t in
   let limit = Option.value at_most ~default:max_int in
+  let exceeded () = limit_exceeded env { st with pos = st.pos + limit + 1 } in
   let rec find k =
     if k - st.pos > limit then begin
       read m env st (st.pos + limit + n);
-      raise (M_fail st)
+      exceeded ()
     end else if k + n > len then begin
       read m env st (len + n);
+      if len - st.pos > limit then exceeded ();
       raise (M_fail st)
     end else if String.sub m.input k n = t then begin
       read m env st (k + n);

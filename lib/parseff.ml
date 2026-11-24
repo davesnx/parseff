@@ -2752,7 +2752,25 @@ let[@inline never] limited st stop f =
       leave ();
       raise exn
 
+let ctx_stride = 2
+let ctx_cut_bit = 1
+
+let cut_state st =
+  let d = st.ctx_top in
+  if d = 0 then
+    ignore (State.seal_frames st ~captures:true ~floor:0)
+  else begin
+    let m = (d - 1) * ctx_stride in
+    let ctx = st.ctx in
+    if State.seal_frames st ~captures:true ~floor:(Array.unsafe_get ctx m) then
+      Array.unsafe_set ctx (m + 1) (Array.unsafe_get ctx (m + 1) lor ctx_cut_bit)
+  end
+
 let[@inline never] fail_limit st ~from ~upto limit =
+  let pos = st.pos in
+  st.pos <- upto;
+  cut_state st;
+  st.pos <- pos;
   fail_user st upto
     (Payload_limit (limit, { from; upto; notes = []; help = None }))
 
@@ -2901,7 +2919,7 @@ let[@inline never] find_terminator st ~name ~keep_from ~at_most ?label t =
     !found
   else begin
     st.pos <- imin keep_from !p;
-    if !p >= stop then
+    if !p >= stop || st.input_len >= stop then
       fail_limit st ~from:start ~upto:stop at_most
     else
       match label with
@@ -3131,8 +3149,6 @@ let[@inline never] replay st frame p =
   State.pop_rewind_frame st frame;
   without_recovery st p
 
-let ctx_stride = 2
-let ctx_cut_bit = 1
 let ctx_delimited_bit = 2
 let ctx_start_shift = 2
 
@@ -3412,17 +3428,7 @@ let context ?(delimited = false) ?start name p =
   | Some f ->
       context_traced st f delimited start name p
 
-let cut () =
-  let st = get_state () in
-  let d = st.ctx_top in
-  if d = 0 then
-    ignore (State.seal_frames st ~captures:true ~floor:0)
-  else begin
-    let m = (d - 1) * ctx_stride in
-    let ctx = st.ctx in
-    if State.seal_frames st ~captures:true ~floor:(Array.unsafe_get ctx m) then
-      Array.unsafe_set ctx (m + 1) (Array.unsafe_get ctx (m + 1) lor ctx_cut_bit)
-  end
+let cut () = cut_state (get_state ())
 
 let rec_ p =
   let st = get_state () in
@@ -3499,12 +3505,13 @@ let[@inline never] rec many_at_most st ~lead ~seen at_least at_most first p =
       repeat_stop st frame;
       List.rev !acc
   | exception Fail when State.frame_replayable st frame ->
+      let n = !n in
       List.rev_append !acc
         (replay st frame (fun () ->
-             if lead && !n = 0 then
+             if lead && n = 0 then
                many_at_most st ~lead ~seen:0 0 at_most first p
              else
-               many_at_most st ~lead:false ~seen:!n 0 at_most p p
+               many_at_most st ~lead:false ~seen:n 0 at_most p p
          )
         )
   | exception Fail ->

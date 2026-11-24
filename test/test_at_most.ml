@@ -316,13 +316,12 @@ let find_from s t i =
 
 let model_until ~at_most input t =
   let start = 1 in
-  let m = String.length t in
   let len = String.length input in
   match find_from input t start with
   | Some k when k - start <= at_most ->
       Is (Value (String.sub input start (k - start), k))
   | _ ->
-      if at_most < max_int - start && len - m + 1 >= start + at_most + 1 then
+      if at_most < max_int - start && len >= start + at_most + 1 then
         Is (Limit { limit = at_most; start; stop = start + at_most + 1 })
       else
         Fails
@@ -546,8 +545,8 @@ let test_furthest_failure () =
                )
             );
           check_outcome Fun.id
-            (id "or_ tries the next branch")
-            (Is (Value "aaaaa"))
+            (id "or_ does not try the next branch")
+            limit
             (classify
                (run input (fun () ->
                     Parseff.or_
@@ -556,6 +555,17 @@ let test_furthest_failure () =
                         ""
                       )
                       (fun () -> Parseff.take 5)
+                )
+               )
+            );
+          check_outcome Fun.id (id "capture recovers") (Is (Value "aaaaa"))
+            (classify
+               (run input (fun () ->
+                    match Parseff.capture p with
+                    | Ok () ->
+                        ""
+                    | Error _ ->
+                        Parseff.take 5
                 )
                )
             );

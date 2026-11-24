@@ -137,8 +137,11 @@ type error_kind = private
           {!val:skip_until}, {!Utf8.take_while}, {!Utf8.skip_while},
           {!Utf8.Slice.take_while}, {!val:many}, {!val:sep_by}, or
           {!val:end_by}. The range covers the run or item that crossed [limit].
-          Participates in furthest-failure selection like any other failure;
-          call {!commit} beforehand to keep it. *)
+          Fatal like [cut (); fail]: no enclosing choice or repetition tries
+          another option, up to the nearest {!look_ahead}, {!peek_with} or
+          {!capture}. A farther failure recorded earlier still wins. Use
+          {!capture} to recover; with [~release:true] it resumes at
+          [range.stop]. *)
   | Depth_limit_exceeded of { limit : int }
       (** {!val:rec_} exceeded [~max_depth] or a {!val:fold_right} chain
           exceeded its stack-depth limit. *)
@@ -438,8 +441,7 @@ val take_while :
     - [~at_most] caps the run length. Reading a [(at_most + 1)]-th matching byte
       fails with [Limit_exceeded { limit = at_most }] covering those
       [at_most + 1] bytes. In streaming, those bytes must fit in
-      [~backtrack_window]. Call {!commit} beforehand inside an active frame if
-      the limit error must win over earlier farther failures or alternatives.
+      [~backtrack_window]. The failure is fatal (see [Limit_exceeded]).
     - Raises [Invalid_argument] if [at_least < 0], [at_most < 0], or
       [at_most < at_least].
 
@@ -476,8 +478,8 @@ val take_until : ?at_most:int -> ?label:string -> string -> string
       [expected <label>]) if [terminator] never appears.
     - [~at_most] caps the returned byte count. Fails with
       [Limit_exceeded { limit = at_most }] if [terminator] does not start within
-      [at_most + 1] bytes (reads at most [at_most + String.length terminator]
-      bytes; if input ends earlier, fails as unterminated).
+      [at_most + 1] bytes, even when input ends there (reads at most
+      [at_most + String.length terminator] bytes).
     - In streaming, the result must fit in [~backtrack_window].
     - Raises [Invalid_argument] if [terminator] is empty or [at_most < 0].
 
@@ -1275,9 +1277,8 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
     - [~at_least] requires at least that many matches.
     - [~at_most] caps the number of matches. After [at_most] matches, runs
       [parser] once more; if it succeeds and consumes input, fails with
-      [Limit_exceeded { limit = at_most }] covering the extra item. Follows
-      furthest-failure selection like {!take_while}; call {!commit} inside
-      [parser] once decided if abandoned branches shouldn't override the limit.
+      [Limit_exceeded { limit = at_most }] covering the extra item. The failure
+      is fatal (see [Limit_exceeded]).
     - Raises [Invalid_argument] if [at_least < 0], [at_most < 0], or
       [at_most < at_least].
     - For error recovery inside a delimited loop, use {!list} with [~close] (see

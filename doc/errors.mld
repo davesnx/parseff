@@ -160,7 +160,10 @@ constructible), except {!type:Parseff.range} and {!type:Parseff.note}.
 - [Limit_exceeded { limit }]: exceeded [~at_most] on [take_while],
   [skip_while], [Slice.take_while], [take_until], [skip_until],
   [Utf8.take_while], [Utf8.skip_while], [Utf8.Slice.take_while], [many],
-  [sep_by], or [end_by].
+  [sep_by], or [end_by]. Fatal like [cut (); fail]: no enclosing choice tries
+  another option, up to the nearest {!val:Parseff.look_ahead},
+  {!val:Parseff.peek_with} or {!val:Parseff.capture}. Use [capture] to recover;
+  with [~release:true] it resumes after the item that crossed the limit.
 - [Depth_limit_exceeded { limit }]: exceeded [~max_depth] on {!val:Parseff.rec_}
   or stack depth in {!val:Parseff.fold_right}.
 - [Backtrack_window_exceeded { limit; oldest }]: exceeded [~backtrack_window] in
