@@ -1033,7 +1033,7 @@ let () =
           "Parseff: parser called outside of a parse context. Parser \
            combinators and warn can only be used inside a function passed to \
            Parseff.parse, Parseff.Source.parse or Parseff.Push.parse, not in a \
-           function given to a *_iter function or to ~trace."
+           function given to an Iter function or to ~trace."
     | _ ->
         None
     )
@@ -3588,75 +3588,77 @@ let rec iter_elements st ~at_least ~progress_first first next f =
       State.pop_rewind_frame st frame;
       raise exn
 
-let many_iter ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) =
-  let st = get_state () in
-  check_sealable st "many_iter";
-  iter_elements st ~at_least ~progress_first:true p p f
+module Iter = struct
+  let many ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) =
+    let st = get_state () in
+    check_sealable st "Iter.many";
+    iter_elements st ~at_least ~progress_first:true p p f
 
-let sep_by_iter ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b)
-    (f : 'a -> unit) =
-  let st = get_state () in
-  check_sealable st "sep_by_iter";
-  let next () =
-    let _ = sep () in
-    p ()
-  in
-  if at_least <= 0 then
-    iter_elements st ~at_least:0 ~progress_first:false p next f
-  else begin
-    give st f (required st p);
-    iter_elements st ~at_least:(at_least - 1) ~progress_first:true next next f
-  end
+  let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) (f : 'a -> unit)
+      =
+    let st = get_state () in
+    check_sealable st "Iter.sep_by";
+    let next () =
+      let _ = sep () in
+      p ()
+    in
+    if at_least <= 0 then
+      iter_elements st ~at_least:0 ~progress_first:false p next f
+    else begin
+      give st f (required st p);
+      iter_elements st ~at_least:(at_least - 1) ~progress_first:true next next f
+    end
 
-let iter_input st limit scan f =
-  let left = ref limit in
-  let more = ref true in
-  while !more && !left > 0 && have st 1 do
-    let p = st.pos in
-    let stop = p + imin !left (st.input_len - p) in
-    let stop_at = scan p stop in
-    let n = stop_at - p in
-    if n > 0 then begin
-      st.pos <- stop_at;
-      left := !left - n;
-      give st f
-        { buf = Bytes.unsafe_to_string st.input; off = p - st.base; len = n }
-    end;
-    if stop_at < stop then more := false
-  done;
-  !left
+  let iter_input st limit scan f =
+    let left = ref limit in
+    let more = ref true in
+    while !more && !left > 0 && have st 1 do
+      let p = st.pos in
+      let stop = p + imin !left (st.input_len - p) in
+      let stop_at = scan p stop in
+      let n = stop_at - p in
+      if n > 0 then begin
+        st.pos <- stop_at;
+        left := !left - n;
+        give st f
+          { buf = Bytes.unsafe_to_string st.input; off = p - st.base; len = n }
+      end;
+      if stop_at < stop then more := false
+    done;
+    !left
 
-let take_iter n (f : span -> unit) =
-  let st = get_state () in
-  check_sealable st "take_iter";
-  if n < 0 then
-    fail_negative_count st n
-  else if n > 0 then begin
-    let left = iter_input st n (fun _ stop -> stop) f in
-    if left > 0 then fail_bytes st left
-  end
+  let take n (f : span -> unit) =
+    let st = get_state () in
+    check_sealable st "Iter.take";
+    if n < 0 then
+      fail_negative_count st n
+    else if n > 0 then begin
+      let left = iter_input st n (fun _ stop -> stop) f in
+      if left > 0 then fail_bytes st left
+    end
 
-let take_while_iter ?set pred (f : span -> unit) =
-  let st = get_state () in
-  check_sealable st "take_while_iter";
-  let scan =
-    match set with
-    | None ->
-        fun p stop ->
-          let i = ref p in
-          while !i < stop && pred (char_at st !i) do
-            incr i
-          done;
-          !i
-    | Some set ->
-        fun p stop ->
-          let i = ref p in
-          while !i < stop && Charset.mem set (char_at st !i) do
-            incr i
-          done;
-          !i
-  in
-  ignore (iter_input st max_int scan f : int)
+  let take_while ?set pred (f : span -> unit) =
+    let st = get_state () in
+    check_sealable st "Iter.take_while";
+    let scan =
+      match set with
+      | None ->
+          fun p stop ->
+            let i = ref p in
+            while !i < stop && pred (char_at st !i) do
+              incr i
+            done;
+            !i
+      | Some set ->
+          fun p stop ->
+            let i = ref p in
+            while !i < stop && Charset.mem set (char_at st !i) do
+              incr i
+            done;
+            !i
+    in
+    ignore (iter_input st max_int scan f : int)
+end
 
 let[@inline never] fold_left_replay st frame again p op first =
   replay st frame (fun () -> again st p op first)
@@ -7584,7 +7586,7 @@ module Ref = struct
           ( if st == State.none then
               "Parseff.Ref.set: the cell belongs to a running parse, and this \
                call is outside that parse, for example in a function given to \
-               a *_iter function or to ~trace"
+               an Iter function or to ~trace"
             else
               "Parseff.Ref.set: another running parse uses this cell"
           );

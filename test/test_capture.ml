@@ -2528,15 +2528,15 @@ let test_release_construct_rewinds () =
             (fun () -> ignore (many (effects ~warns:true)))
             ignore
       );
-      ( "sep_by_iter",
-        fun _ effects -> sep_by_iter num (effects ~warns:true) (fun _ -> ())
+      ( "Iter.sep_by",
+        fun _ effects -> Iter.sep_by num (effects ~warns:true) (fun _ -> ())
       );
-      ( "take_while_iter",
+      ( "Iter.take_while",
         fun _ effects ->
           ignore
             (many (fun () ->
                  effects ~warns:true ();
-                 take_while_iter (fun _ -> false) ignore
+                 Iter.take_while (fun _ -> false) ignore
              )
             )
       );
