@@ -92,7 +92,7 @@ type abort_frames = {
   mutable open_frames : (string * int * bool) list;
 }
 
-exception Depth_limit_exceeded of int * abort_frames
+exception Depth_limit_exceeded of int * bool * abort_frames
 
 type line_index = {
   mutable starts : int array;
@@ -260,6 +260,7 @@ type excerpt = {
   error_place : location option;
   error_frames : (string * int * bool) list;
   marks : note_data list;
+  stack_limit : bool;
 }
 
 type error_kind =
@@ -424,6 +425,10 @@ let default_backtrack_window = 65_536
 let check_backtrack_window ?(name = "Source.parse") w =
   if w < 2 then
     invalid_arg ("Parseff." ^ name ^ ": backtrack_window must be at least 2")
+
+let check_max_depth name d =
+  if d < 1 then
+    invalid_arg ("Parseff." ^ name ^ ": max_depth must be at least 1")
 
 module Byte_source = struct
   type t = source
@@ -2785,6 +2790,47 @@ let[@inline never] scan_set_until st ~keep_from start stop set =
   done;
   !p
 
+let[@inline never] invalid_at_least name =
+  invalid_arg (name ^ ": at_least must be at least 0")
+
+let[@inline never] fail_too_short st at_least label =
+  match label with
+  | Some l ->
+      fail_str_cold st st.pos tag_label l
+  | None ->
+      fail_at_least st at_least
+
+let[@inline never] scan_at_least ~name ~keep at_least label set pred =
+  if at_least < 0 then invalid_at_least name;
+  let st = get_state () in
+  let start = st.pos in
+  let keep_from =
+    if keep then
+      start
+    else
+      no_keep
+  in
+  let end_pos =
+    match set with
+    | None ->
+        scan_while st ~keep_from start pred
+    | Some set ->
+        scan_set st ~keep_from start set
+  in
+  st.pos <- end_pos;
+  if end_pos - start < at_least then fail_too_short st at_least label;
+  start
+
+let[@inline never] invalid_range_bound name bound =
+  invalid_arg (name ^ ": " ^ bound ^ " must be at least 0")
+
+let[@inline] range_bound name bound = function
+  | None ->
+      -1
+  | Some n ->
+      if n < 0 then invalid_range_bound name bound;
+      n
+
 let[@inline never] take_while_at_most st at_least at_most set pred =
   if at_most < 0 || at_most < at_least then
     invalid_arg
@@ -2862,6 +2908,7 @@ let[@inline] end_of_input () =
   if st.pos <> st.input_len || st.source != None then end_of_input_slow st
 
 let[@inline] take_while ?(at_least = 0) ?at_most ?label ?set pred =
+  if at_least < 0 then invalid_at_least "Parseff.take_while";
   let st = get_state () in
   let start = st.pos in
   let end_pos =
@@ -2876,33 +2923,43 @@ let[@inline] take_while ?(at_least = 0) ?at_most ?label ?set pred =
   st.pos <- end_pos;
   let n = end_pos - start in
   if n < at_least then
-    begin match label with
-    | Some l ->
-        fail_str_cold st end_pos tag_label l
-    | None ->
-        fail_at_least st at_least
-  end
+    fail_too_short st at_least label
   else
     slice st start n
 
-let[@inline] skip_while ?set pred =
-  let st = get_state () in
-  match set with
-  | None ->
-      handle_skip_while st pred
-  | Some set ->
-      st.pos <- scan_set st ~keep_from:no_keep st.pos set
+let[@inline] skip_while ?(at_least = 0) ?label ?set pred =
+  if at_least <> 0 then
+    let _ =
+      scan_at_least ~name:"Parseff.skip_while" ~keep:false at_least label set
+        pred
+    in
+    ()
+  else
+    let st = get_state () in
+    match set with
+    | None ->
+        handle_skip_while st pred
+    | Some set ->
+        st.pos <- scan_set st ~keep_from:no_keep st.pos set
 
-let[@inline] take_while_span ?set pred =
-  let st = get_state () in
-  match set with
-  | None ->
-      handle_take_while_span st pred
-  | Some set ->
-      let start = st.pos in
-      let end_pos = scan_set st ~keep_from:start start set in
-      st.pos <- end_pos;
-      span st start (end_pos - start)
+let[@inline] take_while_span ?(at_least = 0) ?label ?set pred =
+  if at_least <> 0 then
+    let start =
+      scan_at_least ~name:"Parseff.Slice.take_while" ~keep:true at_least label
+        set pred
+    in
+    let st = get_state () in
+    span st start (st.pos - start)
+  else
+    let st = get_state () in
+    match set with
+    | None ->
+        handle_take_while_span st pred
+    | Some set ->
+        let start = st.pos in
+        let end_pos = scan_set st ~keep_from:start start set in
+        st.pos <- end_pos;
+        span st start (end_pos - start)
 
 let take_until ?(at_most = max_int) ?label t =
   let st = get_state () in
@@ -2928,11 +2985,15 @@ let[@inline] sep_by_take_span ~ws:ws_pred ~sep:sep_char take_pred =
   let st = get_state () in
   handle_sep_by_take_span st ws_pred sep_char take_pred
 
-let[@inline] fail ?(from = -1) ?(upto = -1) ?(notes = []) ?help msg =
+let[@inline] fail ?from ?upto ?(notes = []) ?help msg =
+  let from = range_bound "Parseff.fail" "from" from in
+  let upto = range_bound "Parseff.fail" "upto" upto in
   let st = get_state () in
   fail_user st st.pos (Payload_failure (msg, { from; upto; notes; help }))
 
-let[@inline] error ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
+let[@inline] error ?from ?upto ?(notes = []) ?help e =
+  let from = range_bound "Parseff.error" "from" from in
+  let upto = range_bound "Parseff.error" "upto" upto in
   let st = get_state () in
   if from < 0 && upto < 0 && notes == [] && help == None then
     fail_user st st.pos (Payload e)
@@ -3292,7 +3353,7 @@ let[@inline always] context_run st delimited start name p =
       raise_notrace Fail
   | exception exn ->
       ( match exn with
-      | Depth_limit_exceeded (_, a) | Backtrack_window_exceeded (_, a) ->
+      | Depth_limit_exceeded (_, _, a) | Backtrack_window_exceeded (_, a) ->
           if a.at > start then
             a.open_frames <- (name, start, delimited) :: a.open_frames
       | _ ->
@@ -3361,7 +3422,9 @@ let rec_ p =
   let st = get_state () in
   if st.current_depth >= st.max_depth then
     raise
-      (Depth_limit_exceeded (st.max_depth, { at = st.pos; open_frames = [] }));
+      (Depth_limit_exceeded
+         (st.max_depth, false, { at = st.pos; open_frames = [] })
+      );
   st.current_depth <- st.current_depth + 1;
   match p () with
   | v ->
@@ -3403,7 +3466,7 @@ let[@inline never] rec many_at_most st at_least at_most p =
   if at_most < 0 || at_most < at_least then
     invalid_arg "Parseff.many: at_most must be at least 0 and at least at_least";
   let acc = ref (many_required st p [] at_least) in
-  let n = ref (imax 0 at_least) in
+  let n = ref at_least in
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
   match
@@ -3464,6 +3527,7 @@ let rec many_loop at_least (p : unit -> 'a) : 'a list =
       raise exn
 
 let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) : 'a list =
+  if at_least < 0 then invalid_at_least "Parseff.many";
   match at_most with
   | None ->
       many_loop at_least p
@@ -3471,8 +3535,9 @@ let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) : 'a list =
       many_at_most (get_state ()) at_least at_most p
 
 let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
+  if at_least < 0 then invalid_at_least "Parseff.sep_by";
   let st = get_state () in
-  if at_least <= 0 then (
+  if at_least = 0 then (
     let acc = ref [] in
     let frame = State.push_rewind_frame st frame_repeat in
     let base = frame * frame_stride in
@@ -3530,6 +3595,7 @@ let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) : 'c =
   value
 
 let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
+  if at_least < 0 then invalid_at_least "Parseff.end_by";
   many ~at_least (fun () ->
       let value = p () in
       let _ = sep () in
@@ -3594,19 +3660,21 @@ let rec iter_elements st ~at_least ~progress_first first next f =
 
 module Iter = struct
   let many ?(at_least = 0) (p : unit -> 'a) (f : 'a -> unit) =
+    if at_least < 0 then invalid_at_least "Parseff.Iter.many";
     let st = get_state () in
     check_sealable st "Iter.many";
     iter_elements st ~at_least ~progress_first:true p p f
 
   let sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) (f : 'a -> unit)
       =
+    if at_least < 0 then invalid_at_least "Parseff.Iter.sep_by";
     let st = get_state () in
     check_sealable st "Iter.sep_by";
     let next () =
       let _ = sep () in
       p ()
     in
-    if at_least <= 0 then
+    if at_least = 0 then
       iter_elements st ~at_least:0 ~progress_first:false p next f
     else begin
       give st f (required st p);
@@ -3754,7 +3822,8 @@ let rec fold_right_from st (p : unit -> 'a) (op : unit -> 'a -> 'a -> 'a) first
   if frame >= fold_right_limit then begin
     State.pop_rewind_frame st frame;
     raise
-      (Depth_limit_exceeded (fold_right_limit, { at = st.pos; open_frames = [] })
+      (Depth_limit_exceeded
+         (fold_right_limit, true, { at = st.pos; open_frames = [] })
       )
   end;
   match
@@ -4458,6 +4527,7 @@ let rec optional (p : unit -> 'a) : 'a option =
       raise exn
 
 let count n (p : unit -> 'a) : 'a list =
+  if n < 0 then invalid_arg "Parseff.count: n must be at least 0";
   let rec loop acc i =
     if i <= 0 then
       List.rev acc
@@ -4747,6 +4817,7 @@ let[@inline always] scan_whitespace st ~keep_from start =
     scan_while_refilling st ~keep_from (!i + base) is_whitespace
 
 let[@inline] whitespace ?(at_least = 0) () =
+  if at_least < 0 then invalid_at_least "Parseff.whitespace";
   let st = get_state () in
   let start = st.pos in
   let end_pos = scan_whitespace st ~keep_from:start start in
@@ -4940,6 +5011,7 @@ module Utf8 = struct
       satisfy_uchar_slow st always_true label_any_char
 
   let take_while ?(at_least = 0) ?label pred =
+    if at_least < 0 then invalid_at_least "Parseff.Utf8.take_while";
     let st = get_state () in
     let s = handle_take_while_uchar st pred in
     if at_least > 0 then begin
@@ -4952,24 +5024,61 @@ module Utf8 = struct
         incr count
       done;
       if !count < at_least then
-        begin match label with
-        | Some l ->
-            fail_str_cold st st.pos tag_label l
-        | None ->
-            fail_at_least st at_least
-      end
+        fail_too_short st at_least label
       else
         s
     end else
       s
 
-  let[@inline] skip_while pred =
+  let[@inline never] scan_uchar_at_least ~name ~keep at_least label pred =
+    if at_least < 0 then invalid_at_least name;
     let st = get_state () in
-    handle_skip_while_uchar st pred
+    let start = st.pos in
+    let keep_from =
+      if keep then
+        start
+      else
+        no_keep
+    in
+    let p = ref start in
+    for _ = 1 to at_least do
+      fill_uchar st ~keep_from !p;
+      if !p >= st.input_len then begin
+        st.pos <- !p;
+        fail_too_short st at_least label
+      end;
+      let d = utf8_decode st.input (!p - st.base) (st.input_len - st.base) in
+      if not (Uchar.utf_decode_is_valid d) then
+        fail_str st !p tag_label label_utf8;
+      if not (pred (Uchar.utf_decode_uchar d)) then begin
+        st.pos <- !p;
+        fail_too_short st at_least label
+      end;
+      p := !p + Uchar.utf_decode_length d
+    done;
+    st.pos <- scan_while_uchar st ~keep_from !p pred;
+    start
 
-  let[@inline] take_while_span pred =
-    let st = get_state () in
-    handle_take_while_span_uchar st pred
+  let[@inline] skip_while ?(at_least = 0) ?label pred =
+    if at_least <> 0 then
+      let _ =
+        scan_uchar_at_least ~name:"Parseff.Utf8.skip_while" ~keep:false at_least
+          label pred
+      in
+      ()
+    else
+      handle_skip_while_uchar (get_state ()) pred
+
+  let[@inline] take_while_span ?(at_least = 0) ?label pred =
+    if at_least <> 0 then
+      let start =
+        scan_uchar_at_least ~name:"Parseff.Utf8.Slice.take_while" ~keep:true
+          at_least label pred
+      in
+      let st = get_state () in
+      span st start (st.pos - start)
+    else
+      handle_take_while_span_uchar (get_state ()) pred
 
   let[@inline] is_whitespace u =
     let i = Uchar.to_int u in
@@ -5003,6 +5112,7 @@ module Utf8 = struct
     handle_satisfy_uchar st is_alphanumeric "alphanumeric"
 
   let whitespace ?(at_least = 0) () =
+    if at_least < 0 then invalid_at_least "Parseff.Utf8.whitespace";
     take_while ~at_least ~label:"whitespace" is_whitespace
 
   let skip_whitespace () = skip_while is_whitespace
@@ -5019,7 +5129,7 @@ let far_chain st =
   else
     []
 
-let location_of_position input pos =
+let location_in input pos =
   let idx = create_line_index () in
   extend_line_index idx
     (Bytes.unsafe_of_string input)
@@ -5030,6 +5140,12 @@ let location_of_position input pos =
     line = line_idx + 1;
     byte_col = pos - idx.starts.(line_idx) + 1;
   }
+
+let location_of_position input pos =
+  if pos < 0 || pos > String.length input then
+    invalid_arg
+      "Parseff.location_of_position: pos is not between 0 and the input length";
+  location_in input pos
 
 let window_size = 240
 let max_frames = 5
@@ -5714,7 +5830,7 @@ let render ?name ?source ?custom e =
   let where =
     match (src, e.location) with
     | Some (s, starts), _ ->
-        let l = location_of_position s e.range.start in
+        let l = location_in s e.range.start in
         Some
           ( l,
             Some
@@ -5735,7 +5851,7 @@ let render ?name ?source ?custom e =
   let frame_loc i (f : context) =
     match src with
     | Some (s, starts) ->
-        let l = location_of_position s f.start in
+        let l = location_in s f.start in
         let shown =
           Some
             (1
@@ -5788,7 +5904,7 @@ let render ?name ?source ?custom e =
         let loc =
           match src with
           | Some (s, _) ->
-              let l = location_of_position s r.start in
+              let l = location_in s r.start in
               Some (l.line, l.byte_col)
           | None ->
               None
@@ -6106,10 +6222,10 @@ let render ?name ?source ?custom e =
       ()
   );
   ( match e.kind with
-  | Depth_limit_exceeded { limit } ->
+  | Depth_limit_exceeded _ ->
       gutter_star ();
       Buffer.add_string b
-        ( if limit = fold_right_limit then
+        ( if e.excerpt.stack_limit then
             "help: raise the stack limit with OCAMLRUNPARAM=l"
           else
             "help: raise ~max_depth"
@@ -6428,7 +6544,8 @@ let memory_location st pos =
     | None ->
         scan_location st.input ~from:0 ~lines:0 ~start:0 pos
 
-let build st ~last ~pos ?(notes = []) ?help kind span frames =
+let build st ~last ~pos ?(notes = []) ?help ?(stack_limit = false) kind span
+    frames =
   let contexts =
     List.map (fun (name, start, delimited) -> { name; start; delimited }) frames
   in
@@ -6485,6 +6602,7 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
             error_place = location;
             error_frames = frames;
             marks = notes;
+            stack_limit;
           };
       }
   | Some src ->
@@ -6527,6 +6645,7 @@ let build st ~last ~pos ?(notes = []) ?help kind span frames =
             error_place = None;
             error_frames = [];
             marks = [];
+            stack_limit;
           };
       }
 
@@ -6578,8 +6697,8 @@ let error_of_far ~last st outer =
             span frames
       end
 
-let error_plain ~last st pos kind frames =
-  build st ~last ~pos kind { start = pos; stop = pos } frames
+let error_plain ?stack_limit ~last st pos kind frames =
+  build st ~last ~pos ?stack_limit kind { start = pos; stop = pos } frames
 
 let outer_contexts st pos =
   let acc = ref [] in
@@ -6597,7 +6716,9 @@ let outer_contexts st pos =
   done;
   !acc
 
-let warn ?(from = -1) ?(upto = -1) ?(notes = []) ?help e =
+let warn ?from ?upto ?(notes = []) ?help e =
+  let from = range_bound "Parseff.warn" "from" from in
+  let upto = range_bound "Parseff.warn" "upto" upto in
   let st = get_state () in
   match st.diag with
   | No_sink ->
@@ -6826,11 +6947,14 @@ let skip_nested ?atom pairs stop =
         go stack
       else
         let c = char_at st start in
-        match close_of c pairs with
-        | Some k ->
+        match (close_of c pairs, stack) with
+        | Some k, top :: rest when k = c && top = c ->
+            st.pos <- start + 1;
+            go rest
+        | Some k, _ ->
             st.pos <- start + 1;
             go (k :: stack)
-        | None ->
+        | None, _ ->
             if List.exists (fun (_, k) -> k = c) pairs then
               begin match drop_through c stack with
               | Some rest ->
@@ -7196,9 +7320,9 @@ let run_detailed st ~all thunk =
         Stdlib.Ok v
     | exception Fail ->
         resume_at st st.far.pos (error_of_far ~last:true st [])
-    | exception Depth_limit_exceeded (limit, a) ->
+    | exception Depth_limit_exceeded (limit, stack_limit, a) ->
         resume_at st a.at
-          (error_plain ~last:true st a.at
+          (error_plain ~stack_limit ~last:true st a.at
              (Depth_limit_exceeded { limit })
              a.open_frames
           )
@@ -7243,6 +7367,7 @@ let run st ~consume ~diagnostics parser =
 
 let parse ?(max_depth = 128) ?diagnostics ?trace ?(consume = `All) input
     (parser : unit -> 'a) =
+  check_max_depth "parse" max_depth;
   run (State.for_input ~input ~max_depth ~trace) ~consume ~diagnostics parser
 
 let run_source ~copy st src ~consume ~diagnostics parser =
@@ -7271,6 +7396,7 @@ let with_source name (src : Byte_source.t) f =
 let parse_source ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
     ?(consume = `All) (src : Byte_source.t) (parser : unit -> 'a) =
+  check_max_depth "Source.parse" max_depth;
   check_backtrack_window backtrack_window;
   with_source "Source.parse" src (fun () ->
       let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
@@ -7289,6 +7415,7 @@ let no_progress st start ~held idle_at =
 let parse_source_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     (src : Byte_source.t) (parser : unit -> 'a) =
+  check_max_depth "Source.parse_each" max_depth;
   check_backtrack_window ~name:"Source.parse_each" backtrack_window;
   let current = ref State.none in
   let stamp = ref (-1) in
@@ -7438,6 +7565,7 @@ let pushed_chunks t =
 let parse_partial ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace
     (parser : unit -> 'a) : 'a partial =
+  check_max_depth "Push.parse" max_depth;
   check_backtrack_window ~name:"Push.parse" backtrack_window;
   let t = { status = Ended; first = None; closed = false } in
   let c = pushed_chunks t in
@@ -7539,6 +7667,7 @@ end
 let parse_chunks_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     ~on_value (parser : unit -> 'a) =
+  check_max_depth "Push.parse_each" max_depth;
   check_backtrack_window ~name:"Push.parse_each" backtrack_window;
   let t = { status = Ended; first = None; closed = false } in
   let c = pushed_chunks t in

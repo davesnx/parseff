@@ -18,10 +18,10 @@ val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t
 val char : Uchar.t -> Uchar.t
 val any_char : unit -> Uchar.t
 val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string
-val skip_while : (Uchar.t -> bool) -> unit
+val skip_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> unit
 
 module Slice : sig
-  val take_while : (Uchar.t -> bool) -> Slice.t
+  val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> Slice.t
 end
 ```
 
@@ -31,6 +31,7 @@ end
 - `Parseff.Utf8.take_while` consumes code points while the predicate holds and returns the matched UTF-8 string. `~at_least` counts *code points*, not bytes.
 - `Parseff.Utf8.skip_while` skips matching code points without allocating.
 - `Parseff.Utf8.Slice.take_while` returns a zero-copy `Parseff.Slice.t`.
+- All three take `~at_least` and `~label`, with the same failure.
 
 ## Mixing with byte-level primitives
 
