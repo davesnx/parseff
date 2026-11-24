@@ -776,6 +776,31 @@ let test_limit_after_replay () =
       );
     ]
 
+let test_zero_width_first_element () =
+  let pp l = "[" ^ String.concat ";" l ^ "]" in
+  let empty () = "" in
+  let comma () = Parseff.char ',' in
+  List.iter
+    (fun (mode, { run }) ->
+      let check name expected p =
+        check_outcome pp
+          (name ^ " " ^ mode)
+          (Is (Value expected))
+          (classify (run "x" p))
+      in
+      check "sep_by ~at_most:0" [] (fun () ->
+          Parseff.sep_by ~at_most:0 empty comma
+      );
+      check "many ~at_most:0" [] (fun () -> Parseff.many ~at_most:0 empty);
+      check "sep_by ~at_most:1" [ "" ] (fun () ->
+          Parseff.sep_by ~at_most:1 empty comma
+      );
+      check "sep_by without a limit" [ "" ] (fun () ->
+          Parseff.sep_by empty comma
+      )
+    )
+    modes
+
 let () =
   Alcotest.run "At_most"
     [
@@ -789,6 +814,8 @@ let () =
             test_furthest_failure;
           Alcotest.test_case "limit after a replay without recovery" `Quick
             test_limit_after_replay;
+          Alcotest.test_case "zero-width first element" `Quick
+            test_zero_width_first_element;
         ]
       );
       ( "streaming",
