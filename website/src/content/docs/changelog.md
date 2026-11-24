@@ -5,9 +5,114 @@ description: Release history and changes for Parseff
 
 All notable changes to Parseff. See [all releases on GitHub](https://github.com/davesnx/parseff/releases).
 
+## [0.6.0](https://github.com/davesnx/parseff/releases/tag/0.6.0)
+
+- [BREAKING] `fail`, `error` and `warn` raise `Invalid_argument` on a note whose `at` has a negative `start` or `stop`, and swap `start` and `stop` when `start > stop`, as they do for `~from` and `~upto`; `render_error` printed such notes at the wrong place ([#141](https://github.com/davesnx/parseff/pull/141)) (@davesnx)
+- [BREAKING] Add `Push.cancel` to end an unfinished push parse and release its `Ref` cells and `~diagnostics` collector; `Push.parse_each` returns its `push` function with a `cancel` function, takes `?pending` as `Source.parse_each` does, and its steps use the names of `Push.parse`: `Need_input` is `Await` and `Error_of` is `Error` ([#139](https://github.com/davesnx/parseff/pull/139)) (@davesnx)
+- [BREAKING] End `Source.parse_each` with `Error` when a `~pending` run consumes no input twice in a row at the same position, so a `pending` that never returns `false` cannot make the sequence endless; `Push.parse_each` follows the same rule ([#139](https://github.com/davesnx/parseff/pull/139)) (@davesnx)
+- [BREAKING] Raise `Invalid_argument` on invalid arguments instead of clamping them: a negative `~at_least` on `take_while`, `many`, `sep_by`, `end_by`, `Iter.many`, `Iter.sep_by`, `whitespace`, `Utf8.take_while` and `Utf8.whitespace`; a `~max_depth` below 1 on `parse`, `Source.parse`, `Source.parse_each`, `Push.parse` and `Push.parse_each`; a negative `~from` or `~upto` on `fail`, `error` and `warn`; a negative `n` on `count`; and a `pos` outside the input on `location_of_position` ([#138](https://github.com/davesnx/parseff/pull/138)) (@davesnx)
+- [BREAKING] `skip_nested` closes a pair with the same opening and closing byte, such as `('"', '"')`, when that byte matches the innermost open bracket, instead of opening a new level each time ([#138](https://github.com/davesnx/parseff/pull/138)) (@davesnx)
+- [BREAKING] Keep the bytes `Source.parse` and `Source.parse_each` read but did not consume, so the next parse of the same source starts after the consumed input, where the parser failed after an `Error`, or where it was when an exception left it; `Source.of_string` continues the same way instead of restarting at offset 0, and `Source.offset` gives the absolute offset where the next parse starts ([#131](https://github.com/davesnx/parseff/pull/131)) (@davesnx)
+- [BREAKING] Read diagnostics in source order: `Diagnostics.to_list` and the `inner` list given to `~keep` sort by `pos`, and entries at the same position keep the order they were recorded in ([#128](https://github.com/davesnx/parseff/pull/128)) (@davesnx)
+- [BREAKING] Name every runner `parse`: `parse_source` is `Source.parse`, and the push runners move into the new module `Push` ([#113](https://github.com/davesnx/parseff/pull/113)) (@davesnx)
+- [BREAKING] Polish the API: combinators run with no trailing `()`, spans move into `Slice`, `fold_left` and `fold_right` take `?otherwise` first, and `literal` takes `?case_sensitive` ([#112](https://github.com/davesnx/parseff/pull/112)) (@davesnx)
+- [BREAKING] Change the error and recovery API before 1.0: `recover`, `require` and `list` use the collector of the runner, `Limit_exceeded` is an `error_kind`, and `location.col` is `byte_col` ([#110](https://github.com/davesnx/parseff/pull/110)) (@davesnx)
+- [BREAKING] Let `warn` record a `custom_error` into the collector of the runner, so a recovering parser can warn; `warn_at` is removed ([#102](https://github.com/davesnx/parseff/pull/102)) (@davesnx)
+- [BREAKING] Remove `regex` and `match_regex`, and drop the `re` dependency ([#100](https://github.com/davesnx/parseff/pull/100)) (@davesnx)
+- [BREAKING] Rename `consume` to `literal` and return `unit` ([#98](https://github.com/davesnx/parseff/pull/98)) (@davesnx)
+- [BREAKING] Settle the API before 1.0: `fail` backtracks as `error` does, `span` is abstract, `location` is private, `digit` returns a `char`, `satisfy` takes `?label` first, `Failure` is `Failed`, `skip_while_then_char` and `fused_sep_take` are removed, and errors compare by their fields; also add `Push`, `Iter.many`, `Iter.take`, `within`, `?at_most`, `Source.of_bigstring_chunks`, `require` and `list` ([#76](https://github.com/davesnx/parseff/pull/76)) (@davesnx)
+- [FEATURE] Group the streaming combinators in `Parseff.Iter`: `Iter.many`, `Iter.sep_by`, `Iter.take` and `Iter.take_while`, with one `unstable` alert on the module ([#137](https://github.com/davesnx/parseff/pull/137)) (@davesnx)
+- [FEATURE] Make `~at_most` stable on `take_while`, `take_until`, `skip_until` and `many`: exceeding it fails with `Limit_exceeded { limit = at_most }`, never a silent cap, and the failure is fatal like `cut (); fail`, so an enclosing `or_`, `optional` or repetition does not try another option (`look_ahead`, `peek_with` and `capture` still stop it, as they stop `cut`); `take_until` and `skip_until` give `Limit_exceeded` whenever more than `at_most` bytes remain without the terminator; `at_most < 0` or `at_most < at_least` raises `Invalid_argument` ([#142](https://github.com/davesnx/parseff/pull/142)) (@davesnx)
+- [FEATURE] Add `?at_most` to `Slice.take_while`, `skip_while`, `Utf8.take_while`, `Utf8.Slice.take_while`, `Utf8.skip_while`, `sep_by` and `end_by`, counting bytes, code points or elements as their `?at_least` does ([#142](https://github.com/davesnx/parseff/pull/142)) (@davesnx)
+- [FEATURE] Add `?at_least` and `?label` to `Slice.take_while`, `skip_while`, `Utf8.Slice.take_while` and `Utf8.skip_while`, failing as `take_while` and `Utf8.take_while` do and raising `Invalid_argument` on a negative `~at_least` ([#140](https://github.com/davesnx/parseff/pull/140)) (@davesnx)
+- [FEATURE] Make `Push.parse`, `Push.feed` and `Push.finish` stable, keep the chunks not yet fed after `Done` in the `Push` example, and state what 0.x releases promise and how to show the `unstable` alert ([#127](https://github.com/davesnx/parseff/pull/127)) (@davesnx)
+- [FEATURE] Add `Push.parse_each`, a push parse of a stream of values in one fiber ([#111](https://github.com/davesnx/parseff/pull/111)) (@davesnx)
+- [FEATURE] Add `not_followed_by` ([#107](https://github.com/davesnx/parseff/pull/107)) (@davesnx)
+- [FEATURE] Pass a `Charset` to `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` as `?set` ([#104](https://github.com/davesnx/parseff/pull/104)) (@davesnx)
+- [FEATURE] Add `identifier` and `is_ident_char` ([#103](https://github.com/davesnx/parseff/pull/103)) (@davesnx)
+- [FEATURE] Add `take_until` and `skip_until` for a string terminator ([#97](https://github.com/davesnx/parseff/pull/97)) (@davesnx)
+- [FEATURE] Recover only where no open choice surrounds the recovery, and make the recovery functions stable: `list` replaces `sep_by_recover`, `~keep` replaces `capture_with` and `~record`, and `~contexts` replaces `~outer` ([#95](https://github.com/davesnx/parseff/pull/95)) (@davesnx)
+- [FEATURE] Add `~record` to `recover` and `sep_by_recover`, and `~outer` to `capture` and `recover` ([#70](https://github.com/davesnx/parseff/pull/70)) (@davesnx)
+- [FEATURE] Add `?initial_buffer_size` to `Source.of_function`, and grow its read buffer at the next read ([#57](https://github.com/davesnx/parseff/pull/57)) (@davesnx)
+- [FEATURE] Add `~release` to `capture` and `recover`: `commit` and `cut` move the rewind point ([#56](https://github.com/davesnx/parseff/pull/56)) (@davesnx)
+- [FEATURE] Add `context ~start` ([#55](https://github.com/davesnx/parseff/pull/55)) (@davesnx)
+- [FEATURE] Add `capture_with` and document the rule for recorded errors ([#54](https://github.com/davesnx/parseff/pull/54)) (@davesnx)
+- [FEATURE] Add `sep_by_recover` and `skip_nested` for lists that recover per element ([#53](https://github.com/davesnx/parseff/pull/53)) (@davesnx)
+- [FEATURE] Add `peek_with` and `skip_to`: read a lookahead token once ([#52](https://github.com/davesnx/parseff/pull/52)) (@davesnx)
+- [FEATURE] Add `precedence`: operator precedence with one lookup per operand ([#51](https://github.com/davesnx/parseff/pull/51)) (@davesnx)
+- [FEATURE] Add `?pending` to `Source.parse_each` for a value held in a lookahead ([#50](https://github.com/davesnx/parseff/pull/50)) (@davesnx)
+- [FEATURE] Add `~help` to `fail` and `error`, printed as a help line by `render_error` ([#49](https://github.com/davesnx/parseff/pull/49)) (@davesnx)
+- [FEATURE] Add `?upto` to `fail` and `error` ([#48](https://github.com/davesnx/parseff/pull/48)) (@davesnx)
+- [FEATURE] Rename the `atom` argument of `expression` to `operand` ([#42](https://github.com/davesnx/parseff/pull/42)) (@davesnx)
+- [FEATURE] Rename `int`, `float` and `hex_int` to `integer`, `number` and `hex_integer` ([#39](https://github.com/davesnx/parseff/pull/39)) (@davesnx)
+- [FEATURE] Add `Ref`, a `ref` that rolls back when the parser backtracks ([#33](https://github.com/davesnx/parseff/pull/33)) (@davesnx)
+- [FEATURE] Add `expression`, an operator table for precedence parsing ([#32](https://github.com/davesnx/parseff/pull/32)) (@davesnx)
+- [FEATURE] Add `int`, `float` and `hex_int` ([#31](https://github.com/davesnx/parseff/pull/31)) (@davesnx)
+- [FEATURE] Add trace mode for context events ([#30](https://github.com/davesnx/parseff/pull/30)) (@davesnx)
+- [FEATURE] Add `with_range`, `recognize` and `Slice.recognize` ([#29](https://github.com/davesnx/parseff/pull/29)) (@davesnx)
+- [FEATURE] Add `Source.parse_each` to parse many values from one source ([#28](https://github.com/davesnx/parseff/pull/28)) (@davesnx)
+- [FEATURE] Add `lexeme` and `keyword` ([#27](https://github.com/davesnx/parseff/pull/27)) (@davesnx)
+- [FEATURE] Add `any_uint32`, `any_varint` and `Slice.take` ([#26](https://github.com/davesnx/parseff/pull/26)) (@davesnx)
+- [FEATURE] Add `capture` and `recover` for error recovery ([#24](https://github.com/davesnx/parseff/pull/24)) (@davesnx)
+- [FIX] `many ~at_most` reports `Limit_exceeded { limit = at_most }` after a `recover` inside an element replays the loop, instead of the limit left over from the replay ([#142](https://github.com/davesnx/parseff/pull/142)) (@davesnx)
+- [FIX] A failed `skip_until` leaves the position at the same place in `parse`, `Source.parse` and `Push.parse`, so trace `Fail` events agree across runners ([#142](https://github.com/davesnx/parseff/pull/142)) (@davesnx)
+- [FIX] `render_error` prints `help: raise ~max_depth` for a `rec_` depth error when `~max_depth` equals the `fold_right` stack limit ([#138](https://github.com/davesnx/parseff/pull/138)) (@davesnx)
+- [FIX] Stop `expression` from looping when one level lists the same operator value twice and that operator fails after it reads its token ([#135](https://github.com/davesnx/parseff/pull/135)) (@davesnx)
+- [FIX] A `commit` in a nested `expression` operator fails only that operator, so the enclosing operator tries the next one, as property fuzzing found ([#126](https://github.com/davesnx/parseff/pull/126)) (@davesnx)
+- [FIX] Fix commit sealing and error positions found by property fuzzing: a `commit` in `fold_right` or in a required element of `many` no longer seals the wrong frame ([#121](https://github.com/davesnx/parseff/pull/121)) (@davesnx)
+- [FIX] Read the longest valid number in `number`, and fail when it is out of float range ([#99](https://github.com/davesnx/parseff/pull/99)) (@davesnx)
+- [FIX] Stop reading buffer bytes after the input when a stream error is built ([#74](https://github.com/davesnx/parseff/pull/74)) (@davesnx)
+- [FIX] Keep the error inside the excerpt of a long line with invalid UTF-8 ([#73](https://github.com/davesnx/parseff/pull/73)) (@davesnx)
+- [FIX] Read through the read buffer in `match_regex` on a stream ([#72](https://github.com/davesnx/parseff/pull/72)) (@davesnx)
+- [FIX] Print line and column in `render_error` when a stream error starts in dropped input ([#69](https://github.com/davesnx/parseff/pull/69)) (@davesnx)
+- [FIX] Keep the bytes of a regex read-ahead when a read raises ([#67](https://github.com/davesnx/parseff/pull/67)) (@davesnx)
+- [FIX] Keep line and column in stream errors after the line start is dropped ([#47](https://github.com/davesnx/parseff/pull/47)) (@davesnx)
+- [FIX] Skip a prefix operator that commits and consumes no input ([#41](https://github.com/davesnx/parseff/pull/41)) (@davesnx)
+- [FIX] Stop `expression` when an `infix_right` operator and operand consume no input ([#40](https://github.com/davesnx/parseff/pull/40)) (@davesnx)
+- [FIX] Read more input in streaming `match_regex` instead of returning a cut match ([#38](https://github.com/davesnx/parseff/pull/38)) (@davesnx)
+- [FIX] Stop `fold_right` when the operator and element consume no input ([#37](https://github.com/davesnx/parseff/pull/37)) (@davesnx)
+- [FIX] Check the range of a span in `Slice.to_string` ([#34](https://github.com/davesnx/parseff/pull/34)) (@davesnx)
+- [FIX] Count terminal cells for `render_error` carets ([#21](https://github.com/davesnx/parseff/pull/21)) (@davesnx)
+- [PERF] Rescan only the frames that changed when a stream refills, so streaming a long `infix_right` chain no longer takes quadratic time ([#136](https://github.com/davesnx/parseff/pull/136)) (@davesnx)
+- [PERF] Cut the cost of a streaming parse that ends in the first chunk ([#105](https://github.com/davesnx/parseff/pull/105)) (@davesnx)
+- [PERF] Defer the line index when a read drops ASCII input ([#96](https://github.com/davesnx/parseff/pull/96)) (@davesnx)
+- [PERF] Cut the cost of each read in a stream: a 462-byte head in 2 chunks runs 20,591 instructions, down from 24,281 ([#92](https://github.com/davesnx/parseff/pull/92)) (@davesnx)
+- [PERF] Keep a short streaming input on the minor heap ([#66](https://github.com/davesnx/parseff/pull/66)) (@davesnx)
+- [PERF] Make `precedence` cheaper: reuse the lookup frame and skip the restore when the lookup changed nothing ([#65](https://github.com/davesnx/parseff/pull/65)) (@davesnx)
+- [PERF] Take chunks straight into the input, without a read buffer ([#64](https://github.com/davesnx/parseff/pull/64)) (@davesnx)
+- [PERF] Record one undo entry per `Ref` cell and frame instead of one per set ([#46](https://github.com/davesnx/parseff/pull/46)) (@davesnx)
+- [PERF] Read into spare room, so a stream does not copy all kept input on each read: 8 MB kept in 4 KB reads takes 0.016 s, down from 1.3 s ([#45](https://github.com/davesnx/parseff/pull/45)) (@davesnx)
+- [PERF] Inline six primitives at call sites, and require odoc 3.2.1 for the docs ([#44](https://github.com/davesnx/parseff/pull/44)) (@davesnx)
+- [PERF] Reduce the cost of the generic combinators ([#35](https://github.com/davesnx/parseff/pull/35)) (@davesnx)
+- [DOCS] Document the `take` window limit, and that a failure at end of input loses recovered values ([#132](https://github.com/davesnx/parseff/pull/132)) (@davesnx)
+- [DOCS] Document the zero-width prefix rule and fuzz committing prefix tokens ([#125](https://github.com/davesnx/parseff/pull/125)) (@davesnx)
+- [DOCS] Render og:images in a static endpoint of the website, so the docs base needs no HTML rewrite ([#123](https://github.com/davesnx/parseff/pull/123)) (@davesnx)
+- [DOCS] Generate the API pages through `fix-odoc-md.sh` instead of a copied `sed` in each dune rule ([#122](https://github.com/davesnx/parseff/pull/122)) (@davesnx)
+- [DOCS] Resolve odoc page links and same-site URLs per docs version ([#115](https://github.com/davesnx/parseff/pull/115)) (@davesnx)
+- [DOCS] Tighten and sync the documentation across `parseff.mli`, the API pages, the guides and the website ([#114](https://github.com/davesnx/parseff/pull/114)) (@davesnx)
+- [DOCS] Document when to use `commit` and when to use `cut` ([#109](https://github.com/davesnx/parseff/pull/109)) (@davesnx)
+- [DOCS] Say that `expression` and `precedence` have their own loops, and when to use each ([#108](https://github.com/davesnx/parseff/pull/108)) (@davesnx)
+- [DOCS] Document `cut` and `commit`, `list` edge cases, recovering expressions and a failing `sync` in the recovery guide ([#101](https://github.com/davesnx/parseff/pull/101)) (@davesnx)
+- [DOCS] Port the HTTP rules of ache into the example ([#93](https://github.com/davesnx/parseff/pull/93)) (@davesnx)
+- [DOCS] Add the migration guide from 0.5 ([#90](https://github.com/davesnx/parseff/pull/90)) (@davesnx)
+- [DOCS] Say that a domain runs one parse at a time, and that system threads on one domain are not supported ([#78](https://github.com/davesnx/parseff/pull/78)) (@davesnx)
+- [DOCS] Correct the docs for the functions added since 0.5.0 ([#75](https://github.com/davesnx/parseff/pull/75)) (@davesnx)
+- [DOCS] Document the cost of `peek_with` and `skip_to` against a token kept by hand ([#71](https://github.com/davesnx/parseff/pull/71)) (@davesnx)
+- [DOCS] Add a Lua 5.4 parser example with error recovery ([#43](https://github.com/davesnx/parseff/pull/43)) (@davesnx)
+- [DOCS] Fix website code spans that contain a backtick ([#36](https://github.com/davesnx/parseff/pull/36)) (@davesnx)
+- [DOCS] Add the error recovery guide ([#25](https://github.com/davesnx/parseff/pull/25)) (@davesnx)
+- [DOCS] Remove the remaining effects claims from docs, tests and examples ([#20](https://github.com/davesnx/parseff/pull/20)) (@davesnx)
+- [CHORE] Reject malformed input in the fused arithmetic bench, explain the cross-domain state cache, and drop dead `fix-odoc-md.sh` rules ([#120](https://github.com/davesnx/parseff/pull/120)) (@davesnx)
+- [CHORE] Remove code comments: tautologies, stale notes and workaround excuses ([#119](https://github.com/davesnx/parseff/pull/119)) (@davesnx)
+- [CHORE] Remove the broken hooks step from `make init`, and correct the opam description and dependency groups ([#77](https://github.com/davesnx/parseff/pull/77)) (@davesnx)
+- [CHORE] Test the `peek_with` rule in a token loop and after a failure that consumed input ([#68](https://github.com/davesnx/parseff/pull/68)) (@davesnx)
+- [CHORE] Test allocation of failed parses and `render_error` ([#23](https://github.com/davesnx/parseff/pull/23)) (@davesnx)
+- [CHORE] Test allocation of the failures that stop repetitions ([#22](https://github.com/davesnx/parseff/pull/22)) (@davesnx)
+- [CHORE] Bump dune-release-action to v0.6.0 ([#19](https://github.com/davesnx/parseff/pull/19)) (@davesnx)
+
 ## [0.5.0](https://github.com/davesnx/parseff/releases/tag/0.5.0)
 
-- **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.error`: `{ kind; range; location; contexts; notes; excerpt }`, where `location` is the line and column in bytes. `location` is `None` when the line is not known (streaming, older than the buffered input). `kind : error_kind` is `Expected { items; found; more }`, `Failure`, `Custom`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. `found` is `Text`, `End`, `Short` or `Value`. The result type is `('a, error) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type `error` and its parts are `private`: you can read and match them, not build them. `note` and `range` stay buildable, for `fail ~notes`. See "Migrating from 0.4" below.
+- **Breaking: errors are structured values.** `parse` and `parse_source` return `Error e` where `e` is a `Parseff.error`: `{ kind; range; location; contexts; notes; excerpt }`, where `location` is the line and column in bytes. `location` is `None` when the line is not known (streaming, older than the buffered input). `kind : error_kind` is `Expected { items; found; more }`, `Failure`, `Custom`, `Depth_limit_exceeded` or `Backtrack_window_exceeded`, so a match on it is exhaustive. `found` is `Text`, `End`, `Short` or `Value`. The result type is `('a, error) Stdlib.result`, and `Parseff.Ok` and `Parseff.Error` are now `Stdlib.Ok` and `Stdlib.Error`. The type `error` and its parts are `private`: you can read and match them, not build them. `note` and `range` stay buildable, for `fail ~notes`. See [Migrating](https://davesnx.github.io/parseff/guides/migrating/).
 - **Breaking: `error` takes an extensible variant.** `error` was `'e -> 'a` and the result carried a free `'e`, so a parser could raise an `int` and the caller could read a `string`: a segfault. `custom_error` is now an extensible variant, `error : ?from:int -> ?notes:note list -> custom_error -> 'a`, and `error_kind` has `Custom of custom_error`. `render_error ?custom` and `error_message ?custom` take a printer `custom_error -> string`. Declare your cases with `type Parseff.custom_error += Too_large of int` and match `Custom (Too_large n)`. A `Custom` match needs a final `_` case.
 - **Breaking: diagnostics are typed by a collector.** `warn : 'd -> unit` had the same hole. `Diagnostics.create ()` makes a `'d Diagnostics.t`; `warn d x` and `warn_at d ~pos x` record into it; pass it to the runner with `~diagnostics:d` and read `Diagnostics.to_list d` after the parse, on `Ok` and on `Error`. The runner empties the collector first. `warn` into a collector the runner did not get does nothing. Diagnostics are still rolled back with a branch that backtracks. A collector in use by one parse raises `Invalid_argument` if another parse gets it, or if `Diagnostics.clear` is called on it.
 - **Breaking: two runners.** `parse` and `parse_source` take `` ?consume:[ `All | `Partial ] `` (default `` `All ``) and `?diagnostics`. By default the parse fails with `Expected End_of_input` when input remains. `parse_until_end s p` is now `parse s p`, and `parse_source_until_end` is now `parse_source`. To parse a leading part and ignore the rest, which was what `parse s p` did in 0.4, pass `` ~consume:`Partial ``. Removed: `parse_until_end`, `parse_source_until_end`, the `result` alias (it shadowed `Stdlib.result` under `open Parseff`), `diagnostic`, `error_with_diagnostics` and `result_with_diagnostics`.
@@ -62,50 +167,6 @@ All notable changes to Parseff. See [all releases on GitHub](https://github.com/
 - **Fix `many`, `sep_by`, `end_by` and `fold_left` looping forever on parsers that consume no input.** The loop now stops after an iteration that consumes nothing and drops that iteration's result and diagnostics. `~at_least` still applies to the kept results.
 - **Fix `take n` raising `Invalid_argument` for a very large `n`.** The length check overflowed. `take` now fails with an `Expected` error whose `found` is `Short` or `End`. A negative count also fails with `Expected`, `expected non-negative length, found -1`, as in 0.4, so `or_` recovers from it.
 - **Document the cost of `match_regex` failures.** `Re` searches forward when the regex does not match at the current position, so a failed match scans the rest of the input and a loop of failing matches takes quadratic time.
-
-### Migrating runners, `error` and `warn`
-
-| Before | After |
-|---|---|
-| `parse_until_end s p` | `parse s p` |
-| `parse_source_until_end src p` | `parse_source src p` |
-| `parse s p` | `` parse ~consume:`Partial s p `` |
-| `parse_source src p` | `` parse_source ~consume:`Partial src p `` |
-| `Ok (v, ds)` and `Error { error; diagnostics }` | `Ok v` and `Error e`; read the diagnostics from the collector |
-| `warn x` | `let d = Diagnostics.create ()`, `parse ~diagnostics:d`, `warn d x` |
-| `warn_at ~pos x` | `warn_at d ~pos x` |
-| `'d Parseff.diagnostic = { pos; diagnostic }` | `'d Parseff.Diagnostics.entry = { pos; value }` |
-| `` error (`Too_large n) `` | `type Parseff.custom_error += Too_large of int`, then `error (Too_large n)` |
-| `` Error { pos; error = `Too_large n } `` | `Error { kind = Custom (Too_large n); _ }`, with a final `_` case |
-| `('a, 'e) Parseff.result` | `('a, Parseff.error) result` |
-
-### Migrating from 0.4
-
-The common case is one pattern. Replace the match on the built-in variants by a match on the error value:
-
-```ocaml
-(* 0.4 *)
-match Parseff.parse input parser with
-| Ok v -> v
-| Error { pos; error = `Expected msg } -> Printf.eprintf "%d: %s\n" pos msg; exit 1
-| Error { pos; error = `Unexpected_end_of_input } -> Printf.eprintf "%d: end of input\n" pos; exit 1
-| Error _ -> exit 1
-
-(* 0.5 *)
-match Parseff.parse input parser with
-| Ok v -> v
-| Error e -> prerr_endline (Parseff.render_error ~name:"input" e); exit 1
-```
-
-- `Error { pos; error }` becomes `Error e`. The position is `e.range.start`, the message is `Parseff.error_message e`.
-- Custom errors move into `kind`: `` Error { error = `Too_large n; _ } `` becomes `Error { kind = Custom (Too_large n); _ }`, with `type Parseff.custom_error += Too_large of int`.
-- `` `Failure msg `` becomes `Failure msg`. The 0.4 messages of primitives that were not expectations (invalid UTF-8, a failed `match_regex` without a label, a mismatched `BE.int16`) are `Expected` items now (`valid UTF-8`, `text matching the pattern`, `int16be 0xFFFE`), so they merge with the alternatives expected at the same position.
-- `` `Expected msg `` becomes `Expected { items; found; more }`. `Parseff.error_message e` gives `expected A, B, or C, found X` instead of `expected A or expected B`, sorted and without duplicates.
-- `` `Unexpected_end_of_input `` becomes `Expected { found = End; _ }` and now has `items`.
-- `` `Depth_limit_exceeded msg `` becomes `Depth_limit_exceeded { limit }`, and `` `Backtrack_window_exceeded info `` becomes `Backtrack_window_exceeded { limit; oldest }`.
-- `Parseff.Ok` and `Parseff.Error` are `Stdlib.Ok` and `Stdlib.Error`. Code that writes `Ok v` and `Error e` keeps compiling.
-- `parse_until_end` and `parse_source_until_end` become `parse` and `parse_source`. `parse` and `parse_source` now require all input to be consumed unless you pass `` ~consume:`Partial ``. Diagnostics are read from a `Diagnostics.t` collector. See the table above.
-- Tests that compared error strings change: messages now name what was expected at the furthest failure, and `consume` fails at the first differing byte.
 
 ## [0.4.0](https://github.com/davesnx/parseff/releases/tag/0.4.0)
 
