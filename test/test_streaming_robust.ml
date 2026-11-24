@@ -425,11 +425,11 @@ let test_found_stops_at_within_end () =
       ignore
         (Parseff.many ~at_least:1 (fun () -> Parseff.optional (item char_c)))
   );
-  check_runners "many of sep_by_iter" "2-2: expected 1 byte, found end of input"
+  check_runners "many of Iter.sep_by" "2-2: expected 1 byte, found end of input"
     "abab" (fun () ->
       ignore
         (Parseff.many ~at_least:1 (fun () ->
-             Parseff.sep_by_iter (item take_1)
+             Parseff.Iter.sep_by (item take_1)
                (fun () -> Parseff.literal "1")
                ignore
          )

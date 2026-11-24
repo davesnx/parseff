@@ -203,10 +203,10 @@ let test_replay_without_recovery () =
   same "sep_by" "y,ax"
     (fun () -> String.concat "," (sep_by y_or_holes (fun () -> char ',')))
     ~plain:"Ok y,ax";
-  same "many_iter" "yax"
+  same "Iter.many" "yax"
     (fun () ->
       let b = Buffer.create 8 in
-      many_iter y_or_holes (Buffer.add_string b);
+      Iter.many y_or_holes (Buffer.add_string b);
       Buffer.contents b
     )
     ~plain:"Ok yax";
@@ -887,9 +887,9 @@ let test_list_empty_separator () =
           ("", "Ok <>"); ("a,", "Ok <a|>"); (",", "Ok <|>"); ("a,b", "Ok <a|b>");
         ]
       );
-      ( "sep_by_iter of nothing",
+      ( "Iter.sep_by of nothing",
         (fun () ->
-          sep_by_iter (fun () -> ()) (fun () -> ignore (char ';')) ignore
+          Iter.sep_by (fun () -> ()) (fun () -> ignore (char ';')) ignore
         ),
         [ ("", "Ok <>"); (",", "Ok <>"); ("a,b", "Ok <a>") ]
       );
@@ -1038,7 +1038,7 @@ let test_rule_a_traps () =
           let v =
             Option.value ~default:"-" (optional (fun () -> body use ab))
           in
-          many_iter (fun () -> char 'a') (Buffer.add_char given);
+          Iter.many (fun () -> char 'a') (Buffer.add_char given);
           v
           ^
           ( literal "ab";
@@ -1059,7 +1059,7 @@ let test_rule_a_traps () =
           let v =
             Option.value ~default:"-" (optional (fun () -> body use ab))
           in
-          many_iter (fun () -> char 'a') (Buffer.add_char given);
+          Iter.many (fun () -> char 'a') (Buffer.add_char given);
           v
           ^
           ( literal "b";

@@ -110,7 +110,7 @@ let csv_field () =
 
 {!module:Parseff.Charset} builds a 256-byte lookup table once outside your
 parser so {!val:Parseff.take_while}, {!val:Parseff.skip_while},
-{!val:Parseff.Slice.take_while}, and {!val:Parseff.take_while_iter} avoid
+{!val:Parseff.Slice.take_while}, and {!val:Parseff.Iter.take_while} avoid
 calling an OCaml predicate closure per byte.
 
 {@ocaml skip[

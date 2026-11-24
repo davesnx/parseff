@@ -302,8 +302,8 @@ To stay within [~backtrack_window]:
 - Call {!val:Parseff.commit} to release the nearest frame once an alternative
   is chosen, or {!val:Parseff.cut} to release every frame inside the enclosing
   {!val:Parseff.context} once a construct is decided.
-- Use {!val:Parseff.many_iter}, {!val:Parseff.sep_by_iter},
-  {!val:Parseff.take_iter}, or {!val:Parseff.take_while_iter} to stream items
+- Use {!val:Parseff.Iter.many}, {!val:Parseff.Iter.sep_by},
+  {!val:Parseff.Iter.take}, or {!val:Parseff.Iter.take_while} to stream items
   or large byte payloads past [~backtrack_window].
 - Raise [~backtrack_window] only when the grammar genuinely requires longer
   lookahead.

@@ -266,7 +266,7 @@ To stay within `~backtrack_window`:
 
 - Dispatch early with `Parseff.peek_char` rather than trying long speculative branches.
 - Call `Parseff.commit` to release the nearest frame once an alternative is chosen, or `Parseff.cut` to release every frame inside the enclosing `Parseff.context` once a construct is decided.
-- Use `Parseff.many_iter`, `Parseff.sep_by_iter`, `Parseff.take_iter`, or `Parseff.take_while_iter` to stream items or large byte payloads past `~backtrack_window`.
+- Use `Parseff.Iter.many`, `Parseff.Iter.sep_by`, `Parseff.Iter.take`, or `Parseff.Iter.take_while` to stream items or large byte payloads past `~backtrack_window`.
 - Raise `~backtrack_window` only when the grammar genuinely requires longer lookahead.
 ```ocaml
 let http_method () =

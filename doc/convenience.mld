@@ -179,9 +179,11 @@ In streaming, [keyword] needs [String.length s + 1] bytes of
 {@ocaml skip[
 val take : int -> string
 val within : int -> (unit -> 'a) -> 'a
-val take_iter : int -> (Slice.t -> unit) -> unit
-val take_while_iter :
-  ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+module Iter : sig
+  val take : int -> (Slice.t -> unit) -> unit
+  val take_while :
+    ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+end
 ]}
 
 - {!val:Parseff.take} reads exactly [n] bytes as a string (fails with an
@@ -189,10 +191,10 @@ val take_while_iter :
 - {!val:Parseff.within} (unstable) runs a parser bounded to the next [n] bytes,
   presenting EOF at the frame boundary without copying the payload. Fails if
   bytes remain unread inside the frame or the input ends before [n] bytes.
-- {!val:Parseff.take_iter} and {!val:Parseff.take_while_iter} (unstable) stream
+- {!val:Parseff.Iter.take} and {!val:Parseff.Iter.take_while} (unstable) stream
   bytes to a callback as non-empty borrowed {!type:Parseff.Slice.t} pieces
-  without holding the whole payload in memory (sealing open frames like
-  {!val:Parseff.many_iter}).
+  without holding the whole payload in memory (sealing open frames like the
+  other {!module:Parseff.Iter} combinators).
 
 {@ocaml[
 let frame () =
