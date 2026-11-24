@@ -656,11 +656,11 @@ let test_required_element_commit () =
       ( "many ~at_least:1, failing element",
         fun () -> ignore (Parseff.many ~at_least:1 failing_elem)
       );
-      ( "many_iter ~at_least:1",
-        fun () -> Parseff.many_iter ~at_least:1 failing_elem ignore
+      ( "Iter.many ~at_least:1",
+        fun () -> Parseff.Iter.many ~at_least:1 failing_elem ignore
       );
-      ( "sep_by_iter ~at_least:1",
-        fun () -> Parseff.sep_by_iter ~at_least:1 failing_elem sep ignore
+      ( "Iter.sep_by ~at_least:1",
+        fun () -> Parseff.Iter.sep_by ~at_least:1 failing_elem sep ignore
       );
     ]
 
@@ -736,7 +736,7 @@ let test_sep_by_csv_trailing_eol () =
   in
   let iter_rows () =
     let acc = ref [] in
-    Parseff.sep_by_iter record eol (fun v -> acc := v :: !acc);
+    Parseff.Iter.sep_by record eol (fun v -> acc := v :: !acc);
     ignore (Parseff.optional eol);
     "[" ^ String.concat ";" (List.rev !acc) ^ "]"
   in
@@ -752,7 +752,7 @@ let test_sep_by_csv_trailing_eol () =
             )
             (in_every_mode input parser)
         )
-        [ ("sep_by", rows); ("sep_by_iter", iter_rows) ]
+        [ ("sep_by", rows); ("Iter.sep_by", iter_rows) ]
     )
     [
       ("a,b\r\nc,d\r\n", "Ok ([a|b;c|d], 10)");

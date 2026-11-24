@@ -529,7 +529,7 @@ let test_set_while_parse_suspended () =
   Alcotest.(check string)
     "cell of the suspended parse"
     "Parseff.Ref.set: the cell belongs to a running parse, and this call is \
-     outside that parse, for example in a function given to a *_iter function \
+     outside that parse, for example in a function given to an Iter function \
      or to ~trace"
     !other;
   Alcotest.(check int)

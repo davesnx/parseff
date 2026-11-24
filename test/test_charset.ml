@@ -87,7 +87,7 @@ let test_predicate_not_called () =
   ignore
     (run
        (fun () ->
-         Parseff.take_while_iter ~set:field counted (fun _ -> ());
+         Parseff.Iter.take_while ~set:field counted (fun _ -> ());
          ""
        )
        input
@@ -168,7 +168,7 @@ let test_iter_pieces () =
   let r =
     run
       (fun () ->
-        Parseff.take_while_iter ~set:field is_field_char (fun piece ->
+        Parseff.Iter.take_while ~set:field is_field_char (fun piece ->
             got := Parseff.Slice.to_string piece :: !got
         );
         ""
@@ -181,7 +181,7 @@ let test_iter_pieces () =
   let r =
     run
       (fun () ->
-        Parseff.take_while_iter ~set:field is_field_char (fun _ -> incr calls);
+        Parseff.Iter.take_while ~set:field is_field_char (fun _ -> incr calls);
         ""
       )
       "\r"
@@ -220,7 +220,7 @@ let test_stream () =
   let walked =
     Parseff.Source.parse ~backtrack_window:32 ~consume:`Partial (src ())
       (fun () ->
-        Parseff.take_while_iter ~set:ays is_a (fun piece ->
+        Parseff.Iter.take_while ~set:ays is_a (fun piece ->
             Buffer.add_string out (Parseff.Slice.to_string piece)
         );
         Parseff.char '\r'

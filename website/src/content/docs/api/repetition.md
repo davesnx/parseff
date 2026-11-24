@@ -7,7 +7,7 @@ description: Looping constructs for parsing repeated and separated patterns
 
 # Repetition and separation
 
-Combinators for repeated items, separated lists, delimited blocks, streaming iteration, and operator-precedence expressions.
+Combinators for repeated items, separated lists, delimited blocks, and operator-precedence expressions. To pass each element to a callback instead of building a list, see [`Iter`](./streaming.md#iter).
 
 ## Basic repetition
 
@@ -94,31 +94,6 @@ let parens p =
 
 let brackets p =
   Parseff.between (fun () -> Parseff.char '[') (fun () -> Parseff.char ']') p
-```
-
-## Streaming iteration
-
-### `many_iter` and `sep_by_iter`
-
-`Parseff.many_iter` and `Parseff.sep_by_iter` (unstable: may change in any minor release) behave like `many` and `sep_by` without building a list, passing each parsed element directly to a callback `f`.
-
-```ocaml
-val many_iter : ?at_least:int -> (unit -> 'a) -> ('a -> unit) -> unit
-val sep_by_iter :
-  ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
-```
-
-Before each callback call, they seal every open backtracking frame so streaming sources can drop earlier bytes and keep memory bounded by one element. Calling them inside frames that cannot be sealed (such as `Parseff.look_ahead` or `Parseff.capture` without `~release:true`) raises `Invalid_argument`. See `Parseff.many_iter` for the complete callback and sealing rules.
-
-```ocaml
-let sum_ints input =
-  let total = ref 0 in
-  let r =
-    Parseff.parse input (fun () ->
-        Parseff.sep_by_iter Parseff.integer (fun () -> Parseff.char ',')
-          (fun n -> total := !total + n))
-  in
-  Result.map (fun () -> !total) r
 ```
 
 ## Operator chains and expressions

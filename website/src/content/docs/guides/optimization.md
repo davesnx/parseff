@@ -23,7 +23,7 @@ parse_value ()
 
 ## Precompute byte sets with `Charset`
 
-`Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.take_while_iter` accept a precomputed `Parseff.Charset` via `~set`, replacing per-byte closure calls with a 256-byte table lookup. Build the set once outside the parser:
+`Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.Iter.take_while` accept a precomputed `Parseff.Charset` via `~set`, replacing per-byte closure calls with a 256-byte table lookup. Build the set once outside the parser:
 
 ```ocaml
 let is_ident c =
