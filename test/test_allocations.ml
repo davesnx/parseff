@@ -409,12 +409,12 @@ let chunks_each_heads chunk =
     incr count;
     `Continue
   in
-  let push = Parseff.Push.parse_each ~on_value (fun () -> head_lines 0) in
+  let push, _ = Parseff.Push.parse_each ~on_value (fun () -> head_lines 0) in
   ( match push (Some chunk) with
-  | Parseff.Push.Need_input ->
+  | Parseff.Push.Await ->
       ()
   | _ ->
-      Alcotest.fail "expected Need_input after the chunk"
+      Alcotest.fail "expected Await after the chunk"
   );
   ( match push None with
   | Parseff.Push.Ended ->

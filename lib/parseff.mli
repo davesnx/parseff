@@ -1981,9 +1981,10 @@ module Source : sig
         keeps its current input buffer alive until the sequence is forced again
         or dropped.
       - Pass [~pending] if [parser] buffers lookahead past its value: called
-        when no input remains, and if it returns [true], runs [parser] once more
-        (allowing zero-width consumption). Must return [false] once drained; an
-        [Error] stops the sequence even if [pending] is [true].
+        when no input remains, and if it returns [true], runs [parser] once
+        more. That run may consume no input, but a second zero-width run in a
+        row at the same position yields an [Error]. Must return [false] once
+        drained; an [Error] stops the sequence even if [pending] is [true].
 
       {@ocaml[
       let record () =
@@ -2009,10 +2010,10 @@ module Push : sig
         and returns any unconsumed leftover bytes; end [parser] with
         {!end_of_input} to require full consumption.
       - While suspended awaiting input, holds any {!Ref} cells it wrote and its
-        [~diagnostics] collector until completion or {!Push.finish}. Multiple
-        push parses and {!Parseff.parse} calls can interleave on one domain; a
-        push parse may migrate across domains but must not be used concurrently
-        from two domains.
+        [~diagnostics] collector until it completes or is cancelled with
+        {!Push.cancel}. Multiple push parses and {!Parseff.parse} calls can
+        interleave on one domain; a push parse may migrate across domains but
+        must not be used concurrently from two domains.
 
       {@ocaml[
       let line () =
@@ -2071,17 +2072,30 @@ module Push : sig
 
   val finish : 'a t -> ('a * string, error) Stdlib.result
   (** [finish t] signals EOF and runs [t] to completion ([finish] with no prior
-      chunks parses [""]). Dropping an unfinished [t] without calling [finish]
-      leaves its {!Ref} cells and [~diagnostics] collector locked and runs no
-      cleanup handlers. Raises [Invalid_argument] under the same conditions as
-      {!Push.feed}. *)
+      chunks parses [""]). Raises [Invalid_argument] under the same conditions
+      as {!Push.feed}. *)
+
+  val cancel : 'a t -> unit
+  (** [cancel t] ends [t] without giving it more input, and releases its {!Ref}
+      cells, [~diagnostics] collector and suspended stack. Call it to drop an
+      unfinished [t]: without it, [t] keeps them locked, and OCaml does not free
+      the stack of a dropped effect continuation.
+
+      - Unwinds the suspended parser with an exception private to Parseff. No
+        trace events are emitted, but exception handlers in [parser], such as
+        [Fun.protect ~finally], run. A handler that catches the exception and
+        continues parsing sees end of input; in {!Push.parse_each}, a value it
+        then returns still goes to [on_value] during [cancel].
+      - Afterwards {!Push.feed} and {!Push.finish} raise [Invalid_argument].
+        Does nothing if [t] has already ended or was cancelled. Raises
+        [Invalid_argument] if called from inside a parser. *)
 
   (** Result of a push to {!Push.parse_each}. *)
   type each_step =
-    | Need_input  (** Ready for the next [Some chunk], or [None] at EOF. *)
+    | Await  (** Ready for the next [Some chunk], or [None] at EOF. *)
     | Stopped of string
         (** [on_value] returned [`Stop]; carries unconsumed leftover bytes. *)
-    | Error_of of error  (** Parsing failed and the stream ended. *)
+    | Error of error  (** Parsing failed and the stream ended. *)
     | Ended  (** [None] was pushed with no remaining input. *)
 
   val parse_each :
@@ -2089,24 +2103,26 @@ module Push : sig
     ?backtrack_window:int ->
     ?diagnostics:Diagnostics.t ->
     ?trace:(trace_event -> unit) ->
+    ?pending:(unit -> bool) ->
     on_value:('a -> [ `Continue | `Stop ]) ->
     (unit -> 'a) ->
-    string option ->
-    each_step
-  (** [parse_each ~on_value parser] returns a [push] function that streams
+    (string option -> each_step) * (unit -> unit)
+  (** [parse_each ~on_value parser] returns [(push, cancel)]: [push] streams
       multiple values from pushed chunks (push counterpart of
-      {!Source.parse_each}, reusing one effect fiber across values).
+      {!Source.parse_each}, reusing one effect fiber across values), and
+      [cancel] ends the stream as {!Push.cancel} does.
 
       - [push (Some chunk)] delivers parsed values to [on_value] and returns
-        [Need_input] when more bytes are needed; [push None] signals EOF.
-      - Follows {!Source.parse_each} rules: zero-width runs produce [Error_of],
-        positions are cumulative, and [~diagnostics] is cleared before each
-        value (and on [Ended]), so read it inside [on_value]. Releases {!Ref}
-        cells and [~diagnostics] between values (retains them while waiting
-        mid-value).
+        [Await] when more bytes are needed; [push None] signals EOF.
+      - Follows {!Source.parse_each} rules: zero-width runs produce [Error],
+        positions are cumulative, [~pending] has the same meaning, and
+        [~diagnostics] is cleared before each value (and on [Ended]), so read it
+        inside [on_value]. Releases {!Ref} cells and [~diagnostics] between
+        values (retains them while waiting mid-value, until [cancel]).
       - Chunks must not be mutated while in use. Exceptions from [parser] or
-        [on_value] propagate and end the stream. Raises [Invalid_argument] after
-        [Stopped]/[Error_of]/[Ended], from inside a parser, or from [on_value].
+        [on_value] propagate and end the stream. [push] raises
+        [Invalid_argument] after [Stopped]/[Error]/[Ended] or [cancel]; [push]
+        and [cancel] raise it from inside a parser or from [on_value].
 
       {@ocaml[
       let line () =
@@ -2116,7 +2132,7 @@ module Push : sig
 
       let lines chunks =
         let seen = ref [] in
-        let push =
+        let push, _cancel =
           Push.parse_each
             ~on_value:(fun s ->
               seen := s :: !seen;
@@ -2129,7 +2145,7 @@ module Push : sig
               push None
           | chunk :: rest -> (
               match push (Some chunk) with
-              | Push.Need_input ->
+              | Push.Await ->
                   go rest
               | step ->
                   step
@@ -2138,9 +2154,9 @@ module Push : sig
         match go chunks with
         | Push.Ended ->
             Ok (List.rev !seen)
-        | Push.Error_of e ->
+        | Push.Error e ->
             Error e
-        | Push.Need_input | Push.Stopped _ ->
+        | Push.Await | Push.Stopped _ ->
             assert false
       ]} *)
 end

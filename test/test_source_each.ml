@@ -112,6 +112,20 @@ let test_pending_empty_source () =
        (Parseff.Source.parse_each ~pending (bytes_src "") (fun () -> "held"))
     )
 
+let test_pending_never_drained () =
+  Alcotest.(check (list string))
+    "the second zero-width held value is an error"
+    [ "ok held"; "error 0 the parser consumed no input" ]
+    (collect
+       (Seq.take 1000
+          (Parseff.Source.parse_each
+             ~pending:(fun () -> true)
+             (bytes_src "")
+             (fun () -> "held")
+          )
+       )
+    )
+
 let test_error_of_each_value () =
   let parser () =
     let v = digits () in
@@ -589,6 +603,7 @@ let () =
             test_pending_only_asked_at_end;
           test_case "error ends" `Quick test_pending_error_ends;
           test_case "empty source" `Quick test_pending_empty_source;
+          test_case "never drained" `Quick test_pending_never_drained;
         ]
       );
       ( "errors",

@@ -114,6 +114,6 @@ let () =
 | [Error recovery](/parseff/guides/error-recovery/) | `capture`, `recover`, `require`, `list`, `skip_nested` |
 | [Diagnostics](/parseff/api/diagnostics/) | `warn`, `Diagnostics`, `Ref` |
 | [Zero-copy API](/parseff/api/zero-copy/) | `Slice.take_while`, `Slice.take`, `Slice.recognize`, `Slice.sep_by_take`, `sep_by_take` |
-| [Streaming](/parseff/api/streaming/) | `Source.of_*`, `Source.parse`, `Source.parse_each`, `Push.parse`, `Push.feed`, `Push.finish`, `Push.parse_each`, `Iter.many`, `Iter.sep_by`, `Iter.take`, `Iter.take_while` |
+| [Streaming](/parseff/api/streaming/) | `Source.of_*`, `Source.parse`, `Source.parse_each`, `Push.parse`, `Push.feed`, `Push.finish`, `Push.cancel`, `Push.parse_each`, `Iter.many`, `Iter.sep_by`, `Iter.take`, `Iter.take_while` |
 | [Binary parsing](/parseff/api/binary/) | `any_uint8`, `any_int8`, `any_varint`, `BE.*`, `LE.*` |
 | [UTF-8 parsing](/parseff/api/utf8/) | `Utf8.satisfy`, `Utf8.char`, `Utf8.any_char`, `Utf8.take_while`, `Utf8.letter`, `Utf8.whitespace`, `Utf8.Slice.take_while` |
