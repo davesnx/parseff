@@ -12,6 +12,7 @@
 - [BREAKING] Remove `regex` and `match_regex`, and drop the `re` dependency ([#100](https://github.com/davesnx/parseff/pull/100)) (@davesnx)
 - [BREAKING] Rename `consume` to `literal` and return `unit` ([#98](https://github.com/davesnx/parseff/pull/98)) (@davesnx)
 - [BREAKING] Settle the API before 1.0: `fail` backtracks as `error` does, `span` is abstract, `location` is private, `digit` returns a `char`, `satisfy` takes `?label` first, `Failure` is `Failed`, `skip_while_then_char` and `fused_sep_take` are removed, and errors compare by their fields; also add `Push`, `many_iter`, `take_iter`, `within`, `?at_most`, `Source.of_bigstring_chunks`, `require` and `list` ([#76](https://github.com/davesnx/parseff/pull/76)) (@davesnx)
+- [FEATURE] Add `?at_least` and `?label` to `Slice.take_while`, `skip_while`, `Utf8.Slice.take_while` and `Utf8.skip_while`, failing as `take_while` and `Utf8.take_while` do and raising `Invalid_argument` on a negative `~at_least` (@davesnx)
 - [FEATURE] Make `Push.parse`, `Push.feed` and `Push.finish` stable, keep the chunks not yet fed after `Done` in the `Push` example, and state what 0.x releases promise and how to show the `unstable` alert ([#127](https://github.com/davesnx/parseff/pull/127)) (@davesnx)
 - [FEATURE] Add `Push.parse_each`, a push parse of a stream of values in one fiber ([#111](https://github.com/davesnx/parseff/pull/111)) (@davesnx)
 - [FEATURE] Add `not_followed_by` ([#107](https://github.com/davesnx/parseff/pull/107)) (@davesnx)

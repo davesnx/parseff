@@ -145,6 +145,57 @@ let test_skip_until_success () =
   | Error error ->
       Alcotest.fail (Parseff.render_error error)
 
+let test_scan_success () =
+  let check name maximum text parser =
+    let input =
+      String.concat ""
+        (List.init (warmup_iterations + iterations) (fun _ -> text))
+    in
+    match
+      Parseff.parse ~consume:`Partial input (fun () ->
+          words_per_call (fun () ->
+              let v = parser () in
+              let _ = Parseff.char ' ' in
+              v
+          )
+      )
+    with
+    | Ok actual ->
+        if actual > maximum then
+          Alcotest.failf
+            "%s allocated %.6f minor words per call, expected at most %.0f" name
+            actual maximum
+    | Error error ->
+        Alcotest.fail (Parseff.render_error error)
+  in
+  let word c = c <> ' ' in
+  let uword u = Uchar.to_int u <> 0x20 in
+  let set = Parseff.Charset.of_predicate word in
+  check "skip_while" 0. "abc " (fun () -> Parseff.skip_while word);
+  check "skip_while ~set" 2. "abc " (fun () -> Parseff.skip_while ~set word);
+  check "skip_while ~at_least" 0. "abc " (fun () ->
+      Parseff.skip_while ~at_least:2 word
+  );
+  check "skip_while ~at_least ~set" 2. "abc " (fun () ->
+      Parseff.skip_while ~at_least:2 ~set word
+  );
+  check "Slice.take_while" 4. "abc " (fun () -> Parseff.Slice.take_while word);
+  check "Slice.take_while ~at_least" 4. "abc " (fun () ->
+      Parseff.Slice.take_while ~at_least:2 word
+  );
+  check "Utf8.skip_while" 0. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.skip_while uword
+  );
+  check "Utf8.Slice.take_while" 4. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.Slice.take_while uword
+  );
+  check "Utf8.skip_while ~at_least" 8. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.skip_while ~at_least:2 uword
+  );
+  check "Utf8.Slice.take_while ~at_least" 12. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.Slice.take_while ~at_least:2 uword
+  )
+
 let reads = 100_000
 
 let one_byte_source () =
@@ -628,6 +679,7 @@ let () =
         [
           Alcotest.test_case "literal" `Quick test_literal_success;
           Alcotest.test_case "skip_until" `Quick test_skip_until_success;
+          Alcotest.test_case "scans" `Quick test_scan_success;
         ]
       );
       ( "operators",
