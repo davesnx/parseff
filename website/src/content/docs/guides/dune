@@ -116,3 +116,20 @@
  (action
   (system
    "printf '%s\\n' '---' 'title: Comparison with Angstrom' 'description: How Parseff compares to Angstrom in performance, API style, and trade-offs' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/comparison.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} guides %{workspace_root}/doc")))
+
+(rule
+ (alias generate-markdown)
+ (enabled_if
+  (= %{env:PARSEFF_GENERATE_MARKDOWN=false} "true"))
+ (mode
+  (promote (until-clean)))
+ (deps
+  %{workspace_root}/_doc/_markdown/parseff/migrating.md
+  %{workspace_root}/website/fix-odoc-md.sh
+  %{workspace_root}/website/fix-code-spans.sh
+  %{workspace_root}/website/fix-relative-links.sh
+  (glob_files %{workspace_root}/doc/*.mld))
+ (targets migrating.md)
+ (action
+  (system
+   "printf '%s\\n' '---' 'title: Migrating' 'description: Update code written for an older Parseff release' '---' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/migrating.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} guides %{workspace_root}/doc")))

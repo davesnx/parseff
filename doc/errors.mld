@@ -213,27 +213,3 @@ Formatting details:
   [* help:].
 - {b Custom errors}: pass [~custom]; without it, [Custom] prints
   [custom error (no ~custom printer given)].
-
-{1 Migrating from 0.4}
-
-[Error { pos; error }] with polymorphic variants was replaced by the [error]
-record:
-
-{@ocaml skip[
-(* before *)
-| Error { pos; error = `Expected msg } -> Printf.printf "%d: %s\n" pos msg
-| Error { error = `Too_large n; _ } -> ...
-| Error { error = `Failure msg; _ } -> ...
-| Error { error = `Unexpected_end_of_input; _ } -> ...
-
-(* after *)
-| Error e -> prerr_endline (Parseff.render_error ~name:"input" e)
-| Error { kind = Custom (Too_large n); _ } -> ...
-| Error { kind = Failed msg; _ } -> ...
-| Error { kind = Expected { found = End; _ }; _ } -> ...
-]}
-
-Declare custom errors via [type Parseff.custom_error += Too_large of int].
-Invalid UTF-8 and mismatched binary integers ([BE.int16], etc.) are now
-[Expected] items ([valid UTF-8], [int16be 0xFFFE]), EOF errors preserve
-expectations, and the failure offset is [e.range.start].

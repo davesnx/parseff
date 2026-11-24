@@ -88,6 +88,7 @@ export default defineConfig({
 					],
 				},
 			{ label: 'Comparison with Angstrom', slug: 'guides/comparison' },
+			{ label: 'Migrating', slug: 'guides/migrating' },
 			{ label: 'Changelog', slug: 'changelog' },
 			{ label: 'Credits', slug: 'credits' },
 			]),
