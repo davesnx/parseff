@@ -2800,26 +2800,6 @@ let[@inline never] fail_too_short st at_least label =
   | None ->
       fail_at_least st at_least
 
-let[@inline never] scan_at_least st ~name ~keep at_least label set pred =
-  if at_least < 0 then invalid_at_least name;
-  let start = st.pos in
-  let keep_from =
-    if keep then
-      start
-    else
-      no_keep
-  in
-  let end_pos =
-    match set with
-    | None ->
-        scan_while st ~keep_from start pred
-    | Some set ->
-        scan_set st ~keep_from start set
-  in
-  st.pos <- end_pos;
-  if end_pos - start < at_least then fail_too_short st at_least label;
-  start
-
 let[@inline never] invalid_range_bound name bound =
   invalid_arg (name ^ ": " ^ bound ^ " must be at least 0")
 
@@ -2830,10 +2810,15 @@ let[@inline] range_bound name bound = function
       if n < 0 then invalid_range_bound name bound;
       n
 
-let[@inline never] take_while_at_most st at_least at_most set pred =
-  if at_most < 0 || at_most < at_least then
-    invalid_arg
-      "Parseff.take_while: at_most must be at least 0 and at least at_least";
+let[@inline never] invalid_at_most name =
+  invalid_arg (name ^ ": at_most must be at least 0 and at least at_least")
+
+let[@inline] check_at_most name at_least at_most =
+  if at_most < 0 || at_most < at_least then invalid_at_most name
+
+let[@inline never] take_while_at_most st ~name ~keep_from at_least at_most set
+    pred =
+  check_at_most name at_least at_most;
   let start = st.pos in
   let stop =
     if at_most >= max_int - start then
@@ -2844,13 +2829,38 @@ let[@inline never] take_while_at_most st at_least at_most set pred =
   let end_pos =
     match set with
     | None ->
-        scan_until st ~keep_from:start start stop pred
+        scan_until st ~keep_from start stop pred
     | Some set ->
-        scan_set_until st ~keep_from:start start stop set
+        scan_set_until st ~keep_from start stop set
   in
-  if end_pos - start > at_most then
-    fail_limit st ~from:start ~upto:end_pos at_most;
+  if end_pos - start > at_most then begin
+    st.pos <- imin keep_from end_pos;
+    fail_limit st ~from:start ~upto:end_pos at_most
+  end;
   end_pos
+
+let[@inline never] scan_at_least st ~name ~keep at_least at_most label set pred
+    =
+  if at_least < 0 then invalid_at_least name;
+  let start = st.pos in
+  let keep_from =
+    if keep then
+      start
+    else
+      no_keep
+  in
+  let end_pos =
+    match (at_most, set) with
+    | None, None ->
+        scan_while st ~keep_from start pred
+    | None, Some set ->
+        scan_set st ~keep_from start set
+    | Some at_most, _ ->
+        take_while_at_most st ~name ~keep_from at_least at_most set pred
+  in
+  st.pos <- end_pos;
+  if end_pos - start < at_least then fail_too_short st at_least label;
+  start
 
 let[@inline never] find_terminator st ~name ~keep_from ~at_most ?label t =
   let m = String.length t in
@@ -2889,14 +2899,17 @@ let[@inline never] find_terminator st ~name ~keep_from ~at_most ?label t =
   done;
   if !found >= 0 then
     !found
-  else if !p >= stop then
-    fail_limit st ~from:start ~upto:stop at_most
-  else
-    match label with
-    | Some l ->
-        fail_str_cold st st.input_len tag_label l
-    | None ->
-        fail_str_cold st st.input_len tag_literal t
+  else begin
+    st.pos <- imin keep_from !p;
+    if !p >= stop then
+      fail_limit st ~from:start ~upto:stop at_most
+    else
+      match label with
+      | Some l ->
+          fail_str_cold st st.input_len tag_label l
+      | None ->
+          fail_str_cold st st.input_len tag_literal t
+  end
 
 let[@inline never] end_of_input_slow st =
   ignore (have st 1);
@@ -2917,7 +2930,8 @@ let[@inline] take_while ?(at_least = 0) ?at_most ?label ?set pred =
     | None, Some set ->
         scan_set st ~keep_from:start start set
     | Some n, _ ->
-        take_while_at_most st at_least n set pred
+        take_while_at_most st ~name:"Parseff.take_while" ~keep_from:start
+          at_least n set pred
   in
   st.pos <- end_pos;
   let n = end_pos - start in
@@ -2926,38 +2940,36 @@ let[@inline] take_while ?(at_least = 0) ?at_most ?label ?set pred =
   else
     slice st start n
 
-let[@inline] skip_while ?(at_least = 0) ?label ?set pred =
+let[@inline] skip_while ?(at_least = 0) ?at_most ?label ?set pred =
   let st = get_state () in
-  if at_least <> 0 then
-    let _ =
-      scan_at_least st ~name:"Parseff.skip_while" ~keep:false at_least label set
-        pred
-    in
-    ()
-  else
-    match set with
-    | None ->
-        handle_skip_while st pred
-    | Some set ->
-        st.pos <- scan_set st ~keep_from:no_keep st.pos set
+  match (at_least, at_most, set) with
+  | 0, None, None ->
+      handle_skip_while st pred
+  | 0, None, Some set ->
+      st.pos <- scan_set st ~keep_from:no_keep st.pos set
+  | _ ->
+      let _ =
+        scan_at_least st ~name:"Parseff.skip_while" ~keep:false at_least at_most
+          label set pred
+      in
+      ()
 
-let[@inline] take_while_span ?(at_least = 0) ?label ?set pred =
+let[@inline] take_while_span ?(at_least = 0) ?at_most ?label ?set pred =
   let st = get_state () in
-  if at_least <> 0 then
-    let start =
-      scan_at_least st ~name:"Parseff.Slice.take_while" ~keep:true at_least
-        label set pred
-    in
-    span st start (st.pos - start)
-  else
-    match set with
-    | None ->
-        handle_take_while_span st pred
-    | Some set ->
-        let start = st.pos in
-        let end_pos = scan_set st ~keep_from:start start set in
-        st.pos <- end_pos;
-        span st start (end_pos - start)
+  match (at_least, at_most, set) with
+  | 0, None, None ->
+      handle_take_while_span st pred
+  | 0, None, Some set ->
+      let start = st.pos in
+      let end_pos = scan_set st ~keep_from:start start set in
+      st.pos <- end_pos;
+      span st start (end_pos - start)
+  | _ ->
+      let start =
+        scan_at_least st ~name:"Parseff.Slice.take_while" ~keep:true at_least
+          at_most label set pred
+      in
+      span st start (st.pos - start)
 
 let take_until ?(at_most = max_int) ?label t =
   let st = get_state () in
@@ -3456,15 +3468,19 @@ let rec many_required st p acc n =
   else
     many_required st p (required st p :: acc) (n - 1)
 
-let[@inline never] rec many_at_most st at_least at_most p =
-  if at_most < 0 || at_most < at_least then
-    invalid_arg "Parseff.many: at_most must be at least 0 and at least at_least";
+let[@inline never] rec many_at_most st ~lead ~seen at_least at_most first p =
   let acc = ref (many_required st p [] at_least) in
-  let n = ref at_least in
+  let n = ref (seen + at_least) in
   let frame = State.push_rewind_frame st frame_repeat in
   let base = frame * frame_stride in
   match
     let start = ref st.pos in
+    if lead then begin
+      acc := [ first () ];
+      n := 1;
+      start := st.pos;
+      State.reset_repeat_frame st frame base !start
+    end;
     let v = ref (p ()) in
     while st.pos <> !start && !n < at_most do
       acc := !v :: !acc;
@@ -3484,7 +3500,13 @@ let[@inline never] rec many_at_most st at_least at_most p =
       List.rev !acc
   | exception Fail when State.frame_replayable st frame ->
       List.rev_append !acc
-        (replay st frame (fun () -> many_at_most st 0 (at_most - !n) p))
+        (replay st frame (fun () ->
+             if lead && !n = 0 then
+               many_at_most st ~lead ~seen:0 0 at_most first p
+             else
+               many_at_most st ~lead:false ~seen:!n 0 at_most p p
+         )
+        )
   | exception Fail ->
       repeat_fail st frame;
       List.rev !acc
@@ -3526,61 +3548,83 @@ let[@inline] many ?(at_least = 0) ?at_most (p : unit -> 'a) : 'a list =
   | None ->
       many_loop at_least p
   | Some at_most ->
-      many_at_most (get_state ()) at_least at_most p
+      check_at_most "Parseff.many" at_least at_most;
+      many_at_most (get_state ()) ~lead:false ~seen:0 at_least at_most p p
 
-let rec sep_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
+let[@inline never] sep_by_at_most st at_least at_most p sep =
+  check_at_most "Parseff.sep_by" at_least at_most;
+  let sep_then_p () =
+    let _ = sep () in
+    p ()
+  in
+  if at_most = 0 then
+    many_at_most st ~lead:false ~seen:0 0 0 p p
+  else if at_least = 0 then
+    many_at_most st ~lead:true ~seen:0 0 at_most p sep_then_p
+  else
+    let first = required st p in
+    first
+    :: many_at_most st ~lead:false ~seen:1 (at_least - 1) at_most sep_then_p
+         sep_then_p
+
+let rec sep_by ?(at_least = 0) ?at_most (p : unit -> 'a) (sep : unit -> 'b) :
+    'a list =
   if at_least < 0 then invalid_at_least "Parseff.sep_by";
   let st = get_state () in
-  if at_least = 0 then (
-    let acc = ref [] in
-    let frame = State.push_rewind_frame st frame_repeat in
-    let base = frame * frame_stride in
-    match
-      acc := [ p () ];
-      let start = ref st.pos in
-      State.reset_repeat_frame st frame base !start;
-      let _ = sep () in
-      let v = ref (p ()) in
-      while st.pos <> !start do
-        acc := !v :: !acc;
-        let pos = st.pos in
-        State.reset_repeat_frame st frame base pos;
-        start := pos;
+  match at_most with
+  | Some at_most ->
+      sep_by_at_most st at_least at_most p sep
+  | None when at_least = 0 -> (
+      let acc = ref [] in
+      let frame = State.push_rewind_frame st frame_repeat in
+      let base = frame * frame_stride in
+      match
+        acc := [ p () ];
+        let start = ref st.pos in
+        State.reset_repeat_frame st frame base !start;
         let _ = sep () in
-        v := p ()
-      done
-    with
-    | () ->
-        repeat_stop st frame;
-        List.rev !acc
-    | exception Fail when State.frame_replayable st frame ->
-        begin match !acc with
-        | [] ->
-            replay st frame (fun () -> sep_by p sep)
-        | acc ->
-            List.rev_append acc
-              (replay st frame (fun () ->
-                   many (fun () ->
-                       let _ = sep () in
-                       p ()
-                   )
-               )
-              )
-        end
-    | exception Fail ->
-        repeat_fail st frame;
-        List.rev !acc
-    | exception exn ->
-        State.pop_rewind_frame st frame;
-        raise exn
-  ) else
-    let first = required st p in
-    let sep_then_p () =
-      let _ = sep () in
-      p ()
-    in
-    let rest = many ~at_least:(at_least - 1) sep_then_p in
-    first :: rest
+        let v = ref (p ()) in
+        while st.pos <> !start do
+          acc := !v :: !acc;
+          let pos = st.pos in
+          State.reset_repeat_frame st frame base pos;
+          start := pos;
+          let _ = sep () in
+          v := p ()
+        done
+      with
+      | () ->
+          repeat_stop st frame;
+          List.rev !acc
+      | exception Fail when State.frame_replayable st frame ->
+          begin match !acc with
+          | [] ->
+              replay st frame (fun () -> sep_by p sep)
+          | acc ->
+              List.rev_append acc
+                (replay st frame (fun () ->
+                     many (fun () ->
+                         let _ = sep () in
+                         p ()
+                     )
+                 )
+                )
+          end
+      | exception Fail ->
+          repeat_fail st frame;
+          List.rev !acc
+      | exception exn ->
+          State.pop_rewind_frame st frame;
+          raise exn
+    )
+  | None ->
+      let first = required st p in
+      let sep_then_p () =
+        let _ = sep () in
+        p ()
+      in
+      let rest = many ~at_least:(at_least - 1) sep_then_p in
+      first :: rest
 
 let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) : 'c =
   let _ = open_ () in
@@ -3588,13 +3632,21 @@ let between (open_ : unit -> 'a) (close_ : unit -> 'b) (p : unit -> 'c) : 'c =
   let _ = close_ () in
   value
 
-let end_by ?(at_least = 0) (p : unit -> 'a) (sep : unit -> 'b) : 'a list =
+let end_by ?(at_least = 0) ?at_most (p : unit -> 'a) (sep : unit -> 'b) :
+    'a list =
   if at_least < 0 then invalid_at_least "Parseff.end_by";
-  many ~at_least (fun () ->
-      let value = p () in
-      let _ = sep () in
-      value
-  )
+  let p_then_sep () =
+    let value = p () in
+    let _ = sep () in
+    value
+  in
+  match at_most with
+  | None ->
+      many ~at_least p_then_sep
+  | Some at_most ->
+      check_at_most "Parseff.end_by" at_least at_most;
+      many_at_most (get_state ()) ~lead:false ~seen:0 at_least at_most
+        p_then_sep p_then_sep
 
 let check_sealable st name =
   if State.always_rewinding_frame_open st then
@@ -5002,28 +5054,17 @@ module Utf8 = struct
     end else
       satisfy_uchar_slow st always_true label_any_char
 
-  let take_while ?(at_least = 0) ?label pred =
-    if at_least < 0 then invalid_at_least "Parseff.Utf8.take_while";
-    let st = get_state () in
-    let s = handle_take_while_uchar st pred in
-    if at_least > 0 then begin
-      let count = ref 0 in
-      let i = ref 0 in
-      let len = String.length s in
-      while !i < len do
-        let d = String.get_utf_8_uchar s !i in
-        i := !i + Uchar.utf_decode_length d;
-        incr count
-      done;
-      if !count < at_least then
-        fail_too_short st at_least label
-      else
-        s
-    end else
-      s
-
-  let[@inline never] scan_uchar_at_least st ~name ~keep at_least label pred =
+  let[@inline never] scan_uchar_at_least st ~name ~keep at_least at_most label
+      pred =
     if at_least < 0 then invalid_at_least name;
+    let at_most =
+      match at_most with
+      | None ->
+          max_int
+      | Some n ->
+          check_at_most name at_least n;
+          n
+    in
     let start = st.pos in
     let keep_from =
       if keep then
@@ -5036,34 +5077,74 @@ module Utf8 = struct
       pred u
       && begin
         incr count;
-        true
+        !count <= at_most
       end
     in
-    st.pos <- scan_while_uchar st ~keep_from start counted;
+    let end_pos = scan_while_uchar st ~keep_from start counted in
+    if !count > at_most then begin
+      st.pos <- imin keep_from end_pos;
+      let d =
+        utf8_decode st.input (end_pos - st.base) (st.input_len - st.base)
+      in
+      fail_limit st ~from:start
+        ~upto:(end_pos + Uchar.utf_decode_length d)
+        at_most
+    end;
+    st.pos <- end_pos;
     if !count < at_least then fail_too_short st at_least label;
     start
 
-  let[@inline] skip_while ?(at_least = 0) ?label pred =
+  let take_while ?(at_least = 0) ?at_most ?label pred =
+    if at_least < 0 then invalid_at_least "Parseff.Utf8.take_while";
     let st = get_state () in
-    if at_least <> 0 then
-      let _ =
-        scan_uchar_at_least st ~name:"Parseff.Utf8.skip_while" ~keep:false
-          at_least label pred
-      in
-      ()
-    else
-      handle_skip_while_uchar st pred
+    match at_most with
+    | Some _ ->
+        let start =
+          scan_uchar_at_least st ~name:"Parseff.Utf8.take_while" ~keep:true
+            at_least at_most label pred
+        in
+        slice st start (st.pos - start)
+    | None ->
+        let s = handle_take_while_uchar st pred in
+        if at_least > 0 then begin
+          let count = ref 0 in
+          let i = ref 0 in
+          let len = String.length s in
+          while !i < len do
+            let d = String.get_utf_8_uchar s !i in
+            i := !i + Uchar.utf_decode_length d;
+            incr count
+          done;
+          if !count < at_least then
+            fail_too_short st at_least label
+          else
+            s
+        end else
+          s
 
-  let[@inline] take_while_span ?(at_least = 0) ?label pred =
+  let[@inline] skip_while ?(at_least = 0) ?at_most ?label pred =
     let st = get_state () in
-    if at_least <> 0 then
-      let start =
-        scan_uchar_at_least st ~name:"Parseff.Utf8.Slice.take_while" ~keep:true
-          at_least label pred
-      in
-      span st start (st.pos - start)
-    else
-      handle_take_while_span_uchar st pred
+    match (at_least, at_most) with
+    | 0, None ->
+        handle_skip_while_uchar st pred
+    | _ ->
+        let _ =
+          scan_uchar_at_least st ~name:"Parseff.Utf8.skip_while" ~keep:false
+            at_least at_most label pred
+        in
+        ()
+
+  let[@inline] take_while_span ?(at_least = 0) ?at_most ?label pred =
+    let st = get_state () in
+    match (at_least, at_most) with
+    | 0, None ->
+        handle_take_while_span_uchar st pred
+    | _ ->
+        let start =
+          scan_uchar_at_least st ~name:"Parseff.Utf8.Slice.take_while"
+            ~keep:true at_least at_most label pred
+        in
+        span st start (st.pos - start)
 
   let[@inline] is_whitespace u =
     let i = Uchar.to_int u in

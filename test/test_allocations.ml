@@ -96,6 +96,22 @@ let test_stopping_failures () =
   check_words "sep_by" 0. (fun () ->
       Parseff.sep_by (fun () -> Parseff.char 'x') (fun () -> Parseff.char ',')
   );
+  check_words "end_by" 5. (fun () ->
+      Parseff.end_by (fun () -> Parseff.char 'x') (fun () -> Parseff.char ',')
+  );
+  check_words "many ~at_most" 2. (fun () ->
+      Parseff.many ~at_most:3 (fun () -> Parseff.char 'x')
+  );
+  check_words "sep_by ~at_most" 7. (fun () ->
+      Parseff.sep_by ~at_most:3
+        (fun () -> Parseff.char 'x')
+        (fun () -> Parseff.char ',')
+  );
+  check_words "end_by ~at_most" 7. (fun () ->
+      Parseff.end_by ~at_most:3
+        (fun () -> Parseff.char 'x')
+        (fun () -> Parseff.char ',')
+  );
   check_words "optional" 4. (fun () ->
       Parseff.optional (fun () -> Parseff.char 'x')
   );
@@ -194,6 +210,43 @@ let test_scan_success () =
   );
   check "Utf8.Slice.take_while ~at_least" 12. "a\xc3\xa9 " (fun () ->
       Parseff.Utf8.Slice.take_while ~at_least:2 uword
+  );
+  check "take_while" 2. "abc " (fun () -> Parseff.take_while word);
+  check "take_while ~at_most" 2. "abc " (fun () ->
+      Parseff.take_while ~at_most:8 word
+  );
+  check "skip_while ~at_most" 0. "abc " (fun () ->
+      Parseff.skip_while ~at_most:8 word
+  );
+  check "skip_while ~at_most ~set" 2. "abc " (fun () ->
+      Parseff.skip_while ~at_most:8 ~set word
+  );
+  check "Slice.take_while ~at_most" 4. "abc " (fun () ->
+      Parseff.Slice.take_while ~at_most:8 word
+  );
+  check "Utf8.take_while" 2. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.take_while uword
+  );
+  check "Utf8.take_while ~at_most" 10. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.take_while ~at_most:8 uword
+  );
+  check "Utf8.skip_while ~at_most" 8. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.skip_while ~at_most:8 uword
+  );
+  check "Utf8.Slice.take_while ~at_most" 12. "a\xc3\xa9 " (fun () ->
+      Parseff.Utf8.Slice.take_while ~at_most:8 uword
+  );
+  let a () = Parseff.char 'a' in
+  let comma () = Parseff.char ',' in
+  check "many" 18. "aaa " (fun () -> Parseff.many a);
+  check "many ~at_most" 20. "aaa " (fun () -> Parseff.many ~at_most:8 a);
+  check "sep_by" 18. "a,a,a " (fun () -> Parseff.sep_by a comma);
+  check "sep_by ~at_most" 25. "a,a,a " (fun () ->
+      Parseff.sep_by ~at_most:8 a comma
+  );
+  check "end_by" 23. "a,a,a, " (fun () -> Parseff.end_by a comma);
+  check "end_by ~at_most" 25. "a,a,a, " (fun () ->
+      Parseff.end_by ~at_most:8 a comma
   )
 
 let reads = 100_000

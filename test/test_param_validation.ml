@@ -160,6 +160,81 @@ let test_skip_nested_symmetric () =
     "with asymmetric pairs" true
     (skip [ ('(', ')'); ('|', '|') ] "(|a, b|), c" = Ok 8)
 
+let test_invalid_at_most () =
+  let set = Parseff.Charset.of_predicate (fun _ -> true) in
+  let any _ = true in
+  let check name f =
+    List.iter
+      (fun (at_least, at_most) ->
+        raises
+          (Printf.sprintf "%s ~at_least:%d ~at_most:%d" name at_least at_most)
+          ("Parseff." ^ name
+         ^ ": at_most must be at least 0 and at least at_least"
+          )
+          (in_parse (fun () -> f at_least at_most))
+      )
+      [ (0, -1); (2, 1); (0, min_int) ]
+  in
+  check "take_while" (fun at_least at_most ->
+      Parseff.take_while ~at_least ~at_most any
+  );
+  check "take_while" (fun at_least at_most ->
+      Parseff.take_while ~at_least ~at_most ~set any
+  );
+  check "Slice.take_while" (fun at_least at_most ->
+      Parseff.Slice.take_while ~at_least ~at_most any
+  );
+  check "Slice.take_while" (fun at_least at_most ->
+      Parseff.Slice.take_while ~at_least ~at_most ~set any
+  );
+  check "skip_while" (fun at_least at_most ->
+      Parseff.skip_while ~at_least ~at_most any
+  );
+  check "skip_while" (fun at_least at_most ->
+      Parseff.skip_while ~at_least ~at_most ~set any
+  );
+  check "Utf8.take_while" (fun at_least at_most ->
+      Parseff.Utf8.take_while ~at_least ~at_most (fun _ -> true)
+  );
+  check "Utf8.Slice.take_while" (fun at_least at_most ->
+      Parseff.Utf8.Slice.take_while ~at_least ~at_most (fun _ -> true)
+  );
+  check "Utf8.skip_while" (fun at_least at_most ->
+      Parseff.Utf8.skip_while ~at_least ~at_most (fun _ -> true)
+  );
+  check "many" (fun at_least at_most -> Parseff.many ~at_least ~at_most digit);
+  check "sep_by" (fun at_least at_most ->
+      Parseff.sep_by ~at_least ~at_most digit comma
+  );
+  check "end_by" (fun at_least at_most ->
+      Parseff.end_by ~at_least ~at_most digit comma
+  );
+  List.iter
+    (fun at_most ->
+      raises "take_until" "Parseff.take_until: at_most must be at least 0"
+        (in_parse (fun () -> Parseff.take_until ~at_most "c"));
+      raises "skip_until" "Parseff.skip_until: at_most must be at least 0"
+        (in_parse (fun () -> Parseff.skip_until ~at_most "c"))
+    )
+    [ -1; min_int ]
+
+let test_at_most_equal_at_least () =
+  let ok name expected p =
+    Alcotest.(check bool)
+      name true
+      (Parseff.parse ~consume:`Partial "abc" p = Ok expected)
+  in
+  ok "take_while" 0 (fun () ->
+      String.length (Parseff.take_while ~at_least:0 ~at_most:0 (fun _ -> false))
+  );
+  ok "many" 0 (fun () -> List.length (Parseff.many ~at_least:0 ~at_most:0 digit));
+  ok "sep_by" 0 (fun () ->
+      List.length (Parseff.sep_by ~at_least:0 ~at_most:0 digit comma)
+  );
+  ok "end_by" 0 (fun () ->
+      List.length (Parseff.end_by ~at_least:0 ~at_most:0 digit comma)
+  )
+
 let () =
   let open Alcotest in
   run "Param_validation"
@@ -168,6 +243,13 @@ let () =
         [
           test_case "negative raises" `Quick test_negative_at_least;
           test_case "zero accepted" `Quick test_zero_at_least;
+        ]
+      );
+      ( "at_most",
+        [
+          test_case "invalid raises" `Quick test_invalid_at_most;
+          test_case "equal to at_least accepted" `Quick
+            test_at_most_equal_at_least;
         ]
       );
       ("max_depth", [ test_case "non-positive raises" `Quick test_max_depth ]);

@@ -157,8 +157,10 @@ constructible), except {!type:Parseff.range} and {!type:Parseff.note}.
 - [Failed msg]: raised by {!val:Parseff.fail}, or ["no alternative matched"]
   for [one_of []].
 - [Custom e]: raised by {!val:Parseff.error}. Match with a fallback [_] case.
-- [Limit_exceeded { limit }]: exceeded [~at_most] on [take_while], [take_until],
-  [skip_until], or [many].
+- [Limit_exceeded { limit }]: exceeded [~at_most] on [take_while],
+  [skip_while], [Slice.take_while], [take_until], [skip_until],
+  [Utf8.take_while], [Utf8.skip_while], [Utf8.Slice.take_while], [many],
+  [sep_by], or [end_by].
 - [Depth_limit_exceeded { limit }]: exceeded [~max_depth] on {!val:Parseff.rec_}
   or stack depth in {!val:Parseff.fold_right}.
 - [Backtrack_window_exceeded { limit; oldest }]: exceeded [~backtrack_window] in

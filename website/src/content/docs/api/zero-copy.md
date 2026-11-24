@@ -19,7 +19,9 @@ module Slice : sig
   val to_string : t -> string
   val length : t -> int
   val get : t -> int -> char
-  val take_while : ?set:Charset.t -> (char -> bool) -> t
+  val take_while :
+    ?at_least:int -> ?at_most:int -> ?label:string -> ?set:Charset.t ->
+    (char -> bool) -> t
   val take : int -> t
   val recognize : (unit -> 'a) -> t
   val sep_by_take :
@@ -31,7 +33,7 @@ end
 
 ### `Slice.take_while`
 
-Zero-copy counterpart of `Parseff.take_while`, with the same `~at_least`, `~label`, and `~set`.
+Zero-copy counterpart of `Parseff.take_while`, with the same `~at_least`, `~at_most`, `~label`, and `~set`.
 
 ```ocaml
 let int_of_slice slice =
