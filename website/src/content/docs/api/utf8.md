@@ -17,21 +17,25 @@ Primitives operate at the code-point level (a base character plus combining mark
 val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t
 val char : Uchar.t -> Uchar.t
 val any_char : unit -> Uchar.t
-val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string
-val skip_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> unit
+val take_while :
+  ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) -> string
+val skip_while :
+  ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) -> unit
 
 module Slice : sig
-  val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> Slice.t
+  val take_while :
+    ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) ->
+    Slice.t
 end
 ```
 
 - `Parseff.Utf8.satisfy` decodes the next code point (1–4 bytes) and tests the predicate, failing with `expected <label>` (default `"matching character"`).
 - `Parseff.Utf8.char` matches an exact `Uchar.t`.
 - `Parseff.Utf8.any_char` decodes and returns the next code point, failing at EOF or on invalid UTF-8.
-- `Parseff.Utf8.take_while` consumes code points while the predicate holds and returns the matched UTF-8 string. `~at_least` counts *code points*, not bytes.
+- `Parseff.Utf8.take_while` consumes code points while the predicate holds and returns the matched UTF-8 string. `~at_least` and `~at_most` count *code points*, not bytes.
 - `Parseff.Utf8.skip_while` skips matching code points without allocating.
 - `Parseff.Utf8.Slice.take_while` returns a zero-copy `Parseff.Slice.t`.
-- All three take `~at_least` and `~label`, with the same failure.
+- All three take `~at_least`, `~at_most`, and `~label`, with the same failure. A `(at_most + 1)`\-th matching code point fails with `Limit_exceeded { limit = at_most }` covering those code points.
 
 ## Mixing with byte-level primitives
 

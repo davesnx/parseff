@@ -90,11 +90,13 @@ val take_while :
   (char -> bool) -> string
 
 val skip_while :
-  ?at_least:int -> ?label:string -> ?set:Charset.t -> (char -> bool) -> unit
+  ?at_least:int -> ?at_most:int -> ?label:string -> ?set:Charset.t ->
+  (char -> bool) -> unit
 ```
 
-- `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match. `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least` and `~label` too.
-- `~at_most` caps the byte count (unstable: may change in any minor release), failing with `Limit_exceeded { limit = at_most }` if another matching byte follows.
+- `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match.
+- `~at_most` caps the byte count, failing with `Limit_exceeded { limit = at_most }` if another matching byte follows. The error covers those `at_most + 1` bytes.
+- `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least`, `~at_most` and `~label` too. On a stream, `skip_while` does not keep the bytes it skips, so `at_most` can exceed `~backtrack_window`.
 - `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
 ```ocaml
 let digits () =
@@ -129,7 +131,7 @@ let fast_digits () =
 
 ### `take_until` and `skip_until`
 
-`Parseff.take_until` reads all bytes before the first occurrence of a terminator string without consuming the terminator. `Parseff.skip_until` skips them without allocating. Both fail at end of input with `expected "<terminator>"` (or `~label`) if the terminator never appears, and support `~at_most` (unstable).
+`Parseff.take_until` reads all bytes before the first occurrence of a terminator string without consuming the terminator. `Parseff.skip_until` skips them without allocating. Both fail at end of input with `expected "<terminator>"` (or `~label`) if the terminator never appears. `~at_most` caps the bytes before the terminator, failing with `Limit_exceeded { limit = at_most }` if the terminator does not start within `at_most + 1` bytes, even when input ends there.
 
 ```ocaml
 val take_until : ?at_most:int -> ?label:string -> string -> string

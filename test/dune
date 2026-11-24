@@ -38,7 +38,8 @@
   test_not_followed_by
   test_param_validation
   test_scan_params
-  test_note_range)
+  test_note_range
+  test_at_most)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest uucp))
 

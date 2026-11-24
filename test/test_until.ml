@@ -246,11 +246,13 @@ let test_at_most () =
     (comment_skip ~at_most:3);
   check_limit "take_until ~at_most:0" ~limit:0 ~range:(2, 3) "/* */"
     (comment_take ~at_most:0);
-  check "unterminated before the limit is decided"
-    (Failed (6, "expected \"*/\", found end of input"))
-    "/* abc" (comment_take ~at_most:3);
-  check_limit "unterminated after the limit is decided" ~limit:3 ~range:(2, 6)
-    "/* abcd" (comment_take ~at_most:3)
+  check "input ends within the limit"
+    (Failed (5, "expected \"*/\", found end of input"))
+    "/* ab" (comment_take ~at_most:3);
+  check_limit "input ends past the limit" ~limit:3 ~range:(2, 6) "/* abc"
+    (comment_take ~at_most:3);
+  check_limit "input ends past the limit, long terminator" ~limit:3
+    ~range:(2, 6) "/* abcd" (comment_take ~at_most:3)
 
 let test_inside_or () =
   let parser () =

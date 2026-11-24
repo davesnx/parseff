@@ -14,11 +14,15 @@ such as {{:https://erratique.ch/software/uuseg}uuseg}.
 val satisfy : ?label:string -> (Uchar.t -> bool) -> Uchar.t
 val char : Uchar.t -> Uchar.t
 val any_char : unit -> Uchar.t
-val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> string
-val skip_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> unit
+val take_while :
+  ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) -> string
+val skip_while :
+  ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) -> unit
 
 module Slice : sig
-  val take_while : ?at_least:int -> ?label:string -> (Uchar.t -> bool) -> Slice.t
+  val take_while :
+    ?at_least:int -> ?at_most:int -> ?label:string -> (Uchar.t -> bool) ->
+    Slice.t
 end
 ]}
 
@@ -29,12 +33,14 @@ end
 - {!val:Parseff.Utf8.any_char} decodes and returns the next code point, failing
   at EOF or on invalid UTF-8.
 - {!val:Parseff.Utf8.take_while} consumes code points while the predicate holds
-  and returns the matched UTF-8 string. [~at_least] counts {e code points}, not
-  bytes.
+  and returns the matched UTF-8 string. [~at_least] and [~at_most] count
+  {e code points}, not bytes.
 - {!val:Parseff.Utf8.skip_while} skips matching code points without allocating.
 - {!val:Parseff.Utf8.Slice.take_while} returns a zero-copy
   {!type:Parseff.Slice.t}.
-- All three take [~at_least] and [~label], with the same failure.
+- All three take [~at_least], [~at_most], and [~label], with the same failure.
+  A [(at_most + 1)]-th matching code point fails with
+  [Limit_exceeded { limit = at_most }] covering those code points.
 
 {1 Mixing with byte-level primitives}
 
