@@ -972,6 +972,181 @@ let test_dropped_feed () =
     "after finish" "ok abc"
     (show (Parseff.parse ~diagnostics "abc" p))
 
+let test_cancel_releases () =
+  let diagnostics = Parseff.Diagnostics.create () in
+  let cell = Parseff.Ref.create 0 in
+  let p () =
+    Parseff.warn (Warning.W "1");
+    Parseff.Ref.set cell 1;
+    Parseff.literal "abc";
+    "abc"
+  in
+  let t = Parseff.Push.parse ~diagnostics p in
+  Alcotest.(check bool)
+    "waits" true
+    (Parseff.Push.feed t "a" = Parseff.Push.Await);
+  Parseff.Push.cancel t;
+  Alcotest.(check string)
+    "parse with the same diagnostics and cell" "ok abc"
+    (show (Parseff.parse ~diagnostics "abc" p));
+  Alcotest.(check int) "cell" 1 (Parseff.Ref.get cell);
+  Alcotest.(check bool)
+    "new push parse" true
+    (feed_chunks ~diagnostics p [ "a"; "bc" ] = Ok ("abc", ""))
+
+let test_cancel_runs_no_parser_code () =
+  let events = ref [] in
+  let trace e =
+    events :=
+      ( match e with
+      | Parseff.Enter { name; _ } ->
+          "enter " ^ name
+      | Parseff.Return { name; _ } ->
+          "return " ^ name
+      | Parseff.Fail { name; _ } ->
+          "fail " ^ name
+      | _ ->
+          "other"
+      )
+      :: !events
+  in
+  let after = ref 0 in
+  let finally = ref 0 in
+  let p () =
+    Parseff.context "outer" (fun () ->
+        Fun.protect
+          ~finally:(fun () -> incr finally)
+          (fun () ->
+            let s =
+              Parseff.or_
+                (fun () -> Parseff.context "inner" (fun () -> Parseff.take 3))
+                (fun () ->
+                  incr after;
+                  "other"
+                )
+            in
+            incr after;
+            s
+          )
+    )
+  in
+  let t = Parseff.Push.parse ~trace p in
+  Alcotest.(check bool)
+    "waits" true
+    (Parseff.Push.feed t "a" = Parseff.Push.Await);
+  Parseff.Push.cancel t;
+  Alcotest.(check (list string))
+    "trace events"
+    [ "enter outer"; "enter inner" ]
+    (List.rev !events);
+  Alcotest.(check int) "parser code after the wait" 0 !after;
+  Alcotest.(check int) "finally" 1 !finally
+
+let test_cancel_handler_sees_end () =
+  let seen = ref "" in
+  let p () =
+    match Parseff.take 3 with
+    | s ->
+        s
+    | exception _ ->
+        seen :=
+          Option.value ~default:"end of input"
+            (Parseff.optional (fun () -> Parseff.take 3));
+        "caught"
+  in
+  let t = Parseff.Push.parse p in
+  ignore (Parseff.Push.feed t "a");
+  Parseff.Push.cancel t;
+  Alcotest.(check string) "handler" "end of input" !seen;
+  Alcotest.check_raises "finish"
+    (Invalid_argument "Parseff.Push.finish: the parse is done") (fun () ->
+      ignore (Parseff.Push.finish t)
+  )
+
+let test_cancel_ends () =
+  let check_done name t =
+    Alcotest.check_raises (name ^ ", feed")
+      (Invalid_argument "Parseff.Push.feed: the parse is done") (fun () ->
+        ignore (Parseff.Push.feed t "1")
+    );
+    Alcotest.check_raises (name ^ ", finish")
+      (Invalid_argument "Parseff.Push.finish: the parse is done") (fun () ->
+        ignore (Parseff.Push.finish t)
+    );
+    Parseff.Push.cancel t
+  in
+  let fresh = Parseff.Push.parse ip_address in
+  Parseff.Push.cancel fresh;
+  check_done "fresh" fresh;
+  let waiting = Parseff.Push.parse ip_address in
+  ignore (Parseff.Push.feed waiting "1.2");
+  Parseff.Push.cancel waiting;
+  check_done "waiting" waiting;
+  let finished = Parseff.Push.parse ip_address in
+  ignore (Parseff.Push.feed finished "1.2.3.4");
+  ignore (Parseff.Push.finish finished);
+  Parseff.Push.cancel finished;
+  check_done "finished" finished
+
+let test_cancel_from_parser () =
+  let other = Parseff.Push.parse ip_address in
+  ignore (Parseff.Push.feed other "1.2");
+  let raised = ref "" in
+  let p () =
+    (try Parseff.Push.cancel other with Invalid_argument msg -> raised := msg);
+    Parseff.char 'y'
+  in
+  ignore (Parseff.parse "y" p);
+  Alcotest.(check string)
+    "from a parse" "Parseff.Push.cancel: called from inside a parser" !raised;
+  raised := "";
+  let fresh = Parseff.Push.parse ip_address in
+  ignore
+    (Parseff.parse "y" (fun () ->
+         ( try Parseff.Push.cancel fresh
+           with Invalid_argument msg -> raised := msg
+         );
+         Parseff.char 'y'
+     )
+    );
+  Alcotest.(check string)
+    "fresh, from a parse" "Parseff.Push.cancel: called from inside a parser"
+    !raised;
+  ignore (Parseff.Push.feed fresh "1.2");
+  raised := "";
+  let rec self =
+    lazy
+      (Parseff.Push.parse (fun () ->
+           ( try Parseff.Push.cancel (Lazy.force self)
+             with Invalid_argument msg -> raised := msg
+           );
+           Parseff.char 'y'
+       )
+      )
+  in
+  let self = Lazy.force self in
+  Alcotest.(check bool)
+    "own parse" true
+    (Parseff.Push.feed self "y" = Parseff.Push.Done (Ok ('y', "")));
+  Alcotest.(check string)
+    "from its own parser" "Parseff.Push.cancel: called from its own parser"
+    !raised;
+  ignore (Parseff.Push.feed other ".3.4");
+  Alcotest.(check bool)
+    "other still runs" true
+    (Parseff.Push.finish other = Ok ("1.2.3.4", ""))
+
+let test_cancel_interleaved () =
+  let a = Parseff.Push.parse ip_address in
+  let b = Parseff.Push.parse ip_address in
+  ignore (Parseff.Push.feed a "1.2");
+  ignore (Parseff.Push.feed b "5.6");
+  Parseff.Push.cancel a;
+  ignore (Parseff.Push.feed b ".7.8");
+  Alcotest.(check bool)
+    "other parse" true
+    (Parseff.Push.finish b = Ok ("5.6.7.8", ""))
+
 let[@inline never] start_dropped finalised =
   let marker = ref 0 in
   Gc.finalise_last (fun () -> finalised := true) marker;
@@ -1071,6 +1246,20 @@ let () =
             test_dropped_feed;
           Alcotest.test_case "dropped feed is collected" `Quick
             test_dropped_feed_collected;
+        ]
+      );
+      ( "cancel",
+        [
+          Alcotest.test_case "releases diagnostics and cells" `Quick
+            test_cancel_releases;
+          Alcotest.test_case "runs no parser code" `Quick
+            test_cancel_runs_no_parser_code;
+          Alcotest.test_case "handler that catches it" `Quick
+            test_cancel_handler_sees_end;
+          Alcotest.test_case "ends the parse" `Quick test_cancel_ends;
+          Alcotest.test_case "from a parser" `Quick test_cancel_from_parser;
+          Alcotest.test_case "another parse waits" `Quick
+            test_cancel_interleaved;
         ]
       );
       ( "results and misuse",

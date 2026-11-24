@@ -3311,6 +3311,8 @@ let[@inline never] trace_emit st f event =
       State.resume st;
       Printexc.raise_with_backtrace exn bt
 
+exception Cancelled
+
 let[@inline never] context_traced st f delimited start name p =
   trace_emit st f (Trace_event.Enter { name; pos = start });
   match context_run st delimited start name p with
@@ -3320,6 +3322,8 @@ let[@inline never] context_traced st f delimited start name p =
   | exception Fail ->
       trace_emit st f (Trace_event.Fail { name; start; pos = st.pos });
       raise_notrace Fail
+  | exception Cancelled ->
+      raise_notrace Cancelled
   | exception exn ->
       let bt = Printexc.get_raw_backtrace () in
       trace_emit st f (Trace_event.Fail { name; start; pos = st.pos });
@@ -7271,15 +7275,27 @@ let parse_source ?(max_depth = 128)
       run_source ~copy:true st src ~consume ~diagnostics parser
   )
 
+let no_progress st start ~held idle_at =
+  if st.pos <> start then
+    false
+  else if held && !idle_at <> start then begin
+    idle_at := start;
+    false
+  end else
+    true
+
 let parse_source_each ?(max_depth = 128)
     ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
     (src : Byte_source.t) (parser : unit -> 'a) =
   check_backtrack_window ~name:"Source.parse_each" backtrack_window;
   let current = ref State.none in
   let stamp = ref (-1) in
+  let idle_at = ref (-1) in
   let state () =
-    if src.stamp <> !stamp then
+    if src.stamp <> !stamp then begin
       current := State.for_source ~src ~max_depth ~backtrack_window ~trace;
+      idle_at := -1
+    end;
     !current
   in
   let held = ref false in
@@ -7330,7 +7346,7 @@ let parse_source_each ?(max_depth = 128)
       | Ok None ->
           finish st;
           Seq.Nil
-      | Ok (Some _) when st.pos = start && not !held ->
+      | Ok (Some _) when no_progress st start ~held:!held idle_at ->
           finish st;
           Seq.Cons
             ( Error
@@ -7436,6 +7452,10 @@ let parse_partial ?(max_depth = 128)
       );
   t
 
+let in_parser name =
+  if State.current () != State.none then
+    invalid_arg ("Parseff." ^ name ^ ": called from inside a parser")
+
 let step name t chunk =
   let status = t.status in
   ( match status with
@@ -7446,8 +7466,7 @@ let step name t chunk =
   | Ended ->
       invalid_arg ("Parseff." ^ name ^ ": the parse is done")
   );
-  if State.current () != State.none then
-    invalid_arg ("Parseff." ^ name ^ ": called from inside a parser");
+  in_parser name;
   if chunk = None then t.closed <- true;
   t.status <- Running;
   match
@@ -7471,6 +7490,30 @@ let step name t chunk =
       t.status <- Ended;
       Printexc.raise_with_backtrace exn bt
 
+let cancel_pushed name t =
+  match t.status with
+  | Ended ->
+      ()
+  | Running ->
+      invalid_arg ("Parseff." ^ name ^ ": called from its own parser")
+  | Fresh _ ->
+      in_parser name;
+      t.status <- Ended
+  | Waiting k -> (
+      in_parser name;
+      t.closed <- true;
+      t.status <- Running;
+      match Effect.Deep.discontinue k Cancelled with
+      | Finished _ | (exception Cancelled) ->
+          t.status <- Ended
+      | Paused _ ->
+          assert false
+      | exception exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          t.status <- Ended;
+          Printexc.raise_with_backtrace exn bt
+    )
+
 let feed t chunk =
   match step "Push.feed" t (Some chunk) with
   | Paused _ ->
@@ -7485,22 +7528,31 @@ let finish t =
   | Paused _ ->
       assert false
 
-type chunks_step = Need_input | Stopped of string | Error_of of error | Ended
+let cancel t = cancel_pushed "Push.cancel" t
+
+type chunks_step = Await | Stopped of string | Error of error | Ended
 
 let parse_chunks_each ?(max_depth = 128)
-    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ~on_value
-    (parser : unit -> 'a) =
+    ?(backtrack_window = default_backtrack_window) ?diagnostics ?trace ?pending
+    ~on_value (parser : unit -> 'a) =
   check_backtrack_window ~name:"Push.parse_each" backtrack_window;
   let t = { status = Ended; first = None; closed = false } in
   let c = pushed_chunks t in
   let src = Byte_source.make ~initial:"" ~eof:false (Chunks c) in
   let st = State.for_source ~src ~max_depth ~backtrack_window ~trace in
   let in_on_value = ref false in
+  let held = ref false in
+  let idle_at = ref (-1) in
   let element () =
     if have st 1 then
       Some (parser ())
     else
-      None
+      match pending with
+      | Some pending when pending () ->
+          held := true;
+          Some (parser ())
+      | _ ->
+          None
   in
   let rec wait () =
     if st.pos = st.input_len && c.pending_pos = String.length c.pending then
@@ -7516,11 +7568,12 @@ let parse_chunks_each ?(max_depth = 128)
     wait ();
     st.far <- far_none;
     let start = st.pos in
+    held := false;
     match run st ~consume:`Partial ~diagnostics element with
     | Ok None ->
         Ended
-    | Ok (Some _) when st.pos = start ->
-        Error_of
+    | Ok (Some _) when no_progress st start ~held:!held idle_at ->
+        Error
           (error_plain ~last:false st start
              (Failed "the parser consumed no input") []
           )
@@ -7539,17 +7592,26 @@ let parse_chunks_each ?(max_depth = 128)
             Printexc.raise_with_backtrace exn bt
       )
     | Error e ->
-        Error_of e
+        Error e
   in
   t.status <- Fresh loop;
-  fun chunk ->
+  let outside_on_value () =
     if !in_on_value then
-      invalid_arg "Parseff.Push.parse_each: called from on_value";
+      invalid_arg "Parseff.Push.parse_each: called from on_value"
+  in
+  let push chunk =
+    outside_on_value ();
     match step "Push.parse_each" t chunk with
     | Paused _ ->
-        Need_input
+        Await
     | Finished r ->
         r
+  in
+  let cancel () =
+    outside_on_value ();
+    cancel_pushed "Push.parse_each" t
+  in
+  (push, cancel)
 
 module Ref = struct
   type 'a t = 'a cell
@@ -7632,14 +7694,15 @@ module Push = struct
     | Done of ('a * string, error) Stdlib.result
 
   type each_step = chunks_step =
-    | Need_input
+    | Await
     | Stopped of string
-    | Error_of of error
+    | Error of error
     | Ended
 
   let parse = parse_partial
   let feed = feed
   let finish = finish
+  let cancel = cancel
   let parse_each = parse_chunks_each
 end
 
