@@ -158,7 +158,7 @@ constructible), except {!type:Parseff.range} and {!type:Parseff.note}.
   for [one_of []].
 - [Custom e]: raised by {!val:Parseff.error}. Match with a fallback [_] case.
 - [Limit_exceeded { limit }]: exceeded [~at_most] on [take_while], [take_until],
-  or [many].
+  [skip_until], or [many].
 - [Depth_limit_exceeded { limit }]: exceeded [~max_depth] on {!val:Parseff.rec_}
   or stack depth in {!val:Parseff.fold_right}.
 - [Backtrack_window_exceeded { limit; oldest }]: exceeded [~backtrack_window] in

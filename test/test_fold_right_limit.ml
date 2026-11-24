@@ -60,6 +60,34 @@ let test_parse_after_limit () =
   | Error e ->
       Alcotest.fail (Parseff.error_message e)
 
+let test_max_depth_at_fold_right_limit () =
+  let limit = limit () in
+  let rec nest () =
+    Parseff.rec_ (fun () ->
+        match Parseff.peek_char () with
+        | Some '(' ->
+            let _ = Parseff.char '(' in
+            nest ()
+        | _ ->
+            ()
+    )
+  in
+  match
+    Parseff.parse ~max_depth:limit ~consume:`Partial
+      (String.make (limit + 1) '(')
+      nest
+  with
+  | Error ({ kind = Depth_limit_exceeded { limit = l }; _ } as e) ->
+      Alcotest.(check int) "reported limit" limit l;
+      let lines = String.split_on_char '\n' (Parseff.render_error e) in
+      Alcotest.(check string)
+        "help" "  * help: raise ~max_depth"
+        (List.nth lines (List.length lines - 1))
+  | Ok () ->
+      Alcotest.fail "Expected Depth_limit_exceeded, got Ok"
+  | Error e ->
+      Alcotest.fail (Parseff.error_message e)
+
 let () =
   Alcotest.run "Parseff fold_right limit"
     [
@@ -69,6 +97,8 @@ let () =
           Alcotest.test_case "at the limit" `Quick test_at_limit;
           Alcotest.test_case "parse after the limit" `Quick
             test_parse_after_limit;
+          Alcotest.test_case "max_depth equal to the limit" `Quick
+            test_max_depth_at_fold_right_limit;
         ]
       );
     ]

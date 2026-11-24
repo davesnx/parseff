@@ -135,7 +135,7 @@ type error = private {
 - `Expected { items; found; more }`: primitive mismatch. `items` holds up to 64 sorted, unique expectations (`Char`, `Literal`, `Label`, `End_of_input`); `more` counts overflow items. `found` is `Text` (input snippet), `End` (EOF), `Short n` (short fixed-width read), or `Value` (mismatched binary integer).
 - `Failed msg`: raised by `Parseff.fail`, or `"no alternative matched"` for `one_of []`.
 - `Custom e`: raised by `Parseff.error`. Match with a fallback `_` case.
-- `Limit_exceeded { limit }`: exceeded `~at_most` on `take_while`, `take_until`, or `many`.
+- `Limit_exceeded { limit }`: exceeded `~at_most` on `take_while`, `take_until`, `skip_until`, or `many`.
 - `Depth_limit_exceeded { limit }`: exceeded `~max_depth` on `Parseff.rec_` or stack depth in `Parseff.fold_right`.
 - `Backtrack_window_exceeded { limit; oldest }`: exceeded `~backtrack_window` in a streaming parse.
 

@@ -89,10 +89,11 @@ val take_while :
   ?at_least:int -> ?at_most:int -> ?label:string -> ?set:Charset.t ->
   (char -> bool) -> string
 
-val skip_while : ?set:Charset.t -> (char -> bool) -> unit
+val skip_while :
+  ?at_least:int -> ?label:string -> ?set:Charset.t -> (char -> bool) -> unit
 ```
 
-- `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match.
+- `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match. `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least` and `~label` too.
 - `~at_most` caps the byte count (unstable: may change in any minor release), failing with `Limit_exceeded { limit = at_most }` if another matching byte follows.
 - `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
 ```ocaml
