@@ -59,7 +59,7 @@ val Source.parse_each :
   ('a, error) Stdlib.result Seq.t
 ```
 
-Each element runs the parser like `` Source.parse ~consume:`Partial ``. The parser must consume its trailing separator (a zero-width run yields an `Error`). The sequence stops at EOF or after the first `Error`, and is ephemeral (forcing an element twice raises `Invalid_argument`). Pass `~pending` if your parser buffers lookahead tokens past its value.
+Each element runs the parser like `` Source.parse ~consume:`Partial ``. The parser must consume its trailing separator (a zero-width run yields an `Error`). The sequence stops at EOF or after the first `Error`, and is ephemeral (forcing an element twice raises `Invalid_argument`). Pass `~pending` if your parser buffers lookahead tokens past its value: the run after `pending` returns `true` may consume no input, but a second zero-width run in a row at the same position yields an `Error`. `Parseff.Push.parse_each` follows the same rule.
 
 ```ocaml
 let record () =
@@ -202,11 +202,12 @@ module Push : sig
     'a t
   val feed : 'a t -> string -> 'a step
   val finish : 'a t -> ('a * string, error) Stdlib.result
+  val cancel : 'a t -> unit
 
   type each_step =
-    | Need_input
+    | Await
     | Stopped of string
-    | Error_of of error
+    | Error of error
     | Ended
 
   val parse_each :
@@ -214,16 +215,16 @@ module Push : sig
     ?backtrack_window:int ->
     ?diagnostics:Diagnostics.t ->
     ?trace:(trace_event -> unit) ->
+    ?pending:(unit -> bool) ->
     on_value:('a -> [ `Continue | `Stop ]) ->
     (unit -> 'a) ->
-    string option ->
-    each_step
+    (string option -> each_step) * (unit -> unit)
 end
 ```
 
-`Parseff.Push.parse`, `Parseff.Push.feed`, and `Parseff.Push.finish` parse a single value and return any leftover bytes in `Done (Ok (value, leftover))`. End your parser with `Parseff.end_of_input` if you want to require full consumption. Always call `Push.finish` on an unfinished parse if you passed `~diagnostics` or mutated `Parseff.Ref` cells so those resources are released.
+`Parseff.Push.parse`, `Parseff.Push.feed`, and `Parseff.Push.finish` parse a single value and return any leftover bytes in `Done (Ok (value, leftover))`. End your parser with `Parseff.end_of_input` if you want to require full consumption. To drop an unfinished parse, for example when the client disconnects, call `Parseff.Push.cancel`: it releases the `Parseff.Ref` cells and the `~diagnostics` collector that the parse holds, without giving it more input.
 
-`Parseff.Push.parse_each` parses a stream of values on a single effect fiber (the push counterpart of `Parseff.Source.parse_each`). Push `Some chunk` for data and `None` at EOF:
+`Parseff.Push.parse_each` parses a stream of values on a single effect fiber (the push counterpart of `Parseff.Source.parse_each`). It returns a `push` function and a `cancel` function. Push `Some chunk` for data and `None` at EOF:
 
 ```ocaml
 let line () =
@@ -233,7 +234,7 @@ let line () =
 
 let push_lines chunks =
   let seen = ref [] in
-  let push =
+  let push, _cancel =
     Parseff.Push.parse_each
       ~on_value:(fun s ->
         seen := s :: !seen;
@@ -244,13 +245,13 @@ let push_lines chunks =
     | [] -> push None
     | chunk :: rest -> (
         match push (Some chunk) with
-        | Parseff.Push.Need_input -> go rest
+        | Parseff.Push.Await -> go rest
         | step -> step)
   in
   match go chunks with
   | Parseff.Push.Ended -> Ok (List.rev !seen)
-  | Parseff.Push.Error_of e -> Error e
-  | Parseff.Push.Need_input | Parseff.Push.Stopped _ -> assert false
+  | Parseff.Push.Error e -> Error e
+  | Parseff.Push.Await | Parseff.Push.Stopped _ -> assert false
 
 let () = assert (push_lines [ "ab"; "c\nde\n" ] = Ok [ "abc"; "de" ])
 ```
