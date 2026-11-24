@@ -1441,7 +1441,7 @@ let test_streaming () =
 let given = Buffer.create 16
 
 let iter_a () =
-  take_while_iter
+  Iter.take_while
     (fun c -> c = 'a')
     (fun sp -> Buffer.add_string given (Slice.to_string sp))
 

@@ -76,7 +76,7 @@ let rec value () =
 let top_array f () =
   ws ();
   token '[';
-  Parseff.sep_by_iter value (fun () -> token ',') f;
+  Parseff.Iter.sep_by value (fun () -> token ',') f;
   let _ = Parseff.char ']' in
   ws ()
 

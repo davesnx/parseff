@@ -21,11 +21,11 @@ let test_negative_at_least () =
   check "many" (fun () -> Parseff.many ~at_least:(-1) ~at_most:0 digit);
   check "sep_by" (fun () -> Parseff.sep_by ~at_least:(-1) digit comma);
   check "end_by" (fun () -> Parseff.end_by ~at_least:(-1) digit comma);
-  check "many_iter" (fun () ->
-      (Parseff.many_iter [@alert "-unstable"]) ~at_least:(-1) digit ignore
+  check "Iter.many" (fun () ->
+      (Parseff.Iter.many [@alert "-unstable"]) ~at_least:(-1) digit ignore
   );
-  check "sep_by_iter" (fun () ->
-      (Parseff.sep_by_iter [@alert "-unstable"]) ~at_least:(-1) digit comma
+  check "Iter.sep_by" (fun () ->
+      (Parseff.Iter.sep_by [@alert "-unstable"]) ~at_least:(-1) digit comma
         ignore
   );
   check "whitespace" (fun () -> Parseff.whitespace ~at_least:(-1) ());

@@ -92,11 +92,11 @@ let window_exceeded = function
   | _ ->
       false
 
-let test_many_iter_values () =
+let test_iter_many_values () =
   let got = ref [] in
   let r =
     Parseff.parse "1 22 333 " (fun () ->
-        Parseff.many_iter
+        Parseff.Iter.many
           (fun () ->
             let n = number () in
             let _ = Parseff.char ' ' in
@@ -138,7 +138,7 @@ let test_same_as_many () =
     (fun at_least ->
       same_as_list
         ~name:(Printf.sprintf "at_least %d" at_least)
-        (fun f -> Parseff.many_iter ~at_least element f)
+        (fun f -> Parseff.Iter.many ~at_least element f)
         (fun () -> Parseff.many ~at_least element)
         cases
     )
@@ -150,7 +150,7 @@ let test_same_as_sep_by () =
     (fun at_least ->
       same_as_list
         ~name:(Printf.sprintf "at_least %d" at_least)
-        (fun f -> Parseff.sep_by_iter ~at_least digits comma f)
+        (fun f -> Parseff.Iter.sep_by ~at_least digits comma f)
         (fun () -> Parseff.sep_by ~at_least digits comma)
         cases
     )
@@ -162,7 +162,7 @@ let test_array_in_small_window () =
   let n = ref 0 in
   let r =
     Parseff.Source.parse ~backtrack_window:64 (array_source count)
-      (value (fun () -> Parseff.sep_by_iter number comma (fun _ -> incr n)))
+      (value (fun () -> Parseff.Iter.sep_by number comma (fun _ -> incr n)))
   in
   Alcotest.(check string) "result" "ok" (show r);
   Alcotest.(check int) "elements" count !n
@@ -184,7 +184,7 @@ let live_after elements =
   let r =
     Parseff.Source.parse ~backtrack_window:4096 (array_source elements)
       (value (fun () ->
-           Parseff.sep_by_iter number comma (fun _ ->
+           Parseff.Iter.sep_by number comma (fun _ ->
                incr n;
                if !n = elements then at := live_words ()
            )
@@ -215,7 +215,7 @@ let live_with_ref wrap elements =
     Parseff.Source.parse ~backtrack_window:64
       (Parseff.Source.of_seq (Seq.init elements (fun _ -> "a")))
       (wrap (fun () ->
-           Parseff.many_iter
+           Parseff.Iter.many
              (fun () ->
                let c = Parseff.any_char () in
                Parseff.Ref.set r (Parseff.Ref.get r + 1);
@@ -254,7 +254,7 @@ let test_ref_undone_in_element () =
   let result =
     Parseff.parse ~consume:`Partial "a;a;ab" (fun () ->
         Parseff.or_
-          (fun () -> Parseff.many_iter (counted r) (fun _ -> incr got))
+          (fun () -> Parseff.Iter.many (counted r) (fun _ -> incr got))
           (fun () -> ())
     )
   in
@@ -268,7 +268,7 @@ let test_ref_undone_by_released_capture () =
     Parseff.parse ~consume:`Partial "a;a;x" (fun () ->
         let c =
           Parseff.capture ~release:true (fun () ->
-              Parseff.many_iter (counted r) ignore;
+              Parseff.Iter.many (counted r) ignore;
               Parseff.Ref.set r 100;
               Parseff.char '!'
           )
@@ -289,7 +289,7 @@ let test_recognize_pins () =
       (body_source ~prefix:"" ~len:1000 ~suffix:"") (fun () ->
         ignore
           (Parseff.recognize (fun () ->
-               Parseff.take_iter 1000 (fun s ->
+               Parseff.Iter.take 1000 (fun s ->
                    got := !got + Parseff.Slice.length s
                )
            )
@@ -308,7 +308,7 @@ let test_with_range_does_not_pin () =
       (body_source ~prefix:"" ~len:1000 ~suffix:"") (fun () ->
         ignore
           (Parseff.with_range (fun () ->
-               Parseff.take_iter 1000 (fun s ->
+               Parseff.Iter.take 1000 (fun s ->
                    got := !got + Parseff.Slice.length s
                )
            )
@@ -323,7 +323,7 @@ let test_zero_width_value () =
   let result =
     Parseff.parse ~consume:`Partial "x" (fun () ->
         Parseff.many (fun () ->
-            Parseff.sep_by_iter
+            Parseff.Iter.sep_by
               (fun () -> Parseff.take_while (fun c -> c = '1'))
               comma
               (fun v -> got := v :: !got)
@@ -337,7 +337,7 @@ let test_zero_width_value () =
 
 let body_len = 100_000
 
-let test_take_iter_pieces () =
+let test_iter_take_pieces () =
   let out = Buffer.create body_len in
   let largest = ref 0 in
   let r =
@@ -346,7 +346,7 @@ let test_take_iter_pieces () =
         Parseff.or_
           (fun () ->
             Parseff.literal "len:";
-            Parseff.take_iter body_len (fun piece ->
+            Parseff.Iter.take body_len (fun piece ->
                 largest := max !largest (Parseff.Slice.length piece);
                 Buffer.add_string out (Parseff.Slice.to_string piece)
             );
@@ -371,12 +371,12 @@ let test_take_fails_in_small_window () =
   in
   Alcotest.(check bool) "window exceeded" true (window_exceeded r)
 
-let test_take_while_iter_pieces () =
+let test_iter_take_while_pieces () =
   let out = Buffer.create body_len in
   let r =
     Parseff.Source.parse ~backtrack_window:64
       (body_source ~prefix:"" ~len:body_len ~suffix:"0") (fun () ->
-        Parseff.take_while_iter
+        Parseff.Iter.take_while
           (fun c -> c >= 'a' && c <= 'z')
           (fun piece -> Buffer.add_string out (Parseff.Slice.to_string piece));
         Parseff.char '0'
@@ -396,24 +396,24 @@ let pieces_of run input =
   in
   (show r, List.rev !got)
 
-let test_take_iter_string () =
+let test_iter_take_string () =
   Alcotest.(check (pair string (list string)))
     "one piece" ("ok", [ "abc" ])
-    (pieces_of (Parseff.take_iter 3) "abcd");
+    (pieces_of (Parseff.Iter.take 3) "abcd");
   Alcotest.(check (pair string (list string)))
     "zero bytes" ("ok", [])
-    (pieces_of (Parseff.take_iter 0) "abcd");
+    (pieces_of (Parseff.Iter.take 0) "abcd");
   Alcotest.(check (pair string (list string)))
     "negative"
     ("error 0 expected non-negative length, found -1", [])
-    (pieces_of (Parseff.take_iter (-1)) "abcd");
+    (pieces_of (Parseff.Iter.take (-1)) "abcd");
   Alcotest.(check (pair string (list string)))
     "short input"
     ("error 4 expected 2 bytes, found end of input", [ "abcd" ])
-    (pieces_of (Parseff.take_iter 6) "abcd");
+    (pieces_of (Parseff.Iter.take 6) "abcd");
   Alcotest.(check (pair string (list string)))
     "while, no match" ("ok", [])
-    (pieces_of (Parseff.take_while_iter (fun c -> c = 'x')) "abcd")
+    (pieces_of (Parseff.Iter.take_while (fun c -> c = 'x')) "abcd")
 
 let test_inside_or_seals () =
   let got = ref 0 in
@@ -423,7 +423,7 @@ let test_inside_or_seals () =
         Parseff.or_
           (fun () ->
             let _ = Parseff.char '[' in
-            Parseff.sep_by_iter number comma (fun _ -> incr got);
+            Parseff.Iter.sep_by number comma (fun _ -> incr got);
             ignore (Parseff.char ']')
           )
           (fun () ->
@@ -442,7 +442,7 @@ let test_inside_optional_seals () =
     Parseff.parse "1;2;x" (fun () ->
         ignore
           (Parseff.optional (fun () ->
-               Parseff.many_iter
+               Parseff.Iter.many
                  (fun () ->
                    let n = number () in
                    let _ = Parseff.char ';' in
@@ -466,7 +466,7 @@ let raises_invalid name run =
   | exception Invalid_argument _ ->
       ()
 
-let elements f () = Parseff.sep_by_iter number comma f
+let elements f () = Parseff.Iter.sep_by number comma f
 
 let test_zero_width_effects_kept () =
   let d = Parseff.Diagnostics.create () in
@@ -477,7 +477,7 @@ let test_zero_width_effects_kept () =
           Parseff.many (fun () ->
               Parseff.Ref.set z 7;
               Parseff.warn (Warning.W "w");
-              Parseff.sep_by_iter
+              Parseff.Iter.sep_by
                 (fun () -> Parseff.take_while (fun c -> c = 'a'))
                 comma ignore
           )
@@ -506,7 +506,7 @@ let test_ref_set_in_callback () =
     message_of (fun () ->
         Parseff.parse "1,2" (fun () ->
             Parseff.Ref.set x 1;
-            Parseff.sep_by_iter digits comma (fun _ -> Parseff.Ref.set x 5)
+            Parseff.Iter.sep_by digits comma (fun _ -> Parseff.Ref.set x 5)
         )
     )
   in
@@ -519,7 +519,7 @@ let test_ref_in_callback_unowned () =
   let seen = ref [] in
   let result =
     Parseff.parse "1,2" (fun () ->
-        Parseff.sep_by_iter digits comma (fun _ ->
+        Parseff.Iter.sep_by digits comma (fun _ ->
             seen := Parseff.Ref.get x :: !seen;
             Parseff.Ref.set x (Parseff.Ref.get x + 1)
         );
@@ -536,19 +536,19 @@ let test_warn_in_callback () =
   let msg =
     message_of (fun () ->
         Parseff.parse ~diagnostics:d "1" (fun () ->
-            Parseff.take_iter 1 (fun _ -> Parseff.warn (Warning.W "w"))
+            Parseff.Iter.take 1 (fun _ -> Parseff.warn (Warning.W "w"))
         )
     )
   in
   Alcotest.(check bool)
-    ("names the *_iter functions: " ^ msg)
-    true (contains msg "_iter")
+    ("names the Iter functions: " ^ msg)
+    true (contains msg "Iter")
 
 let test_recover_raises_with_collector () =
   let errs = Parseff.Diagnostics.create () in
   let got = ref 0 in
   let items () =
-    Parseff.many_iter
+    Parseff.Iter.many
       (fun () ->
         let d = digits () in
         let _ = Parseff.char ';' in
@@ -607,11 +607,11 @@ let test_barriers_raise () =
       ("peek_with", fun p -> ignore (Parseff.peek_with p));
       ("capture", fun p -> ignore (Parseff.capture p));
       ("recover", fun p -> Parseff.recover ~sync:ignore p ignore);
-      ( "take_iter in look_ahead",
-        fun _ -> Parseff.look_ahead (fun () -> Parseff.take_iter 1 ignore_value)
+      ( "Iter.take in look_ahead",
+        fun _ -> Parseff.look_ahead (fun () -> Parseff.Iter.take 1 ignore_value)
       );
-      ( "take_iter 0 in look_ahead",
-        fun _ -> Parseff.look_ahead (fun () -> Parseff.take_iter 0 ignore_value)
+      ( "Iter.take 0 in look_ahead",
+        fun _ -> Parseff.look_ahead (fun () -> Parseff.Iter.take 0 ignore_value)
       );
     ]
 
@@ -621,7 +621,7 @@ let test_released_capture () =
     Parseff.parse ~consume:`Partial "1,2,x" (fun () ->
         let r =
           Parseff.capture ~release:true (fun () ->
-              Parseff.sep_by_iter number comma (fun _ -> incr got);
+              Parseff.Iter.sep_by number comma (fun _ -> incr got);
               Parseff.char ';'
           )
         in
@@ -642,7 +642,7 @@ let test_released_recover () =
         Parseff.recover ~release:true
           ~sync:(fun () -> ignore (Parseff.take_while (fun _ -> true)))
           (fun () ->
-            Parseff.sep_by_iter number comma (fun _ -> incr got);
+            Parseff.Iter.sep_by number comma (fun _ -> incr got);
             ignore (Parseff.char ';')
           )
           ignore
@@ -657,7 +657,7 @@ let test_callback_raises () =
   ( match
       Parseff.Source.parse ~backtrack_window:64 (array_source 100)
         (value (fun () ->
-             Parseff.sep_by_iter number comma (fun _ ->
+             Parseff.Iter.sep_by number comma (fun _ ->
                  incr calls;
                  if !calls = 3 then raise Boom
              )
@@ -677,7 +677,7 @@ let test_callback_raises () =
 let test_callback_outside_parse () =
   match
     Parseff.parse "1" (fun () ->
-        Parseff.take_iter 1 (fun _ -> ignore (Parseff.any_char ()))
+        Parseff.Iter.take 1 (fun _ -> ignore (Parseff.any_char ()))
     )
   with
   | _ ->
@@ -693,7 +693,7 @@ let () =
     [
       ( "repetition",
         [
-          test_case "values in order" `Quick test_many_iter_values;
+          test_case "values in order" `Quick test_iter_many_values;
           test_case "same as many" `Quick test_same_as_many;
           test_case "same as sep_by" `Quick test_same_as_sep_by;
           test_case "array in a small window" `Quick test_array_in_small_window;
@@ -711,12 +711,12 @@ let () =
       );
       ( "pieces",
         [
-          test_case "take_iter in a small window" `Quick test_take_iter_pieces;
+          test_case "Iter.take in a small window" `Quick test_iter_take_pieces;
           test_case "take fails in a small window" `Quick
             test_take_fails_in_small_window;
-          test_case "take_while_iter in a small window" `Quick
-            test_take_while_iter_pieces;
-          test_case "string input" `Quick test_take_iter_string;
+          test_case "Iter.take_while in a small window" `Quick
+            test_iter_take_while_pieces;
+          test_case "string input" `Quick test_iter_take_string;
         ]
       );
       ( "frames",
