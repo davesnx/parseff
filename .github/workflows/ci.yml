@@ -85,13 +85,11 @@ jobs:
             ox: git+https://github.com/oxcaml/opam-repository.git
             default: https://opam.ocaml.org
 
-      # On OxCaml, make install and make test cover the unit tests only: miou,
-      # which an example uses, does not build there.
       - name: Install dependencies
-        run: make install
+        run: make -f Makefile-ox install SWITCH="$(opam switch show)"
 
       - name: Run tests
-        run: make test
+        run: make -f Makefile-ox test SWITCH="$(opam switch show)"
 
   website:
     name: Build website

@@ -1,0 +1,38 @@
+# OxCaml targets: make -f Makefile-ox <target>
+#
+# They use the opam switch $(SWITCH), created by `install` when missing, and
+# build in _build-ox. Only the unit tests in test/ run: miou, which an example
+# uses, does not build on OxCaml.
+
+SWITCH ?= oxcaml.5.4.0+ox9
+COMPILER = ocaml-variants.5.4.0+ox,oxcaml-compiler.5.4.0-ox9
+REPOS = ox=git+https://github.com/oxcaml/opam-repository.git,default
+DUNE = DUNE_BUILD_DIR=_build-ox opam exec --switch=$(SWITCH) -- dune
+
+.PHONY: help
+help: ## Print this help message
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile-ox | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: create-switch
+create-switch: ## Create the OxCaml opam switch
+	opam switch create $(SWITCH) --packages=$(COMPILER) --repos $(REPOS) -y
+
+.PHONY: install
+install: ## Create the switch if missing, and install the test dependencies
+	@opam switch list --short | grep -Fqx '$(SWITCH)' || $(MAKE) -f Makefile-ox --no-print-directory create-switch
+	opam install --switch=$(SWITCH) dune uucp alcotest -y
+
+.PHONY: build
+build: ## Build the library, and fail on an OxCaml safety alert in lib/
+	@out=$$(DUNE_CACHE=disabled $(DUNE) build --root . ./lib/parseff.cmxa 2>&1); status=$$?; \
+	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	if printf '%s\n' "$$out" | grep -q '^Alert'; then echo "lib/ has OxCaml alerts"; exit 1; fi
+
+.PHONY: test
+test: build ## Run the unit tests
+	$(DUNE) build --root . @test/runtest
+
+.PHONY: clean
+clean: ## Clean artifacts
+	$(DUNE) clean --root .
