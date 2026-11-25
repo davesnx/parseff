@@ -1,6 +1,6 @@
 ## Unreleased
 
-- [PERF] Scan the input directly in `Iter.take_while` instead of through a closure built on every call: 6 fewer minor words per call and up to 20% faster on 8-byte words ([#149](https://github.com/davesnx/parseff/pull/149)) (@davesnx)
+- [PERF] Scan the input directly in `Iter.take_while` instead of through a closure built on every call: 6 fewer minor words per call, and 17–22% faster per byte with `~set` on stock OCaml ([#149](https://github.com/davesnx/parseff/pull/149)) (@davesnx)
 
 ## 0.6.0
 
