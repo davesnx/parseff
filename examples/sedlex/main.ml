@@ -16,52 +16,55 @@ type expr =
   | Let of string * expr * expr
 
 type custom_error +=
-  | Unexpected of { expected : string; found : Lexer.token }
+  | Unexpected of { expected : string; found : string }
   | Unbound of string
 
 let show_error = function
   | Unexpected { expected; found } ->
-      Printf.sprintf "expected %s, found %s" expected (Lexer.describe found)
+      Printf.sprintf "expected %s, found %s" expected found
   | Unbound name ->
       Printf.sprintf "unbound variable %s" name
   | _ ->
       "unknown error"
 
-(* [tokens] holds the lexer output. [index.(pos)] is the first token that
-   starts at or after byte [pos], so a position inside whitespace or a comment
-   maps to the token after it. *)
-type tokens = { tokens : Lexer.t array; index : int array }
+(* [input] is the source text and [tokens] the lexer output, in order. *)
+type tokens = { input : string; tokens : Lexer.t array }
 
-let index_tokens input =
-  let tokens = Lexer.tokenize input in
-  let index = Array.make (String.length input + 1) 0 in
-  let next = ref (Array.length tokens - 1) in
-  for pos = String.length input downto 0 do
-    while !next > 0 && tokens.(!next - 1).start >= pos do
-      decr next
-    done;
-    index.(pos) <- !next
-  done;
-  { tokens; index }
+(* The first token that starts at or after byte [pos]. A position inside
+   whitespace or a comment maps to the token after it. [Eof] starts at the end
+   of the input, so the search always finds a token. *)
+let token_at t pos =
+  let rec search lo hi =
+    if lo >= hi then
+      lo
+    else
+      let mid = (lo + hi) / 2 in
+      if t.tokens.(mid).start >= pos then
+        search lo mid
+      else
+        search (mid + 1) hi
+  in
+  t.tokens.(search 0 (Array.length t.tokens - 1))
 
 (* Moves to the start of the next token, past whitespace and comments, so
    errors and contexts start at the token. *)
 let peek t =
-  let tok = t.tokens.(t.index.(position ())) in
+  let tok = token_at t (position ()) in
   skip_to tok.start;
   tok
 
 let advance (t : Lexer.t) = skip_to t.stop
 
-let unexpected (t : Lexer.t) expected =
-  error ~from:t.start ~upto:t.stop (Unexpected { expected; found = t.token })
+let unexpected t (tok : Lexer.t) expected =
+  error ~from:tok.start ~upto:tok.stop
+    (Unexpected { expected; found = Lexer.describe t.input tok })
 
 let eat t expected_token label =
   let current_token = peek t in
   if current_token.token = expected_token then
     advance current_token
   else
-    unexpected current_token label
+    unexpected t current_token label
 
 (* Operators are read by [operator], so their token parsers only return the
    build function. *)
@@ -119,7 +122,7 @@ and operand t scope () =
   | Let ->
       let_binding t scope tok
   | _ ->
-      unexpected tok "an expression"
+      unexpected t tok "an expression"
 
 and let_binding t scope let_token =
   context "let binding" (fun () ->
@@ -131,7 +134,7 @@ and let_binding t scope let_token =
             advance name_token;
             name
         | _ ->
-            unexpected name_token "a name"
+            unexpected t name_token "a name"
       in
       eat t Equal "'='";
       let value = rec_ (expr t scope) in
@@ -182,10 +185,15 @@ let rec to_string = function
       Printf.sprintf "(let %s %s %s)" name (to_string value) (to_string body)
 
 let () =
-  let input = Sys.argv.(1) in
-  let t = index_tokens input in
-  match parse input (program t) with
-  | Ok e ->
-      Printf.printf "%s = %g\n" (to_string e) (eval [] e)
-  | Error e ->
-      print_endline (render_error ~custom:show_error e)
+  match Sys.argv with
+  | [| _; input |] -> (
+      let t = { input; tokens = Lexer.tokenize input } in
+      match parse input (program t) with
+      | Ok e ->
+          Printf.printf "%s = %g\n" (to_string e) (eval [] e)
+      | Error e ->
+          print_endline (render_error ~custom:show_error e)
+    )
+  | _ ->
+      prerr_endline "usage: main.exe EXPRESSION";
+      exit 2

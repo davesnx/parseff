@@ -13,12 +13,38 @@ type token =
   | Rparen
   | Number of float
   | Ident of string
-  | Invalid of string
+  | Invalid
   | Eof
 
 type t = { token : token; start : int; stop : int }
 
-let describe = function
+(* Quotes [text] as it appears in the input. Bytes that are not valid UTF-8
+   and control characters print as [\xNN], as in [Parseff.render_error]. *)
+let quote text =
+  let buf = Buffer.create (String.length text + 2) in
+  Buffer.add_char buf '"';
+  let rec loop i =
+    if i < String.length text then begin
+      let d = String.get_utf_8_uchar text i in
+      let n = Uchar.utf_decode_length d in
+      let c = text.[i] in
+      if Uchar.utf_decode_is_valid d && c >= ' ' && c <> '\x7f' then
+        Buffer.add_string buf (String.sub text i n)
+      else
+        for j = i to i + n - 1 do
+          Printf.bprintf buf "\\x%02X" (Char.code text.[j])
+        done;
+      loop (i + n)
+    end
+  in
+  loop 0;
+  Buffer.add_char buf '"';
+  Buffer.contents buf
+
+(* Describes [t] with its text in [input], so a number reads as written. *)
+let describe input t =
+  let text () = String.sub input t.start (t.stop - t.start) in
+  match t.token with
   | Let ->
       "'let'"
   | In ->
@@ -37,12 +63,12 @@ let describe = function
       "'('"
   | Rparen ->
       "')'"
-  | Number n ->
-      Printf.sprintf "number %g" n
-  | Ident name ->
-      Printf.sprintf "identifier %s" name
-  | Invalid text ->
-      Printf.sprintf "invalid input %S" text
+  | Number _ ->
+      "number " ^ text ()
+  | Ident _ ->
+      "identifier " ^ text ()
+  | Invalid ->
+      "invalid input " ^ quote (text ())
   | Eof ->
       "end of input"
 
@@ -81,7 +107,7 @@ let rec next buf =
   | eof ->
       Eof
   | any ->
-      Invalid (Sedlexing.Utf8.lexeme buf)
+      Invalid
   | _ ->
       assert false
 
@@ -112,8 +138,7 @@ let tokenize input =
     if token <> Eof then
       loop ({ token; start; stop } :: acc)
     else if valid < len then
-      let invalid = String.sub input valid (len - valid) in
-      { token = Invalid invalid; start = valid; stop = len } :: acc
+      { token = Invalid; start = valid; stop = len } :: acc
     else
       acc
   in

@@ -53,7 +53,7 @@ token, which the parser reports like any other unexpected token:
     |                ^
 
   $ ./main.exe "$(printf '1 + \342\202')"
-  1:5: [error] expected an expression, found invalid input "\226\130"
+  1:5: [error] expected an expression, found invalid input "\xE2\x82"
   1 | 1 + \xE2\x82
     |     ^^^^^^^^
 
@@ -64,3 +64,26 @@ token, which the parser reports like any other unexpected token:
   3 | │    3
     | ╰─────^
     * while parsing parenthesized expression, from 2:3
+
+Errors quote tokens as they appear in the input:
+
+  $ ./main.exe "1 1234567"
+  1:3: [error] expected an operator or end of input, found number 1234567
+  1 | 1 1234567
+    |   ^^^^^^^
+
+  $ ./main.exe "1 → 2"
+  1:3: [error] expected an operator or end of input, found invalid input "→"
+  1 | 1 → 2
+    |   ^
+
+  $ ./main.exe "$(printf '1 \001')"
+  1:3: [error] expected an operator or end of input, found invalid input "\x01"
+  1 | 1 \x01
+    |   ^^^^
+
+Without exactly one argument, main.exe prints its usage:
+
+  $ ./main.exe
+  usage: main.exe EXPRESSION
+  [2]
