@@ -65,6 +65,50 @@ let scenario t = function
       prerr_endline ("unknown scenario " ^ s);
       exit 2
 
+(* One stream of [size]-byte chunks, read by sedlex and by parseff. Each keeps
+   its own cursor into the chunks read so far. *)
+type tee = { input : string; size : int; chunks : string Dynarray.t }
+
+let reader tee =
+  let i = ref 0 in
+  fun () ->
+    let pos = Dynarray.length tee.chunks * tee.size in
+    if !i = Dynarray.length tee.chunks && pos < String.length tee.input then
+      Dynarray.add_last tee.chunks
+        (String.sub tee.input pos (min tee.size (String.length tee.input - pos)));
+    if !i < Dynarray.length tee.chunks then begin
+      incr i;
+      Some (Dynarray.get tee.chunks (!i - 1))
+    end else
+      None
+
+let char_reader tee =
+  let next = reader tee in
+  let chunk = ref "" and pos = ref 0 in
+  let rec gen () =
+    if !pos < String.length !chunk then begin
+      incr pos;
+      Some !chunk.[!pos - 1]
+    end else
+      match next () with
+      | Some c ->
+          chunk := c;
+          pos := 0;
+          gen ()
+      | None ->
+          None
+  in
+  gen
+
+(* [skip_to] that reads input up to [target] first. *)
+let pull_to target =
+  let n = ref (target - position ()) in
+  if !n > 0 then
+    skip_while (fun _ ->
+        decr n;
+        !n >= 0
+    )
+
 (* All the tokens of [input], for comparison with the number lexed. *)
 let count_tokens input =
   let next = Lexer.tokens input in
@@ -79,19 +123,35 @@ let count_tokens input =
 let () =
   match Sys.argv with
   | [| _; s; input |] ->
-      let t =
-        Tokens.create ~show:Lexer.show ~eof:Lexer.Eof (Lexer.tokens input)
-      in
-      let count, s =
+      let mode, s =
         match String.split_on_char ':' s with
-        | [ "count"; s ] ->
-            (true, s)
+        | [ mode; s ] ->
+            (mode, s)
         | _ ->
-            (false, s)
+            ("", s)
       in
+      let tee = { input; size = 2; chunks = Dynarray.create () } in
+      let t =
+        match mode with
+        | "stream" ->
+            Tokens.create ~show:Lexer.show ~eof:Lexer.Eof
+              (Lexer.stream_tokens (char_reader tee))
+        | "stream-pull" ->
+            Tokens.create ~move:pull_to ~show:Lexer.show ~eof:Lexer.Eof
+              (Lexer.stream_tokens (char_reader tee))
+        | _ ->
+            Tokens.create ~show:Lexer.show ~eof:Lexer.Eof (Lexer.tokens input)
+      in
+      let count = mode = "count" in
       let diagnostics = Diagnostics.create () in
+      let run () = scenario t s in
       let result =
-        parse ~consume:`Partial ~diagnostics input (fun () -> scenario t s)
+        if mode = "" || count then
+          parse ~consume:`Partial ~diagnostics input run
+        else
+          Source.parse ~consume:`Partial ~diagnostics
+            (Source.of_chunks (reader tee))
+            run
       in
       List.iter
         (fun (d : Diagnostics.entry) ->

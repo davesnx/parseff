@@ -123,3 +123,29 @@ let tokens input =
       | value ->
           let start, stop = Sedlexing.bytes_loc buf in
           { Tokens.value; start; stop }
+
+(* The same lexer on a stream of bytes. Invalid UTF-8 ends the stream with
+   one [Invalid] byte: sedlex raises there, and the rest is not lexed. *)
+let stream_tokens gen =
+  let buf = Sedlexing.Utf8.from_gen gen in
+  let eof = ref None in
+  fun () ->
+    match !eof with
+    | Some tok ->
+        tok
+    | None -> (
+        match next buf with
+        | Eof ->
+            let start, stop = Sedlexing.bytes_loc buf in
+            let tok = { Tokens.value = Eof; start; stop } in
+            eof := Some tok;
+            tok
+        | value ->
+            let start, stop = Sedlexing.bytes_loc buf in
+            { Tokens.value; start; stop }
+        | exception Sedlexing.MalFormed ->
+            let _, stop = Sedlexing.bytes_loc buf in
+            eof :=
+              Some { Tokens.value = Eof; start = stop + 1; stop = stop + 1 };
+            { Tokens.value = Invalid; start = stop; stop = stop + 1 }
+      )
