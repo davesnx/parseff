@@ -15,20 +15,16 @@ type expr =
   | Binop of char * expr * expr
   | Let of string * expr * expr
 
-type custom_error +=
-  | Unexpected of { expected : string; found : string }
-  | Unbound of string
+type custom_error += Unbound of string
 
 let show_error = function
-  | Unexpected { expected; found } ->
-      Printf.sprintf "expected %s, found %s" expected found
   | Unbound name ->
       Printf.sprintf "unbound variable %s" name
   | _ ->
       "unknown error"
 
-(* [input] is the source text and [tokens] the lexer output, in order. *)
-type tokens = { input : string; tokens : Lexer.t array }
+(* The lexer output, in order. *)
+type tokens = { tokens : Lexer.t array }
 
 (* The first token that starts at or after byte [pos]. A position inside
    whitespace or a comment maps to the token after it. [Eof] starts at the end
@@ -55,16 +51,16 @@ let peek t =
 
 let advance (t : Lexer.t) = skip_to t.stop
 
-let unexpected t (tok : Lexer.t) expected =
-  error ~from:tok.start ~upto:tok.stop
-    (Unexpected { expected; found = Lexer.describe t.input tok })
+(* An ordinary [Expected] failure, so alternatives merge and [expect]
+   relabels it. *)
+let unexpected (tok : Lexer.t) expected = expected_token ~upto:tok.stop expected
 
 let eat t expected_token label =
   let current_token = peek t in
   if current_token.token = expected_token then
     advance current_token
   else
-    unexpected t current_token label
+    unexpected current_token label
 
 (* Operators are read by [operator], so their token parsers only return the
    build function. *)
@@ -122,7 +118,7 @@ and operand t scope () =
   | Let ->
       let_binding t scope tok
   | _ ->
-      unexpected t tok "an expression"
+      unexpected tok "an expression"
 
 and let_binding t scope let_token =
   context "let binding" (fun () ->
@@ -134,7 +130,7 @@ and let_binding t scope let_token =
             advance name_token;
             name
         | _ ->
-            unexpected t name_token "a name"
+            unexpected name_token "a name"
       in
       eat t Equal "'='";
       let value = rec_ (expr t scope) in
@@ -187,7 +183,7 @@ let rec to_string = function
 let () =
   match Sys.argv with
   | [| _; input |] -> (
-      let t = { input; tokens = Lexer.tokenize input } in
+      let t = { tokens = Lexer.tokenize input } in
       match parse input (program t) with
       | Ok e ->
           Printf.printf "%s = %g\n" (to_string e) (eval [] e)

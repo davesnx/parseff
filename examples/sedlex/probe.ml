@@ -3,15 +3,7 @@
 
 open Parseff
 
-type custom_error += Unexpected of { expected : string; found : string }
-
-let show_error = function
-  | Unexpected { expected; found } ->
-      Printf.sprintf "expected %s, found %s" expected found
-  | _ ->
-      "unknown error"
-
-type tokens = { input : string; tokens : Lexer.t array }
+type tokens = { tokens : Lexer.t array }
 
 let token_at t pos =
   let rec search lo hi =
@@ -33,16 +25,14 @@ let peek t =
 
 let advance (t : Lexer.t) = skip_to t.stop
 
-let unexpected t (tok : Lexer.t) expected =
-  error ~from:tok.start ~upto:tok.stop
-    (Unexpected { expected; found = Lexer.describe t.input tok })
+let unexpected (tok : Lexer.t) expected = expected_token ~upto:tok.stop expected
 
 let eat t expected_token label =
   let current_token = peek t in
   if current_token.token = expected_token then
     advance current_token
   else
-    unexpected t current_token label
+    unexpected current_token label
 
 let name t =
   let tok = peek t in
@@ -51,7 +41,7 @@ let name t =
       advance tok;
       name
   | _ ->
-      unexpected t tok "a name"
+      unexpected tok "a name"
 
 let eat_in t () = eat t In "'in'"
 let eat_rparen t () = eat t Rparen "')'"
@@ -66,6 +56,8 @@ let scenario t = function
       expect "the keyword in" (eat_in t)
   | "mixed" ->
       or_ (eat_in t) (fun () -> literal "foo")
+  | "mixed-deeper" ->
+      or_ (eat_in t) (fun () -> literal "baz")
   | "require" ->
       let _ = name t in
       require (eat_in t) (fun _ -> ());
@@ -81,21 +73,21 @@ let scenario t = function
 let () =
   match Sys.argv with
   | [| _; s; input |] -> (
-      let t = { input; tokens = Lexer.tokenize input } in
+      let t = { tokens = Lexer.tokenize input } in
       let diagnostics = Diagnostics.create () in
       let result =
         parse ~consume:`Partial ~diagnostics input (fun () -> scenario t s)
       in
       List.iter
         (fun (d : Diagnostics.entry) ->
-          print_endline ("recorded: " ^ render_error ~custom:show_error d.value)
+          print_endline ("recorded: " ^ render_error d.value)
         )
         (Diagnostics.to_list diagnostics);
       match result with
       | Ok () ->
           print_endline "ok"
       | Error e ->
-          print_endline (render_error ~custom:show_error e)
+          print_endline (render_error e)
     )
   | _ ->
       prerr_endline "usage: probe.exe SCENARIO INPUT";

@@ -40,7 +40,7 @@ cells:
     * while parsing let binding, from 1:1
 
   $ ./main.exe "1 + 2 3"
-  1:7: [error] expected an operator or end of input, found number 3
+  1:7: [error] expected an operator or end of input, found '3'
   1 | 1 + 2 3
     |       ^
 
@@ -48,12 +48,12 @@ Input that no sedlex rule matches, including invalid UTF-8, becomes an Invalid
 token, which the parser reports like any other unexpected token:
 
   $ ./main.exe "let λ = 1 in λ @ 2"
-  1:16: [error] expected an operator or end of input, found invalid input "@"
+  1:16: [error] expected an operator or end of input, found '@'
   1 | let λ = 1 in λ @ 2
     |                ^
 
   $ ./main.exe "$(printf '1 + \342\202')"
-  1:5: [error] expected an expression, found invalid input "\xE2\x82"
+  1:5: [error] expected an expression, found '\xE2\x82'
   1 | 1 + \xE2\x82
     |     ^^^^^^^^
 
@@ -68,17 +68,17 @@ token, which the parser reports like any other unexpected token:
 Errors quote tokens as they appear in the input:
 
   $ ./main.exe "1 1234567"
-  1:3: [error] expected an operator or end of input, found number 1234567
+  1:3: [error] expected an operator or end of input, found '1234567'
   1 | 1 1234567
     |   ^^^^^^^
 
   $ ./main.exe "1 → 2"
-  1:3: [error] expected an operator or end of input, found invalid input "→"
+  1:3: [error] expected an operator or end of input, found '→'
   1 | 1 → 2
     |   ^
 
   $ ./main.exe "$(printf '1 \001')"
-  1:3: [error] expected an operator or end of input, found invalid input "\x01"
+  1:3: [error] expected an operator or end of input, found '\x01'
   1 | 1 \x01
     |   ^^^^
 

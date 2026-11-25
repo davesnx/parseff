@@ -561,6 +561,18 @@ val error :
         n
     ]} *)
 
+val expected_token : upto:int -> string -> 'a
+(** [expected_token ~upto label] fails at the current position with
+    [expected <label>], for a token that a separate lexer found between the
+    position and [upto].
+
+    - [found] quotes the bytes of the token and the error range covers them.
+      With [upto = position ()], [found] is the next character or end of input,
+      as for {!satisfy}.
+    - An ordinary [Expected] failure: it merges with other expected items at the
+      same position, and {!expect} relabels it and keeps the token text.
+    - Raises [Invalid_argument] if [upto < position ()]. *)
+
 val warn :
   ?from:int ->
   ?upto:int ->

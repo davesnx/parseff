@@ -1617,6 +1617,15 @@ let tag_bytes = 5
 let tag_at_least = 6
 let tag_big = 7
 let max_small_count = max_int lsr 3
+
+(* A token item keeps the token width in its payload so that the error can
+   quote the token, even after [expect] relabels it. *)
+let big_token_payload = 16
+
+let[@inline always] token_kind width =
+  ((big_token_payload + width) lsl 3) lor tag_big
+
+let is_token_kind k = k land 7 = tag_big && k lsr 3 >= big_token_payload
 let far_max_capacity = 62
 
 let[@inline never] far_first_int st p k =
@@ -1824,7 +1833,22 @@ let far_clip f =
   | _ ->
       no_end
 
+let far_token_width f n0 =
+  let w = ref 0 in
+  for i = n0 to f.n - 1 do
+    let k = far_item_kind f i in
+    if is_token_kind k then w := imax !w ((k lsr 3) - big_token_payload)
+  done;
+  !w
+
 let far_relabel f n0 o0 label =
+  let w = far_token_width f n0 in
+  let kind =
+    if w > 0 then
+      token_kind w
+    else
+      tag_label
+  in
   f.n <- n0;
   begin match far_over f with
   | Some o ->
@@ -1837,11 +1861,11 @@ let far_relabel f n0 o0 label =
       ()
   end;
   if n0 = 0 then begin
-    f.k0 <- tag_label;
+    f.k0 <- kind;
     f.s0 <- label;
     f.n <- 1
   end else
-    far_push_str f tag_label label
+    far_push_str f kind label
 
 let[@inline always] fail_int st p k =
   let f = st.far in
@@ -3059,6 +3083,19 @@ let[@inline] error ?from ?upto ?(notes = []) ?help e =
     fail_user st st.pos (Payload e)
   else
     fail_user st st.pos (Payload_ext (e, { from; upto; notes; help }))
+
+let[@inline never] invalid_token_upto () =
+  invalid_arg "Parseff.expected_token: upto precedes the position"
+
+let expected_token ~upto label =
+  let st = get_state () in
+  let p = st.pos in
+  if upto < p then invalid_token_upto ();
+  if upto = p then
+    fail_str_cold st p tag_label label
+  else
+    let width = imin (upto - p) (max_small_count - big_token_payload) in
+    fail_str_cold st p (token_kind width) label
 
 let[@inline always] record_diagnostic c st pos value =
   if st.diag == c.self then begin
@@ -6415,6 +6452,8 @@ let expected_of_far f =
           else
             string_of_int payload ^ " bytes"
         )
+    else if is_token_kind kind then
+      Label s
     else if tag = tag_big && payload >= big_field_payload then begin
       let label, _, _ = field_mismatch payload s in
       Label label
@@ -6606,10 +6645,27 @@ let found_of st ~open_end stop pos =
     end
   end
 
+let token_found st ~open_end stop pos width =
+  let upto = imin (pos + width) stop in
+  if pos < st.base || upto <= pos then
+    found_of st ~open_end stop pos
+  else
+    let span = { start = pos; stop = pos + width } in
+    let text =
+      Bytes.sub_string st.input (pos - st.base) (imin (upto - pos) 33)
+    in
+    if String.length text > 32 then
+      (Text (String.sub text 0 (char_start text 32) ^ "..."), span)
+    else if upto - pos < width then
+      (Text (text ^ "..."), span)
+    else
+      (Text text, span)
+
 let found_of_far st f pos =
   let clip = far_clip f in
   let stop = imax st.base (imin clip st.input_len) in
   let all_short = ref true and all_value = ref true and value = ref None in
+  let token = ref 0 in
   for i = 0 to f.n - 1 do
     let kind = far_item_kind f i in
     let tag = kind land 7 and payload = kind lsr 3 in
@@ -6617,7 +6673,10 @@ let found_of_far st f pos =
       if not (tag = tag_bytes || (tag = tag_big && payload = big_bytes_payload))
       then
         all_short := false;
-      if tag = tag_big && payload >= big_field_payload then begin
+      if is_token_kind kind then begin
+        token := imax !token (payload - big_token_payload);
+        all_value := false
+      end else if tag = tag_big && payload >= big_field_payload then begin
         let ((_, found, _) as v) = field_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
@@ -6645,7 +6704,10 @@ let found_of_far st f pos =
           | None ->
               false
         in
-        found_of st ~open_end stop pos
+        if !token > 0 then
+          token_found st ~open_end stop pos !token
+        else
+          found_of st ~open_end stop pos
 
 let scan_location input ~from ~lines ~start pos =
   let n = count_newlines input from pos in
