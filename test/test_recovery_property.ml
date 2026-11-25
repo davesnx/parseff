@@ -206,7 +206,7 @@ let test_replay_without_recovery () =
   same "Iter.many" "yax"
     (fun () ->
       let b = Buffer.create 8 in
-      Iter.many y_or_holes (Buffer.add_string b);
+      Iter.many y_or_holes (fun s -> Buffer.add_string b s);
       Buffer.contents b
     )
     ~plain:"Ok yax";
