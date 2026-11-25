@@ -32,7 +32,7 @@ let ip_address () =
   (a, b, c, d)
 ```
 
-`octet` parses digits and validates the range afterward (unlike `Parseff.integer`, it rejects a leading `-`). `Parseff.parse` requires full consumption by default, so trailing input fails:
+`octet` parses digits and validates the range afterward (unlike [`Parseff.integer`](./Parseff.md#val-integer), it rejects a leading `-`). [`Parseff.parse`](./Parseff.md#val-parse) requires full consumption by default, so trailing input fails:
 
 ```ocaml
 match Parseff.parse "192.168.1.1" ip_address with
@@ -42,13 +42,13 @@ match Parseff.parse "192.168.1.1" ip_address with
 
 ## Error behavior
 
-- **Out of range** (`"1.2.3.256"`): fails with `"number out of range: 256"` at offset 9 (pass `~from` to `Parseff.fail` to underline the whole octet).
+- **Out of range** (`"1.2.3.256"`): fails with `"number out of range: 256"` at offset 9 (pass `~from` to [`Parseff.fail`](./Parseff.md#val-fail) to underline the whole octet).
 - **Incomplete** (`"1.2.3"`): fails expecting `'.'`, found end of input.
 - **Trailing data** (`"1.2.3.4 extra"`): fails at offset 7 with `expected digit or end of input` because the final `many` stopped at the space and furthest-failure reporting merges both expectations at offset 7.
 
 ## Clearer errors with `expect`
 
-Wrap primitives with `Parseff.expect` to replace raw token names with domain wording:
+Wrap primitives with [`Parseff.expect`](./Parseff.md#val-expect) to replace raw token names with domain wording:
 
 ```ocaml
 let digit_val () = Parseff.expect "a digit (0-9)" Parseff.digit
@@ -77,7 +77,7 @@ On `"192.168.1.x"`, this reports `expected a digit (0-9)`. On `"192.168.1x"`, it
 
 ## Typed errors
 
-Extend `Parseff.custom_error` when callers need to handle validation failures programmatically:
+Extend [`Parseff.custom_error`](./Parseff.md#type-custom_error) when callers need to handle validation failures programmatically:
 
 ```ocaml
 type Parseff.custom_error += Out_of_range of int

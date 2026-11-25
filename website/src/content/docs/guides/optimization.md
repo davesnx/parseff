@@ -9,7 +9,7 @@ Practical techniques for high-throughput, low-allocation parsers in Parseff.
 
 ## Skip instead of allocate
 
-Use `Parseff.skip_whitespace` and `Parseff.skip_while` whenever you discard the matched bytes:
+Use [`Parseff.skip_whitespace`](./Parseff.md#val-skip_whitespace) and [`Parseff.skip_while`](./Parseff.md#val-skip_while) whenever you discard the matched bytes:
 
 ```ocaml
 (* allocates and discards a string *)
@@ -23,7 +23,7 @@ parse_value ()
 
 ## Precompute byte sets with `Charset`
 
-`Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.Iter.take_while` accept a precomputed `Parseff.Charset` via `~set`, replacing per-byte closure calls with a 256-byte table lookup. Build the set once outside the parser:
+[`Parseff.take_while`](./Parseff.md#val-take_while), [`Parseff.skip_while`](./Parseff.md#val-skip_while), [`Parseff.Slice.take_while`](./Parseff-Slice.md#val-take_while), and [`Parseff.Iter.take_while`](./Parseff-Iter.md#val-take_while) accept a precomputed [`Parseff.Charset`](./Parseff-Charset.md) via `~set`, replacing per-byte closure calls with a 256-byte table lookup. Build the set once outside the parser:
 
 ```ocaml
 let is_ident c =
@@ -36,7 +36,7 @@ let ident () = Parseff.take_while ~at_least:1 ~label:"identifier" ~set:ident_set
 
 ## Use zero-copy slices and fused scanners
 
-`Parseff.Slice` borrows the input buffer without allocating substrings under `Parseff.parse`, and `Parseff.sep_by_take` / `Parseff.Slice.sep_by_take` scan an entire separated list in one loop instead of entering combinator frames per element:
+[`Parseff.Slice`](./Parseff-Slice.md) borrows the input buffer without allocating substrings under [`Parseff.parse`](./Parseff.md#val-parse), and [`Parseff.sep_by_take`](./Parseff.md#val-sep_by_take) / [`Parseff.Slice.sep_by_take`](./Parseff-Slice.md#val-sep_by_take) scan an entire separated list in one loop instead of entering combinator frames per element:
 
 ```
 Operation                        Replaces
@@ -63,11 +63,11 @@ let parse_ints () =
   |> List.map int_of_slice
 ```
 
-See the [Zero-copy API](../api/zero-copy.md) reference for details.
+See the [Zero-copy API](./zero-copy.md) reference for details.
 
 ## Dispatch with `peek_char` instead of `or_` in tight loops
 
-Each `Parseff.or_` installs a backtracking frame. Inside hot loops, dispatch on `Parseff.peek_char` or read a token once and match on it:
+Each [`Parseff.or_`](./Parseff.md#val-or_) installs a backtracking frame. Inside hot loops, dispatch on [`Parseff.peek_char`](./Parseff.md#val-peek_char) or read a token once and match on it:
 
 ```ocaml
 let keyword () =
@@ -80,4 +80,4 @@ let keyword () =
   | _ -> Parseff.fail "expected keyword"
 ```
 
-Reserve `or_` and `one_of` for branches with genuinely distinct structure or outside inner loops. For expression grammars with many operator precedence levels, `Parseff.precedence` dispatches with a single lookup per operand instead of scanning a table.
+Reserve `or_` and `one_of` for branches with genuinely distinct structure or outside inner loops. For expression grammars with many operator precedence levels, [`Parseff.precedence`](./Parseff.md#val-precedence) dispatches with a single lookup per operand instead of scanning a table.

@@ -11,7 +11,7 @@ How to update code written for an older Parseff release. Each section covers one
 
 | 0.5 | 0.6 |
 | --- | --- |
-| `parse_source` | `Parseff.Source.parse` |
+| `parse_source` | [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) |
 | `many p ()`, `or_ a b ()` and the other combinators that take parsers | `many p`, `or_ a b`; where a parser is expected, `fun () -> many p` |
 | `let item = optional p` | `let item () = optional p` |
 | `fail msg`, final for `or_`, `many` and `optional` | `cut (); fail msg` keeps it final; `fail msg` alone lets them try the next option |
@@ -44,8 +44,8 @@ Code that compiles unchanged can still behave differently:
 
 - Invalid arguments raise `Invalid_argument` instead of being clamped: a negative `~at_least` or `~at_most`, an `~at_most` below `~at_least`, a `~max_depth` below 1, a negative `~from`, `~upto` or note range, a negative `count`, and a position outside the input in `location_of_position`.
 - Going past `~at_most` fails with `Limit_exceeded`, and the failure is fatal like `cut (); fail`: an enclosing `or_`, `optional` or repetition does not try another option.
-- A second `Parseff.Source.parse` on the same source starts after the input the first one consumed, instead of losing the bytes it read ahead. `Parseff.Source.offset` gives that position.
-- `Parseff.Diagnostics.to_list` returns entries sorted by position.
+- A second [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) on the same source starts after the input the first one consumed, instead of losing the bytes it read ahead. [`Parseff.Source.offset`](./Parseff-Source.md#val-offset) gives that position.
+- [`Parseff.Diagnostics.to_list`](./Parseff-Diagnostics.md#val-to_list) returns entries sorted by position.
 - `skip_nested` closes a pair whose opening and closing bytes are the same, such as `('"', '"')`, when that byte matches the innermost open bracket.
 
 ## From 0.4 to 0.5

@@ -7,7 +7,7 @@ description: Parse Unicode code points from UTF-8 input
 
 # UTF-8 parsing
 
-`Parseff.Utf8` provides primitives operating on Unicode code points (`Uchar.t`) decoded from UTF-8 `string` input, backed by [uucp](https://erratique.ch/software/uucp) for Unicode character properties.
+[`Parseff.Utf8`](./Parseff-Utf8.md) provides primitives operating on Unicode code points (`Uchar.t`) decoded from UTF-8 `string` input, backed by [uucp](https://erratique.ch/software/uucp) for Unicode character properties.
 
 Primitives operate at the code-point level (a base character plus combining mark is two code points). For grapheme clusters, compose them with a library such as [uuseg](https://erratique.ch/software/uuseg).
 
@@ -29,17 +29,17 @@ module Slice : sig
 end
 ```
 
-- `Parseff.Utf8.satisfy` decodes the next code point (1–4 bytes) and tests the predicate, failing with `expected <label>` (default `"matching character"`).
-- `Parseff.Utf8.char` matches an exact `Uchar.t`.
-- `Parseff.Utf8.any_char` decodes and returns the next code point, failing at EOF or on invalid UTF-8.
-- `Parseff.Utf8.take_while` consumes code points while the predicate holds and returns the matched UTF-8 string. `~at_least` and `~at_most` count *code points*, not bytes.
-- `Parseff.Utf8.skip_while` skips matching code points without allocating.
-- `Parseff.Utf8.Slice.take_while` returns a zero-copy `Parseff.Slice.t`.
+- [`Parseff.Utf8.satisfy`](./Parseff-Utf8.md#val-satisfy) decodes the next code point (1–4 bytes) and tests the predicate, failing with `expected <label>` (default `"matching character"`).
+- [`Parseff.Utf8.char`](./Parseff-Utf8.md#val-char) matches an exact `Uchar.t`.
+- [`Parseff.Utf8.any_char`](./Parseff-Utf8.md#val-any_char) decodes and returns the next code point, failing at EOF or on invalid UTF-8.
+- [`Parseff.Utf8.take_while`](./Parseff-Utf8.md#val-take_while) consumes code points while the predicate holds and returns the matched UTF-8 string. `~at_least` and `~at_most` count *code points*, not bytes.
+- [`Parseff.Utf8.skip_while`](./Parseff-Utf8.md#val-skip_while) skips matching code points without allocating.
+- [`Parseff.Utf8.Slice.take_while`](./Parseff-Utf8-Slice.md#val-take_while) returns a zero-copy [`Parseff.Slice.t`](./Parseff-Slice.md#type-t).
 - All three take `~at_least`, `~at_most`, and `~label`, with the same failure. A `(at_most + 1)`-th matching code point fails with `Limit_exceeded { limit = at_most }` covering those code points.
 
 ## Mixing with byte-level primitives
 
-UTF-8 and byte-level primitives mix freely in the same parser: use byte-level primitives for ASCII syntax and `Parseff.Utf8` for text content.
+UTF-8 and byte-level primitives mix freely in the same parser: use byte-level primitives for ASCII syntax and [`Parseff.Utf8`](./Parseff-Utf8.md) for text content.
 
 ```ocaml
 let field () =
@@ -67,9 +67,9 @@ val whitespace : ?at_least:int -> unit -> string
 val skip_whitespace : unit -> unit
 ```
 
-- `Parseff.Utf8.letter`: matches Unicode alphabetic code points (`Uucp.Alpha.is_alphabetic` across Latin, Greek, Cyrillic, CJK, Arabic, Devanagari, etc.).
-- `Parseff.Utf8.alphanum`: matches a Unicode alphabetic code point or ASCII digit.
-- `Parseff.Utf8.is_whitespace`, `Parseff.Utf8.whitespace`, and `Parseff.Utf8.skip_whitespace`: match the Unicode `White_Space` property (`Uucp.White.is_white_space`, including `U+00A0`, `U+2002`, `U+2003`, `U+3000`). `~at_least` on `whitespace` counts code points.
+- [`Parseff.Utf8.letter`](./Parseff-Utf8.md#val-letter): matches Unicode alphabetic code points (`Uucp.Alpha.is_alphabetic` across Latin, Greek, Cyrillic, CJK, Arabic, Devanagari, etc.).
+- [`Parseff.Utf8.alphanum`](./Parseff-Utf8.md#val-alphanum): matches a Unicode alphabetic code point or ASCII digit.
+- [`Parseff.Utf8.is_whitespace`](./Parseff-Utf8.md#val-is_whitespace), [`Parseff.Utf8.whitespace`](./Parseff-Utf8.md#val-whitespace), and [`Parseff.Utf8.skip_whitespace`](./Parseff-Utf8.md#val-skip_whitespace): match the Unicode `White_Space` property (`Uucp.White.is_white_space`, including `U+00A0`, `U+2002`, `U+2003`, `U+3000`). `~at_least` on `whitespace` counts code points.
 
 ## Invalid UTF-8
 
@@ -77,8 +77,8 @@ All `Utf8` primitives fail with `expected valid UTF-8` on bare continuation byte
 
 ## Positions, columns, and streaming
 
-- **Positions**: `Parseff.position` and `location.byte_col` always count bytes (a single `Utf8.satisfy` advances by 1–4 bytes).
-- **Error columns and carets**: `Parseff.render_error` header columns count code points, while carets count terminal cells (wide characters like `名` take two, combining marks take zero). See [`errors`](./errors.md) for streaming dropped-prefix behavior.
+- **Positions**: [`Parseff.position`](./Parseff.md#val-position) and `location.byte_col` always count bytes (a single `Utf8.satisfy` advances by 1–4 bytes).
+- **Error columns and carets**: [`Parseff.render_error`](./Parseff.md#val-render_error) header columns count code points, while carets count terminal cells (wide characters like `名` take two, combining marks take zero). See [`errors`](./errors.md) for streaming dropped-prefix behavior.
 
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'
@@ -86,4 +86,4 @@ input.json:1:6: [error] expected ',' or ']', found '"'
   |      ^
 ```
 
-- **Streaming**: all `Utf8` primitives work across chunk boundaries in `Parseff.Source.parse` and `Parseff.Push`.
+- **Streaming**: all `Utf8` primitives work across chunk boundaries in [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) and [`Parseff.Push`](./Parseff-Push.md).

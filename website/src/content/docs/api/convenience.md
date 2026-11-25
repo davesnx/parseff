@@ -18,10 +18,10 @@ val alphanum : unit -> char
 val any_char : unit -> char
 ```
 
-- `Parseff.digit`: ASCII decimal digit (`'0'`..`'9'`). Use `Parseff.integer` to parse an integer value directly.
-- `Parseff.letter`: ASCII letter (`'a'`..`'z'` or `'A'`..`'Z'`).
-- `Parseff.alphanum`: ASCII letter or digit.
-- `Parseff.any_char`: any single byte; fails only at end of input.
+- [`Parseff.digit`](./Parseff.md#val-digit): ASCII decimal digit (`'0'`..`'9'`). Use [`Parseff.integer`](./Parseff.md#val-integer) to parse an integer value directly.
+- [`Parseff.letter`](./Parseff.md#val-letter): ASCII letter (`'a'`..`'z'` or `'A'`..`'Z'`).
+- [`Parseff.alphanum`](./Parseff.md#val-alphanum): ASCII letter or digit.
+- [`Parseff.any_char`](./Parseff.md#val-any_char): any single byte; fails only at end of input.
 
 ```ocaml
 let username () =
@@ -32,7 +32,7 @@ let username () =
 
 ## Numbers
 
-All number parsers stop at the first byte that does not belong to the number and work across chunk boundaries in `Parseff.Source.parse`.
+All number parsers stop at the first byte that does not belong to the number and work across chunk boundaries in [`Parseff.Source.parse`](./Parseff-Source.md#val-parse).
 
 ```ocaml
 val integer : unit -> int
@@ -40,9 +40,9 @@ val number : unit -> float
 val hex_integer : unit -> int
 ```
 
-- `Parseff.integer`: optional `-` followed by ASCII digits. Fails without a digit or on `int` overflow.
-- `Parseff.number`: JSON-grammar decimal float (optional `-`, digits, optional fraction only when a digit follows `'.'`, optional exponent only when a digit or sign+digit follows `'e'`/`'E'`). Fails without a digit or on float overflow. `"-0"` returns `-0.` (whereas `integer` returns `0`).
-- `Parseff.hex_integer`: unsigned ASCII hex digits (no sign, no `0x` prefix). Fails without a digit or above `max_int`.
+- [`Parseff.integer`](./Parseff.md#val-integer): optional `-` followed by ASCII digits. Fails without a digit or on `int` overflow.
+- [`Parseff.number`](./Parseff.md#val-number): JSON-grammar decimal float (optional `-`, digits, optional fraction only when a digit follows `'.'`, optional exponent only when a digit or sign+digit follows `'e'`/`'E'`). Fails without a digit or on float overflow. `"-0"` returns `-0.` (whereas `integer` returns `0`).
+- [`Parseff.hex_integer`](./Parseff.md#val-hex_integer): unsigned ASCII hex digits (no sign, no `0x` prefix). Fails without a digit or above `max_int`.
 
 ```ocaml
 let point () =
@@ -58,7 +58,7 @@ let color () =
 
 ### Custom number formats
 
-`integer`, `number`, and `hex_integer` do not accept leading `+`, `.5`, digit separators (`1_000`), `inf`, or `nan`, and stop before non-matching suffixes: `number` on `"5."` returns `5.` and stops at `'.'`, and on `"2em"` returns `2.` and stops at `'e'`. Build custom formats with `Parseff.take_while` and `Parseff.recognize`:
+`integer`, `number`, and `hex_integer` do not accept leading `+`, `.5`, digit separators (`1_000`), `inf`, or `nan`, and stop before non-matching suffixes: `number` on `"5."` returns `5.` and stops at `'.'`, and on `"2em"` returns `2.` and stops at `'e'`. Build custom formats with [`Parseff.take_while`](./Parseff.md#val-take_while) and [`Parseff.recognize`](./Parseff.md#val-recognize):
 
 ```ocaml
 let is_digit c = c >= '0' && c <= '9'
@@ -91,9 +91,9 @@ val whitespace : ?at_least:int -> unit -> string
 val skip_whitespace : unit -> unit
 ```
 
-- `Parseff.is_whitespace` returns `true` for space, tab, newline, and carriage return.
-- `Parseff.whitespace` reads zero or more ASCII whitespace bytes as a string (pass `~at_least:1` to require at least one).
-- `Parseff.skip_whitespace` skips ASCII whitespace without allocating. Prefer it whenever you do not need the matched string.
+- [`Parseff.is_whitespace`](./Parseff.md#val-is_whitespace) returns `true` for space, tab, newline, and carriage return.
+- [`Parseff.whitespace`](./Parseff.md#val-whitespace) reads zero or more ASCII whitespace bytes as a string (pass `~at_least:1` to require at least one).
+- [`Parseff.skip_whitespace`](./Parseff.md#val-skip_whitespace) skips ASCII whitespace without allocating. Prefer it whenever you do not need the matched string.
 
 ```ocaml
 let words () =
@@ -108,7 +108,7 @@ let words () =
 
 ### `lexeme`
 
-`Parseff.lexeme` runs a parser, then `~skip` (default: `Parseff.skip_whitespace`), and returns the parser's result.
+[`Parseff.lexeme`](./Parseff.md#val-lexeme) runs a parser, then `~skip` (default: [`Parseff.skip_whitespace`](./Parseff.md#val-skip_whitespace)), and returns the parser's result.
 
 ```ocaml
 val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
@@ -133,9 +133,9 @@ let pair () =
 
 ### `keyword`, `is_ident_char`, and `identifier`
 
-- `Parseff.is_ident_char`: `true` for ASCII letters, digits, and `'_'`.
-- `Parseff.keyword`: matches a literal only when the following byte does not satisfy `~is_ident` (default `Parseff.is_ident_char`), so `keyword "let"` rejects `"letter"` at offset 0. Raises `Invalid_argument` on `""`.
-- `Parseff.identifier`: matches one `start` byte followed by zero or more `inner` bytes. `~reserved` rejects keywords as ordinary `Expected` failures at offset 0 so alternatives in `Parseff.or_` still work.
+- [`Parseff.is_ident_char`](./Parseff.md#val-is_ident_char): `true` for ASCII letters, digits, and `'_'`.
+- [`Parseff.keyword`](./Parseff.md#val-keyword): matches a literal only when the following byte does not satisfy `~is_ident` (default [`Parseff.is_ident_char`](./Parseff.md#val-is_ident_char)), so `keyword "let"` rejects `"letter"` at offset 0. Raises `Invalid_argument` on `""`.
+- [`Parseff.identifier`](./Parseff.md#val-identifier): matches one `start` byte followed by zero or more `inner` bytes. `~reserved` rejects keywords as ordinary `Expected` failures at offset 0 so alternatives in [`Parseff.or_`](./Parseff.md#val-or_) still work.
 
 ```ocaml
 val is_ident_char : char -> bool
@@ -168,8 +168,8 @@ val take : int -> string
 val within : int -> (unit -> 'a) -> 'a
 ```
 
-- `Parseff.take` reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
-- `Parseff.within` (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
+- [`Parseff.take`](./Parseff.md#val-take) reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
+- [`Parseff.within`](./Parseff.md#val-within) (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
 - To stream a payload larger than `~backtrack_window` to a callback, see [`Iter`](./streaming.md#iter).
 
 ```ocaml

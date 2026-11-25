@@ -7,11 +7,11 @@ description: Zero-copy slices and fused scanners
 
 # Zero-copy API
 
-`Parseff.Slice` and `Parseff.sep_by_take` avoid intermediate string allocations when scanning hot paths or converting bytes directly into values.
+[`Parseff.Slice`](./Parseff-Slice.md) and [`Parseff.sep_by_take`](./Parseff.md#val-sep_by_take) avoid intermediate string allocations when scanning hot paths or converting bytes directly into values.
 
 ## `Slice`
 
-A `Parseff.Slice.t` borrows a byte range from the input string without copying under `Parseff.parse`. Under `Parseff.Source.parse` (or inside `Parseff.within`), slices may be materialized into owned copies so the streaming buffer can reclaim older prefixes.
+A [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) borrows a byte range from the input string without copying under [`Parseff.parse`](./Parseff.md#val-parse). Under [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) (or inside [`Parseff.within`](./Parseff.md#val-within)), slices may be materialized into owned copies so the streaming buffer can reclaim older prefixes.
 
 ```ocaml
 module Slice : sig
@@ -29,11 +29,11 @@ module Slice : sig
 end
 ```
 
-`Parseff.Slice.get` indexes relative to the start of the slice and raises `Invalid_argument` outside `0 .. Slice.length s - 1`.
+[`Parseff.Slice.get`](./Parseff-Slice.md#val-get) indexes relative to the start of the slice and raises `Invalid_argument` outside `0 .. Slice.length s - 1`.
 
 ### `Slice.take_while`
 
-Zero-copy counterpart of `Parseff.take_while`, with the same `~at_least`, `~at_most`, `~label`, and `~set`.
+Zero-copy counterpart of [`Parseff.take_while`](./Parseff.md#val-take_while), with the same `~at_least`, `~at_most`, `~label`, and `~set`.
 
 ```ocaml
 let int_of_slice slice =
@@ -51,7 +51,7 @@ let fast_uint () =
 
 ### `Slice.take`
 
-Reads exactly `n` bytes like `Parseff.take` and returns a `Parseff.Slice.t`.
+Reads exactly `n` bytes like [`Parseff.take`](./Parseff.md#val-take) and returns a [`Parseff.Slice.t`](./Parseff-Slice.md#type-t).
 
 ```ocaml
 let payload () =
@@ -66,11 +66,11 @@ let () =
 
 ### `Slice.recognize`
 
-Runs a parser, discards its return value, and returns the consumed bytes as a `Parseff.Slice.t`. See `Parseff.recognize`.
+Runs a parser, discards its return value, and returns the consumed bytes as a [`Parseff.Slice.t`](./Parseff-Slice.md#type-t). See [`Parseff.recognize`](./Parseff.md#val-recognize).
 
 ### `Slice.sep_by_take`
 
-Fused separated-list scanner returning `Parseff.Slice.t` elements. `~ws` skips surrounding bytes around `~sep`, and the final predicate matches each element's bytes.
+Fused separated-list scanner returning [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) elements. `~ws` skips surrounding bytes around `~sep`, and the final predicate matches each element's bytes.
 
 ```ocaml
 let csv_to_ints () =
@@ -92,7 +92,7 @@ let () =
 
 ## Fused string scanner: `sep_by_take`
 
-`Parseff.sep_by_take` runs the same fused loop as `Parseff.Slice.sep_by_take` and returns `string list` directly without intermediate combinator frames.
+[`Parseff.sep_by_take`](./Parseff.md#val-sep_by_take) runs the same fused loop as [`Parseff.Slice.sep_by_take`](./Parseff-Slice.md#val-sep_by_take) and returns `string list` directly without intermediate combinator frames.
 
 ```ocaml
 val sep_by_take :
