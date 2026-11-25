@@ -20,11 +20,15 @@ const pages = (dir) =>
 		return entry.name === 'index.html' ? [path] : [];
 	});
 
+// Text escapes `<`, so a match that starts at `<` is a real tag, not a code example.
+const attributes = (html, name) =>
+	[...html.matchAll(new RegExp(`<[a-zA-Z][^>]*\\s${name}="([^"]+)"`, 'g'))].map((m) => m[1]);
+
 const ids = new Map();
 const idsOf = (file) => {
 	if (!ids.has(file)) {
 		const html = readFileSync(file, 'utf8');
-		ids.set(file, new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1])));
+		ids.set(file, new Set(attributes(html, 'id')));
 	}
 	return ids.get(file);
 };
@@ -42,7 +46,7 @@ for (const page of pages(dist)) {
 	const dir = relative(dist, join(page, '..')).split(sep).join('/');
 	const route = dir ? `${base}/${dir}/` : `${base}/`;
 	const main = readFileSync(page, 'utf8').match(/<main[\s\S]*<\/main>/)?.[0] ?? '';
-	for (const [, href] of main.matchAll(/\shref="([^"]+)"/g)) {
+	for (const href of attributes(main, 'href')) {
 		const url = new URL(href.replaceAll('&amp;', '&'), `http://site${route}`);
 		if (url.host !== 'site' || !url.pathname.startsWith(`${base}/`)) continue;
 		checked++;
