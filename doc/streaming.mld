@@ -328,10 +328,9 @@ let http_method () =
 
 {1:iter [Iter]}
 
-{!module:Parseff.Iter} passes each
-value or byte piece to a callback [f] instead of returning it. Memory stays
-bounded by one element or one piece, so the input can be much larger than
-[~backtrack_window].
+{!module:Parseff.Iter} passes each value or byte piece to a callback [f]
+instead of returning it. Memory stays bounded by one element or one piece, so
+the input can be much larger than [~backtrack_window].
 
 {@ocaml skip[
 module Iter : sig
