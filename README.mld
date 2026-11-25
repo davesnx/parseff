@@ -65,8 +65,11 @@ let () =
   monadic ([>>=], [>>|], [*>]) or binding ([let*], [let+], [and+]) operators.
 - {{:https://davesnx.github.io/parseff/api/errors/}{b Structured errors and source excerpts}}:
   furthest-failure reporting with merged expectations, typed custom errors,
-  construct contexts, and multi-error
-  {{:https://davesnx.github.io/parseff/guides/error-recovery/}recovery}.
+  and construct contexts.
+- {{:https://davesnx.github.io/parseff/guides/error-recovery/}{b Error recovery}}:
+  keep parsing after an error and report every error in one run. [recover]
+  records the error, skips to a sync point, and returns a placeholder; [list]
+  recovers per element; [capture] returns a failure as a [result].
 - {b Automatic backtracking}: {{:https://davesnx.github.io/parseff/api/combinators/#or_}[Parseff.or_]}
   and [Parseff.one_of], with [commit] and [cut] to seal branches.
 - {{:https://davesnx.github.io/parseff/api/streaming/}{b Pull and push streaming}}:
