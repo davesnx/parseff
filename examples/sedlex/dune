@@ -1,8 +1,8 @@
-(executable
- (name main)
+(executables
+ (names main probe)
  (libraries parseff sedlex)
  (preprocess
   (pps sedlex.ppx)))
 
 (cram
- (deps main.exe))
+ (deps main.exe probe.exe))
