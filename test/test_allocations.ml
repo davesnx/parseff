@@ -729,6 +729,36 @@ let test_parse_loop_large_window () =
   check_bytes_per_line ~backtrack_window:(1 lsl 21) "one chunk"
     (Parseff.Source.of_seq (Seq.return line_input))
 
+(* Slices at an odd offset, of each length class: below 4, below 8, 8, and
+   more than 8 bytes. *)
+let test_slice_keys () =
+  List.iter
+    (fun n ->
+      let key = String.init n (fun i -> Char.chr (97 + i)) in
+      let slice =
+        match
+          Parseff.parse ("#" ^ key) (fun () ->
+              let _ = Parseff.char '#' in
+              Parseff.Slice.take n
+          )
+        with
+        | Ok slice ->
+            slice
+        | Error error ->
+            Alcotest.fail (Parseff.render_error error)
+      in
+      let other = Parseff.Slice.of_string key in
+      let check name f =
+        let actual = words_per_call f in
+        if actual > 0. then
+          Alcotest.failf "%s on %d bytes allocated %.6f minor words per call"
+            name n actual
+      in
+      check "Slice.hash" (fun () -> Parseff.Slice.hash slice);
+      check "Slice.equal" (fun () -> Parseff.Slice.equal slice other)
+    )
+    [ 0; 3; 7; 8; 17 ]
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -746,6 +776,7 @@ let () =
           Alcotest.test_case "literal" `Quick test_literal_success;
           Alcotest.test_case "skip_until" `Quick test_skip_until_success;
           Alcotest.test_case "scans" `Quick test_scan_success;
+          Alcotest.test_case "Slice.hash and Slice.equal" `Quick test_slice_keys;
         ]
       );
       ( "operators",

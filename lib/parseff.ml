@@ -48,6 +48,82 @@ let[@inline always] span_get s i =
   if i < 0 || i >= s.len then invalid_arg "Parseff.Slice.get";
   String.unsafe_get s.buf (s.off + i)
 
+external string_get64u : string -> int -> int64 = "%caml_string_get64u"
+external string_get32u : string -> int -> int32 = "%caml_string_get32u"
+
+let span_of_string s = { buf = s; off = 0; len = String.length s }
+
+(* FxHash rounds over 8-byte words, then the MurmurHash3 64-bit finalizer. A
+   tail shorter than 8 bytes is read as overlapping words, so every byte is
+   read once or twice and no byte loop runs. *)
+let[@inline always] fx_round h w =
+  Int64.mul
+    (Int64.logxor
+       (Int64.logor (Int64.shift_left h 5) (Int64.shift_right_logical h 59))
+       w
+    )
+    0x517cc1b727220a95L
+
+let span_hash s =
+  let buf = s.buf in
+  let off = s.off in
+  let len = s.len in
+  let h = ref (Int64.of_int len) in
+  if len >= 8 then begin
+    let last = off + len - 8 in
+    let i = ref off in
+    while !i < last do
+      h := fx_round !h (string_get64u buf !i);
+      i := !i + 8
+    done;
+    h := fx_round !h (string_get64u buf last)
+  end else if len >= 4 then begin
+    let lo = Int64.of_int32 (string_get32u buf off) in
+    let hi = Int64.of_int32 (string_get32u buf (off + len - 4)) in
+    h :=
+      fx_round !h
+        (Int64.logor (Int64.logand lo 0xFFFFFFFFL) (Int64.shift_left hi 32))
+  end else if len > 0 then begin
+    let b0 = Char.code (String.unsafe_get buf off) in
+    let b1 = Char.code (String.unsafe_get buf (off + (len lsr 1))) in
+    let b2 = Char.code (String.unsafe_get buf (off + len - 1)) in
+    h := fx_round !h (Int64.of_int (b0 lor (b1 lsl 8) lor (b2 lsl 16)))
+  end;
+  let h = !h in
+  let h = Int64.logxor h (Int64.shift_right_logical h 33) in
+  let h = Int64.mul h 0xff51afd7ed558ccdL in
+  let h = Int64.logxor h (Int64.shift_right_logical h 33) in
+  let h = Int64.mul h 0xc4ceb9fe1a85ec53L in
+  let h = Int64.logxor h (Int64.shift_right_logical h 33) in
+  Int64.to_int h land max_int
+
+let rec equal_words a ao b bo i last =
+  if i < last then
+    (string_get64u a (ao + i) : int64) = string_get64u b (bo + i)
+    && equal_words a ao b bo (i + 8) last
+  else
+    (string_get64u a (ao + last) : int64) = string_get64u b (bo + last)
+
+let rec equal_bytes a ao b bo i len =
+  i = len
+  || String.unsafe_get a (ao + i) = String.unsafe_get b (bo + i)
+     && equal_bytes a ao b bo (i + 1) len
+
+(* Compares 8-byte words, then the last 8 bytes, which may overlap the words
+   already compared. Below 8 bytes the same goes for 4-byte words. *)
+let span_equal a b =
+  let len = a.len in
+  len = b.len
+  &&
+  if len >= 8 then
+    equal_words a.buf a.off b.buf b.off 0 (len - 8)
+  else if len >= 4 then
+    (string_get32u a.buf a.off : int32) = string_get32u b.buf b.off
+    && (string_get32u a.buf (a.off + len - 4) : int32)
+       = string_get32u b.buf (b.off + len - 4)
+  else
+    equal_bytes a.buf a.off b.buf b.off 0 len
+
 type location = { offset : int; line : int; byte_col : int }
 type range_data = { start : int; stop : int }
 type note_data = { at : range_data option; text : string }
@@ -8016,6 +8092,9 @@ module Slice = struct
   let sep_by_take = sep_by_take_span
   let recognize = recognize_span
   let take = take_span
+  let of_string = span_of_string
+  let equal = span_equal
+  let hash = span_hash
 end
 
 module Source = struct
