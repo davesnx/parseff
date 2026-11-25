@@ -1,3 +1,7 @@
+## Unreleased
+
+- [PERF] Scan a `Charset` that excludes one or two bytes, such as `fun c -> c <> ';'`, 8 bytes at a time in `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` (@davesnx)
+
 ## 0.6.0
 
 - [BREAKING] `fail`, `error` and `warn` raise `Invalid_argument` on a note whose `at` has a negative `start` or `stop`, and swap `start` and `stop` when `start > stop`, as they do for `~from` and `~upto`; `render_error` printed such notes at the wrong place ([#141](https://github.com/davesnx/parseff/pull/141)) (@davesnx)

@@ -2145,17 +2145,105 @@ let[@inline always] handle_skip_while st pred =
   st.pos <- scan_while st ~keep_from:no_keep st.pos pred
 
 module Charset = struct
+  (* Bytes 0 to 255 hold membership. Byte 256 holds the number of excluded
+     bytes when it is 1 or 2, and 0 otherwise; bytes 257 and 258 hold the
+     excluded bytes. *)
   type t = string
 
+  let excluded_count = 256
+
   let of_predicate f =
-    String.init 256 (fun i ->
-        if f (Char.chr i) then
-          '\001'
-        else
-          '\000'
-    )
+    let set =
+      Bytes.init 259 (fun i ->
+          if i < 256 && f (Char.chr i) then
+            '\001'
+          else
+            '\000'
+      )
+    in
+    let excluded = ref [] in
+    for i = 255 downto 0 do
+      if Bytes.get set i = '\000' then excluded := Char.chr i :: !excluded
+    done;
+    ( match !excluded with
+    | [ a ] ->
+        Bytes.set set excluded_count '\001';
+        Bytes.set set 257 a;
+        Bytes.set set 258 a
+    | [ a; b ] ->
+        Bytes.set set excluded_count '\002';
+        Bytes.set set 257 a;
+        Bytes.set set 258 b
+    | _ ->
+        ()
+    );
+    Bytes.unsafe_to_string set
 
   let[@inline always] mem set c = String.unsafe_get set (Char.code c) <> '\000'
+
+  (* Marks the zero bytes of [x] with their high bit. Only the lowest mark is
+     exact, which is all [first_mark] reads. *)
+  let[@inline always] zero_bytes x =
+    Int64.logand
+      (Int64.logand (Int64.sub x 0x0101010101010101L) (Int64.lognot x))
+      0x8080808080808080L
+
+  (* Index of the byte holding the lowest mark of [m], on little-endian. *)
+  let[@inline always] first_mark m =
+    let low = Int64.shift_right_logical (Int64.logand m (Int64.neg m)) 7 in
+    Int64.to_int
+      (Int64.shift_right_logical (Int64.mul low 0x0001020304050607L) 56)
+
+  let[@inline always] repeat c =
+    Int64.mul (Int64.of_int (Char.code c)) 0x0101010101010101L
+
+  let[@inline always] excluded_marks x a b =
+    Int64.logor (zero_bytes (Int64.logxor x a)) (zero_bytes (Int64.logxor x b))
+
+  (* Reads 8 bytes at a time and stops at the first excluded byte. The last
+     partial word is read again as the word ending at [limit]; its bytes before
+     the current index are already known to be in the set. *)
+  let[@inline never] scan_excluded set inp from limit =
+    let a = repeat (String.unsafe_get set 257) in
+    let b = repeat (String.unsafe_get set 258) in
+    let i = ref from in
+    let found = ref (-1) in
+    while !found < 0 && !i + 8 <= limit do
+      let m = excluded_marks (bytes_get64u inp !i) a b in
+      if m <> 0L then
+        found := !i + first_mark m
+      else
+        i := !i + 8
+    done;
+    if !found >= 0 then
+      !found
+    else if !i = limit then
+      limit
+    else if limit - from >= 8 then begin
+      let j = limit - 8 in
+      let m = excluded_marks (bytes_get64u inp j) a b in
+      if m <> 0L then
+        j + first_mark m
+      else
+        limit
+    end else begin
+      while !i < limit && mem set (Bytes.unsafe_get inp !i) do
+        incr i
+      done;
+      !i
+    end
+
+  (* [scan set inp from limit] returns the first index in [from, limit) whose
+     byte is not in [set], or [limit]. *)
+  let[@inline always] scan set inp from limit =
+    if String.unsafe_get set excluded_count = '\000' || Sys.big_endian then begin
+      let i = ref from in
+      while !i < limit && mem set (Bytes.unsafe_get inp !i) do
+        incr i
+      done;
+      !i
+    end else
+      scan_excluded set inp from limit
 end
 
 let[@inline never] scan_set_refilling st ~keep_from start set =
@@ -2165,12 +2253,9 @@ let[@inline never] scan_set_refilling st ~keep_from start set =
     let base = st.base in
     let inp = st.input in
     let len = st.input_len - base in
-    let i = ref (!p - base) in
-    while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
-      incr i
-    done;
-    p := !i + base;
-    if !i < len || not (refill_at st keep_from !p) then continue_loop := false
+    let i = Charset.scan set inp (!p - base) len in
+    p := i + base;
+    if i < len || not (refill_at st keep_from !p) then continue_loop := false
   done;
   !p
 
@@ -2178,18 +2263,15 @@ let[@inline always] scan_set st ~keep_from start set =
   let base = st.base in
   let inp = st.input in
   let len = st.input_len - base in
-  let i = ref (start - base) in
-  while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
-    incr i
-  done;
-  if !i < len then
-    !i + base
+  let i = Charset.scan set inp (start - base) len in
+  if i < len then
+    i + base
   else
     match st.source with
     | None ->
-        !i + base
+        i + base
     | Some _ ->
-        scan_set_refilling st ~keep_from (!i + base) set
+        scan_set_refilling st ~keep_from (i + base) set
 
 let[@inline always] handle_sep_by_take st ws_pred sep_char take_pred =
   let start = st.pos in
@@ -2798,12 +2880,9 @@ let[@inline never] scan_set_until st ~keep_from start stop set =
     let base = st.base in
     let inp = st.input in
     let len = imin st.input_len stop - base in
-    let i = ref (!p - base) in
-    while !i < len && Charset.mem set (Bytes.unsafe_get inp !i) do
-      incr i
-    done;
-    p := !i + base;
-    if !i < len || !p >= stop || not (refill_at st keep_from !p) then
+    let i = Charset.scan set inp (!p - base) len in
+    p := i + base;
+    if i < len || !p >= stop || not (refill_at st keep_from !p) then
       continue_loop := false
   done;
   !p
@@ -3812,11 +3891,8 @@ module Iter = struct
             !i
       | Some set ->
           fun p stop ->
-            let i = ref p in
-            while !i < stop && Charset.mem set (char_at st !i) do
-              incr i
-            done;
-            !i
+            let base = st.base in
+            Charset.scan set st.input (p - base) (stop - base) + base
     in
     ignore (iter_input st max_int scan f : int)
 end

@@ -410,8 +410,9 @@ val char : char -> char
 (** [char c] matches and returns the byte [c]. *)
 
 (** Precomputed 256-byte lookup table for the [~set] argument of {!take_while},
-    {!skip_while}, {!Slice.take_while}, and {!Iter.take_while}. Build once
-    outside the parser. *)
+    {!skip_while}, {!Slice.take_while}, and {!Iter.take_while}. A set that
+    excludes one or two bytes is scanned 8 bytes at a time. Build once outside
+    the parser. *)
 module Charset : sig
   type t
 
