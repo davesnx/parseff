@@ -1,3 +1,7 @@
+## Unreleased
+
+- [PERF] Scan the input directly in `Iter.take_while` instead of through a closure built on every call: 6 fewer minor words per call and up to 20% faster on 8-byte words ([#149](https://github.com/davesnx/parseff/pull/149)) (@davesnx)
+
 ## 0.6.0
 
 - [BREAKING] `fail`, `error` and `warn` raise `Invalid_argument` on a note whose `at` has a negative `start` or `stop`, and swap `start` and `stop` when `start > stop`, as they do for `~from` and `~upto`; `render_error` printed such notes at the wrong place ([#141](https://github.com/davesnx/parseff/pull/141)) (@davesnx)
