@@ -51,18 +51,17 @@ let peek t =
   skip_to tok.start;
   tok
 
-let advance t = skip_to (peek t).stop
+let advance (t : Lexer.t) = skip_to t.stop
 
-let unexpected t expected =
-  let tok = peek t in
-  error ~from:tok.start ~upto:tok.stop
-    (Unexpected { expected; found = tok.token })
+let unexpected (t : Lexer.t) expected =
+  error ~from:t.start ~upto:t.stop (Unexpected { expected; found = t.token })
 
-let eat t token label =
-  if (peek t).token = token then
-    advance t
+let eat t expected_token label =
+  let current_token = peek t in
+  if current_token.token = expected_token then
+    advance current_token
   else
-    unexpected t label
+    unexpected current_token label
 
 (* Operators are read by [operator], so their token parsers only return the
    build function. *)
@@ -73,11 +72,12 @@ let mul = binop '*'
 let div = binop '/'
 
 let operator t () =
+  let tok = peek t in
   let found prec op =
-    advance t;
+    advance tok;
     Some (prec, op)
   in
-  match (peek t).token with
+  match tok.token with
   | Plus ->
       found 1 add
   | Minus ->
@@ -95,15 +95,15 @@ and operand t scope () =
   let tok = peek t in
   match tok.token with
   | Number n ->
-      advance t;
+      advance tok;
       Num n
   | Ident name ->
       if not (List.mem name scope) then
         error ~from:tok.start ~upto:tok.stop (Unbound name);
-      advance t;
+      advance tok;
       Var name
   | Minus ->
-      advance t;
+      advance tok;
       Neg
         (rec_ (fun () ->
              precedence ~min:3 ~operator:(operator t) (operand t scope)
@@ -111,26 +111,27 @@ and operand t scope () =
         )
   | Lparen ->
       context ~delimited:true "parenthesized expression" (fun () ->
-          advance t;
+          advance tok;
           let e = rec_ (expr t scope) in
           eat t Rparen "')'";
           e
       )
   | Let ->
-      let_binding t scope
+      let_binding t scope tok
   | _ ->
-      unexpected t "an expression"
+      unexpected tok "an expression"
 
-and let_binding t scope =
+and let_binding t scope let_token =
   context "let binding" (fun () ->
-      advance t;
+      advance let_token;
+      let name_token = peek t in
       let name =
-        match (peek t).token with
+        match name_token.token with
         | Ident name ->
-            advance t;
+            advance name_token;
             name
         | _ ->
-            unexpected t "a name"
+            unexpected name_token "a name"
       in
       eat t Equal "'='";
       let value = rec_ (expr t scope) in
