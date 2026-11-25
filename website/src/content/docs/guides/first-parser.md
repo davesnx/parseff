@@ -10,8 +10,8 @@ Build a key-value config file parser from scratch.
 Parser combinators compose small single-purpose parsers in three ways:
 
 - **Sequence**: parse A, then parse B (`let` bindings)
-- **Choice**: try A, then fall back to B (`Parseff.or_`, `Parseff.one_of`)
-- **Repetition**: parse A repeatedly (`Parseff.many`, `Parseff.sep_by`)
+- **Choice**: try A, then fall back to B ([`Parseff.or_`](./Parseff.md#val-or_), [`Parseff.one_of`](./Parseff.md#val-one_of))
+- **Repetition**: parse A repeatedly ([`Parseff.many`](./Parseff.md#val-many), [`Parseff.sep_by`](./Parseff.md#val-sep_by))
 
 ## The format
 
@@ -46,7 +46,7 @@ let entry () =
 
 `take_while ~at_least:1` consumes bytes matching the predicate and fails with `expected <label>` if none match. `skip_while` advances without allocating a string. Sequencing uses plain OCaml `let` bindings.
 
-Run it with `Parseff.parse`:
+Run it with [`Parseff.parse`](./Parseff.md#val-parse):
 
 ```ocaml
 match Parseff.parse "host = localhost" entry with
@@ -56,7 +56,7 @@ match Parseff.parse "host = localhost" entry with
 
 ## Step 2: comments and blank lines
 
-A line is a comment, an entry, or blank. `Parseff.one_of` tries each alternative in order, backtracking automatically on failure:
+A line is a comment, an entry, or blank. [`Parseff.one_of`](./Parseff.md#val-one_of) tries each alternative in order, backtracking automatically on failure:
 
 ```ocaml
 let comment () =
@@ -79,7 +79,7 @@ The final branch matches blank lines without consuming input.
 
 ## Step 3: the whole file
 
-`Parseff.sep_by` parses lines separated by `'\n'`. `Parseff.parse` requires full input consumption by default, so trailing garbage fails rather than being silently ignored.
+[`Parseff.sep_by`](./Parseff.md#val-sep_by) parses lines separated by `'\n'`. [`Parseff.parse`](./Parseff.md#val-parse) requires full input consumption by default, so trailing garbage fails rather than being silently ignored.
 
 ```ocaml
 let config () =
@@ -111,7 +111,7 @@ debug = true
 
 ## Step 4: typed values
 
-Parse values into an algebraic type using `Parseff.or_` (two branches) and `Parseff.one_of` (three or more):
+Parse values into an algebraic type using [`Parseff.or_`](./Parseff.md#val-or_) (two branches) and [`Parseff.one_of`](./Parseff.md#val-one_of) (three or more):
 
 ```ocaml
 type config_value =
@@ -154,7 +154,7 @@ Order matters: `bool_value` must come before `tag_list`, otherwise `"true"` matc
 
 ## Step 5: validation with typed errors
 
-To reject invalid port numbers with a structured error, extend `Parseff.custom_error` and call `Parseff.error`:
+To reject invalid port numbers with a structured error, extend [`Parseff.custom_error`](./Parseff.md#type-custom_error) and call [`Parseff.error`](./Parseff.md#val-error):
 
 ```ocaml
 type Parseff.custom_error += Port_out_of_range of int
@@ -177,4 +177,4 @@ match Parseff.parse "port = 99999" typed_entry with
 | Error e -> prerr_endline (Parseff.render_error e)
 ```
 
-Use `Parseff.error` when callers need to match failure cases in code, and `Parseff.fail` when a string message is enough.
+Use [`Parseff.error`](./Parseff.md#val-error) when callers need to match failure cases in code, and [`Parseff.fail`](./Parseff.md#val-fail) when a string message is enough.

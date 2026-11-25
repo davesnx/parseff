@@ -87,6 +87,9 @@ jobs:
           ocaml-compiler: 5.3.0
           with-doc: true
           with-dev-setup: true
+          pins: |
+            odoc-parser git+https://github.com/davesnx/odoc.git#9a61607361c6820d48e6fde486fd82fcc476d0af
+            odoc git+https://github.com/davesnx/odoc.git#9a61607361c6820d48e6fde486fd82fcc476d0af
 
       - name: Setup Node
         uses: actions/setup-node@v4

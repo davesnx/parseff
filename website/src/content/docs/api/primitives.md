@@ -13,7 +13,7 @@ Primitives read bytes directly from the input.
 
 ### `literal`
 
-`Parseff.literal` matches an exact string and returns `()`. On a mismatch, it fails at the first differing byte expecting the rest of the string: `literal "ab"` on `"ax"` fails at offset 1 with `expected "b"`. Mismatches inside a multi-byte UTF-8 character are reported at the start of that character. Pass `~case_sensitive:false` for ASCII case-insensitive matching (`A`–`Z` and `a`–`z` only).
+[`Parseff.literal`](./Parseff.md#val-literal) matches an exact string and returns `()`. On a mismatch, it fails at the first differing byte expecting the rest of the string: `literal "ab"` on `"ax"` fails at offset 1 with `expected "b"`. Mismatches inside a multi-byte UTF-8 character are reported at the start of that character. Pass `~case_sensitive:false` for ASCII case-insensitive matching (`A`–`Z` and `a`–`z` only).
 
 ```ocaml
 val literal : ?case_sensitive:bool -> string -> unit
@@ -29,7 +29,7 @@ In streaming, `literal` checks buffered bytes first and pulls more input only wh
 
 ### `char`
 
-`Parseff.char` matches a single byte and returns it.
+[`Parseff.char`](./Parseff.md#val-char) matches a single byte and returns it.
 
 ```ocaml
 val char : char -> char
@@ -47,7 +47,7 @@ let pair () =
 
 ### `satisfy`
 
-`Parseff.satisfy` matches one byte satisfying a predicate. `~label` names the expectation in error messages (default: `"matching character"`).
+[`Parseff.satisfy`](./Parseff.md#val-satisfy) matches one byte satisfying a predicate. `~label` names the expectation in error messages (default: `"matching character"`).
 
 ```ocaml
 val satisfy : ?label:string -> (char -> bool) -> char
@@ -63,7 +63,7 @@ let uppercase () =
 
 ### `peek_char`
 
-`Parseff.peek_char` returns `Some c` for the next byte without consuming it, or `None` at end of input. Use it for cheap single-byte dispatch instead of trying alternatives with `Parseff.or_`.
+[`Parseff.peek_char`](./Parseff.md#val-peek_char) returns `Some c` for the next byte without consuming it, or `None` at end of input. Use it for cheap single-byte dispatch instead of trying alternatives with [`Parseff.or_`](./Parseff.md#val-or_).
 
 ```ocaml
 val peek_char : unit -> char option
@@ -82,7 +82,7 @@ let value_start () =
 
 ### `take_while` and `skip_while`
 
-`Parseff.take_while` consumes bytes while a predicate holds and returns them as a string. `Parseff.skip_while` does the same without allocating.
+[`Parseff.take_while`](./Parseff.md#val-take_while) consumes bytes while a predicate holds and returns them as a string. [`Parseff.skip_while`](./Parseff.md#val-skip_while) does the same without allocating.
 
 ```ocaml
 val take_while :
@@ -96,8 +96,9 @@ val skip_while :
 
 - `~at_least` requires at least that many matching bytes, failing with `~label` (default: `"at least n characters"`) if fewer match.
 - `~at_most` caps the byte count, failing with `Limit_exceeded { limit = at_most }` if another matching byte follows. The error covers those `at_most + 1` bytes.
-- `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least`, `~at_most` and `~label` too. On a stream, `skip_while` does not keep the bytes it skips, so `at_most` can exceed `~backtrack_window`.
-- `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
+- [`Parseff.skip_while`](./Parseff.md#val-skip_while) and [`Parseff.Slice.take_while`](./Parseff-Slice.md#val-take_while) take `~at_least`, `~at_most` and `~label` too. On a stream, `skip_while` does not keep the bytes it skips, so `at_most` can exceed `~backtrack_window`.
+- `~set` replaces per-byte predicate calls with a precomputed [`Parseff.Charset`](./Parseff-Charset.md) lookup table.
+
 ```ocaml
 let digits () =
   Parseff.take_while ~at_least:1 ~label:"digit" (fun c -> c >= '0' && c <= '9')
@@ -111,7 +112,7 @@ let csv_field () =
 
 ### `Charset`
 
-`Parseff.Charset` builds a 256-byte lookup table once outside your parser so `Parseff.take_while`, `Parseff.skip_while`, `Parseff.Slice.take_while`, and `Parseff.Iter.take_while` avoid calling an OCaml predicate closure per byte.
+[`Parseff.Charset`](./Parseff-Charset.md) builds a 256-byte lookup table once outside your parser so [`Parseff.take_while`](./Parseff.md#val-take_while), [`Parseff.skip_while`](./Parseff.md#val-skip_while), [`Parseff.Slice.take_while`](./Parseff-Slice.md#val-take_while), and [`Parseff.Iter.take_while`](./Parseff-Iter.md#val-take_while) avoid calling an OCaml predicate closure per byte.
 
 ```ocaml
 module Charset : sig
@@ -131,7 +132,7 @@ let fast_digits () =
 
 ### `take_until` and `skip_until`
 
-`Parseff.take_until` reads all bytes before the first occurrence of a terminator string without consuming the terminator. `Parseff.skip_until` skips them without allocating. Both fail at end of input with `expected "<terminator>"` (or `~label`) if the terminator never appears. `~at_most` caps the bytes before the terminator, failing with `Limit_exceeded { limit = at_most }` if the terminator does not start within `at_most + 1` bytes, even when input ends there.
+[`Parseff.take_until`](./Parseff.md#val-take_until) reads all bytes before the first occurrence of a terminator string without consuming the terminator. [`Parseff.skip_until`](./Parseff.md#val-skip_until) skips them without allocating. Both fail at end of input with `expected "<terminator>"` (or `~label`) if the terminator never appears. `~at_most` caps the bytes before the terminator, failing with `Limit_exceeded { limit = at_most }` if the terminator does not start within `at_most + 1` bytes, even when input ends there.
 
 ```ocaml
 val take_until : ?at_most:int -> ?label:string -> string -> string
@@ -152,7 +153,7 @@ In streaming, `skip_until` retains only the last `String.length terminator - 1` 
 
 ### `end_of_input`
 
-`Parseff.end_of_input` succeeds only when no input remains. `Parseff.parse` and `Parseff.Source.parse` enforce this by default unless `` ~consume:`Partial `` is passed, so top-level parsers rarely need it.
+[`Parseff.end_of_input`](./Parseff.md#val-end_of_input) succeeds only when no input remains. [`Parseff.parse`](./Parseff.md#val-parse) and [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) enforce this by default unless ``~consume:`Partial`` is passed, so top-level parsers rarely need it.
 
 ```ocaml
 val end_of_input : unit -> unit
@@ -160,9 +161,10 @@ val end_of_input : unit -> unit
 
 ### `position`, `with_range`, and `location`
 
-- `Parseff.position` returns the current byte offset from the start of the input. Under `Parseff.Source.parse` it counts from where the parse starts in the source; add `Parseff.Source.offset`, read before the parse, to get an absolute offset.
-- `Parseff.with_range` runs a parser and returns its result alongside the `Parseff.range` of bytes it consumed.
-- `Parseff.location` returns a 1-based `Parseff.location` record (`byte_col` counts bytes, not Unicode code points). The line index is built lazily on first call. Outside a parser, use `Parseff.location_of_position`.
+- [`Parseff.position`](./Parseff.md#val-position) returns the current byte offset from the start of the input. Under [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) it counts from where the parse starts in the source; add [`Parseff.Source.offset`](./Parseff-Source.md#val-offset), read before the parse, to get an absolute offset.
+- [`Parseff.with_range`](./Parseff.md#val-with_range) runs a parser and returns its result alongside the [`Parseff.range`](./Parseff.md#type-range) of bytes it consumed.
+- [`Parseff.location`](./Parseff.md#val-location) returns a 1-based [`Parseff.location`](./Parseff.md#type-location) record (`byte_col` counts bytes, not Unicode code points). The line index is built lazily on first call. Outside a parser, use [`Parseff.location_of_position`](./Parseff.md#val-location_of_position).
+
 ```ocaml
 type range = { start : int; stop : int }
 type location = private { offset : int; line : int; byte_col : int }
@@ -197,7 +199,7 @@ let report_error input = function
 
 ### `recognize` and `Slice.recognize`
 
-`Parseff.recognize` runs a parser, discards its result, and returns the consumed input bytes as a string. `Parseff.Slice.recognize` returns a zero-copy `Parseff.Slice.t`.
+[`Parseff.recognize`](./Parseff.md#val-recognize) runs a parser, discards its result, and returns the consumed input bytes as a string. [`Parseff.Slice.recognize`](./Parseff-Slice.md#val-recognize) returns a zero-copy [`Parseff.Slice.t`](./Parseff-Slice.md#type-t).
 
 ```ocaml
 val recognize : (unit -> 'a) -> string
@@ -222,4 +224,4 @@ let () =
 
 ### Failure primitives
 
-For `Parseff.fail`, `Parseff.error`, and `Parseff.expect`, see [`errors`](./errors.md).
+For [`Parseff.fail`](./Parseff.md#val-fail), [`Parseff.error`](./Parseff.md#val-error), and [`Parseff.expect`](./Parseff.md#val-expect), see [`errors`](./errors.md).

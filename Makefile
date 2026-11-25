@@ -56,8 +56,13 @@ format-check: ## Checks if format is correct
 create-switch: ## Create opam switch
 	opam switch create . 5.5.2 --deps-only --with-test -y
 
+# The website markdown needs the odoc markdown fixes of ocaml/odoc#1528.
+ODOC_PIN = git+https://github.com/davesnx/odoc.git\#9a61607361c6820d48e6fde486fd82fcc476d0af
+
 .PHONY: install
 install: ## Install dependencies
+	opam pin add odoc-parser $(ODOC_PIN) -yn
+	opam pin add odoc $(ODOC_PIN) -yn
 	opam install . --deps-only --with-test --with-doc --with-dev-setup -y
 
 .PHONY: init

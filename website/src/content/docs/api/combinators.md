@@ -13,7 +13,7 @@ Combinators compose parsers for alternation, lookahead, error labeling, backtrac
 
 ### `or_`
 
-`Parseff.or_` tries the first parser; if it fails (and did not commit), rewinds and tries the second.
+[`Parseff.or_`](./Parseff.md#val-or_) tries the first parser; if it fails (and did not commit), rewinds and tries the second.
 
 ```ocaml
 val or_ : (unit -> 'a) -> (unit -> 'a) -> 'a
@@ -30,11 +30,11 @@ let bool_parser () =
       false)
 ```
 
-When both branches fail at the same position (such as `"maybe"` at offset 0\), Parseff merges their expectations into a sorted list: `expected "false" or "true", found 'maybe'`. When they fail at different positions, the furthest failure wins: on `"tr"`, the first branch reaches offset 2 and reports `expected "ue", found end of input`.
+When both branches fail at the same position (such as `"maybe"` at offset 0), Parseff merges their expectations into a sorted list: `expected "false" or "true", found 'maybe'`. When they fail at different positions, the furthest failure wins: on `"tr"`, the first branch reaches offset 2 and reports `expected "ue", found end of input`.
 
 ### `one_of` and `one_of_labeled`
 
-`Parseff.one_of` tries a list of parsers in order, merging expectations with the same rules as `or_`. `Parseff.one_of_labeled` attaches a label to each branch (wrapping each branch in `Parseff.expect`) so failures at the start position report the labels instead of inner primitive expectations.
+[`Parseff.one_of`](./Parseff.md#val-one_of) tries a list of parsers in order, merging expectations with the same rules as `or_`. [`Parseff.one_of_labeled`](./Parseff.md#val-one_of_labeled) attaches a label to each branch (wrapping each branch in [`Parseff.expect`](./Parseff.md#val-expect)) so failures at the start position report the labels instead of inner primitive expectations.
 
 ```ocaml
 val one_of : (unit -> 'a) list -> 'a
@@ -62,7 +62,7 @@ If a branch of `one_of_labeled` fails past its starting position, its inner erro
 
 ### `optional`
 
-`Parseff.optional` returns `Some v` if the parser succeeds, or `None` without consuming input if it fails.
+[`Parseff.optional`](./Parseff.md#val-optional) returns `Some v` if the parser succeeds, or `None` without consuming input if it fails.
 
 ```ocaml
 val optional : (unit -> 'a) -> 'a option
@@ -78,7 +78,7 @@ let optional_sign () =
 
 ### `look_ahead`
 
-`Parseff.look_ahead` runs a parser and rewinds the cursor on both success and failure.
+[`Parseff.look_ahead`](./Parseff.md#val-look_ahead) runs a parser and rewinds the cursor on both success and failure.
 
 ```ocaml
 val look_ahead : (unit -> 'a) -> 'a
@@ -86,7 +86,7 @@ val look_ahead : (unit -> 'a) -> 'a
 
 ### `peek_with` and `skip_to`
 
-`Parseff.peek_with` behaves like `Parseff.look_ahead` and also returns the byte offset where the parser stopped. `Parseff.skip_to` advances to that offset without re-parsing the bytes.
+[`Parseff.peek_with`](./Parseff.md#val-peek_with) behaves like [`Parseff.look_ahead`](./Parseff.md#val-look_ahead) and also returns the byte offset where the parser stopped. [`Parseff.skip_to`](./Parseff.md#val-skip_to) advances to that offset without re-parsing the bytes.
 
 ```ocaml
 val peek_with : (unit -> 'a) -> 'a * int
@@ -104,7 +104,7 @@ let keyword_or_name () =
 
 ### `not_followed_by`
 
-`Parseff.not_followed_by` succeeds when the inner parser fails and fails at its starting position with `expected <label>` when it succeeds, consuming no input. Failures inside the inner parser are discarded.
+[`Parseff.not_followed_by`](./Parseff.md#val-not_followed_by) succeeds when the inner parser fails and fails at its starting position with `expected <label>` when it succeeds, consuming no input. Failures inside the inner parser are discarded.
 
 ```ocaml
 val not_followed_by : ?label:string -> (unit -> 'a) -> unit
@@ -120,7 +120,7 @@ let less_than () =
 
 ### `expect`
 
-`Parseff.expect` replaces `Expected` failures at the parser's starting position with `expected <label>`. Failures strictly past the starting position (and `Parseff.fail`/`Parseff.error`) are left unchanged.
+[`Parseff.expect`](./Parseff.md#val-expect) replaces `Expected` failures at the parser's starting position with `expected <label>`. Failures strictly past the starting position (and [`Parseff.fail`](./Parseff.md#val-fail)/[`Parseff.error`](./Parseff.md#val-error)) are left unchanged.
 
 ```ocaml
 val expect : string -> (unit -> 'a) -> 'a
@@ -134,7 +134,7 @@ let dot () = Parseff.expect "a dot separator" (fun () -> Parseff.char '.')
 
 ### `context`
 
-`Parseff.context` attaches a construct name to failures strictly past its starting position, reported outermost first in `error.contexts` and printed as `* while parsing <name>` by `Parseff.render_error`. Pass `~delimited:true` for constructs with an opening token (such as arrays or blocks) so multi-line error reports draw a bracket from the opener to the failure.
+[`Parseff.context`](./Parseff.md#val-context) attaches a construct name to failures strictly past its starting position, reported outermost first in `error.contexts` and printed as `* while parsing <name>` by [`Parseff.render_error`](./Parseff.md#val-render_error). Pass `~delimited:true` for constructs with an opening token (such as arrays or blocks) so multi-line error reports draw a bracket from the opener to the failure.
 
 ```ocaml
 val context : ?delimited:bool -> ?start:int -> string -> (unit -> 'a) -> 'a
@@ -158,7 +158,7 @@ Name grammar constructs (statements, objects, declarations), not single tokens. 
 
 ### `commit`
 
-`Parseff.commit` seals the nearest enclosing backtracking frame (`or_`, `one_of`, `many`, `sep_by`, `optional`, `fold_left`, or `fold_right`), prevents it from backtracking, forgets failures recorded at or beyond the current position, and releases buffered streaming input held by that frame.
+[`Parseff.commit`](./Parseff.md#val-commit) seals the nearest enclosing backtracking frame (`or_`, `one_of`, `many`, `sep_by`, `optional`, `fold_left`, or `fold_right`), prevents it from backtracking, forgets failures recorded at or beyond the current position, and releases buffered streaming input held by that frame.
 
 ```ocaml
 val commit : unit -> unit
@@ -166,7 +166,7 @@ val commit : unit -> unit
 
 ### `cut`
 
-`Parseff.cut` seals every backtracking frame opened since the innermost enclosing `Parseff.context` (or since the start of the parse if none). If that `context` later fails, frames outside it are sealed as well so enclosing `or_`, `many`, or `sep_by` cannot swallow the error.
+[`Parseff.cut`](./Parseff.md#val-cut) seals every backtracking frame opened since the innermost enclosing [`Parseff.context`](./Parseff.md#val-context) (or since the start of the parse if none). If that `context` later fails, frames outside it are sealed as well so enclosing `or_`, `many`, or `sep_by` cannot swallow the error.
 
 ```ocaml
 val cut : unit -> unit
@@ -210,6 +210,7 @@ Use `commit` when an alternative in `or_`/`one_of` is chosen. Use `cut` when an 
 | Prior failures at/past cursor | Forgotten, so errors report only what the committed branch expected. | Kept. |
 | Streaming memory | Releases input pinned by the nearest frame only. | Releases input pinned by all sealed frames. |
 | Inside `look_ahead`, `peek_with`, or `capture` | Does not cross the boundary. With `capture ~release:true`, moves the rewind point and stops. | Does not cross the boundary. With `capture ~release:true`, moves the rewind point and continues outward. |
+
 ```ocaml
 let decided_statement decide () =
   Parseff.context "statement" (fun () ->
@@ -251,11 +252,11 @@ let read_statements decide input =
 - : (int * int, string) result = Error "expected expression, found ';'"
 ```
 
-With `commit`, only `or_` is sealed, so `many` rewinds to offset 2 and returns the first statement. With `cut`, `many` is sealed too, so the broken `let` fails the parse. (With the default `` ~consume:`All ``, both fail because furthest failure still reports the missing expression.)
+With `commit`, only `or_` is sealed, so `many` rewinds to offset 2 and returns the first statement. With `cut`, `many` is sealed too, so the broken `let` fails the parse. (With the default ``~consume:`All``, both fail because furthest failure still reports the missing expression.)
 
 ### Tracing
 
-Pass `~trace` to `Parseff.parse`, `Parseff.Source.parse`, or `Parseff.Push.parse` to observe `Parseff.trace_event`s from `context` and recovery combinators. `Parseff.print_trace` prints an indented tree:
+Pass `~trace` to [`Parseff.parse`](./Parseff.md#val-parse), [`Parseff.Source.parse`](./Parseff-Source.md#val-parse), or [`Parseff.Push.parse`](./Parseff-Push.md#val-parse) to observe [`Parseff.trace_event`](./Parseff.md#type-trace_event)s from `context` and recovery combinators. [`Parseff.print_trace`](./Parseff.md#val-print_trace) prints an indented tree:
 
 ```ocaml
 let number () =
@@ -283,13 +284,13 @@ list @0
 list failed @2 (from @0)
 ```
 
-A `failed` line prints the parser position where the construct failed, not the furthest error offset (here `list` failed at `@2`, while the error is at offset 3\).
+A `failed` line prints the parser position where the construct failed, not the furthest error offset (here `list` failed at `@2`, while the error is at offset 3).
 
 ## Recursion
 
 ### `rec_`
 
-`Parseff.rec_` tracks nesting depth against `~max_depth` (default `128`), failing with `Depth_limit_exceeded { limit }` instead of overflowing the stack. Wrap the entry point of a recursive grammar rule (you do not need `rec_` on every mutually recursive helper).
+[`Parseff.rec_`](./Parseff.md#val-rec_) tracks nesting depth against `~max_depth` (default `128`), failing with `Depth_limit_exceeded { limit }` instead of overflowing the stack. Wrap the entry point of a recursive grammar rule (you do not need `rec_` on every mutually recursive helper).
 
 ```ocaml
 val rec_ : (unit -> 'a) -> 'a

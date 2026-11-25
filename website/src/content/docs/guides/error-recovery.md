@@ -9,15 +9,15 @@ By default, a parser stops at the first syntax error and returns a single `Error
 
 Error recovery catches a failure locally so the rest of the input can still be parsed. Most grammars combine three techniques:
 
-- **Synchronize and skip** (`Parseff.recover`): record the error, skip ahead to a boundary token such as `;`, return a hole node, and continue on the next construct.
-- **Insert a missing token or value** (`Parseff.require`): when an expected closing delimiter or operand is absent, record the error and return a placeholder without skipping input.
-- **Recover inside lists** (`Parseff.list` and `Parseff.skip_nested`): recover from broken elements or missing separators without consuming the closing delimiter.
+- **Synchronize and skip** ([`Parseff.recover`](./Parseff.md#val-recover)): record the error, skip ahead to a boundary token such as `;`, return a hole node, and continue on the next construct.
+- **Insert a missing token or value** ([`Parseff.require`](./Parseff.md#val-require)): when an expected closing delimiter or operand is absent, record the error and return a placeholder without skipping input.
+- **Recover inside lists** ([`Parseff.list`](./Parseff.md#val-list) and [`Parseff.skip_nested`](./Parseff.md#val-skip_nested)): recover from broken elements or missing separators without consuming the closing delimiter.
 
-All three build on `Parseff.capture` and record errors into a `Parseff.Diagnostics.t` collector passed to the runner. Without a collector, recovery is disabled and the same parser fails at the first error. For the exhaustive edge-case specification, see the `Parseff` API reference.
+All three build on [`Parseff.capture`](./Parseff.md#val-capture) and record errors into a [`Parseff.Diagnostics.t`](./Parseff-Diagnostics.md#type-t) collector passed to the runner. Without a collector, recovery is disabled and the same parser fails at the first error. For the exhaustive edge-case specification, see the [`Parseff`](./Parseff.md) API reference.
 
 ## Starting grammar: a statement list
 
-A list of statements like `let x = 1;`, using `Parseff.cut` after `let` to mark the statement decided:
+A list of statements like `let x = 1;`, using [`Parseff.cut`](./Parseff.md#val-cut) after `let` to mark the statement decided:
 
 ```ocaml
 type stmt = Let of string * int | Hole
@@ -74,9 +74,9 @@ Without recovery, parsing stops at the first broken statement:
 
 ## `capture` and `recover`
 
-`Parseff.capture` runs a parser and returns its failure as `Error e` after rewinding to where `capture` started (even across `Parseff.cut`, unlike `Parseff.or_`).
+[`Parseff.capture`](./Parseff.md#val-capture) runs a parser and returns its failure as `Error e` after rewinding to where `capture` started (even across [`Parseff.cut`](./Parseff.md#val-cut), unlike [`Parseff.or_`](./Parseff.md#val-or_)).
 
-`Parseff.recover` builds on `capture`: when `parser` fails, it records the error in the runner's `~diagnostics` collector, runs `sync ()` to advance to a safe restart point, and returns `hole e`. Without `~diagnostics`, `recover` does not recover and runs `parser` directly.
+[`Parseff.recover`](./Parseff.md#val-recover) builds on `capture`: when `parser` fails, it records the error in the runner's `~diagnostics` collector, runs `sync ()` to advance to a safe restart point, and returns `hole e`. Without `~diagnostics`, `recover` does not recover and runs `parser` directly.
 
 ```ocaml
 let skip_statement () =
@@ -121,9 +121,9 @@ Make any terminating token inside `sync` optional (as `skip_statement` does for 
 
 ## `cut` and `commit`
 
-Recovery combinators never override an open choice (`or_`, `one_of`, `optional`, etc.): if another alternative could still match, the failure backtracks normally. Seal the choice with `Parseff.commit` (seals the nearest frame) or `Parseff.cut` (seals every frame since the enclosing `Parseff.context`) once the construct is decided.
+Recovery combinators never override an open choice (`or_`, `one_of`, `optional`, etc.): if another alternative could still match, the failure backtracks normally. Seal the choice with [`Parseff.commit`](./Parseff.md#val-commit) (seals the nearest frame) or [`Parseff.cut`](./Parseff.md#val-cut) (seals every frame since the enclosing [`Parseff.context`](./Parseff.md#val-context)) once the construct is decided.
 
-`Parseff.require` inserts a missing token or value without skipping input when its parser fails at the starting position. Wrap the entire construct in `context` so `cut` keeps the enclosing `or_` sealed while `require` runs:
+[`Parseff.require`](./Parseff.md#val-require) inserts a missing token or value without skipping input when its parser fails at the starting position. Wrap the entire construct in `context` so `cut` keeps the enclosing `or_` sealed while `require` runs:
 
 ```ocaml
 let let_statement value () =
@@ -163,7 +163,7 @@ y = 0; _ = 2
 - : unit = ()
 ```
 
-Inside a single alternative chosen by a prefix token, use `Parseff.commit` (not `cut`) so an outer loop can still stop cleanly:
+Inside a single alternative chosen by a prefix token, use [`Parseff.commit`](./Parseff.md#val-commit) (not `cut`) so an outer loop can still stop cleanly:
 
 ```ocaml
 let signed () =
@@ -192,11 +192,12 @@ x = -1; y = -2
 
 ## Delimited and separated lists: `list` and `skip_nested`
 
-Inside `Parseff.many`, `recover` would treat a closing brace `'}'` as a broken statement and skip it. Use `Parseff.list` with `~close` (and optional `~sep` / `~trailing`) together with `Parseff.skip_nested`:
+Inside [`Parseff.many`](./Parseff.md#val-many), `recover` would treat a closing brace `'}'` as a broken statement and skip it. Use [`Parseff.list`](./Parseff.md#val-list) with `~close` (and optional `~sep` / `~trailing`) together with [`Parseff.skip_nested`](./Parseff.md#val-skip_nested):
 
-- When `close ()` is `true`, `list` stops cleanly so the caller's `Parseff.require` can consume the closing delimiter.
+- When `close ()` is `true`, `list` stops cleanly so the caller's [`Parseff.require`](./Parseff.md#val-require) can consume the closing delimiter.
 - `skip_nested pairs stop` skips to the next delimiter while balancing nested bracket pairs so inner separators are not mistaken for outer ones.
 - For separated lists with missing separators (e.g. `f(1 2)`), skip trailing whitespace after each element and separator rather than leading whitespace, so the next element can start immediately after a missing separator.
+
 ```ocaml
 let comma () =
   let _ = Parseff.char ',' in
@@ -260,14 +261,15 @@ f(1, 2)
 
 ### A broken last element at end of input
 
-A failure at end of input is not recovered. The parse returns `Error` and loses the recovered values. Parse the closing token with `Parseff.require` to record a missing one instead.
+A failure at end of input is not recovered. The parse returns `Error` and loses the recovered values. Parse the closing token with [`Parseff.require`](./Parseff.md#val-require) to record a missing one instead.
 
 ## An expression that recovers
 
-When combining `Parseff.expression` with `Parseff.require` on operands, follow two rules:
+When combining [`Parseff.expression`](./Parseff.md#val-expression) with [`Parseff.require`](./Parseff.md#val-require) on operands, follow two rules:
 
-1. Call `Parseff.commit` inside each `Parseff.prefix` operator's token parser (a prefix operator is otherwise an open choice for its operand).
-2. Make operator tokens take the longest match (e.g. with `Parseff.keyword` or `Parseff.not_followed_by`), because an infix operator's operand recovers before `expression` tries later operators in the table.
+1. Call [`Parseff.commit`](./Parseff.md#val-commit) inside each [`Parseff.prefix`](./Parseff.md#val-prefix) operator's token parser (a prefix operator is otherwise an open choice for its operand).
+2. Make operator tokens take the longest match (e.g. with [`Parseff.keyword`](./Parseff.md#val-keyword) or [`Parseff.not_followed_by`](./Parseff.md#val-not_followed_by)), because an infix operator's operand recovers before `expression` tries later operators in the table.
+
 ```ocaml
 type expr =
   | Num of int
@@ -341,12 +343,12 @@ let run_expr input =
 
 ## Rules and options
 
-Key behaviors to keep in mind (see the `Parseff` API reference for all edge cases):
+Key behaviors to keep in mind (see the [`Parseff`](./Parseff.md) API reference for all edge cases):
 
 - **Open choices**: `recover`, `require`, and `list` do not recover inside open choices (`or_`, `one_of`, `optional`, `capture`, `look_ahead`, `peek_with`) until sealed by `commit` or `cut`.
 - **Progress and EOF**: `recover` always advances at least one byte (even if `sync` consumes nothing), and does not recover failures starting at end of input (so trailing EOF produces one error instead of cascading).
 - **Nested diagnostics (`~keep`)**: by default, `recover` and `list` discard diagnostics recorded inside the failing parser and record only the parser's own error. Pass `~keep:(fun entry inner -> ...)` to keep inner errors instead (e.g., `if inner = [] then [ entry ] else inner`).
-- **Contexts (`~contexts`)**: recovered errors retain enclosing contexts by default (`` `All ``); pass `` ~contexts:`Inner `` to keep only contexts opened inside the recovered parser.
-- **Collector gating and warnings**: without `~diagnostics`, recovery combinators run their inner parser directly and stop at the first error. `Parseff.warn` writes `` `Warning `` entries to the same collector alongside `` `Error `` recovery entries (see [Diagnostics](../api/diagnostics.md)).
+- **Contexts (`~contexts`)**: recovered errors retain enclosing contexts by default (`` `All ``); pass ``~contexts:`Inner`` to keep only contexts opened inside the recovered parser.
+- **Collector gating and warnings**: without `~diagnostics`, recovery combinators run their inner parser directly and stop at the first error. [`Parseff.warn`](./Parseff.md#val-warn) writes `` `Warning `` entries to the same collector alongside `` `Error `` recovery entries (see [Diagnostics](./diagnostics.md)).
 - **Tracing**: passing `~trace` emits `Captured` events for each recovered failure.
 - **Streaming**: `capture` and active recovery frames retain input from their start until they finish (pass `~release:true` where appropriate to let `commit`/`cut` advance the streaming window).
