@@ -63,6 +63,27 @@ install: ## Install dependencies
 .PHONY: init
 init: create-switch install ## Create a local dev enviroment
 
+OXCAML_SWITCH ?= parseff-oxcaml-ox9
+OXCAML_COMPILER ?= ocaml-variants.5.4.0+ox,oxcaml-compiler.5.4.0-ox9
+OXCAML_DUNE ?= opam exec --switch=$(OXCAML_SWITCH) -- dune
+OXCAML_BUILD_DIR ?= _build-oxcaml
+
+.PHONY: create-switch-oxcaml
+create-switch-oxcaml: ## Create the OxCaml opam switch
+	opam switch create $(OXCAML_SWITCH) --packages=$(OXCAML_COMPILER) --repos ox=git+https://github.com/oxcaml/opam-repository.git,default -y
+
+.PHONY: install-oxcaml
+install-oxcaml: ## Install the test dependencies into the OxCaml switch
+	opam install --switch=$(OXCAML_SWITCH) dune uucp alcotest -y
+
+.PHONY: test-oxcaml
+test-oxcaml: ## Run the unit tests with OxCaml, and fail on a safety alert in lib/
+	@out=$$(DUNE_CACHE=disabled $(OXCAML_DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) ./lib/parseff.cmxa 2>&1); status=$$?; \
+	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	if printf '%s\n' "$$out" | grep -q '^Alert'; then echo "lib/ has OxCaml alerts"; exit 1; fi
+	$(OXCAML_DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) @test/runtest
+
 BENCH_FILES := $(wildcard bench/bench_*.ml)
 BENCH_NAMES := $(patsubst bench/bench_%.ml,bench-%,$(BENCH_FILES))
 

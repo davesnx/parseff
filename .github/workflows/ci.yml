@@ -70,6 +70,29 @@ jobs:
       - name: Save dune cache
         uses: ml-in-barcelona/gh-ci-action/dune-cache/save@v1.2.0
 
+  oxcaml:
+    name: Build and test (OxCaml)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup OxCaml
+        uses: ocaml/setup-ocaml@v3.9.1
+        with:
+          ocaml-compiler: ocaml-variants.5.4.0+ox,oxcaml-compiler.5.4.0-ox9
+          opam-repositories: |
+            ox: git+https://github.com/oxcaml/opam-repository.git
+            default: https://opam.ocaml.org
+
+      # Unit tests only: they need no other package, and miou, which an
+      # example uses, does not build on OxCaml.
+      - name: Install dependencies
+        run: opam install dune uucp alcotest
+
+      - name: Run tests
+        run: make test-oxcaml OXCAML_DUNE='opam exec -- dune'
+
   website:
     name: Build website
     needs: build
