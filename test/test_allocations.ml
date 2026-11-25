@@ -212,6 +212,13 @@ let test_scan_success () =
       Parseff.Utf8.Slice.take_while ~at_least:2 uword
   );
   check "take_while" 2. "abc " (fun () -> Parseff.take_while word);
+  let ignore_piece (_ : Parseff.Slice.t) = () in
+  check "Iter.take_while" 8. "abc " (fun () ->
+      Parseff.Iter.take_while word ignore_piece
+  );
+  check "Iter.take_while ~set" 10. "abc " (fun () ->
+      Parseff.Iter.take_while ~set word ignore_piece
+  );
   check "take_while ~at_most" 2. "abc " (fun () ->
       Parseff.take_while ~at_most:8 word
   );
