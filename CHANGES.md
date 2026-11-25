@@ -1,5 +1,6 @@
 ## Unreleased
 
+- [PERF] Parse on several domains without slowing each other down: once a second domain parses, nothing writes the state hint shared by all domains, so CPU time per domain at 64 domains drops from 11 s to 0.11 s on the benchmark in the PR ([#151](https://github.com/davesnx/parseff/pull/151)) (@davesnx)
 - [PERF] Scan a `Charset` that excludes one or two bytes, such as `fun c -> c <> ';'`, 8 bytes at a time in `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` ([#150](https://github.com/davesnx/parseff/pull/150)) (@davesnx)
 - [PERF] Scan the input directly in `Iter.take_while` instead of through a closure built on every call: 6 fewer minor words per call, and 17–22% faster per byte with `~set` on stock OCaml ([#149](https://github.com/davesnx/parseff/pull/149)) (@davesnx)
 
