@@ -1,6 +1,7 @@
 ## Unreleased
 
-- [PERF] Scan a `Charset` that excludes one or two bytes, such as `fun c -> c <> ';'`, 8 bytes at a time in `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` (@davesnx)
+- [PERF] Scan a `Charset` that excludes one or two bytes, such as `fun c -> c <> ';'`, 8 bytes at a time in `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` ([#150](https://github.com/davesnx/parseff/pull/150)) (@davesnx)
+- [PERF] Scan the input directly in `Iter.take_while` instead of through a closure built on every call: 6 fewer minor words per call, and 17–22% faster per byte with `~set` on stock OCaml ([#149](https://github.com/davesnx/parseff/pull/149)) (@davesnx)
 
 ## 0.6.0
 

@@ -3770,7 +3770,8 @@ let check_sealable st name =
       )
 
 let give st f v =
-  ignore (State.seal_frames ~force:true st ~captures:true ~floor:0 : bool);
+  if st.frames_top > 0 then
+    ignore (State.seal_frames ~force:true st ~captures:true ~floor:0 : bool);
   State.keep_effects_so_far st;
   trace_emit st f v
 
@@ -3869,21 +3870,28 @@ module Iter = struct
   let take_while ?set pred (f : span -> unit) =
     let st = get_state () in
     check_sealable st "Iter.take_while";
-    let scan =
-      match set with
+    let more = ref true in
+    while !more && have st 1 do
+      let base = st.base in
+      let input = st.input in
+      let start = st.pos - base in
+      let stop = st.input_len - base in
+      let i = ref start in
+      begin match set with
       | None ->
-          fun p stop ->
-            let i = ref p in
-            while !i < stop && pred (char_at st !i) do
-              incr i
-            done;
-            !i
+          while !i < stop && pred (Bytes.unsafe_get input !i) do
+            incr i
+          done
       | Some set ->
-          fun p stop ->
-            let base = st.base in
-            Charset.scan set st.input (p - base) (stop - base) + base
-    in
-    ignore (iter_input st max_int scan f : int)
+          i := Charset.scan set input start stop
+      end;
+      let n = !i - start in
+      if n > 0 then begin
+        st.pos <- !i + base;
+        give st f { buf = Bytes.unsafe_to_string input; off = start; len = n }
+      end;
+      if !i < stop then more := false
+    done
 end
 
 let[@inline never] fold_left_replay st frame again p op first =

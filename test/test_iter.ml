@@ -387,6 +387,32 @@ let test_iter_take_while_pieces () =
     "pieces joined" true
     (Buffer.contents out = expected_body body_len)
 
+let test_iter_take_while_set_in_or () =
+  let letters = Parseff.Charset.of_predicate (fun c -> c >= 'a' && c <= 'z') in
+  let out = Buffer.create body_len in
+  let largest = ref 0 in
+  let r =
+    Parseff.Source.parse ~backtrack_window:64
+      (body_source ~prefix:"" ~len:body_len ~suffix:"0") (fun () ->
+        Parseff.or_
+          (fun () ->
+            Parseff.Iter.take_while ~set:letters
+              (fun _ -> false)
+              (fun piece ->
+                largest := max !largest (Parseff.Slice.length piece);
+                Buffer.add_string out (Parseff.Slice.to_string piece)
+              );
+            Parseff.char '0'
+          )
+          (fun () -> Parseff.char '?')
+    )
+  in
+  Alcotest.(check string) "result" "ok" (show r);
+  Alcotest.(check bool) "pieces fit the window" true (!largest <= 64);
+  Alcotest.(check bool)
+    "pieces joined" true
+    (Buffer.contents out = expected_body body_len)
+
 let pieces_of run input =
   let got = ref [] in
   let r =
@@ -413,7 +439,14 @@ let test_iter_take_string () =
     (pieces_of (Parseff.Iter.take 6) "abcd");
   Alcotest.(check (pair string (list string)))
     "while, no match" ("ok", [])
-    (pieces_of (Parseff.Iter.take_while (fun c -> c = 'x')) "abcd")
+    (pieces_of (Parseff.Iter.take_while (fun c -> c = 'x')) "abcd");
+  let ab = Parseff.Charset.of_predicate (fun c -> c = 'a' || c = 'b') in
+  Alcotest.(check (pair string (list string)))
+    "while ~set" ("ok", [ "ab" ])
+    (pieces_of (Parseff.Iter.take_while ~set:ab (fun _ -> false)) "abcd");
+  Alcotest.(check (pair string (list string)))
+    "while ~set, to the end" ("ok", [ "abab" ])
+    (pieces_of (Parseff.Iter.take_while ~set:ab (fun _ -> false)) "abab")
 
 let test_inside_or_seals () =
   let got = ref 0 in
@@ -716,6 +749,8 @@ let () =
             test_take_fails_in_small_window;
           test_case "Iter.take_while in a small window" `Quick
             test_iter_take_while_pieces;
+          test_case "Iter.take_while ~set in or_ in a small window" `Quick
+            test_iter_take_while_set_in_or;
           test_case "string input" `Quick test_iter_take_string;
         ]
       );
