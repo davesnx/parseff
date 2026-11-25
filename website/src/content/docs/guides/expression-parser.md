@@ -85,7 +85,7 @@ With `expect`, error messages use grammar names instead of raw tokens:
 
 ## Shorter chains with `fold_left`
 
-`Parseff.fold_left` replaces the `many` + `List.fold_left` boilerplate (use `Parseff.fold_right` for right-associative operators like `^`):
+[`Parseff.fold_left`](./Parseff.md#val-fold_left) replaces the `many` + `List.fold_left` boilerplate (use [`Parseff.fold_right`](./Parseff.md#val-fold_right) for right-associative operators like `^`):
 
 ```ocaml
 let rec expr () =
@@ -116,7 +116,7 @@ and factor () =
 
 ## Operator tables: `expression`
 
-`Parseff.expression` builds all levels from a single precedence table ordered from lowest to highest precedence, supporting `Parseff.infix_left`, `Parseff.infix_right`, `Parseff.prefix`, and `Parseff.postfix`:
+[`Parseff.expression`](./Parseff.md#val-expression) builds all levels from a single precedence table ordered from lowest to highest precedence, supporting [`Parseff.infix_left`](./Parseff.md#val-infix_left), [`Parseff.infix_right`](./Parseff.md#val-infix_right), [`Parseff.prefix`](./Parseff.md#val-prefix), and [`Parseff.postfix`](./Parseff.md#val-postfix):
 
 ```ocaml
 let add () =
@@ -156,7 +156,7 @@ If an operator token parser or its right operand fails, `expression` tries the n
 
 ## Single-lookup dispatch: `precedence`
 
-For grammars with many precedence levels that can dispatch from `Parseff.peek_char` or a lexer token, `Parseff.precedence` avoids scanning a table after every operand:
+For grammars with many precedence levels that can dispatch from [`Parseff.peek_char`](./Parseff.md#val-peek_char) or a lexer token, [`Parseff.precedence`](./Parseff.md#val-precedence) avoids scanning a table after every operand:
 
 ```ocaml
 let operator () =
@@ -180,7 +180,7 @@ and factor () =
     (fun () -> Num (Char.code (Parseff.digit ()) - Char.code '0'))
 ```
 
-`precedence` accepts only infix and postfix operators. Parse prefix operators inside `operand` by calling `Parseff.precedence ~min` inside `Parseff.rec_`. Passing a prefix operator in `~operator` is a compile-time type error:
+`precedence` accepts only infix and postfix operators. Parse prefix operators inside `operand` by calling `Parseff.precedence ~min` inside [`Parseff.rec_`](./Parseff.md#val-rec_). Passing a prefix operator in `~operator` is a compile-time type error:
 
 ```ocaml
 # let negate () = Some (3, Parseff.prefix (fun () e -> Mul (Num (-1), e))) in

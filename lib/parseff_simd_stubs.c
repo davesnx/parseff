@@ -31,6 +31,11 @@ caml_avx2_int8x32_cmpeq(__m256i a, __m256i b) {
   return _mm256_cmpeq_epi8(a, b);
 }
 
+__attribute__((weak, target("avx2"))) __m256i
+caml_avx2_int8x32_sub_saturating_unsigned(__m256i a, __m256i b) {
+  return _mm256_subs_epu8(a, b);
+}
+
 __attribute__((weak, target("avx2"))) intnat
 caml_avx2_vec256_movemask_8(__m256i x) {
   return (intnat)(uint32_t)_mm256_movemask_epi8(x);

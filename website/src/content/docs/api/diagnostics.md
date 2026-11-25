@@ -9,7 +9,7 @@ description: Warnings, diagnostic collectors, and backtracking Ref state
 
 Diagnostics let a parser record warnings and recovered errors without stopping at the first problem.
 
-To recover from syntax errors and continue parsing, see the [Error recovery](../guides/error-recovery.md) guide.
+To recover from syntax errors and continue parsing, see the [Error recovery](./error-recovery.md) guide.
 
 ## Types
 
@@ -27,10 +27,10 @@ module Diagnostics : sig
 end
 ```
 
-A `Parseff.Diagnostics.t` collects the diagnostics of one parse. Each entry carries a `Parseff.error` and its start offset (`pos = value.range.start`):
+A [`Parseff.Diagnostics.t`](./Parseff-Diagnostics.md#type-t) collects the diagnostics of one parse. Each entry carries a [`Parseff.error`](./Parseff.md#type-error) and its start offset (`pos = value.range.start`):
 
-- `` `Warning ``: emitted by `Parseff.warn`.
-- `` `Error ``: recorded by `Parseff.recover`, `Parseff.require`, or `Parseff.list` before continuing.
+- `` `Warning ``: emitted by [`Parseff.warn`](./Parseff.md#val-warn).
+- `` `Error ``: recorded by [`Parseff.recover`](./Parseff.md#val-recover), [`Parseff.require`](./Parseff.md#val-require), or [`Parseff.list`](./Parseff.md#val-list) before continuing.
 
 ## Emitting and collecting diagnostics
 
@@ -49,9 +49,9 @@ val parse :
   ('a, error) Stdlib.result
 ```
 
-`Parseff.warn` records a `Parseff.custom_error` with severity `` `Warning `` and continues parsing. `~from`, `~upto`, `~notes`, and `~help` work as in `Parseff.fail`.
+[`Parseff.warn`](./Parseff.md#val-warn) records a [`Parseff.custom_error`](./Parseff.md#type-custom_error) with severity `` `Warning `` and continues parsing. `~from`, `~upto`, `~notes`, and `~help` work as in [`Parseff.fail`](./Parseff.md#val-fail).
 
-Pass a `Parseff.Diagnostics.t` collector to `Parseff.parse`, `Parseff.Source.parse`, or `Parseff.Push.parse` via `~diagnostics`. The runner clears the collector before running; entries are available after the parse whether it returns `Ok` or `Error`. Without `~diagnostics`, `warn` is a no-op and `recover`/`require`/`list` do not recover.
+Pass a [`Parseff.Diagnostics.t`](./Parseff-Diagnostics.md#type-t) collector to [`Parseff.parse`](./Parseff.md#val-parse), [`Parseff.Source.parse`](./Parseff-Source.md#val-parse), or [`Parseff.Push.parse`](./Parseff-Push.md#val-parse) via `~diagnostics`. The runner clears the collector before running; entries are available after the parse whether it returns `Ok` or `Error`. Without `~diagnostics`, `warn` is a no-op and `recover`/`require`/`list` do not recover.
 
 ## Example
 
@@ -124,14 +124,14 @@ let octets_out_of_range diagnostics =
 
 Diagnostics are transactional with backtracking:
 
-- `Parseff.or_` / `Parseff.one_of`: rolled back on failed branches.
-- `Parseff.many` / `Parseff.sep_by`: rolled back on the final failing iteration.
-- `Parseff.look_ahead` / `Parseff.peek_with`: always rolled back.
-- `Parseff.capture` / `Parseff.recover`: rolled back when the inner parser fails (`recover` records the inner parser's error instead; pass `~keep` to retain earlier diagnostics, see the [Error recovery](../guides/error-recovery.md) guide).
+- [`Parseff.or_`](./Parseff.md#val-or_) / [`Parseff.one_of`](./Parseff.md#val-one_of): rolled back on failed branches.
+- [`Parseff.many`](./Parseff.md#val-many) / [`Parseff.sep_by`](./Parseff.md#val-sep_by): rolled back on the final failing iteration.
+- [`Parseff.look_ahead`](./Parseff.md#val-look_ahead) / [`Parseff.peek_with`](./Parseff.md#val-peek_with): always rolled back.
+- [`Parseff.capture`](./Parseff.md#val-capture) / [`Parseff.recover`](./Parseff.md#val-recover): rolled back when the inner parser fails (`recover` records the inner parser's error instead; pass `~keep` to retain earlier diagnostics, see the [Error recovery](./error-recovery.md) guide).
 
 ## Backtracking state (`Ref`)
 
-`Parseff.Ref.t` is a mutable cell whose writes roll back on backtracking under the same rules as diagnostics (for symbol tables, indentation stacks, or similar parser state). Store immutable values, as only the cell binding is restored.
+[`Parseff.Ref.t`](./Parseff-Ref.md#type-t) is a mutable cell whose writes roll back on backtracking under the same rules as diagnostics (for symbol tables, indentation stacks, or similar parser state). Store immutable values, as only the cell binding is restored.
 
 ```ocaml
 module Ref : sig

@@ -30,7 +30,7 @@ Angstrom (optimized)    ~1,720,000     1.4x faster             11.1 GB
 Angstrom (generic)      ~1,260,000     baseline                 5.9 GB
 ```
 
-- **Optimized**: `Parseff.Slice.sep_by_take` plus `List.map` (avoids per-element `String.sub` during scanning; still converts with `float_of_string` via `Parseff.Slice.to_string`).
+- **Optimized**: [`Parseff.Slice.sep_by_take`](./Parseff-Slice.md#val-sep_by_take) plus `List.map` (avoids per-element `String.sub` during scanning; still converts with `float_of_string` via [`Parseff.Slice.to_string`](./Parseff-Slice.md#val-to_string)).
 - **Generic**: ordinary `char`, `skip_while`, `take_while`, and `sep_by` with the same `float_of_string` conversion as `Angstrom (generic)`.
 - Minor allocations are cumulative `Benchmark.latencyN` totals across all 1,000,000 parses.
 
@@ -44,9 +44,9 @@ Arithmetic  ~11,860,000    ~2,960,000        ~5,360,000      ~1,510,000
 
 ### Why Parseff is faster
 
-- **Direct character scanning**: `Parseff.take_while` runs a tight loop over the input buffer (optionally backed by a `Parseff.Charset` table).
-- **Zero-copy slices**: `Parseff.Slice` avoids per-token `String.sub` allocations.
-- **Fused scanners**: `Parseff.Slice.sep_by_take` scans a separated list in one loop without chaining monadic closures.
+- **Direct character scanning**: [`Parseff.take_while`](./Parseff.md#val-take_while) runs a tight loop over the input buffer (optionally backed by a [`Parseff.Charset`](./Parseff-Charset.md) table).
+- **Zero-copy slices**: [`Parseff.Slice`](./Parseff-Slice.md) avoids per-token `String.sub` allocations.
+- **Fused scanners**: [`Parseff.Slice.sep_by_take`](./Parseff-Slice.md#val-sep_by_take) scans a separated list in one loop without chaining monadic closures.
 - **Direct-style calls**: sequencing uses plain OCaml function calls rather than CPS closures.
 
 ## API style
@@ -154,7 +154,7 @@ let expr =
 
 | Feature | Parseff | Angstrom |
 | --- | --- | --- |
-| OCaml version | 5\.3+ | 4\.x+ |
+| OCaml version | 5.3+ | 4.x+ |
 | API style | Direct style | Monadic (CPS) |
 | Pull streaming | `Source.parse`, `Source.parse_each` | Buffered / Unbuffered |
 | Push / async | `Push.parse`, `Push.parse_each`; Eio fibers via `Source` | Incremental `Partial` API |
@@ -177,4 +177,5 @@ let expr =
 | Zero-copy API | Yes | Yes | No | No |
 | Streaming / incremental | Yes | Yes | No | No |
 | Requires OCaml 5+ | Yes | No | No | No |
+
 MParser and Opal require explicit backtracking (like Parsec's `try`) and do not support streaming.

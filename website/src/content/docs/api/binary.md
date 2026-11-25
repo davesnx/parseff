@@ -7,7 +7,7 @@ description: Big-endian and little-endian integers, floats and varints
 
 # Binary parsing
 
-`Parseff.BE` (big-endian) and `Parseff.LE` (little-endian) provide multi-byte integer and IEEE 754 float parsers. Single-byte readers (`Parseff.any_uint8`, `Parseff.any_int8`) and `Parseff.any_varint` live at the top level of `Parseff`.
+[`Parseff.BE`](./Parseff-BE.md) (big-endian) and [`Parseff.LE`](./Parseff-LE.md) (little-endian) provide multi-byte integer and IEEE 754 float parsers. Single-byte readers ([`Parseff.any_uint8`](./Parseff.md#val-any_uint8), [`Parseff.any_int8`](./Parseff.md#val-any_int8)) and [`Parseff.any_varint`](./Parseff.md#val-any_varint) live at the top level of [`Parseff`](./Parseff.md).
 
 ## Integer parsers
 
@@ -26,8 +26,9 @@ val any_uint32 : unit -> int   (* 4 bytes, 0..4294967295 *)
 val any_int64 : unit -> int64  (* 8 bytes, signed *)
 ```
 
-- `Parseff.any_varint` reads an unsigned LEB128 varint (7 bits per byte, LSB first; `"\xAC\x02"` is `300`). Fails if longer than 9 bytes or above `max_int` (rejecting negative Protobuf `int32`/`int64`). Decode zigzag values manually with `(n lsr 1) lxor (-(n land 1))`.
+- [`Parseff.any_varint`](./Parseff.md#val-any_varint) reads an unsigned LEB128 varint (7 bits per byte, LSB first; `"\xAC\x02"` is `300`). Fails if longer than 9 bytes or above `max_int` (rejecting negative Protobuf `int32`/`int64`). Decode zigzag values manually with `(n lsr 1) lxor (-(n land 1))`.
 - On platforms where `int` has fewer than 63 bits (such as `js_of_ocaml`), large values in `any_varint` or `any_uint32` overflow silently.
+
 ```ocaml
 let png_chunk_length () = Parseff.BE.any_int32 ()
 let http2_frame_length () = Parseff.BE.any_uint24 ()
@@ -42,7 +43,7 @@ let () = assert (Parseff.parse "\xAC\x02" Parseff.any_varint = Ok 300)
 
 ## Floating-point parsers
 
-Inside both `Parseff.BE` and `Parseff.LE`:
+Inside both [`Parseff.BE`](./Parseff-BE.md) and [`Parseff.LE`](./Parseff-LE.md):
 
 ```ocaml
 val any_float : unit -> float   (* 4 bytes, IEEE 754 single precision *)
@@ -58,7 +59,7 @@ let coordinates () =
 
 ## Exact-match parsers
 
-`Parseff.BE.int16`, `Parseff.BE.int32`, and `Parseff.BE.int64` (and their `Parseff.LE` counterparts) assert that the next bytes encode an exact constant. `int16` accepts `-32768`..`65535` and raises `Invalid_argument` outside that range.
+[`Parseff.BE.int16`](./Parseff-BE.md#val-int16), [`Parseff.BE.int32`](./Parseff-BE.md#val-int32), and [`Parseff.BE.int64`](./Parseff-BE.md#val-int64) (and their [`Parseff.LE`](./Parseff-LE.md) counterparts) assert that the next bytes encode an exact constant. `int16` accepts `-32768`..`65535` and raises `Invalid_argument` outside that range.
 
 ```ocaml
 val int16 : int -> unit
@@ -78,7 +79,7 @@ let wav_header () =
 
 ## Fixed-length reads and framed payloads
 
-`Parseff.take` reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`). `Parseff.Slice.take` returns a zero-copy `Parseff.Slice.t` (see [Zero-copy API](./zero-copy.md)). `Parseff.within` (unstable) runs an inner parser bounded to the next `n` bytes without copying.
+[`Parseff.take`](./Parseff.md#val-take) reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`). [`Parseff.Slice.take`](./Parseff-Slice.md#val-take) returns a zero-copy [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) (see [Zero-copy API](./zero-copy.md)). [`Parseff.within`](./Parseff.md#val-within) (unstable) runs an inner parser bounded to the next `n` bytes without copying.
 
 ```ocaml
 val take : int -> string
@@ -88,7 +89,7 @@ val within : int -> (unit -> 'a) -> 'a
 
 ## Mixing binary and text primitives
 
-Binary and text primitives compose freely, including backtracking with `Parseff.or_`:
+Binary and text primitives compose freely, including backtracking with [`Parseff.or_`](./Parseff.md#val-or_):
 
 ```ocaml
 let tlv_field () =
@@ -116,4 +117,4 @@ let tlv_message () =
 - **Short reads**: fail at the start of the field with `expected N bytes, found only K (end of input)` (or `found end of input` if no bytes remain).
 - **Exact-match mismatches**: fail at the start of the field with an `Expected` error formatted in hexadecimal, e.g. `expected int32be 0x01020304, found 0xDE000000`, merging with other alternatives at the same offset.
 - **Positions**: always byte offsets, advancing by the field width.
-- **Streaming and performance**: multi-byte reads use the stdlib's `String.get_int16_be`/`String.get_int32_le` primitives directly on the buffer and work across chunk boundaries in `Parseff.Source.parse` and `Parseff.Push`.
+- **Streaming and performance**: multi-byte reads use the stdlib's `String.get_int16_be`/`String.get_int32_le` primitives directly on the buffer and work across chunk boundaries in [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) and [`Parseff.Push`](./Parseff-Push.md).

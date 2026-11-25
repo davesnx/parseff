@@ -13,7 +13,7 @@ Combinators for repeated items, separated lists, delimited blocks, and operator-
 
 ### `many`
 
-`Parseff.many` runs a parser repeatedly until it fails or an iteration consumes no input (dropping that zero-width result), returning the matched list.
+[`Parseff.many`](./Parseff.md#val-many) runs a parser repeatedly until it fails or an iteration consumes no input (dropping that zero-width result), returning the matched list.
 
 ```ocaml
 val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
@@ -21,6 +21,7 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
 
 - `~at_least` requires at least that many matches.
 - `~at_most` caps the count, failing with `Limit_exceeded { limit = at_most }` if another match consumes input. The error covers that extra match.
+
 ```ocaml
 let digits () = Parseff.many Parseff.digit
 let digits1 () = Parseff.many ~at_least:1 Parseff.digit
@@ -28,7 +29,7 @@ let digits1 () = Parseff.many ~at_least:1 Parseff.digit
 
 ### `count`
 
-`Parseff.count` runs a parser exactly `n` times, failing if any repetition fails. It raises `Invalid_argument` if `n < 0`, so check a count decoded from the input first.
+[`Parseff.count`](./Parseff.md#val-count) runs a parser exactly `n` times, failing if any repetition fails. It raises `Invalid_argument` if `n < 0`, so check a count decoded from the input first.
 
 ```ocaml
 val count : int -> (unit -> 'a) -> 'a list
@@ -51,13 +52,13 @@ let hex_color () =
 
 ### Errors at the end of a loop
 
-The failure that stops a repetition loop is still recorded for furthest-failure reporting. On `"12x"`, `many digit` stops at `'x'` and a following `end_of_input` fails at the same offset, producing `expected digit or end of input`. If a loop stops partway through an element (such as `"ab,ab,ax"` for `sep_by (fun () -> literal "ab") (fun () -> char ',')`), the deeper failure (`expected "b"` at offset 7\) wins over `end_of_input` at offset 5\.
+The failure that stops a repetition loop is still recorded for furthest-failure reporting. On `"12x"`, `many digit` stops at `'x'` and a following `end_of_input` fails at the same offset, producing `expected digit or end of input`. If a loop stops partway through an element (such as `"ab,ab,ax"` for `sep_by (fun () -> literal "ab") (fun () -> char ',')`), the deeper failure (`expected "b"` at offset 7) wins over `end_of_input` at offset 5.
 
 ## Separated and delimited lists
 
 ### `sep_by` and `end_by`
 
-`Parseff.sep_by` parses zero or more elements separated by a separator (discarding separator results). `Parseff.end_by` expects the separator *after* every element, including the last. Pass `~at_least:1` to require at least one element; both stop on zero-width steps. `~at_most` caps the element count as in `many`; the extra item is a separator with the next element for `sep_by`, and an element with its separator for `end_by`. An element that matches empty input also matches after the last separator, so rows separated by line ends give an extra empty row after a final line end, unless the row fails at end of input with `Parseff.not_followed_by` `Parseff.end_of_input`.
+[`Parseff.sep_by`](./Parseff.md#val-sep_by) parses zero or more elements separated by a separator (discarding separator results). [`Parseff.end_by`](./Parseff.md#val-end_by) expects the separator *after* every element, including the last. Pass `~at_least:1` to require at least one element; both stop on zero-width steps. `~at_most` caps the element count as in `many`; the extra item is a separator with the next element for `sep_by`, and an element with its separator for `end_by`. An element that matches empty input also matches after the last separator, so rows separated by line ends give an extra empty row after a final line end, unless the row fails at end of input with [`Parseff.not_followed_by`](./Parseff.md#val-not_followed_by) [`Parseff.end_of_input`](./Parseff.md#val-end_of_input).
 
 ```ocaml
 val sep_by :
@@ -84,7 +85,7 @@ let statements () =
 
 ### `between`
 
-`Parseff.between` parses an opening delimiter, a body, and a closing delimiter, returning the body's result.
+[`Parseff.between`](./Parseff.md#val-between) parses an opening delimiter, a body, and a closing delimiter, returning the body's result.
 
 ```ocaml
 val between : (unit -> 'a) -> (unit -> 'b) -> (unit -> 'c) -> 'c
@@ -102,7 +103,7 @@ let brackets p =
 
 ### `fold_left` and `fold_right`
 
-`Parseff.fold_left` and `Parseff.fold_right` parse one or more elements separated by an operator parser returning a combine function, folding left- or right-associatively. Pass `~otherwise` to return a default when the first element fails (later failures after `commit`/`cut` still fail). Both stop if an operator and element together consume no input.
+[`Parseff.fold_left`](./Parseff.md#val-fold_left) and [`Parseff.fold_right`](./Parseff.md#val-fold_right) parse one or more elements separated by an operator parser returning a combine function, folding left- or right-associatively. Pass `~otherwise` to return a default when the first element fails (later failures after `commit`/`cut` still fail). Both stop if an operator and element together consume no input.
 
 ```ocaml
 val fold_left : ?otherwise:'a -> (unit -> 'a) -> (unit -> 'a -> 'a -> 'a) -> 'a
@@ -127,9 +128,9 @@ let power () =
 
 ### `expression` and `precedence`
 
-`Parseff.expression` parses expressions from a precedence table ordered from lowest to highest precedence, supporting `Parseff.infix_left`, `Parseff.infix_right`, `Parseff.prefix`, and `Parseff.postfix`. Use `expression` when operators are parsed by token parsers that may share prefixes, play multiple roles, or should appear in `Expected` errors.
+[`Parseff.expression`](./Parseff.md#val-expression) parses expressions from a precedence table ordered from lowest to highest precedence, supporting [`Parseff.infix_left`](./Parseff.md#val-infix_left), [`Parseff.infix_right`](./Parseff.md#val-infix_right), [`Parseff.prefix`](./Parseff.md#val-prefix), and [`Parseff.postfix`](./Parseff.md#val-postfix). Use `expression` when operators are parsed by token parsers that may share prefixes, play multiple roles, or should appear in `Expected` errors.
 
-`Parseff.precedence` uses a single `~operator` lookup function per operand returning `Some (prec, op)` or `None`. It supports infix and postfix operators (parse prefix operators in `operand` with `precedence ~min` inside `Parseff.rec_`) and is faster for grammars with many precedence levels that can dispatch from `Parseff.peek_char` or a lexer token.
+[`Parseff.precedence`](./Parseff.md#val-precedence) uses a single `~operator` lookup function per operand returning `Some (prec, op)` or `None`. It supports infix and postfix operators (parse prefix operators in `operand` with `precedence ~min` inside [`Parseff.rec_`](./Parseff.md#val-rec_)) and is faster for grammars with many precedence levels that can dispatch from [`Parseff.peek_char`](./Parseff.md#val-peek_char) or a lexer token.
 
 ```ocaml
 val expression :
@@ -144,7 +145,7 @@ val precedence :
   'a
 ```
 
-See the [Expressions with precedence](../guides/expression-parser.md) guide for complete examples.
+See the [Expressions with precedence](./expression-parser.md) guide for complete examples.
 
 ## Complete example: JSON integer array
 

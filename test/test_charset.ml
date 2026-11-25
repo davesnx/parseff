@@ -399,6 +399,95 @@ let test_random_inputs () =
     check_scans ~name ~off set pred input
   done
 
+(* Sets that exclude every byte below a threshold and up to four more, with
+   some bytes below the threshold kept in the set, as in
+   [c = '\t' || (c >= ' ' && c <> '\127')]. Inputs lean on the bytes around the
+   threshold, the excluded bytes and the kept ones. *)
+let test_threshold_sets () =
+  let rng = Random.State.make [| 4 |] in
+  let byte () = Char.chr (Random.State.int rng 256) in
+  for _ = 1 to 2000 do
+    let t = Random.State.int rng 129 in
+    let extras = List.init (Random.State.int rng 6) (fun _ -> byte ()) in
+    let kept =
+      List.init (Random.State.int rng 3) (fun _ ->
+          Char.chr (Random.State.int rng (max 1 t))
+      )
+    in
+    let pred c =
+      (Char.code c >= t || List.mem c kept) && not (List.mem c extras)
+    in
+    let set = Parseff.Charset.of_predicate pred in
+    let near =
+      Array.of_list
+        (List.map Char.chr
+           [ max 0 (t - 1); t; min 255 (t + 1); 0x7f; 0x80; 0xff ]
+        @ extras @ kept
+        )
+    in
+    let len = Random.State.int rng 160 in
+    let input =
+      String.init len (fun _ ->
+          if Random.State.int rng 6 = 0 then
+            near.(Random.State.int rng (Array.length near))
+          else
+            Char.chr (0x61 + Random.State.int rng 26)
+      )
+    in
+    let off = Random.State.int rng (len + 1) in
+    check_scans ~name:(Printf.sprintf "threshold %d" t) ~off set pred input
+  done
+
+(* The filter flags the kept bytes below the threshold too. Inputs made mostly
+   of them check that a scan steps over each one. *)
+let test_dense_false_matches () =
+  let kept = [ '\t'; '\001'; '\014'; '\031' ] in
+  let pred c = (c >= ' ' || List.mem c kept) && c <> '\127' in
+  let set = Parseff.Charset.of_predicate pred in
+  let rng = Random.State.make [| 5 |] in
+  let alphabet = Array.of_list ('a' :: '\127' :: '\n' :: kept) in
+  for _ = 1 to 1000 do
+    let len = Random.State.int rng 120 in
+    let input =
+      String.init len (fun _ ->
+          if Random.State.int rng 30 = 0 then
+            alphabet.(1 + Random.State.int rng 2)
+          else if Random.State.bool rng then
+            alphabet.(3 + Random.State.int rng (List.length kept))
+          else
+            'a'
+      )
+    in
+    let off = Random.State.int rng (len + 1) in
+    check_scans ~name:"dense false matches" ~off set pred input
+  done
+
+(* A byte below the threshold borrows from the next byte of the word. That
+   byte must still be flagged when it is ['\000'] and the threshold is high. *)
+let test_threshold_borrow () =
+  let sets =
+    [
+      ("a, 0x80 and from 0x85", fun c -> c = 'a' || c = '\x80' || c >= '\x85');
+      ( "a and from 0x7f but 0x81",
+        fun c -> c = 'a' || (c >= '\x7f' && c <> '\x81')
+      );
+    ]
+  in
+  let inputs =
+    [
+      "\x80a\x80\x80\x00\x80\x80\x80";
+      "a\x00\x00\x00\x00\x00\x00\x00\x00";
+      "a\x7f\x7f\x7f\x00\x7f\x7f\x7f\x7f";
+      "aaaaaaa\x00aaaaaaaa";
+    ]
+  in
+  List.iter
+    (fun (name, pred) ->
+      let set = Parseff.Charset.of_predicate pred in
+      List.iter (check_scans ~name ~off:0 set pred) inputs
+    )
+    sets
+
 let () =
   let open Alcotest in
   run "Charset"
@@ -419,6 +508,9 @@ let () =
           test_case "one excluded byte" `Quick test_one_excluded;
           test_case "two excluded bytes" `Quick test_two_excluded;
           test_case "random inputs" `Quick test_random_inputs;
+          test_case "threshold sets" `Quick test_threshold_sets;
+          test_case "dense false matches" `Quick test_dense_false_matches;
+          test_case "threshold borrow" `Quick test_threshold_borrow;
         ]
       );
     ]

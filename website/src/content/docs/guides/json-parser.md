@@ -5,7 +5,7 @@ description: Build a recursive-descent JSON parser with depth limiting
 
 # Guide: A JSON parser
 
-Build a recursive-descent JSON parser with nesting-depth protection via `Parseff.rec_`.
+Build a recursive-descent JSON parser with nesting-depth protection via [`Parseff.rec_`](./Parseff.md#val-rec_).
 
 Source: [`test/test_json.ml`](https://github.com/davesnx/parseff/blob/main/test/test_json.ml).
 
@@ -48,11 +48,11 @@ let string_parser () =
   String s
 ```
 
-`Parseff.number` parses JSON-grammar numbers (integers, fractions, exponents, optional leading `-`). `string_parser` omits backslash escape sequences for brevity.
+[`Parseff.number`](./Parseff.md#val-number) parses JSON-grammar numbers (integers, fractions, exponents, optional leading `-`). `string_parser` omits backslash escape sequences for brevity.
 
 ## Recursive grammar
 
-Arrays and objects contain nested JSON values. Wrap the recursive entry point (`json`) in `Parseff.rec_` so nesting depth is checked against `~max_depth` (default `128`), and wrap `array_parser` / `object_parser` in `Parseff.context` with `~delimited:true` so multi-line errors point back to the opening bracket or brace:
+Arrays and objects contain nested JSON values. Wrap the recursive entry point (`json`) in [`Parseff.rec_`](./Parseff.md#val-rec_) so nesting depth is checked against `~max_depth` (default `128`), and wrap `array_parser` / `object_parser` in [`Parseff.context`](./Parseff.md#val-context) with `~delimited:true` so multi-line errors point back to the opening bracket or brace:
 
 ```ocaml
 let rec json () =
@@ -105,7 +105,7 @@ and key_value () =
   (key, value)
 ```
 
-Only `json` needs `Parseff.rec_`, since every recursive cycle passes through it.
+Only `json` needs [`Parseff.rec_`](./Parseff.md#val-rec_), since every recursive cycle passes through it.
 
 ## Running and depth limiting
 
