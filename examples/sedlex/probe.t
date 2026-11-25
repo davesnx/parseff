@@ -93,3 +93,11 @@ The range of a token, and of a token followed by a space:
   $ ./probe.exe range "  x"
   range 0-3
   ok
+
+A context opened right after a token, before the space:
+
+  $ ./probe.exe context "x  y 1"
+  1:6: [error] expected 'in', found '1'
+  1 | x  y 1
+    |      ^
+    * while parsing pair, from 1:2

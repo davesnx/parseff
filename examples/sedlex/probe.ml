@@ -66,6 +66,12 @@ let scenario t = function
   | "range" ->
       let _, r = with_range (fun () -> name t) in
       Printf.printf "range %d-%d\n" r.start r.stop
+  | "context" ->
+      let _ = name t in
+      context "pair" (fun () ->
+          let _ = name t in
+          eat_in t ()
+      )
   | s ->
       prerr_endline ("unknown scenario " ^ s);
       exit 2
