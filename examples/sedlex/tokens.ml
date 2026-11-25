@@ -10,21 +10,16 @@ type 'tok token = { value : 'tok; start : int; stop : int }
 type 'tok t = {
   mutable tokens : 'tok token array;
   mutable len : int;
-  mutable next : unit -> 'tok token;
+  next : unit -> 'tok token;
   eof : 'tok;
   show : 'tok -> string;
-  move : int -> unit;
   mutable last : int;
 }
 
 (* [next ()] returns the next token. After the input, it must return [eof]
-   with [start = stop = length]. [move] goes to a token start; [skip_to] does
-   not read input, so a lexer that reads a stream ahead of parseff needs a
-   [move] that does. *)
-let create ?(move = skip_to) ~show ~eof next =
-  { tokens = [||]; len = 0; next; eof; show; move; last = 0 }
-
-let lexed t = t.len
+   with [start = stop = length]. *)
+let create ~show ~eof next =
+  { tokens = [||]; len = 0; next; eof; show; last = 0 }
 
 let push t tok =
   if t.len = Array.length t.tokens then begin
@@ -74,7 +69,7 @@ let index_at t pos =
 
 let peek t =
   let tok = t.tokens.(index_at t (position ())) in
-  t.move tok.start;
+  skip_to tok.start;
   tok
 
 (* To the start of the next token, so a combinator that starts here starts
@@ -84,25 +79,16 @@ let advance t =
   fill t t.tokens.(i).stop;
   let i = min (i + 1) (t.len - 1) in
   t.last <- i;
-  t.move t.tokens.(i).start
+  skip_to t.tokens.(i).start
 
-(* Reads the token, and one byte after it, before failing: on a stream, the
-   error can then quote the token or say that the input ended. *)
-let unexpected t tok label =
-  let _ =
-    look_ahead (fun () ->
-        t.move tok.stop;
-        peek_char ()
-    )
-  in
-  expected_token ~upto:tok.stop label
+let unexpected tok label = expected_token ~upto:tok.stop label
 
 let eat t value =
   let tok = peek t in
   if tok.value = value then
     advance t
   else
-    unexpected t tok (t.show value)
+    unexpected tok (t.show value)
 
 (* [optional] keeps the failure, so a later failure at the same token also
    lists [value]. *)
@@ -116,15 +102,7 @@ let select t label f =
       advance t;
       v
   | None ->
-      unexpected t tok label
-
-(* Drops the tokens from the position on and lexes the rest with [next], for a
-   token that depends on parser state. Tokens before the position stay. *)
-let relex t next =
-  let i = index_at t (position ()) in
-  t.len <- i;
-  t.last <- 0;
-  t.next <- next
+      unexpected tok label
 
 (* The end of the token before the position, so ranges leave out the
    whitespace and comments that [advance] skipped. *)

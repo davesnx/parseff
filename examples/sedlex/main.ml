@@ -1,7 +1,8 @@
 (* sedlex lexes, parseff parses.
 
-   [Lexer.tokenize] runs the sedlex lexer over the whole input first. The
-   parser then reads tokens instead of bytes through [Tokens]. Because
+   [Lexer.tokens] runs the sedlex lexer one token at a time, when the parser
+   first asks for a token. The parser reads tokens instead of bytes through
+   [Tokens]. Because
    positions are byte offsets in the original input, parseff errors still
    point at the source text. *)
 
