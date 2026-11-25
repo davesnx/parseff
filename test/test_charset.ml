@@ -455,6 +455,32 @@ let test_dense_false_matches () =
     check_scans ~name:"dense false matches" ~off set pred input
   done
 
+(* A byte below the threshold borrows from the next byte of the word. That
+   byte must still be flagged when it is ['\000'] and the threshold is high. *)
+let test_threshold_borrow () =
+  let sets =
+    [
+      ("a, 0x80 and from 0x85", fun c -> c = 'a' || c = '\x80' || c >= '\x85');
+      ( "a and from 0x7f but 0x81",
+        fun c -> c = 'a' || (c >= '\x7f' && c <> '\x81')
+      );
+    ]
+  in
+  let inputs =
+    [
+      "\x80a\x80\x80\x00\x80\x80\x80";
+      "a\x00\x00\x00\x00\x00\x00\x00\x00";
+      "a\x7f\x7f\x7f\x00\x7f\x7f\x7f\x7f";
+      "aaaaaaa\x00aaaaaaaa";
+    ]
+  in
+  List.iter
+    (fun (name, pred) ->
+      let set = Parseff.Charset.of_predicate pred in
+      List.iter (check_scans ~name ~off:0 set pred) inputs
+    )
+    sets
+
 let () =
   let open Alcotest in
   run "Charset"
@@ -477,6 +503,7 @@ let () =
           test_case "random inputs" `Quick test_random_inputs;
           test_case "threshold sets" `Quick test_threshold_sets;
           test_case "dense false matches" `Quick test_dense_false_matches;
+          test_case "threshold borrow" `Quick test_threshold_borrow;
         ]
       );
     ]

@@ -2302,7 +2302,9 @@ module Charset = struct
     in
     let inside i = Bytes.get set i <> '\000' in
     let best = ref None in
-    for t = 128 downto 0 do
+    (* [t] stops at 127: the word test [x - t] borrows from the next byte, and
+       with [t = 128] that borrow turns ['\000'] into [0x7f], which it misses. *)
+    for t = 127 downto 0 do
       let extras = ref [] and n = ref 0 in
       for b = 255 downto t do
         if not (inside b) then begin
