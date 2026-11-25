@@ -673,22 +673,71 @@ module State = struct
         active
     )
 
+  let unset =
+    let rec unset =
+      { dls = [| Obj.repr 0 |]; state = none; live = false; peer = unset }
+    in
+    unset
+
   (* Shared by all domains, so reads and writes race. This is safe because the
      cache is only a hint: a slot's fields are written only by the domain that
      owns it, [dls] holds that domain's DLS array, and readers use a slot only
      when [slot.dls == dls_state ()]. A foreign or stale slot fails that check
      and falls back to [Domain.DLS]. The OCaml 5 memory model guarantees that a
      racy read returns a fully initialised slot. *)
-  let cache : slot ref =
-    let rec unset =
-      { dls = [| Obj.repr 0 |]; state = none; live = false; peer = unset }
-    in
-    ref unset
+  let cache : slot ref = ref unset
+
+  (* [shared] becomes true once a second domain has run a parse, and stays
+     true. From then on nothing writes [cache]: with several domains, those
+     writes bounce one cache line between cores on every primitive. *)
+  let shared = ref false
+  let owner = ref (-1)
+
+  (* Where [key]'s slot sits in each domain's DLS array, found by looking for
+     the slot that [Domain.DLS.get] returned. With it, the shared mode reads
+     the slot from [dls_state ()] instead of calling [Domain.DLS.get], which
+     is not inlined. It stays [-1] if the stdlib stores DLS values in another
+     way, and the shared mode then always calls [refresh]. *)
+  let index = ref (-1)
+
+  let find_index slot d =
+    let i = ref 0 in
+    while !i < Array.length d && Array.unsafe_get d !i != Obj.repr slot do
+      incr i
+    done;
+    if !i < Array.length d then index := !i
 
   let[@inline never] refresh () =
     let slot = Domain.DLS.get key in
-    slot.dls <- dls_state ();
+    let d = dls_state () in
+    slot.dls <- d;
+    if !index < 0 then find_index slot d;
+    if not !shared then begin
+      let self = (Domain.self () :> int) in
+      let o = !owner in
+      if o = -1 then
+        owner := self
+      else if o <> self then begin
+        shared := true;
+        cache := unset
+      end
+    end else if !cache != unset then
+      (* An [activate] that raced with the switch stored its slot. *)
+      cache := unset;
     slot
+
+  (* An entry that holds no slot yet is a block whose field 0 is not [d], so
+     reading [dls] first is safe. *)
+  let[@inline always] shared_slot d =
+    let i = !index in
+    if i >= 0 && i < Array.length d then
+      let slot : slot = Obj.obj (Array.unsafe_get d i) in
+      if slot.dls == d then
+        slot
+      else
+        refresh ()
+    else
+      refresh ()
 
   let[@inline always] own_slot () =
     let d = dls_state () in
@@ -697,18 +746,20 @@ module State = struct
       slot
     else if slot.peer.dls == d then
       slot.peer
+    else if !shared then
+      shared_slot d
     else
       refresh ()
 
   let[@inline always] activate slot (t : t) =
     if slot.state != t then slot.state <- t;
     slot.live <- true;
-    if !cache != slot then cache := slot
+    if (not !shared) && !cache != slot then cache := slot
 
   let deactivate slot =
     slot.state <- none;
     slot.live <- false;
-    cache := slot.peer
+    if not !shared then cache := slot.peer
 
   let install (t : t) = activate (own_slot ()) t
 
@@ -1123,15 +1174,21 @@ let[@inline never] get_state_slow () =
   let slot = State.refresh () in
   let st = slot.state in
   if st == State.none || not slot.live then raise Not_in_parse_context;
-  State.cache := slot;
+  if not !State.shared then State.cache := slot;
   st
 
 let[@inline always] get_state () =
   let slot = !State.cache in
-  if slot.dls != State.dls_state () || not slot.live then
-    get_state_slow ()
-  else
+  if slot.dls == State.dls_state () && slot.live then
     slot.state
+  else if !State.shared then
+    let slot = State.shared_slot (State.dls_state ()) in
+    if slot.live then
+      slot.state
+    else
+      get_state_slow ()
+  else
+    get_state_slow ()
 
 let create_line_index () =
   let starts = Array.make 8 0 in
