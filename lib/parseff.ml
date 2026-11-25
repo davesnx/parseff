@@ -617,9 +617,25 @@ module State = struct
   let shared = ref false
   let owner = ref (-1)
 
+  (* Where [key]'s slot sits in each domain's DLS array, found by looking for
+     the slot that [Domain.DLS.get] returned. With it, the shared mode reads
+     the slot from [dls_state ()] instead of calling [Domain.DLS.get], which
+     is not inlined. It stays [-1] if the stdlib stores DLS values in another
+     way, and the shared mode then always calls [refresh]. *)
+  let index = ref (-1)
+
+  let find_index slot d =
+    let i = ref 0 in
+    while !i < Array.length d && Array.unsafe_get d !i != Obj.repr slot do
+      incr i
+    done;
+    if !i < Array.length d then index := !i
+
   let[@inline never] refresh () =
     let slot = Domain.DLS.get key in
-    slot.dls <- dls_state ();
+    let d = dls_state () in
+    slot.dls <- d;
+    if !index < 0 then find_index slot d;
     if not !shared then begin
       let self = (Domain.self () :> int) in
       let o = !owner in
@@ -634,6 +650,19 @@ module State = struct
       cache := unset;
     slot
 
+  (* An entry that holds no slot yet is a block whose field 0 is not [d], so
+     reading [dls] first is safe. *)
+  let[@inline always] shared_slot d =
+    let i = !index in
+    if i >= 0 && i < Array.length d then
+      let slot : slot = Obj.obj (Array.unsafe_get d i) in
+      if slot.dls == d then
+        slot
+      else
+        refresh ()
+    else
+      refresh ()
+
   let[@inline always] own_slot () =
     let d = dls_state () in
     let slot = !cache in
@@ -641,6 +670,8 @@ module State = struct
       slot
     else if slot.peer.dls == d then
       slot.peer
+    else if !shared then
+      shared_slot d
     else
       refresh ()
 
@@ -1075,7 +1106,7 @@ let[@inline always] get_state () =
   if slot.dls == State.dls_state () && slot.live then
     slot.state
   else if !State.shared then
-    let slot = Domain.DLS.get State.key in
+    let slot = State.shared_slot (State.dls_state ()) in
     if slot.live then
       slot.state
     else

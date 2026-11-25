@@ -99,6 +99,28 @@ let test_nested_parse_across_domains () =
     )
     results
 
+(* A new DLS key read during a parse replaces the domain's DLS array with a
+   larger one. Parseff must find its slot in the new array. *)
+let test_dls_grows_during_parse () =
+  Domain.join (Domain.spawn (fun () -> ignore (Parseff.parse "a;1\n" fields)));
+  let result =
+    Parseff.parse "x;1\ny;2\n" (fun () ->
+        let first = fields () in
+        for i = 1 to 100 do
+          let key = Domain.DLS.new_key (fun () -> i) in
+          ignore (Domain.DLS.get key : int)
+        done;
+        let second = fields () in
+        (first, second)
+    )
+  in
+  match result with
+  | Ok (first, second) ->
+      Alcotest.(check (pair string string)) "before" ("x", "1") first;
+      Alcotest.(check (pair string string)) "after" ("y", "2") second
+  | Error _ ->
+      Alcotest.fail "parse failed"
+
 (* Each domain does the same work, so CPU time per domain should stay near the
    single-domain time. Writing a shared cache line on every primitive made it
    grow with the number of domains. CPU time rather than wall time keeps the
@@ -151,6 +173,8 @@ let () =
             test_parallel_after_switch;
           Alcotest.test_case "nested parses on several domains" `Quick
             test_nested_parse_across_domains;
+          Alcotest.test_case "DLS array grows during a parse" `Quick
+            test_dls_grows_during_parse;
           Alcotest.test_case "CPU per domain does not grow" `Quick
             test_cpu_per_domain_does_not_grow;
         ]
