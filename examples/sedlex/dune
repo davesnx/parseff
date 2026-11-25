@@ -1,0 +1,8 @@
+(executable
+ (name main)
+ (libraries parseff sedlex)
+ (preprocess
+  (pps sedlex.ppx)))
+
+(cram
+ (deps main.exe))

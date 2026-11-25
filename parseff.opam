@@ -17,6 +17,7 @@ depends: [
   "eio" {with-test}
   "eio_main" {with-test}
   "miou" {with-test}
+  "sedlex" {>= "3.2" & with-test}
   "benchmark" {with-dev-setup}
   "angstrom" {with-dev-setup}
   "bigstringaf" {with-dev-setup}
