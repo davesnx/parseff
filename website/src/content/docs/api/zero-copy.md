@@ -26,9 +26,6 @@ module Slice : sig
   val recognize : (unit -> 'a) -> t
   val sep_by_take :
     ws:(char -> bool) -> sep:char -> (char -> bool) -> t list
-  val of_string : string -> t
-  val equal : t -> t -> bool
-  val hash : t -> int
 end
 ```
 
@@ -91,20 +88,6 @@ let () =
   match Parseff.parse "[1, 2, 3, 4, 5]" json_int_array with
   | Ok nums -> assert (List.fold_left ( + ) 0 nums = 15)
   | Error e -> prerr_endline (Parseff.render_error ~name:"array" e)
-```
-
-### Slices as table keys
-
-`Parseff.Slice.equal` and `Parseff.Slice.hash` compare and hash slices without allocating, so `Hashtbl.Make (Parseff.Slice)` looks up a slice of the input without copying it to a string. `Parseff.Slice.of_string` builds keys from strings. A slice stored in a table keeps the whole input alive under `Parseff.parse`, and a slice from `Parseff.Iter` is valid only during its callback; store `Slice.of_string (Slice.to_string s)` to keep a copy of its bytes.
-
-```ocaml
-module Stations = Hashtbl.Make (Parseff.Slice)
-
-let count_station table () =
-  let name = Parseff.Slice.take_while (fun c -> c <> ';') in
-  match Stations.find_opt table name with
-  | Some n -> incr n
-  | None -> Stations.add table name (ref 1)
 ```
 
 ## Fused string scanner: `sep_by_take`
