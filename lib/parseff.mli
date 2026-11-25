@@ -409,7 +409,7 @@ val satisfy : ?label:string -> (char -> bool) -> char
 val char : char -> char
 (** [char c] matches and returns the byte [c]. *)
 
-(** Precomputed 256-byte lookup table for the [~set] argument of {!take_while},
+(** Precomputed byte set for the [~set] argument of {!take_while},
     {!skip_while}, {!Slice.take_while}, and {!Iter.take_while}. Build once
     outside the parser. *)
 module Charset : sig
