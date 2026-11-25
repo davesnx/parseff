@@ -6,6 +6,7 @@
   test_json
   test_streaming
   test_domains
+  test_domain_state
   test_binary
   test_utf8
   test_errors
