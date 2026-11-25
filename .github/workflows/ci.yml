@@ -85,13 +85,13 @@ jobs:
             ox: git+https://github.com/oxcaml/opam-repository.git
             default: https://opam.ocaml.org
 
-      # Unit tests only: they need no other package, and miou, which an
-      # example uses, does not build on OxCaml.
+      # On OxCaml, make install and make test cover the unit tests only: miou,
+      # which an example uses, does not build there.
       - name: Install dependencies
-        run: opam install dune uucp alcotest
+        run: make install
 
       - name: Run tests
-        run: make test-oxcaml OXCAML_DUNE='opam exec -- dune'
+        run: make test
 
   website:
     name: Build website

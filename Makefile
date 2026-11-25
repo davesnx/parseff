@@ -1,6 +1,22 @@
 project_name = parseff
 
-DUNE = opam exec -- dune
+# SWITCH names an opam switch to use instead of the current one, for example
+# SWITCH=oxcaml.5.4.0+ox9 make install test. Each switch builds in its own
+# BUILD_DIR.
+SWITCH ?=
+OPAM_EXEC = opam exec $(if $(SWITCH),--switch=$(SWITCH)) --
+BUILD_DIR ?= $(if $(SWITCH),_build-$(SWITCH),_build)
+DUNE ?= DUNE_BUILD_DIR=$(BUILD_DIR) $(OPAM_EXEC) dune
+
+# A SWITCH whose name contains "ox" gets OxCaml.
+comma := ,
+OXCAML_COMPILER = ocaml-variants.5.4.0+ox$(comma)oxcaml-compiler.5.4.0-ox9
+COMPILER ?= $(if $(findstring ox,$(SWITCH)),$(OXCAML_COMPILER),5.5.2)
+OXCAML_REPOS = ox=git+https://github.com/oxcaml/opam-repository.git,default
+
+# Non-empty when the switch runs OxCaml. Expanded only by the recipes that use it.
+IS_OXCAML = $(shell $(OPAM_EXEC) ocamlc -version 2>/dev/null | grep '+ox')
+
 opam_file = $(project_name).opam
 PARSEFF_GENERATE_MARKDOWN ?= true
 
@@ -33,8 +49,16 @@ clean: ## Clean artifacts
 	$(DUNE) clean --root .
 
 .PHONY: test
-test: ## Run the unit tests
-	$(DUNE) build --root . @runtest
+test: ## Run the unit tests; on OxCaml, those in test/ only, and fail on a safety alert in lib/
+	@if [ -z "$(IS_OXCAML)" ]; then \
+		echo '$(DUNE) build --root . @runtest'; $(DUNE) build --root . @runtest; \
+	else \
+		out=$$(DUNE_CACHE=disabled $(DUNE) build --root . ./lib/parseff.cmxa 2>&1); status=$$?; \
+		if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi; \
+		if [ $$status -ne 0 ]; then exit $$status; fi; \
+		if printf '%s\n' "$$out" | grep -q '^Alert'; then echo "lib/ has OxCaml alerts"; exit 1; fi; \
+		echo '$(DUNE) build --root . @test/runtest'; $(DUNE) build --root . @test/runtest; \
+	fi
 
 .PHONY: test-watch
 test-watch: ## Run the unit tests in watch mode
@@ -53,36 +77,25 @@ format-check: ## Checks if format is correct
 	@DUNE_CONFIG__GLOBAL_LOCK=disabled $(DUNE) build --root . @fmt
 
 .PHONY: create-switch
-create-switch: ## Create opam switch
-	opam switch create . 5.5.2 --deps-only --with-test -y
+create-switch: ## Create the opam switch (SWITCH, or a local one)
+ifeq ($(SWITCH),)
+	opam switch create . $(COMPILER) --deps-only --with-test -y
+else
+	opam switch create $(SWITCH) --packages=$(COMPILER) $(if $(findstring +ox,$(COMPILER)),--repos $(OXCAML_REPOS)) -y
+endif
+
+.PHONY: switch
+switch:
+	@if [ -n "$(SWITCH)" ] && ! opam switch list --short | grep -Fqx '$(SWITCH)'; then \
+		$(MAKE) --no-print-directory create-switch; \
+	fi
 
 .PHONY: install
-install: ## Install dependencies
-	opam install . --deps-only --with-test --with-doc --with-dev-setup -y
+install: switch ## Install dependencies; on OxCaml, only those of the unit tests
+	$(if $(IS_OXCAML),opam install $(if $(SWITCH),--switch=$(SWITCH)) dune uucp alcotest -y,opam install $(if $(SWITCH),--switch=$(SWITCH)) . --deps-only --with-test --with-doc --with-dev-setup -y)
 
 .PHONY: init
 init: create-switch install ## Create a local dev enviroment
-
-OXCAML_SWITCH ?= parseff-oxcaml-ox9
-OXCAML_COMPILER ?= ocaml-variants.5.4.0+ox,oxcaml-compiler.5.4.0-ox9
-OXCAML_DUNE ?= opam exec --switch=$(OXCAML_SWITCH) -- dune
-OXCAML_BUILD_DIR ?= _build-oxcaml
-
-.PHONY: create-switch-oxcaml
-create-switch-oxcaml: ## Create the OxCaml opam switch
-	opam switch create $(OXCAML_SWITCH) --packages=$(OXCAML_COMPILER) --repos ox=git+https://github.com/oxcaml/opam-repository.git,default -y
-
-.PHONY: install-oxcaml
-install-oxcaml: ## Install the test dependencies into the OxCaml switch
-	opam install --switch=$(OXCAML_SWITCH) dune uucp alcotest -y
-
-.PHONY: test-oxcaml
-test-oxcaml: ## Run the unit tests with OxCaml, and fail on a safety alert in lib/
-	@out=$$(DUNE_CACHE=disabled $(OXCAML_DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) ./lib/parseff.cmxa 2>&1); status=$$?; \
-	if [ -n "$$out" ]; then printf '%s\n' "$$out"; fi; \
-	if [ $$status -ne 0 ]; then exit $$status; fi; \
-	if printf '%s\n' "$$out" | grep -q '^Alert'; then echo "lib/ has OxCaml alerts"; exit 1; fi
-	$(OXCAML_DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) @test/runtest
 
 BENCH_FILES := $(wildcard bench/bench_*.ml)
 BENCH_NAMES := $(patsubst bench/bench_%.ml,bench-%,$(BENCH_FILES))
