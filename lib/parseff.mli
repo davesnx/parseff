@@ -1266,6 +1266,29 @@ module Slice : sig
         let len = BE.any_uint16 () in
         Slice.take len
       ]} *)
+
+  val of_string : string -> t
+  (** [of_string str] is a slice of all of [str], without copying it. *)
+
+  val equal : t -> t -> bool
+  (** [equal a b] is [String.equal (to_string a) (to_string b)], without
+      allocating. *)
+
+  val hash : t -> int
+  (** [hash s] hashes the bytes of [s] to a non-negative int, without
+      allocating. Values differ from [Hashtbl.hash] and may change between
+      releases.
+
+      With {!equal}, [Slice] is a [Hashtbl.HashedType]. Build constant keys with
+      {!of_string} once, outside the parser:
+
+      {@ocaml[
+      module Names = Hashtbl.Make (Slice)
+
+      let names = Names.create 16
+      let () = Names.replace names (Slice.of_string "host") `Host
+      let name () = Names.find_opt names (Slice.take_while (fun c -> c <> ':'))
+      ]} *)
 end
 
 (** {1 Repetition} *)
