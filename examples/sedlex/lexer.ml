@@ -85,31 +85,37 @@ let rec next buf =
   | _ ->
       assert false
 
+(* The length of the longest valid UTF-8 prefix of [s]. *)
+let valid_utf_8_prefix s =
+  let rec loop i =
+    if i >= String.length s then
+      i
+    else
+      let d = String.get_utf_8_uchar s i in
+      if Uchar.utf_decode_is_valid d then
+        loop (i + Uchar.utf_decode_length d)
+      else
+        i
+  in
+  loop 0
+
 (* Lexes all of [input]. The last token is [Eof], with
-   [start = stop = String.length input]. Invalid UTF-8 stops the lexer with an
-   [Invalid] token from the end of the last token to the end of the input. *)
+   [start = stop = String.length input]. sedlex raises on invalid UTF-8, so it
+   lexes only the valid prefix, and the rest becomes one [Invalid] token. *)
 let tokenize input =
   let len = String.length input in
-  let buf = Sedlexing.Utf8.from_string input in
-  let rec loop acc last_stop =
-    match next buf with
-    | token ->
-        let start, stop = Sedlexing.bytes_loc buf in
-        let tok = { token; start; stop } in
-        if token = Eof then
-          List.rev (tok :: acc)
-        else
-          loop (tok :: acc) stop
-    | exception Sedlexing.MalFormed ->
-        let start = ref last_stop in
-        while !start < len && String.contains " \t\r\n" input.[!start] do
-          incr start
-        done;
-        let invalid = String.sub input !start (len - !start) in
-        List.rev
-          ({ token = Eof; start = len; stop = len }
-          :: { token = Invalid invalid; start = !start; stop = len }
-          :: acc
-          )
+  let valid = valid_utf_8_prefix input in
+  let buf = Sedlexing.Utf8.from_string (String.sub input 0 valid) in
+  let rec loop acc =
+    let token = next buf in
+    let start, stop = Sedlexing.bytes_loc buf in
+    if token <> Eof then
+      loop ({ token; start; stop } :: acc)
+    else if valid < len then
+      let invalid = String.sub input valid (len - valid) in
+      { token = Invalid invalid; start = valid; stop = len } :: acc
+    else
+      acc
   in
-  Array.of_list (loop [] 0)
+  let eof = { token = Eof; start = len; stop = len } in
+  Array.of_list (List.rev (eof :: loop []))

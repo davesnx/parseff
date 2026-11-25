@@ -52,10 +52,10 @@ token, which the parser reports like any other unexpected token:
   1 | let λ = 1 in λ @ 2
     |                ^
 
-  $ ./main.exe "$(printf '1 + a\342\202')"
-  1:5: [error] expected an expression, found invalid input "a\226\130"
-  1 | 1 + a\xE2\x82
-    |     ^^^^^^^^^
+  $ ./main.exe "$(printf '1 + \342\202')"
+  1:5: [error] expected an expression, found invalid input "\226\130"
+  1 | 1 + \xE2\x82
+    |     ^^^^^^^^
 
   $ ./main.exe "$(printf '1 +\n  (2 *\n   3')"
   3:5: [error] expected ')', found end of input
