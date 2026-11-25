@@ -2145,9 +2145,6 @@ let[@inline always] handle_skip_while st pred =
   st.pos <- scan_while st ~keep_from:no_keep st.pos pred
 
 module Charset = struct
-  (* Bytes 0 to 255 hold membership. Byte 256 holds the number of excluded
-     bytes when it is 1 or 2, and 0 otherwise; bytes 257 and 258 hold the
-     excluded bytes. *)
   type t = string
 
   let excluded_count = 256
@@ -2181,14 +2178,11 @@ module Charset = struct
 
   let[@inline always] mem set c = String.unsafe_get set (Char.code c) <> '\000'
 
-  (* Marks the zero bytes of [x] with their high bit. Only the lowest mark is
-     exact, which is all [first_mark] reads. *)
   let[@inline always] zero_bytes x =
     Int64.logand
       (Int64.logand (Int64.sub x 0x0101010101010101L) (Int64.lognot x))
       0x8080808080808080L
 
-  (* Index of the byte holding the lowest mark of [m], on little-endian. *)
   let[@inline always] first_mark m =
     let low = Int64.shift_right_logical (Int64.logand m (Int64.neg m)) 7 in
     Int64.to_int
@@ -2200,9 +2194,6 @@ module Charset = struct
   let[@inline always] excluded_marks x a b =
     Int64.logor (zero_bytes (Int64.logxor x a)) (zero_bytes (Int64.logxor x b))
 
-  (* Reads 8 bytes at a time and stops at the first excluded byte. The last
-     partial word is read again as the word ending at [limit]; its bytes before
-     the current index are already known to be in the set. *)
   let[@inline never] scan_excluded set inp from limit =
     let a = repeat (String.unsafe_get set 257) in
     let b = repeat (String.unsafe_get set 258) in
@@ -2233,8 +2224,6 @@ module Charset = struct
       !i
     end
 
-  (* [scan set inp from limit] returns the first index in [from, limit) whose
-     byte is not in [set], or [limit]. *)
   let[@inline always] scan set inp from limit =
     if String.unsafe_get set excluded_count = '\000' || Sys.big_endian then begin
       let i = ref from in

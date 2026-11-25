@@ -241,8 +241,6 @@ let chunked_by size input =
       n
   )
 
-(* Every way to scan with [set], each compared with the same scan by [pred]
-   after skipping [off] bytes. *)
 let check_scans ~name ~off set pred input =
   let after_off p () =
     let _ = Parseff.take off in
@@ -302,8 +300,6 @@ let check_scans ~name ~off set pred input =
     )
     [ 1; 5; 13 ]
 
-(* Bytes that sit next to an excluded byte in value or in bits, where the
-   zero-byte arithmetic borrows or carries. *)
 let neighbours excluded =
   List.concat_map
     (fun c ->
