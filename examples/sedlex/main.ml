@@ -29,7 +29,7 @@ type tokens = { tokens : Lexer.t array }
 (* The first token that starts at or after byte [pos]. A position inside
    whitespace or a comment maps to the token after it. [Eof] starts at the end
    of the input, so the search always finds a token. *)
-let token_at t pos =
+let index_at t pos =
   let rec search lo hi =
     if lo >= hi then
       lo
@@ -40,7 +40,9 @@ let token_at t pos =
       else
         search (mid + 1) hi
   in
-  t.tokens.(search 0 (Array.length t.tokens - 1))
+  search 0 (Array.length t.tokens - 1)
+
+let token_at t pos = t.tokens.(index_at t pos)
 
 (* Moves to the start of the next token, past whitespace and comments, so
    errors and contexts start at the token. *)
@@ -49,16 +51,18 @@ let peek t =
   skip_to tok.start;
   tok
 
-let advance (t : Lexer.t) = skip_to t.stop
+(* Moves past [tok] and the whitespace and comments after it, to the start of
+   the next token. A combinator that starts after [advance] then starts where
+   the next token check fails, so [expect], [require], and [list] see that
+   failure as their own. *)
+let advance t (tok : Lexer.t) = skip_to (token_at t tok.stop).start
 
-(* An ordinary [Expected] failure, so alternatives merge and [expect]
-   relabels it. *)
 let unexpected (tok : Lexer.t) expected = expected_token ~upto:tok.stop expected
 
 let eat t expected_token label =
   let current_token = peek t in
   if current_token.token = expected_token then
-    advance current_token
+    advance t current_token
   else
     unexpected current_token label
 
@@ -73,7 +77,7 @@ let div = binop '/'
 let operator t () =
   let tok = peek t in
   let found prec op =
-    advance tok;
+    advance t tok;
     Some (prec, op)
   in
   match tok.token with
@@ -94,15 +98,15 @@ and operand t scope () =
   let tok = peek t in
   match tok.token with
   | Number n ->
-      advance tok;
+      advance t tok;
       Num n
   | Ident name ->
       if not (List.mem name scope) then
         error ~from:tok.start ~upto:tok.stop (Unbound name);
-      advance tok;
+      advance t tok;
       Var name
   | Minus ->
-      advance tok;
+      advance t tok;
       Neg
         (rec_ (fun () ->
              precedence ~min:3 ~operator:(operator t) (operand t scope)
@@ -110,7 +114,7 @@ and operand t scope () =
         )
   | Lparen ->
       context ~delimited:true "parenthesized expression" (fun () ->
-          advance tok;
+          advance t tok;
           let e = rec_ (expr t scope) in
           eat t Rparen "')'";
           e
@@ -122,12 +126,12 @@ and operand t scope () =
 
 and let_binding t scope let_token =
   context "let binding" (fun () ->
-      advance let_token;
+      advance t let_token;
       let name_token = peek t in
       let name =
         match name_token.token with
         | Ident name ->
-            advance name_token;
+            advance t name_token;
             name
         | _ ->
             unexpected name_token "a name"

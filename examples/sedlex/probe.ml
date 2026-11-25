@@ -5,7 +5,7 @@ open Parseff
 
 type tokens = { tokens : Lexer.t array }
 
-let token_at t pos =
+let index_at t pos =
   let rec search lo hi =
     if lo >= hi then
       lo
@@ -16,21 +16,36 @@ let token_at t pos =
       else
         search (mid + 1) hi
   in
-  t.tokens.(search 0 (Array.length t.tokens - 1))
+  search 0 (Array.length t.tokens - 1)
+
+let token_at t pos = t.tokens.(index_at t pos)
 
 let peek t =
   let tok = token_at t (position ()) in
   skip_to tok.start;
   tok
 
-let advance (t : Lexer.t) = skip_to t.stop
+(* Moves past [tok] and the whitespace and comments after it, to the start of
+   the next token. A combinator that starts after [advance] then starts where
+   the next token check fails, so [expect], [require], and [list] see that
+   failure as their own. *)
+let advance t (tok : Lexer.t) = skip_to (token_at t tok.stop).start
+
+(* The end of the token before the position. Ranges end here, not after the
+   whitespace that [advance] skipped. *)
+let last_stop t =
+  let i = index_at t (position ()) in
+  if i = 0 then
+    position ()
+  else
+    t.tokens.(i - 1).stop
 
 let unexpected (tok : Lexer.t) expected = expected_token ~upto:tok.stop expected
 
 let eat t expected_token label =
   let current_token = peek t in
   if current_token.token = expected_token then
-    advance current_token
+    advance t current_token
   else
     unexpected current_token label
 
@@ -38,7 +53,7 @@ let name t =
   let tok = peek t in
   match tok.token with
   | Ident name ->
-      advance tok;
+      advance t tok;
       name
   | _ ->
       unexpected tok "a name"
@@ -66,6 +81,10 @@ let scenario t = function
   | "range" ->
       let _, r = with_range (fun () -> name t) in
       Printf.printf "range %d-%d\n" r.start r.stop
+  | "token-range" ->
+      let start = (peek t).start in
+      let _ = name t in
+      Printf.printf "range %d-%d\n" start (last_stop t)
   | "context" ->
       let _ = name t in
       context "pair" (fun () ->

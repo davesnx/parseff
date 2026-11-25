@@ -32,7 +32,7 @@ expect relabels a token check that starts at the token:
 expect after a token and a space:
 
   $ ./probe.exe expect-after "x 1"
-  1:3: [error] expected 'in', found '1'
+  1:3: [error] expected the keyword in, found '1'
   1 | x 1
     |   ^
 
@@ -61,16 +61,18 @@ A token check and a byte primitive at the same position:
 require after a token and a space, then without the space:
 
   $ ./probe.exe require "x y"
-  1:3: [error] expected 'in', found 'y'
+  recorded: 1:3: [error] expected 'in', found 'y'
   1 | x y
     |   ^
+  ok
 
   $ ./probe.exe require "x # comment
   > y"
-  2:1: [error] expected 'in', found 'y'
+  recorded: 2:1: [error] expected 'in', found 'y'
   1 | x # comment
   2 | y
     | ^
+  ok
 
   $ ./probe.exe require "x+"
   recorded: 1:2: [error] expected 'in', found '+'
@@ -87,11 +89,17 @@ The range of a token, and of a token followed by a space:
   ok
 
   $ ./probe.exe range "x   + 1"
-  range 0-1
+  range 0-4
   ok
 
   $ ./probe.exe range "  x"
   range 0-3
+  ok
+
+The range from the first token start to the end of the last token read:
+
+  $ ./probe.exe token-range "  x   + 1"
+  range 2-3
   ok
 
 A context opened right after a token, before the space:
@@ -100,4 +108,4 @@ A context opened right after a token, before the space:
   1:6: [error] expected 'in', found '1'
   1 | x  y 1
     |      ^
-    * while parsing pair, from 1:2
+    * while parsing pair, from 1:4
