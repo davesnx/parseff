@@ -1831,7 +1831,6 @@ module Iter : sig
       {!take}. Never fails, and does not call [f] if the first byte does not
       match. *)
 end
-[@@alert unstable "This module can change in any minor release."]
 
 (** {1:streaming Streaming}
 

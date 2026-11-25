@@ -285,7 +285,7 @@ let http_method () =
 
 ## `Iter`
 
-[`Parseff.Iter`](./Parseff-Iter.md) (unstable: may change in any minor release) passes each value or byte piece to a callback `f` instead of returning it. Memory stays bounded by one element or one piece, so the input can be much larger than `~backtrack_window`.
+[`Parseff.Iter`](./Parseff-Iter.md) passes each value or byte piece to a callback `f` instead of returning it. Memory stays bounded by one element or one piece, so the input can be much larger than `~backtrack_window`.
 
 ```ocaml
 module Iter : sig

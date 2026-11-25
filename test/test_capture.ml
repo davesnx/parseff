@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 open Parseff
 
 let recovering ~sync ~hole p () = recover ~sync p (fun _ -> hole)
