@@ -13,6 +13,7 @@ type token =
   | Rparen
   | Number of float
   | Ident of string
+  | Regex of string
   | Invalid
   | Eof
 
@@ -42,6 +43,8 @@ let show = function
       "a number"
   | Ident _ ->
       "a name"
+  | Regex _ ->
+      "a regular expression"
   | Invalid ->
       "invalid input"
   | Eof ->
@@ -86,6 +89,15 @@ let rec next buf =
   | _ ->
       assert false
 
+(* Where an operand starts, [/] opens a regular expression, as in
+   JavaScript. *)
+let regex buf =
+  match%sedlex buf with
+  | '/', Star (Compl ('/' | '\n')), '/' ->
+      Regex (Sedlexing.Utf8.lexeme buf)
+  | _ ->
+      next buf
+
 (* The length of the longest valid UTF-8 prefix of [s]. *)
 let valid_utf_8_prefix s =
   let rec loop i =
@@ -100,20 +112,28 @@ let valid_utf_8_prefix s =
   in
   loop 0
 
-(* A lexer for [input] that returns one token per call, then [Eof] with
-   [start = stop = String.length input] forever. sedlex raises on invalid
-   UTF-8, so it lexes only the valid prefix, and the rest becomes one
-   [Invalid] token. *)
-let tokens input =
+(* A lexer for [input] from byte [from] that returns one token per call, then
+   [Eof] with [start = stop = String.length input] forever. With [~regex], the
+   first token can be a regular expression. sedlex raises on invalid UTF-8, so
+   it lexes only the valid prefix, and the rest becomes one [Invalid] token. *)
+let tokens ?(from = 0) ?regex:(in_regex = false) input =
   let len = String.length input in
-  let valid = valid_utf_8_prefix input in
-  let buf = Sedlexing.Utf8.from_string (String.sub input 0 valid) in
+  let valid = max from (valid_utf_8_prefix input) in
+  let buf = Sedlexing.Utf8.from_string (String.sub input from (valid - from)) in
   let ended = ref false in
+  let first = ref in_regex in
   fun () ->
     if !ended then
       { Tokens.value = Eof; start = len; stop = len }
     else
-      match next buf with
+      let lex =
+        if !first then
+          regex
+        else
+          next
+      in
+      first := false;
+      match lex buf with
       | Eof when valid < len ->
           ended := true;
           { Tokens.value = Invalid; start = valid; stop = len }
@@ -122,7 +142,7 @@ let tokens input =
           { Tokens.value = Eof; start = len; stop = len }
       | value ->
           let start, stop = Sedlexing.bytes_loc buf in
-          { Tokens.value; start; stop }
+          { Tokens.value; start = from + start; stop = from + stop }
 
 (* The same lexer on a stream of bytes. Invalid UTF-8 ends the stream with
    one [Invalid] byte: sedlex raises there, and the rest is not lexed. *)

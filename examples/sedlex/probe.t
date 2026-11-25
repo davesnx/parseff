@@ -185,3 +185,38 @@ one byte and the input ends there:
   1:1: [error] expected ')' or 'in', found '\xE2\x82 1'
   1 | \xE2\x82 1
     | ^^^^^^^^^^
+
+A regular expression where an operand starts, and [/] as division elsewhere.
+Lexing the regular expression on its own and going back to the cached tokens
+works only when the two modes split the rest of the input the same way:
+
+  $ ./probe.exe regex-resync "/a b/ / x"
+  /a b/ / x
+  ok
+
+  $ ./probe.exe regex-resync "/a#b/ / x"
+  /a#b/
+  ok
+
+Lexing again from the [/] in the right mode:
+
+  $ ./probe.exe regex-relex "/a#b/ / x"
+  /a#b/ / x
+  ok
+
+  $ ./probe.exe regex-relex "x / /a#b/ / y"
+  x / /a#b/ / y
+  ok
+
+After a rewind, the cache still holds the tokens of the other mode:
+
+  $ ./probe.exe regex-backtrack "/a/b"
+  /a/
+  1:4: [error] expected end of input, found 'b'
+  1 | /a/b
+    |    ^
+
+  $ ./probe.exe regex-backtrack-relex "/a/b"
+  /a/
+  / a / b
+  ok

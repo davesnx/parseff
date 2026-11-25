@@ -27,7 +27,64 @@ let sum t accept =
   done;
   Tokens.eat t Rparen
 
-let scenario t = function
+(* [operand (/ operand)*] then the end, where an operand is a name or a
+   regular expression. Prints the operands it read. *)
+let divisions t operand =
+  let rec loop acc =
+    if Tokens.accept t Lexer.Slash then
+      loop (acc ^ " / " ^ operand ())
+    else
+      acc
+  in
+  let s = loop (operand ()) in
+  Tokens.eat t Eof;
+  print_endline s
+
+let regex_text t =
+  Tokens.select t "a regular expression" (function
+    | Lexer.Regex r ->
+        Some r
+    | _ ->
+        None
+    )
+
+(* The cached tokens were lexed with [/] as division. Lexes the regular
+   expression on its own, then goes on with the first cached token after
+   it. *)
+let operand_resync input t () =
+  let tok = Tokens.peek t in
+  match tok.value with
+  | Lexer.Slash -> (
+      match Lexer.tokens ~from:tok.start ~regex:true input () with
+      | { value = Lexer.Regex r; stop; _ } ->
+          skip_to stop;
+          r
+      | _ ->
+          name t
+    )
+  | _ ->
+      name t
+
+(* Lexes again from the [/], in the mode where it starts a regular
+   expression. *)
+let operand_relex input t () =
+  let tok = Tokens.peek t in
+  match tok.value with
+  | Lexer.Slash ->
+      Tokens.relex t (Lexer.tokens ~from:tok.start ~regex:true input);
+      regex_text t
+  | _ ->
+      name t
+
+let slash_names t =
+  Tokens.eat t Lexer.Slash;
+  let a = name t in
+  Tokens.eat t Lexer.Slash;
+  let b = name t in
+  Tokens.eat t Eof;
+  print_endline ("/ " ^ a ^ " / " ^ b)
+
+let scenario input t = function
   | "or" ->
       or_ (eat_in t) (eat_rparen t)
   | "expect" ->
@@ -55,6 +112,27 @@ let scenario t = function
       sum t Tokens.accept
   | "sum-silent" ->
       sum t accept_silent
+  | "regex-resync" ->
+      divisions t (operand_resync input t)
+  | "regex-relex" ->
+      divisions t (operand_relex input t)
+  | "regex-backtrack" ->
+      or_
+        (fun () ->
+          print_endline (operand_relex input t ());
+          Tokens.eat t Eof
+        )
+        (fun () -> slash_names t)
+  | "regex-backtrack-relex" ->
+      or_
+        (fun () ->
+          print_endline (operand_relex input t ());
+          Tokens.eat t Eof
+        )
+        (fun () ->
+          Tokens.relex t (Lexer.tokens ~from:(position ()) input);
+          slash_names t
+        )
   | "context" ->
       let _ = name t in
       context "pair" (fun () ->
@@ -144,7 +222,7 @@ let () =
       in
       let count = mode = "count" in
       let diagnostics = Diagnostics.create () in
-      let run () = scenario t s in
+      let run () = scenario input t s in
       let result =
         if mode = "" || count then
           parse ~consume:`Partial ~diagnostics input run

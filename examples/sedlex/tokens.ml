@@ -118,6 +118,14 @@ let select t label f =
   | None ->
       unexpected t tok label
 
+(* Drops the tokens from the position on and lexes the rest with [next], for a
+   token that depends on parser state. Tokens before the position stay. *)
+let relex t next =
+  let i = index_at t (position ()) in
+  t.len <- i;
+  t.last <- 0;
+  t.next <- next
+
 (* The end of the token before the position, so ranges leave out the
    whitespace and comments that [advance] skipped. *)
 let last_stop t =
