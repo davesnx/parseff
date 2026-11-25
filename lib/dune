@@ -1,10 +1,50 @@
+; OxCaml on x86-64 scans for excluded bytes with AVX2 (lib/simd). Its builtins
+; need C symbols, so it has its own stanza with C stubs.
+
 (library
  (name parseff)
  (public_name parseff)
- (modules parseff compat)
+ (enabled_if
+  (and
+   %{oxcaml_supported}
+   (= %{architecture} amd64)))
+ (modules parseff compat simd)
+ (libraries uucp)
+ (foreign_stubs
+  (language c)
+  (names parseff_simd_stubs))
+ (ocamlopt_flags
+  (:standard -O3 -unbox-closures -inline 50)))
+
+(library
+ (name parseff)
+ (public_name parseff)
+ (enabled_if
+  (not
+   (and
+    %{oxcaml_supported}
+    (= %{architecture} amd64))))
+ (modules parseff compat simd)
  (libraries uucp)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures -inline 50)))
+
+(rule
+ (enabled_if
+  (and
+   %{oxcaml_supported}
+   (= %{architecture} amd64)))
+ (action
+  (copy# simd/simd_avx2.ml simd.ml)))
+
+(rule
+ (enabled_if
+  (not
+   (and
+    %{oxcaml_supported}
+    (= %{architecture} amd64))))
+ (action
+  (copy# simd/simd_none.ml simd.ml)))
 
 ; OxCaml marks Domain.DLS, Printexc.register_printer and Effect.perform with
 ; safety alerts. Compat uses its safe APIs there, and the stdlib ones elsewhere.

@@ -2328,8 +2328,10 @@ module Charset = struct
     Int64.logor (zero_bytes (Int64.logxor x a)) (zero_bytes (Int64.logxor x b))
 
   let[@inline never] scan_excluded set inp from limit =
-    let a = repeat (String.unsafe_get set 257) in
-    let b = repeat (String.unsafe_get set 258) in
+    let ca = String.unsafe_get set 257 in
+    let cb = String.unsafe_get set 258 in
+    let a = repeat ca in
+    let b = repeat cb in
     let i = ref from in
     let found = ref (-1) in
     while !found < 0 && !i + 8 <= limit do
@@ -2337,7 +2339,11 @@ module Charset = struct
       if m <> 0L then
         found := !i + first_mark m
       else
-        i := !i + 8
+        let j = Simd.skip_excluded ca cb inp (!i + 8) limit in
+        if Simd.found j then
+          found := lnot j
+        else
+          i := j
     done;
     if !found >= 0 then
       !found

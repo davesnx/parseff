@@ -316,6 +316,11 @@ let excluding excluded =
   let pred c = not (List.mem c excluded) in
   (pred, Parseff.Charset.of_predicate pred)
 
+(* Every position in the first 8-byte words, and around the 32-byte blocks
+   that a vector scan reads after the first word. *)
+let positions =
+  List.init 18 Fun.id @ [ 31; 32; 39; 40; 41; 47; 63; 64; 71; 72; 73 ]
+
 let test_excluded_positions excluded =
   let pred, set = excluding excluded in
   let fill = neighbours excluded in
@@ -326,20 +331,22 @@ let test_excluded_positions excluded =
   let name = String.concat "," (List.map Char.escaped excluded) in
   List.iter
     (fun off ->
-      for pos = 0 to 17 do
-        List.iter
-          (fun stop ->
-            let tail =
-              String.init (Random.State.int rng 12) (fun _ ->
-                  Char.chr (Random.State.int rng 256)
-              )
-            in
-            let input = filler off ^ filler pos ^ String.make 1 stop ^ tail in
-            check_scans ~name ~off set pred input
-          )
-          excluded;
-        check_scans ~name ~off set pred (filler (off + pos))
-      done
+      List.iter
+        (fun pos ->
+          List.iter
+            (fun stop ->
+              let tail =
+                String.init (Random.State.int rng 12) (fun _ ->
+                    Char.chr (Random.State.int rng 256)
+                )
+              in
+              let input = filler off ^ filler pos ^ String.make 1 stop ^ tail in
+              check_scans ~name ~off set pred input
+            )
+            excluded;
+          check_scans ~name ~off set pred (filler (off + pos))
+        )
+        positions
     )
     [ 0; 1; 3; 7; 8 ]
 
