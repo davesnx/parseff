@@ -154,7 +154,19 @@ let test_hex_integer () =
     );
   check string_of_int "00000000000000001" Parseff.hex_integer "Ok 1"
 
-let show_float = Printf.sprintf "%.17g"
+(* The C library of Windows prints three exponent digits ([1e-005]); keep two,
+   as glibc and the BSDs do. *)
+let show_float x =
+  let s = Printf.sprintf "%.17g" x in
+  match String.index_opt s 'e' with
+  | None ->
+      s
+  | Some i ->
+      let mantissa = String.sub s 0 (i + 2) in
+      let exponent =
+        int_of_string (String.sub s (i + 2) (String.length s - i - 2))
+      in
+      Printf.sprintf "%s%02d" mantissa exponent
 
 let number_rest () =
   let x = Parseff.number () in

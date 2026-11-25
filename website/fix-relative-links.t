@@ -11,7 +11,7 @@ same-directory links and fenced code blocks stay unchanged.
   > Kept in code: [Error recovery](./error-recovery.md)
   > ```
   > MD
-  $ ./fix-relative-links.sh api.md api doc
+  $ ./md_fix.exe relative-links api.md api doc
   $ cat api.md
   Same dir: [errors](./errors.md).
   Cross dir: [Error recovery](../guides/error-recovery.md) and [anchor](../guides/error-recovery.md#rules).
@@ -23,7 +23,7 @@ same-directory links and fenced code blocks stay unchanged.
   > Same dir: [Recovery](./error-recovery.md).
   > Cross dir: [Diagnostics](./diagnostics.md).
   > MD
-  $ ./fix-relative-links.sh guide.md guides doc
+  $ ./md_fix.exe relative-links guide.md guides doc
   $ cat guide.md
   Same dir: [Recovery](./error-recovery.md).
   Cross dir: [Diagnostics](../api/diagnostics.md).

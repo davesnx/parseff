@@ -7,13 +7,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/primitives.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets primitives.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Primitives' 'description: Basic parsing operations in Parseff' '---' '' '<!-- This file is generated from doc/primitives.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/primitives.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Primitives' 'description: Basic parsing operations in Parseff' '---' '' '<!-- This file is generated from doc/primitives.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/primitives.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -24,13 +23,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/combinators.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets combinators.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Combinators' 'description: Composition operators for building complex parsers' '---' '' '<!-- This file is generated from doc/combinators.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/combinators.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Combinators' 'description: Composition operators for building complex parsers' '---' '' '<!-- This file is generated from doc/combinators.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/combinators.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -41,13 +39,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/repetition.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets repetition.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Repetition and separation' 'description: Looping constructs for parsing repeated and separated patterns' '---' '' '<!-- This file is generated from doc/repetition.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/repetition.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Repetition and separation' 'description: Looping constructs for parsing repeated and separated patterns' '---' '' '<!-- This file is generated from doc/repetition.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/repetition.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -58,13 +55,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/convenience.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets convenience.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Convenience combinators' 'description: Common parsing patterns made easy' '---' '' '<!-- This file is generated from doc/convenience.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/convenience.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Convenience combinators' 'description: Common parsing patterns made easy' '---' '' '<!-- This file is generated from doc/convenience.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/convenience.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -75,13 +71,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/errors.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets errors.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Error handling' 'description: Building better error messages in Parseff' '---' '' '<!-- This file is generated from doc/errors.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/errors.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Error handling' 'description: Building better error messages in Parseff' '---' '' '<!-- This file is generated from doc/errors.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/errors.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -92,13 +87,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/diagnostics.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets diagnostics.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Diagnostics' 'description: Warnings, diagnostic collectors, and backtracking Ref state' '---' '' '<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/diagnostics.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Diagnostics' 'description: Warnings, diagnostic collectors, and backtracking Ref state' '---' '' '<!-- This file is generated from doc/diagnostics.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/diagnostics.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -109,13 +103,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/zero-copy.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets zero-copy.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Zero-copy API' 'description: Zero-copy slices and fused scanners' '---' '' '<!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/zero-copy.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Zero-copy API' 'description: Zero-copy slices and fused scanners' '---' '' '<!-- This file is generated from doc/zero-copy.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/zero-copy.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -126,13 +119,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/streaming.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets streaming.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Streaming' 'description: Pull and push streaming from files, channels, and chunk callbacks' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Streaming' 'description: Pull and push streaming from files, channels, and chunk callbacks' '---' '' '<!-- This file is generated from doc/streaming.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/streaming.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -143,13 +135,12 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/binary.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets binary.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: Binary parsing' 'description: Big-endian and little-endian integers, floats and varints' '---' '' '<!-- This file is generated from doc/binary.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/binary.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: Binary parsing' 'description: Big-endian and little-endian integers, floats and varints' '---' '' '<!-- This file is generated from doc/binary.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/binary.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
 
 (rule
  (alias generate-markdown)
@@ -160,10 +151,9 @@
  (deps
   %{workspace_root}/_doc/_markdown/parseff/utf8.md
   %{workspace_root}/website/fix-odoc-md.sh
-  %{workspace_root}/website/fix-code-spans.sh
-  %{workspace_root}/website/fix-relative-links.sh
+  %{workspace_root}/website/md_fix.exe
   (glob_files %{workspace_root}/doc/guides/*.mld))
  (targets utf8.md)
  (action
   (system
-   "printf '%s\\n' '---' 'title: UTF-8 parsing' 'description: Parse Unicode code points from UTF-8 input' '---' '' '<!-- This file is generated from doc/utf8.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/utf8.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/fix-relative-links.sh %{targets} api %{workspace_root}/doc")))
+   "printf '%s\\n' '---' 'title: UTF-8 parsing' 'description: Parse Unicode code points from UTF-8 input' '---' '' '<!-- This file is generated from doc/utf8.mld. Do not edit directly. -->' '' > %{targets} && cat %{workspace_root}/_doc/_markdown/parseff/utf8.md >> %{targets} && %{workspace_root}/website/fix-odoc-md.sh %{targets} && %{workspace_root}/website/md_fix.exe relative-links %{targets} api %{workspace_root}/doc")))
