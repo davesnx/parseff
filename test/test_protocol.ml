@@ -302,7 +302,7 @@ let test_within_capture_excerpt () =
             false has_next
       | Error e ->
           Alcotest.failf "%s: %s" name (Parseff.error_message e)
-      )
+    )
 
 let test_within_fail_range () =
   both "fail inside the frame" "key=abcNEXT"
@@ -319,7 +319,7 @@ let test_within_fail_range () =
             (e.range.start, e.range.stop)
       | _ ->
           Alcotest.failf "%s: expected Failed" name
-      )
+    )
 
 let test_within_recover_sync_to_end () =
   let input = "abcdefXYZ" in
@@ -507,7 +507,7 @@ let test_take_while_at_most () =
       | Error e ->
           Alcotest.(check string)
             name "expected end of input, found ';'" (Parseff.error_message e)
-      );
+    );
   both "over the limit" "aaaaa;"
     (fun () -> Parseff.take_while ~at_most:4 (fun c -> c = 'a'))
     (fun name r ->

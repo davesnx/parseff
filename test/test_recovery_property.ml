@@ -1381,12 +1381,12 @@ let test_review_stream_equal () =
          )
         )
       : string * int
-      );
+    );
   ignore
     ( on_all_sources ~window:64 "a cut past the construct, many" "aaaawwwwwwq"
         (cut_past (fun body -> string_of_int (List.length (many body))))
       : string * int
-      )
+    )
 
 let test_review_rollback () =
   let d = Diagnostics.create () in
@@ -1888,7 +1888,7 @@ let test_zero_width_steps () =
         ignore
           ( list ~release:true ~close ~sync (fun () -> fail "u") (fun _ -> "H")
             : string list
-            );
+          );
         cut ();
         fail "u"
       in
@@ -1903,7 +1903,7 @@ let test_zero_width_steps () =
         ignore
           ( list ~close ~sync (fun () -> s1 (char 'b')) (fun _ -> "H")
             : string list
-            )
+          )
       in
       String.concat ","
         (list ~release:true ~sep ~close ~sync
@@ -2049,7 +2049,7 @@ let test_undecided_steps () =
                               (fun _ -> 'H')
                         )
                         : char list
-                        );
+                      );
                   s1 (any_char ())
                 )
                 (fun _ -> "M")

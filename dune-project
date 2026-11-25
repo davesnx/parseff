@@ -50,7 +50,8 @@
 
   (ocamlformat
    (and
-    (>= 0.29.0)
+    (>= 0.30.0)
+    (< 0.31.0)
     :with-dev-setup))
   (ocaml-lsp-server :with-dev-setup)
 

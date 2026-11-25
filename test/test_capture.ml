@@ -359,7 +359,7 @@ let test_error_value () =
   | Ok
       (Some
          { kind = Custom (Too_big 300); range = { start = 7; _ }; contexts; _ }
-        ) ->
+      ) ->
       Alcotest.(check (list string))
         "custom contexts" [ "array" ]
         (List.map (fun (c : context) -> c.name) contexts)
@@ -2279,7 +2279,7 @@ let release_live_words elements =
                     )
                     (fun () -> ( + ))
                   : int
-                  )
+                )
           )
         with
         | Ok () ->

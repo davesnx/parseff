@@ -141,7 +141,7 @@ let rec ensure_dir path =
   else if Sys.file_exists path then
     begin if not (Sys.is_directory path) then
       invalid_arg (Printf.sprintf "%s exists and is not a directory" path)
-  end
+    end
   else begin
     let parent = Filename.dirname path in
     if parent <> path then ensure_dir parent;

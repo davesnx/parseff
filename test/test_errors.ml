@@ -3042,7 +3042,7 @@ let test_cut_line_keeps_line_and_column () =
                 e.location,
               header_of (Parseff.render_error ~name:"stdin" e)
             )
-      )
+    )
     |> List.of_seq
   in
   let expected =

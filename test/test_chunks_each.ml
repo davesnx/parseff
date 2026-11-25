@@ -123,7 +123,7 @@ let test_no_progress_fails () =
       | Error e ->
           Printf.sprintf "failed %d %s" e.Parseff.range.start
             (Parseff.error_message e)
-      )
+    )
   in
   Alcotest.(check (list string))
     "Source.parse_each"
@@ -563,7 +563,7 @@ let reference text =
     | Error e ->
         Printf.sprintf "failed %d %s" e.Parseff.range.start
           (Parseff.error_message e)
-    )
+  )
 
 let push_pieces ?stop_at pieces =
   let seen = ref [] in

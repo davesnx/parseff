@@ -1168,7 +1168,7 @@ let () =
            function given to an Iter function or to ~trace."
     | _ ->
         None
-    )
+  )
 
 let[@inline never] get_state_slow () =
   let slot = State.refresh () in
@@ -2186,14 +2186,14 @@ let[@inline] handle_literal st s case_sensitive =
           literal_caseless st s
       | _ ->
           literal_mismatch st s
-    end
+      end
   else
     begin match case_sensitive with
     | Some false ->
         literal_caseless st s
     | _ ->
         literal_refilling st s
-  end
+    end
 
 let[@inline never] satisfy_slow st pred label =
   if have st 1 then
@@ -2743,9 +2743,7 @@ let[@inline never] scan_uchars st inp ~base start limit pred =
         pos := !pos + Uchar.utf_decode_length d;
         true
       end
-  do
-    ()
-  done;
+  do () done;
   !pos
 
 let[@inline never] scan_while_uchar_refilling st ~keep_from start pred =
@@ -3323,7 +3321,7 @@ let[@inline] commit () =
   if State.commit_nearest st then
     if st.diag == No_sink then
       begin if st.far.pos >= st.pos then far_commit_reset st
-    end
+      end
     else
       commit_reset_held st
 
@@ -4581,7 +4579,7 @@ and expr_step st operand t base top value hi ops =
         | exception exn ->
             expr_unwind st base;
             raise exn
-      end
+        end
   | ((Infix_left _ | Infix_right _) as op) :: next -> (
       let level = t.found in
       let right = match op with Infix_right _ -> true | _ -> false in
@@ -4864,7 +4862,7 @@ let expect label p =
         else if f.n > n0 || (n0 = far_total_capacity && far_over_pushes f > p0)
         then
           far_relabel f n0 o0 label
-      end;
+        end;
       raise_notrace Fail
 
 let one_of_last st frame p =
@@ -5821,7 +5819,7 @@ let display_unit text i =
       (1, escaped (escape_code (Char.code c)))
     else
       (1, ("", 1))
-  end
+    end
   else begin
     let d = String.get_utf_8_uchar text i in
     if Uchar.utf_decode_is_valid d then begin
@@ -6498,7 +6496,7 @@ let render ?name ?source ?custom e =
                         line_row m
                     | None ->
                         elide ()
-                  end
+                    end
                   else if hidden > 1 then
                     elide ()
               | [] ->
@@ -7191,9 +7189,7 @@ let recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
     sync ();
     if progress && st.pos = start then begin
       let target = imax start e.range.start in
-      while target > st.input_len && refill_at st st.input_len st.input_len do
-        ()
-      done;
+      while target > st.input_len && refill_at st st.input_len st.input_len do () done;
       let p = imin target st.input_len in
       st.pos <- p;
       fill_uchar st ~keep_from:p p;
@@ -7303,7 +7299,7 @@ let skip_nested ?atom pairs stop =
                   go rest
               | None ->
                   ()
-            end
+              end
             else if stack == [] && stop c then
               ()
             else begin

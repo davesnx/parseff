@@ -646,7 +646,7 @@ let read m env st need =
               oldest
             else
               min oldest start
-        )
+      )
       st.pos env.frames
   in
   m.span <- max m.span (need - 1 - oldest)
@@ -1378,7 +1378,7 @@ let check_case stats seed case =
                    "%s: window exceeded, but the model rewinds at most %d bytes"
                    (show_stream s) span
                 )
-          end
+            end
           else if o <> traced then
             report seed case g input
               (Printf.sprintf "parse: %s\n%s: %s" (show_outcome traced)
