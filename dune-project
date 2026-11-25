@@ -38,6 +38,10 @@
    (eio :with-test)
    (eio_main :with-test)
    (miou :with-test)
+   (sedlex
+    (and
+     (>= 3.2)
+     :with-test))
 
    (benchmark :with-dev-setup)
    (angstrom :with-dev-setup)
