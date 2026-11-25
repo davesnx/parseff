@@ -38,7 +38,7 @@ close_in ic;
 result
 ```
 
-- `~consume` defaults to `` `All ``, pulling one extra byte after the parser returns to check EOF without reading the rest of the source. Pass `` ~consume:`Partial `` to leave remaining bytes unread.
+- `~consume` defaults to `` `All ``, pulling one extra byte after the parser returns to check EOF without reading the rest of the source. Pass ``~consume:`Partial`` to leave remaining bytes unread.
 - `~backtrack_window` bounds how much buffered history Parseff retains for backtracking (default: `65536` bytes; minimum `2`). Exceeding it fails with `Backtrack_window_exceeded`.
 - Error positions are byte offsets from where this parse starts in the stream. `found` text covers only whole characters already buffered (Parseff does not pull more bytes just to lengthen a snippet), so it can be a prefix of the text `Parseff.parse` reports and `range.stop` can be smaller. `Text ""` means no whole character is buffered at the failure position (it is at the end of the input read so far, or the character there is incomplete): the range is empty and the message has no `found` part.
 - `~diagnostics` collects diagnostics as in `Parseff.parse`. See [`diagnostics`](./diagnostics.md).
@@ -59,7 +59,7 @@ val Source.parse_each :
   ('a, error) Stdlib.result Seq.t
 ```
 
-Each element runs the parser like `` Source.parse ~consume:`Partial ``. The parser must consume its trailing separator (a zero-width run yields an `Error`). The sequence stops at EOF or after the first `Error`, and is ephemeral (forcing an element twice raises `Invalid_argument`). Pass `~pending` if your parser buffers lookahead tokens past its value: the run after `pending` returns `true` may consume no input, but a second zero-width run in a row at the same position yields an `Error`. `Parseff.Push.parse_each` follows the same rule.
+Each element runs the parser like ``Source.parse ~consume:`Partial``. The parser must consume its trailing separator (a zero-width run yields an `Error`). The sequence stops at EOF or after the first `Error`, and is ephemeral (forcing an element twice raises `Invalid_argument`). Pass `~pending` if your parser buffers lookahead tokens past its value: the run after `pending` returns `true` may consume no input, but a second zero-width run in a row at the same position yields an `Error`. `Parseff.Push.parse_each` follows the same rule.
 
 ```ocaml
 let record () =
@@ -267,8 +267,9 @@ To stay within `~backtrack_window`:
 
 - Dispatch early with `Parseff.peek_char` rather than trying long speculative branches.
 - Call `Parseff.commit` to release the nearest frame once an alternative is chosen, or `Parseff.cut` to release every frame inside the enclosing `Parseff.context` once a construct is decided.
-- Use `Parseff.Iter` to stream items or large byte payloads past `~backtrack_window` (see [`Iter`](./#iter)).
+- Use `Parseff.Iter` to stream items or large byte payloads past `~backtrack_window` (see [`Iter`](#iter)).
 - Raise `~backtrack_window` only when the grammar genuinely requires longer lookahead.
+
 ```ocaml
 let http_method () =
   Parseff.or_
@@ -299,6 +300,7 @@ end
 
 - `Parseff.Iter.many` and `Parseff.Iter.sep_by` work like `Parseff.many` and `Parseff.sep_by`, but give each element to `f` and do not build a list.
 - `Parseff.Iter.take` and `Parseff.Iter.take_while` work like `Parseff.take` and `Parseff.take_while`, but give the bytes to `f` as non-empty `Parseff.Slice.t` pieces. A piece borrows the input buffer and is valid only during `f`. Call `Parseff.Slice.to_string` to keep it.
+
 ```ocaml
 let sum_ints input =
   let total = ref 0 in

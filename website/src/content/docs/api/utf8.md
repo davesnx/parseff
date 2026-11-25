@@ -35,7 +35,7 @@ end
 - `Parseff.Utf8.take_while` consumes code points while the predicate holds and returns the matched UTF-8 string. `~at_least` and `~at_most` count *code points*, not bytes.
 - `Parseff.Utf8.skip_while` skips matching code points without allocating.
 - `Parseff.Utf8.Slice.take_while` returns a zero-copy `Parseff.Slice.t`.
-- All three take `~at_least`, `~at_most`, and `~label`, with the same failure. A `(at_most + 1)`\-th matching code point fails with `Limit_exceeded { limit = at_most }` covering those code points.
+- All three take `~at_least`, `~at_most`, and `~label`, with the same failure. A `(at_most + 1)`-th matching code point fails with `Limit_exceeded { limit = at_most }` covering those code points.
 
 ## Mixing with byte-level primitives
 
@@ -79,6 +79,7 @@ All `Utf8` primitives fail with `expected valid UTF-8` on bare continuation byte
 
 - **Positions**: `Parseff.position` and `location.byte_col` always count bytes (a single `Utf8.satisfy` advances by 1–4 bytes).
 - **Error columns and carets**: `Parseff.render_error` header columns count code points, while carets count terminal cells (wide characters like `名` take two, combining marks take zero). See [`errors`](./errors.md) for streaming dropped-prefix behavior.
+
 ```
 input.json:1:6: [error] expected ',' or ']', found '"'
 1 | ["é" "b"]

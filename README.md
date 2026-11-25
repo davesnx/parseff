@@ -2,10 +2,9 @@
 
 # Parseff
 
-Parseff is a direct-style parser combinator library for OCaml 5\. Parsers are plain functions (`unit -> 'a`); the runtime handles backtracking, streaming input, and error reporting with source excerpts. Designed for performance with zero-copy slice APIs and fused operations.
+Parseff is a direct-style parser combinator library for OCaml 5. Parsers are plain functions (`unit -> 'a`); the runtime handles backtracking, streaming input, and error reporting with source excerpts. Designed for performance with zero-copy slice APIs and fused operations.
 
 [Documentation](https://davesnx.github.io/parseff/)
-
 
 ## Installation
 
@@ -75,7 +74,6 @@ let () =
 Parseff is built for throughput and low allocation: in the benchmark suite, Parseff's generic parsers are up to ~1.5x faster than Angstrom's baselines, and its fused zero-copy paths are ~3x faster. Against Angstrom's optimized JSON parser, Parseff's optimized path is ~1.5x faster while reducing minor allocations from ~11.1 GB to ~1.3 GB.
 
 See the [comparison with Angstrom](https://davesnx.github.io/parseff/guides/comparison/), [`bench/bench_json.ml`](https://github.com/davesnx/parseff/blob/main/bench/bench_json.ml), and [`bench/`](https://github.com/davesnx/parseff/tree/main/bench).
-
 
 ## Documentation
 

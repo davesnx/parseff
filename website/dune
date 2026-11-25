@@ -5,5 +5,5 @@
  (modules md_fix))
 
 (cram
- (applies_to fix-code-spans fix-relative-links)
+ (applies_to md_fix)
  (deps md_fix.exe))

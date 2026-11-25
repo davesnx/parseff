@@ -1,16 +1,12 @@
-(* Rewrites of the markdown that odoc generates for the website.
+(* md_fix.exe FILE SECTION DOC_DIR
 
-   md_fix.exe code-spans FILE
-     Gives an inline code span that contains a backtick, such as
-     `~consume:`Partial`, a longer delimiter: `` ~consume:`Partial ``.
+   Rewrites the links in the markdown that odoc generates for a page of SECTION
+   (api or guides), outside fenced code blocks, and edits FILE in place:
 
-   md_fix.exe relative-links FILE SECTION DOC_DIR
-     In a page of SECTION (api or guides), points a link to a page of the other
-     section, (./name.md), at ../guides/name.md or ../api/name.md.
-
-   Both leave fenced code blocks unchanged and edit FILE in place. *)
-
-let is_upper c = c >= 'A' && c <= 'Z'
+   - The website has no module pages, so a link to one, such as
+     [`Parseff.many`](./Parseff.md#val-many), becomes its text.
+   - odoc writes every page to one directory, so a link to a page of the other
+     section, (./name.md), points at ../guides/name.md or ../api/name.md. *)
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -34,80 +30,90 @@ let map_prose_lines f contents =
   )
   |> String.concat "\n"
 
-let longest_backtick_run s =
-  let best = ref 0 and run = ref 0 in
-  String.iter
-    (fun c ->
-      if c = '`' then (
-        incr run;
-        best := max !best !run
-      ) else
-        run := 0
-    )
-    s;
-  !best
+let has_prefix_at line i prefix =
+  i + String.length prefix <= String.length line
+  && String.sub line i (String.length prefix) = prefix
 
-(* A span opens at a backtick that does not follow another backtick. Its content
-   is one or more characters, where a backtick counts only when an uppercase
-   letter follows it. It closes at the first backtick that is followed by
-   neither a backtick nor an uppercase letter. *)
-let fix_code_spans_line line =
-  let len = String.length line in
-  let at i =
-    if i < len then
-      Some line.[i]
-    else
+let backtick_run line i =
+  let j = ref i in
+  while !j < String.length line && line.[!j] = '`' do
+    incr j
+  done;
+  !j - i
+
+(* The index of the next run of exactly [n] backticks from [i]. *)
+let rec closing_run line i n =
+  match String.index_from_opt line i '`' with
+  | None ->
       None
-  in
-  let content_char j =
-    match at j with
-    | Some '`' -> (
-        match at (j + 1) with Some c -> is_upper c | None -> false
+  | Some j ->
+      let m = backtick_run line j in
+      if m = n then
+        Some j
+      else
+        closing_run line (j + m) n
+
+(* The index of the ] that ends a link text starting at [i], skipping code
+   spans. *)
+let rec link_text_end line i =
+  if i >= String.length line then
+    None
+  else
+    match line.[i] with
+    | ']' ->
+        Some i
+    | '[' ->
+        None
+    | '`' -> (
+        let n = backtick_run line i in
+        match closing_run line (i + n) n with
+        | Some j ->
+            link_text_end line (j + n)
+        | None ->
+            None
       )
-    | Some _ ->
-        true
-    | None ->
-        false
-  in
-  let closes j =
-    at j = Some '`'
-    &&
-    match at (j + 1) with
-    | Some c ->
-        c <> '`' && not (is_upper c)
-    | None ->
-        true
-  in
-  let rec span_end j =
-    if closes j then
-      Some j
-    else if content_char j then
-      span_end (j + 1)
-    else
-      None
-  in
-  let buf = Buffer.create (len + 8) in
+    | _ ->
+        link_text_end line (i + 1)
+
+(* The index of the ) that ends a link destination starting at [i]. A space
+   means a title or no ) at all, and such a link is left unchanged. *)
+let rec destination_end line i =
+  if i >= String.length line then
+    None
+  else
+    match line.[i] with
+    | ')' ->
+        Some i
+    | ' ' ->
+        None
+    | _ ->
+        destination_end line (i + 1)
+
+let module_page line j =
+  has_prefix_at line j "](./Parseff.md" || has_prefix_at line j "](./Parseff-"
+
+(* Replaces [TEXT](./Parseff.md...) and [TEXT](./Parseff-...) with TEXT. *)
+let unlink_module_pages line =
+  let len = String.length line in
+  let buf = Buffer.create len in
   let rec go i =
     if i >= len then
       ()
     else
-      let opens = line.[i] = '`' && (i = 0 || line.[i - 1] <> '`') in
-      match
-        if opens && content_char (i + 1) then
-          span_end (i + 2)
-        else
+      let link =
+        if line.[i] <> '[' then
           None
-      with
-      | Some j ->
-          let content = String.sub line (i + 1) (j - i - 1) in
-          let n = longest_backtick_run content in
-          ( if n = 0 then
-              Buffer.add_string buf ("`" ^ content ^ "`")
-            else
-              let d = String.make (n + 1) '`' in
-              Buffer.add_string buf (d ^ " " ^ content ^ " " ^ d)
-          );
-          go (j + 1)
+        else
+          match link_text_end line (i + 1) with
+          | Some j when module_page line j ->
+              Option.map (fun close -> (j, close)) (destination_end line (j + 2))
+          | _ ->
+              None
+      in
+      match link with
+      | Some (j, close) ->
+          Buffer.add_string buf (String.sub line (i + 1) (j - i - 1));
+          go (close + 1)
       | None ->
           Buffer.add_char buf line.[i];
           go (i + 1)
@@ -123,7 +129,7 @@ let fix_relative_links_line ~others ~prefix line =
   let rec go i =
     if i >= len then
       ()
-    else if i + 3 <= len && String.sub line i 3 = "(./" then (
+    else if has_prefix_at line i "(./" then (
       let start = i + 3 in
       let stop = ref start in
       while !stop < len && name_char line.[!stop] do
@@ -169,13 +175,9 @@ let pages_of_dir dir =
         None
   )
 
-let edit file f = write_file file (map_prose_lines f (read_file file))
-
 let () =
   match Array.to_list Sys.argv |> List.tl with
-  | [ "code-spans"; file ] ->
-      edit file fix_code_spans_line
-  | [ "relative-links"; file; section; doc_dir ] ->
+  | [ file; section; doc_dir ] ->
       let other_dir, prefix =
         match section with
         | "api" ->
@@ -190,9 +192,10 @@ let () =
             exit 1
       in
       let others = pages_of_dir other_dir in
-      edit file (fix_relative_links_line ~others ~prefix)
+      let fix line =
+        fix_relative_links_line ~others ~prefix (unlink_module_pages line)
+      in
+      write_file file (map_prose_lines fix (read_file file))
   | _ ->
-      prerr_endline
-        "usage: md_fix.exe code-spans FILE\n\
-        \       md_fix.exe relative-links FILE SECTION DOC_DIR";
+      prerr_endline "usage: md_fix.exe FILE SECTION DOC_DIR";
       exit 2

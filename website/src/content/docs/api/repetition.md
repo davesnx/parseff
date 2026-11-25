@@ -21,6 +21,7 @@ val many : ?at_least:int -> ?at_most:int -> (unit -> 'a) -> 'a list
 
 - `~at_least` requires at least that many matches.
 - `~at_most` caps the count, failing with `Limit_exceeded { limit = at_most }` if another match consumes input. The error covers that extra match.
+
 ```ocaml
 let digits () = Parseff.many Parseff.digit
 let digits1 () = Parseff.many ~at_least:1 Parseff.digit
@@ -51,7 +52,7 @@ let hex_color () =
 
 ### Errors at the end of a loop
 
-The failure that stops a repetition loop is still recorded for furthest-failure reporting. On `"12x"`, `many digit` stops at `'x'` and a following `end_of_input` fails at the same offset, producing `expected digit or end of input`. If a loop stops partway through an element (such as `"ab,ab,ax"` for `sep_by (fun () -> literal "ab") (fun () -> char ',')`), the deeper failure (`expected "b"` at offset 7\) wins over `end_of_input` at offset 5\.
+The failure that stops a repetition loop is still recorded for furthest-failure reporting. On `"12x"`, `many digit` stops at `'x'` and a following `end_of_input` fails at the same offset, producing `expected digit or end of input`. If a loop stops partway through an element (such as `"ab,ab,ax"` for `sep_by (fun () -> literal "ab") (fun () -> char ',')`), the deeper failure (`expected "b"` at offset 7) wins over `end_of_input` at offset 5.
 
 ## Separated and delimited lists
 

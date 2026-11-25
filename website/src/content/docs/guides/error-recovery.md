@@ -197,6 +197,7 @@ Inside `Parseff.many`, `recover` would treat a closing brace `'}'` as a broken s
 - When `close ()` is `true`, `list` stops cleanly so the caller's `Parseff.require` can consume the closing delimiter.
 - `skip_nested pairs stop` skips to the next delimiter while balancing nested bracket pairs so inner separators are not mistaken for outer ones.
 - For separated lists with missing separators (e.g. `f(1 2)`), skip trailing whitespace after each element and separator rather than leading whitespace, so the next element can start immediately after a missing separator.
+
 ```ocaml
 let comma () =
   let _ = Parseff.char ',' in
@@ -268,6 +269,7 @@ When combining `Parseff.expression` with `Parseff.require` on operands, follow t
 
 1. Call `Parseff.commit` inside each `Parseff.prefix` operator's token parser (a prefix operator is otherwise an open choice for its operand).
 2. Make operator tokens take the longest match (e.g. with `Parseff.keyword` or `Parseff.not_followed_by`), because an infix operator's operand recovers before `expression` tries later operators in the table.
+
 ```ocaml
 type expr =
   | Num of int
@@ -346,7 +348,7 @@ Key behaviors to keep in mind (see the `Parseff` API reference for all edge case
 - **Open choices**: `recover`, `require`, and `list` do not recover inside open choices (`or_`, `one_of`, `optional`, `capture`, `look_ahead`, `peek_with`) until sealed by `commit` or `cut`.
 - **Progress and EOF**: `recover` always advances at least one byte (even if `sync` consumes nothing), and does not recover failures starting at end of input (so trailing EOF produces one error instead of cascading).
 - **Nested diagnostics (`~keep`)**: by default, `recover` and `list` discard diagnostics recorded inside the failing parser and record only the parser's own error. Pass `~keep:(fun entry inner -> ...)` to keep inner errors instead (e.g., `if inner = [] then [ entry ] else inner`).
-- **Contexts (`~contexts`)**: recovered errors retain enclosing contexts by default (`` `All ``); pass `` ~contexts:`Inner `` to keep only contexts opened inside the recovered parser.
+- **Contexts (`~contexts`)**: recovered errors retain enclosing contexts by default (`` `All ``); pass ``~contexts:`Inner`` to keep only contexts opened inside the recovered parser.
 - **Collector gating and warnings**: without `~diagnostics`, recovery combinators run their inner parser directly and stop at the first error. `Parseff.warn` writes `` `Warning `` entries to the same collector alongside `` `Error `` recovery entries (see [Diagnostics](../api/diagnostics.md)).
 - **Tracing**: passing `~trace` emits `Captured` events for each recovered failure.
 - **Streaming**: `capture` and active recovery frames retain input from their start until they finish (pass `~release:true` where appropriate to let `commit`/`cut` advance the streaming window).

@@ -98,6 +98,7 @@ val skip_while :
 - `~at_most` caps the byte count, failing with `Limit_exceeded { limit = at_most }` if another matching byte follows. The error covers those `at_most + 1` bytes.
 - `Parseff.skip_while` and `Parseff.Slice.take_while` take `~at_least`, `~at_most` and `~label` too. On a stream, `skip_while` does not keep the bytes it skips, so `at_most` can exceed `~backtrack_window`.
 - `~set` replaces per-byte predicate calls with a precomputed `Parseff.Charset` lookup table.
+
 ```ocaml
 let digits () =
   Parseff.take_while ~at_least:1 ~label:"digit" (fun c -> c >= '0' && c <= '9')
@@ -152,7 +153,7 @@ In streaming, `skip_until` retains only the last `String.length terminator - 1` 
 
 ### `end_of_input`
 
-`Parseff.end_of_input` succeeds only when no input remains. `Parseff.parse` and `Parseff.Source.parse` enforce this by default unless `` ~consume:`Partial `` is passed, so top-level parsers rarely need it.
+`Parseff.end_of_input` succeeds only when no input remains. `Parseff.parse` and `Parseff.Source.parse` enforce this by default unless ``~consume:`Partial`` is passed, so top-level parsers rarely need it.
 
 ```ocaml
 val end_of_input : unit -> unit
@@ -163,6 +164,7 @@ val end_of_input : unit -> unit
 - `Parseff.position` returns the current byte offset from the start of the input. Under `Parseff.Source.parse` it counts from where the parse starts in the source; add `Parseff.Source.offset`, read before the parse, to get an absolute offset.
 - `Parseff.with_range` runs a parser and returns its result alongside the `Parseff.range` of bytes it consumed.
 - `Parseff.location` returns a 1-based `Parseff.location` record (`byte_col` counts bytes, not Unicode code points). The line index is built lazily on first call. Outside a parser, use `Parseff.location_of_position`.
+
 ```ocaml
 type range = { start : int; stop : int }
 type location = private { offset : int; line : int; byte_col : int }

@@ -50,6 +50,7 @@ val error :
 - `~from` and `~upto` (both default to the current position) set the underlined byte range.
 - `~notes` attaches annotations: a note with `at = Some range` underlines that range in the excerpt; `at = None` prints a `* note:` line.
 - `~help` prints a `* help:` line after any notes.
+
 ```ocaml
 let octet () =
   let start = Parseff.position () in

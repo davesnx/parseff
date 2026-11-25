@@ -28,6 +28,7 @@ val any_int64 : unit -> int64  (* 8 bytes, signed *)
 
 - `Parseff.any_varint` reads an unsigned LEB128 varint (7 bits per byte, LSB first; `"\xAC\x02"` is `300`). Fails if longer than 9 bytes or above `max_int` (rejecting negative Protobuf `int32`/`int64`). Decode zigzag values manually with `(n lsr 1) lxor (-(n land 1))`.
 - On platforms where `int` has fewer than 63 bits (such as `js_of_ocaml`), large values in `any_varint` or `any_uint32` overflow silently.
+
 ```ocaml
 let png_chunk_length () = Parseff.BE.any_int32 ()
 let http2_frame_length () = Parseff.BE.any_uint24 ()

@@ -154,7 +154,7 @@ let expr =
 
 | Feature | Parseff | Angstrom |
 | --- | --- | --- |
-| OCaml version | 5\.3+ | 4\.x+ |
+| OCaml version | 5.3+ | 4.x+ |
 | API style | Direct style | Monadic (CPS) |
 | Pull streaming | `Source.parse`, `Source.parse_each` | Buffered / Unbuffered |
 | Push / async | `Push.parse`, `Push.parse_each`; Eio fibers via `Source` | Incremental `Partial` API |
@@ -177,4 +177,5 @@ let expr =
 | Zero-copy API | Yes | Yes | No | No |
 | Streaming / incremental | Yes | Yes | No | No |
 | Requires OCaml 5+ | Yes | No | No | No |
+
 MParser and Opal require explicit backtracking (like Parsec's `try`) and do not support streaming.

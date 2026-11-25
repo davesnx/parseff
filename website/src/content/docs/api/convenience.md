@@ -22,6 +22,7 @@ val any_char : unit -> char
 - `Parseff.letter`: ASCII letter (`'a'`..`'z'` or `'A'`..`'Z'`).
 - `Parseff.alphanum`: ASCII letter or digit.
 - `Parseff.any_char`: any single byte; fails only at end of input.
+
 ```ocaml
 let username () =
   let first = Parseff.letter () in
@@ -42,6 +43,7 @@ val hex_integer : unit -> int
 - `Parseff.integer`: optional `-` followed by ASCII digits. Fails without a digit or on `int` overflow.
 - `Parseff.number`: JSON-grammar decimal float (optional `-`, digits, optional fraction only when a digit follows `'.'`, optional exponent only when a digit or sign+digit follows `'e'`/`'E'`). Fails without a digit or on float overflow. `"-0"` returns `-0.` (whereas `integer` returns `0`).
 - `Parseff.hex_integer`: unsigned ASCII hex digits (no sign, no `0x` prefix). Fails without a digit or above `max_int`.
+
 ```ocaml
 let point () =
   let x = Parseff.integer () in
@@ -92,6 +94,7 @@ val skip_whitespace : unit -> unit
 - `Parseff.is_whitespace` returns `true` for space, tab, newline, and carriage return.
 - `Parseff.whitespace` reads zero or more ASCII whitespace bytes as a string (pass `~at_least:1` to require at least one).
 - `Parseff.skip_whitespace` skips ASCII whitespace without allocating. Prefer it whenever you do not need the matched string.
+
 ```ocaml
 let words () =
   Parseff.sep_by ~at_least:1
@@ -131,8 +134,9 @@ let pair () =
 ### `keyword`, `is_ident_char`, and `identifier`
 
 - `Parseff.is_ident_char`: `true` for ASCII letters, digits, and `'_'`.
-- `Parseff.keyword`: matches a literal only when the following byte does not satisfy `~is_ident` (default `Parseff.is_ident_char`), so `keyword "let"` rejects `"letter"` at offset 0\. Raises `Invalid_argument` on `""`.
+- `Parseff.keyword`: matches a literal only when the following byte does not satisfy `~is_ident` (default `Parseff.is_ident_char`), so `keyword "let"` rejects `"letter"` at offset 0. Raises `Invalid_argument` on `""`.
 - `Parseff.identifier`: matches one `start` byte followed by zero or more `inner` bytes. `~reserved` rejects keywords as ordinary `Expected` failures at offset 0 so alternatives in `Parseff.or_` still work.
+
 ```ocaml
 val is_ident_char : char -> bool
 val keyword : ?is_ident:(char -> bool) -> string -> unit
@@ -167,6 +171,7 @@ val within : int -> (unit -> 'a) -> 'a
 - `Parseff.take` reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
 - `Parseff.within` (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
 - To stream a payload larger than `~backtrack_window` to a callback, see [`Iter`](./streaming.md#iter).
+
 ```ocaml
 let frame () =
   let len = Parseff.BE.any_uint16 () in

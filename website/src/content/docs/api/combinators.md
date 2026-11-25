@@ -30,7 +30,7 @@ let bool_parser () =
       false)
 ```
 
-When both branches fail at the same position (such as `"maybe"` at offset 0\), Parseff merges their expectations into a sorted list: `expected "false" or "true", found 'maybe'`. When they fail at different positions, the furthest failure wins: on `"tr"`, the first branch reaches offset 2 and reports `expected "ue", found end of input`.
+When both branches fail at the same position (such as `"maybe"` at offset 0), Parseff merges their expectations into a sorted list: `expected "false" or "true", found 'maybe'`. When they fail at different positions, the furthest failure wins: on `"tr"`, the first branch reaches offset 2 and reports `expected "ue", found end of input`.
 
 ### `one_of` and `one_of_labeled`
 
@@ -210,6 +210,7 @@ Use `commit` when an alternative in `or_`/`one_of` is chosen. Use `cut` when an 
 | Prior failures at/past cursor | Forgotten, so errors report only what the committed branch expected. | Kept. |
 | Streaming memory | Releases input pinned by the nearest frame only. | Releases input pinned by all sealed frames. |
 | Inside `look_ahead`, `peek_with`, or `capture` | Does not cross the boundary. With `capture ~release:true`, moves the rewind point and stops. | Does not cross the boundary. With `capture ~release:true`, moves the rewind point and continues outward. |
+
 ```ocaml
 let decided_statement decide () =
   Parseff.context "statement" (fun () ->
@@ -251,7 +252,7 @@ let read_statements decide input =
 - : (int * int, string) result = Error "expected expression, found ';'"
 ```
 
-With `commit`, only `or_` is sealed, so `many` rewinds to offset 2 and returns the first statement. With `cut`, `many` is sealed too, so the broken `let` fails the parse. (With the default `` ~consume:`All ``, both fail because furthest failure still reports the missing expression.)
+With `commit`, only `or_` is sealed, so `many` rewinds to offset 2 and returns the first statement. With `cut`, `many` is sealed too, so the broken `let` fails the parse. (With the default ``~consume:`All``, both fail because furthest failure still reports the missing expression.)
 
 ### Tracing
 
@@ -283,7 +284,7 @@ list @0
 list failed @2 (from @0)
 ```
 
-A `failed` line prints the parser position where the construct failed, not the furthest error offset (here `list` failed at `@2`, while the error is at offset 3\).
+A `failed` line prints the parser position where the construct failed, not the furthest error offset (here `list` failed at `@2`, while the error is at offset 3).
 
 ## Recursion
 

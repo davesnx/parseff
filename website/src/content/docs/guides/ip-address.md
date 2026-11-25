@@ -44,7 +44,7 @@ match Parseff.parse "192.168.1.1" ip_address with
 
 - **Out of range** (`"1.2.3.256"`): fails with `"number out of range: 256"` at offset 9 (pass `~from` to `Parseff.fail` to underline the whole octet).
 - **Incomplete** (`"1.2.3"`): fails expecting `'.'`, found end of input.
-- **Trailing data** (`"1.2.3.4 extra"`): fails at offset 7 with `expected digit or end of input` because the final `many` stopped at the space and furthest-failure reporting merges both expectations at offset 7\.
+- **Trailing data** (`"1.2.3.4 extra"`): fails at offset 7 with `expected digit or end of input` because the final `many` stopped at the space and furthest-failure reporting merges both expectations at offset 7.
 
 ## Clearer errors with `expect`
 
