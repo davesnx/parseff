@@ -39,7 +39,8 @@
   test_param_validation
   test_scan_params
   test_note_range
-  test_at_most)
+  test_at_most
+  test_expected_token)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest uucp))
 

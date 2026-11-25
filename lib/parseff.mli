@@ -567,8 +567,8 @@ val expected_token : upto:int -> string -> 'a
     position and [upto].
 
     - [found] quotes the bytes of the token and the error range covers them.
-      With [upto = position ()], [found] is the next character or end of input,
-      as for {!satisfy}.
+      With [upto = position ()], [found] and the range are what {!satisfy}
+      reports at the position.
     - An ordinary [Expected] failure: it merges with other expected items at the
       same position, and {!expect} relabels it and keeps the token text.
     - Raises [Invalid_argument] if [upto < position ()]. *)
