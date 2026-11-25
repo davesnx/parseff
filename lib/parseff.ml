@@ -2280,30 +2280,69 @@ let[@inline always] handle_skip_while st pred =
 module Charset = struct
   type t = string
 
-  let excluded_count = 256
+  (* After the 256-byte table, byte 256 is ['\001'] when the set has a filter:
+     a test that is true on every byte outside the set, [b < t] or [b] equal to
+     one of four extra bytes. Bytes 264 to 303 hold [t] and the extra bytes,
+     each repeated 8 times. Scans test 8 bytes at a time against the filter and
+     look each match up in the table, so a byte of the set that the filter also
+     matches, such as the tab in [c = '\t' || c >= ' '], costs one lookup. *)
+  external string_get64u : string -> int -> int64 = "%caml_string_get64u"
+
+  let filter_flag = 256
+  let max_extras = 4
 
   let of_predicate f =
     let set =
-      Bytes.init 259 (fun i ->
+      Bytes.init 304 (fun i ->
           if i < 256 && f (Char.chr i) then
             '\001'
           else
             '\000'
       )
     in
-    let excluded = ref [] in
-    for i = 255 downto 0 do
-      if Bytes.get set i = '\000' then excluded := Char.chr i :: !excluded
+    let inside i = Bytes.get set i <> '\000' in
+    let best = ref None in
+    (* [t] stops at 127: the word test [x - t] borrows from the next byte, and
+       with [t = 128] that borrow turns ['\000'] into [0x7f], which it misses. *)
+    for t = 127 downto 0 do
+      let extras = ref [] and n = ref 0 in
+      for b = 255 downto t do
+        if not (inside b) then begin
+          incr n;
+          extras := Char.chr b :: !extras
+        end
+      done;
+      if !n <= max_extras then begin
+        let fp = ref 0 in
+        for b = 0 to t - 1 do
+          if inside b then incr fp
+        done;
+        match !best with
+        | Some (bfp, bn, _, _) when bfp < !fp || (bfp = !fp && bn <= !n) ->
+            ()
+        | _ ->
+            best := Some (!fp, !n, t, !extras)
+      end
     done;
-    ( match !excluded with
-    | [ a ] ->
-        Bytes.set set excluded_count '\001';
-        Bytes.set set 257 a;
-        Bytes.set set 258 a
-    | [ a; b ] ->
-        Bytes.set set excluded_count '\002';
-        Bytes.set set 257 a;
-        Bytes.set set 258 b
+    ( match !best with
+    | Some (fp, _, t, extras) when fp <= 16 && (t > 0 || extras <> []) ->
+        let pad = match extras with c :: _ -> c | [] -> Char.chr 0 in
+        let extras = Array.of_list extras in
+        Bytes.set set filter_flag '\001';
+        let word k c =
+          Bytes.set_int64_le set
+            (264 + (8 * k))
+            (Int64.mul (Int64.of_int (Char.code c)) 0x0101010101010101L)
+        in
+        word 0 (Char.chr t);
+        for k = 0 to max_extras - 1 do
+          word (k + 1)
+            ( if k < Array.length extras then
+                extras.(k)
+              else
+                pad
+            )
+        done
     | _ ->
         ()
     );
@@ -2321,36 +2360,50 @@ module Charset = struct
     Int64.to_int
       (Int64.shift_right_logical (Int64.mul low 0x0001020304050607L) 56)
 
-  let[@inline always] repeat c =
-    Int64.mul (Int64.of_int (Char.code c)) 0x0101010101010101L
-
-  let[@inline always] excluded_marks x a b =
-    Int64.logor (zero_bytes (Int64.logxor x a)) (zero_bytes (Int64.logxor x b))
-
-  let[@inline never] scan_excluded set inp from limit =
-    let a = repeat (String.unsafe_get set 257) in
-    let b = repeat (String.unsafe_get set 258) in
+  let[@inline always] scan_filtered set inp from limit =
+    let below = string_get64u set 264 in
+    let a = string_get64u set 272 in
+    let b = string_get64u set 280 in
+    let c = string_get64u set 288 in
+    let d = string_get64u set 296 in
     let i = ref from in
     let found = ref (-1) in
     while !found < 0 && !i + 8 <= limit do
-      let m = excluded_marks (bytes_get64u inp !i) a b in
-      if m <> 0L then
-        found := !i + first_mark m
-      else
-        i := !i + 8
+      let x = bytes_get64u inp !i in
+      let m =
+        Int64.logor
+          (Int64.logand
+             (Int64.logand (Int64.sub x below) (Int64.lognot x))
+             0x8080808080808080L
+          )
+          (Int64.logor
+             (Int64.logor
+                (zero_bytes (Int64.logxor x a))
+                (zero_bytes (Int64.logxor x b))
+             )
+             (Int64.logor
+                (zero_bytes (Int64.logxor x c))
+                (zero_bytes (Int64.logxor x d))
+             )
+          )
+      in
+      if m <> 0L then begin
+        (* Every byte outside the set is flagged, but a flagged byte may be in
+           the set: look each one up, lowest first. *)
+          let m = ref m in
+          while !found < 0 && !m <> 0L do
+            let j = !i + first_mark !m in
+            if mem set (Bytes.unsafe_get inp j) then
+              m := Int64.logand !m (Int64.sub !m 1L)
+            else
+              found := j
+          done
+      end;
+      if !found < 0 then i := !i + 8
     done;
     if !found >= 0 then
       !found
-    else if !i = limit then
-      limit
-    else if limit - from >= 8 then begin
-      let j = limit - 8 in
-      let m = excluded_marks (bytes_get64u inp j) a b in
-      if m <> 0L then
-        j + first_mark m
-      else
-        limit
-    end else begin
+    else begin
       while !i < limit && mem set (Bytes.unsafe_get inp !i) do
         incr i
       done;
@@ -2358,14 +2411,14 @@ module Charset = struct
     end
 
   let[@inline always] scan set inp from limit =
-    if String.unsafe_get set excluded_count = '\000' || Sys.big_endian then begin
+    if String.unsafe_get set filter_flag = '\000' || Sys.big_endian then begin
       let i = ref from in
       while !i < limit && mem set (Bytes.unsafe_get inp !i) do
         incr i
       done;
       !i
     end else
-      scan_excluded set inp from limit
+      scan_filtered set inp from limit
 end
 
 let[@inline never] scan_set_refilling st ~keep_from start set =
