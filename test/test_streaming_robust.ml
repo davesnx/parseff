@@ -599,9 +599,16 @@ let with_failing_alloc f =
     )
     f
 
+(* OxCaml raises an exception from a Gc.Memprof callback as an asynchronous
+   exception. No [try] catches it, so the program stops instead of the parse
+   failing. *)
+let memprof_exceptions_reach_handlers =
+  not (String.ends_with ~suffix:"+ox" Sys.ocaml_version)
+
 let rest () = Parseff.take_while (fun _ -> true)
 
 let test_alloc_fails_in_slice_append () =
+  if not memprof_exceptions_reach_handlers then Alcotest.skip ();
   let data =
     String.init 5000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
   in
