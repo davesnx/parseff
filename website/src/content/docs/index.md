@@ -10,7 +10,8 @@ Parseff is a direct-style parser combinator library for OCaml 5. Parsers are pla
 ## Features
 
 - **Direct-style parsers**: compose plain `unit -> 'a` functions without monadic (`>>=`, `>>|`, `*>`) or binding (`let*`, `let+`, `and+`) operators.
-- [**Structured errors and source excerpts**](/parseff/api/errors/): furthest-failure reporting with merged expectations, typed custom errors, construct contexts, and multi-error [recovery](/parseff/guides/error-recovery/).
+- [**Structured errors and source excerpts**](/parseff/api/errors/): furthest-failure reporting with merged expectations, typed custom errors, and construct contexts.
+- [**Error recovery**](/parseff/guides/error-recovery/): keep parsing after an error and report every error in one run. `recover` records the error, skips to a sync point, and returns a placeholder; `list` recovers per element; `capture` returns a failure as a `result`.
 - **Automatic backtracking**: [`Parseff.or_`](/parseff/api/combinators/#or_) and `Parseff.one_of`, with `commit` and `cut` to seal branches.
 - [**Pull and push streaming**](/parseff/api/streaming/): `Source.parse`, `Source.parse_each`, and `Push` with bounded backtracking.
 - **Domain-safe**: parse state lives per domain so independent parses run in parallel across OCaml 5 domains.
