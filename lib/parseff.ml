@@ -3557,13 +3557,16 @@ let look_ahead p =
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match without_recovery st p with
+  st.recovery_off <- st.recovery_off + 1;
+  match p () with
   | v ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       if st.far != saved then st.far <- saved;
       v
   | exception exn ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -3574,14 +3577,17 @@ let peek_with p =
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match without_recovery st p with
+  st.recovery_off <- st.recovery_off + 1;
+  match p () with
   | v ->
+      st.recovery_off <- st.recovery_off - 1;
       let stop = st.pos in
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       if st.far != saved then st.far <- saved;
       (v, stop)
   | exception exn ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -3595,17 +3601,21 @@ let not_followed_by ?(label = label_not_followed_by) p =
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match without_recovery st p with
+  st.recovery_off <- st.recovery_off + 1;
+  match p () with
   | _ ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       st.far <- saved;
       fail_str_cold st start tag_label label
   | exception Fail ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       st.far <- saved
   | exception exn ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       far_merge st saved;
