@@ -3,63 +3,29 @@
 
 open Parseff
 
-type tokens = { tokens : Lexer.t array }
-
-let index_at t pos =
-  let rec search lo hi =
-    if lo >= hi then
-      lo
-    else
-      let mid = (lo + hi) / 2 in
-      if t.tokens.(mid).start >= pos then
-        search lo mid
-      else
-        search (mid + 1) hi
-  in
-  search 0 (Array.length t.tokens - 1)
-
-let token_at t pos = t.tokens.(index_at t pos)
-
-let peek t =
-  let tok = token_at t (position ()) in
-  skip_to tok.start;
-  tok
-
-(* Moves past [tok] and the whitespace and comments after it, to the start of
-   the next token. A combinator that starts after [advance] then starts where
-   the next token check fails, so [expect], [require], and [list] see that
-   failure as their own. *)
-let advance t (tok : Lexer.t) = skip_to (token_at t tok.stop).start
-
-(* The end of the token before the position. Ranges end here, not after the
-   whitespace that [advance] skipped. *)
-let last_stop t =
-  let i = index_at t (position ()) in
-  if i = 0 then
-    position ()
-  else
-    t.tokens.(i - 1).stop
-
-let unexpected (tok : Lexer.t) expected = expected_token ~upto:tok.stop expected
-
-let eat t expected_token label =
-  let current_token = peek t in
-  if current_token.token = expected_token then
-    advance t current_token
-  else
-    unexpected current_token label
-
 let name t =
-  let tok = peek t in
-  match tok.token with
-  | Ident name ->
-      advance t tok;
-      name
-  | _ ->
-      unexpected tok "a name"
+  Tokens.select t "a name" (function Lexer.Ident name -> Some name | _ -> None)
 
-let eat_in t () = eat t In "'in'"
-let eat_rparen t () = eat t Rparen "')'"
+let eat_in t () = Tokens.eat t Lexer.In
+let eat_rparen t () = Tokens.eat t Lexer.Rparen
+
+(* An [accept] that records nothing when the token does not match. *)
+let accept_silent t value =
+  (Tokens.peek t).value = value
+  &&
+  ( Tokens.advance t;
+    true
+  )
+
+(* [(a + b + c)]: names joined by [+] in parentheses. *)
+let sum t accept =
+  Tokens.eat t Lexer.Lparen;
+  let _ = name t in
+  while accept t Lexer.Plus do
+    let _ = name t in
+    ()
+  done;
+  Tokens.eat t Rparen
 
 let scenario t = function
   | "or" ->
@@ -82,9 +48,13 @@ let scenario t = function
       let _, r = with_range (fun () -> name t) in
       Printf.printf "range %d-%d\n" r.start r.stop
   | "token-range" ->
-      let start = (peek t).start in
+      let start = (Tokens.peek t).start in
       let _ = name t in
-      Printf.printf "range %d-%d\n" start (last_stop t)
+      Printf.printf "range %d-%d\n" start (Tokens.last_stop t)
+  | "sum-accept" ->
+      sum t Tokens.accept
+  | "sum-silent" ->
+      sum t accept_silent
   | "context" ->
       let _ = name t in
       context "pair" (fun () ->
@@ -98,7 +68,7 @@ let scenario t = function
 let () =
   match Sys.argv with
   | [| _; s; input |] -> (
-      let t = { tokens = Lexer.tokenize input } in
+      let t = Tokens.create ~show:Lexer.show (Lexer.tokenize input) in
       let diagnostics = Diagnostics.create () in
       let result =
         parse ~consume:`Partial ~diagnostics input (fun () -> scenario t s)

@@ -109,3 +109,15 @@ A context opened right after a token, before the space:
   1 | x  y 1
     |      ^
     * while parsing pair, from 1:4
+
+accept that keeps the expected token, and accept that records nothing:
+
+  $ ./probe.exe sum-accept "(a + b c)"
+  1:8: [error] expected ')' or '+', found 'c'
+  1 | (a + b c)
+    |        ^
+
+  $ ./probe.exe sum-silent "(a + b c)"
+  1:8: [error] expected ')', found 'c'
+  1 | (a + b c)
+    |        ^

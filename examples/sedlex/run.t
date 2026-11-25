@@ -32,7 +32,7 @@ cells:
     * while parsing let binding, from 1:1
 
   $ ./main.exe "let a = 1 in let b = (a"
-  1:24: [error] expected ')', found end of input
+  1:24: [error] expected ')' or an operator, found end of input
   1 | let a = 1 in let b = (a
     |                        ^
     * while parsing parenthesized expression, from 1:22
@@ -51,6 +51,7 @@ token, which the parser reports like any other unexpected token:
   1:16: [error] expected an operator or end of input, found '@'
   1 | let λ = 1 in λ @ 2
     |                ^
+    * while parsing let binding, from 1:1
 
   $ ./main.exe "$(printf '1 + \342\202')"
   1:5: [error] expected an expression, found '\xE2\x82'
@@ -58,7 +59,7 @@ token, which the parser reports like any other unexpected token:
     |     ^^^^^^^^
 
   $ ./main.exe "$(printf '1 +\n  (2 *\n   3')"
-  3:5: [error] expected ')', found end of input
+  3:5: [error] expected ')' or an operator, found end of input
   2 |     (2 *
     | ╭───╯
   3 | │    3

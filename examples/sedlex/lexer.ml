@@ -16,7 +16,36 @@ type token =
   | Invalid
   | Eof
 
-type t = { token : token; start : int; stop : int }
+type t = token Tokens.token
+
+(* How an error names a token that the parser expected. *)
+let show = function
+  | Let ->
+      "'let'"
+  | In ->
+      "'in'"
+  | Equal ->
+      "'='"
+  | Plus ->
+      "'+'"
+  | Minus ->
+      "'-'"
+  | Star ->
+      "'*'"
+  | Slash ->
+      "'/'"
+  | Lparen ->
+      "'('"
+  | Rparen ->
+      "')'"
+  | Number _ ->
+      "a number"
+  | Ident _ ->
+      "a name"
+  | Invalid ->
+      "invalid input"
+  | Eof ->
+      "end of input"
 
 let digit = [%sedlex.regexp? '0' .. '9']
 let number = [%sedlex.regexp? Plus digit, Opt ('.', Plus digit)]
@@ -82,11 +111,11 @@ let tokenize input =
     let token = next buf in
     let start, stop = Sedlexing.bytes_loc buf in
     if token <> Eof then
-      loop ({ token; start; stop } :: acc)
+      loop ({ Tokens.value = token; start; stop } :: acc)
     else if valid < len then
-      { token = Invalid; start = valid; stop = len } :: acc
+      { Tokens.value = Invalid; start = valid; stop = len } :: acc
     else
       acc
   in
-  let eof = { token = Eof; start = len; stop = len } in
+  let eof = { Tokens.value = Eof; start = len; stop = len } in
   Array.of_list (List.rev (eof :: loop []))
