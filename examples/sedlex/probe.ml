@@ -65,10 +65,30 @@ let scenario t = function
       prerr_endline ("unknown scenario " ^ s);
       exit 2
 
+(* All the tokens of [input], for comparison with the number lexed. *)
+let count_tokens input =
+  let next = Lexer.tokens input in
+  let rec loop n =
+    if (next ()).value = Lexer.Eof then
+      n + 1
+    else
+      loop (n + 1)
+  in
+  loop 0
+
 let () =
   match Sys.argv with
-  | [| _; s; input |] -> (
-      let t = Tokens.create ~show:Lexer.show (Lexer.tokenize input) in
+  | [| _; s; input |] ->
+      let t =
+        Tokens.create ~show:Lexer.show ~eof:Lexer.Eof (Lexer.tokens input)
+      in
+      let count, s =
+        match String.split_on_char ':' s with
+        | [ "count"; s ] ->
+            (true, s)
+        | _ ->
+            (false, s)
+      in
       let diagnostics = Diagnostics.create () in
       let result =
         parse ~consume:`Partial ~diagnostics input (fun () -> scenario t s)
@@ -78,12 +98,15 @@ let () =
           print_endline ("recorded: " ^ render_error d.value)
         )
         (Diagnostics.to_list diagnostics);
-      match result with
+      ( match result with
       | Ok () ->
           print_endline "ok"
       | Error e ->
           print_endline (render_error e)
-    )
+      );
+      if count then
+        Printf.printf "lexed %d of %d tokens\n" (Tokens.lexed t)
+          (count_tokens input)
   | _ ->
       prerr_endline "usage: probe.exe SCENARIO INPUT";
       exit 2

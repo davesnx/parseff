@@ -121,3 +121,12 @@ accept that keeps the expected token, and accept that records nothing:
   1:8: [error] expected ')', found 'c'
   1 | (a + b c)
     |        ^
+
+The lexer runs on demand, so an early error lexes only the tokens before it:
+
+  $ ./probe.exe count:sum-accept "(a b $(printf '+ x%d ' $(seq 1 10000)))" | tail -1
+  lexed 3 of 20005 tokens
+
+  $ ./probe.exe count:sum-accept "(a $(printf '+ x%d ' $(seq 1 10000)))" | tail -2
+  ok
+  lexed 20004 of 20004 tokens

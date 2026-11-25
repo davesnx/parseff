@@ -100,22 +100,26 @@ let valid_utf_8_prefix s =
   in
   loop 0
 
-(* Lexes all of [input]. The last token is [Eof], with
-   [start = stop = String.length input]. sedlex raises on invalid UTF-8, so it
-   lexes only the valid prefix, and the rest becomes one [Invalid] token. *)
-let tokenize input =
+(* A lexer for [input] that returns one token per call, then [Eof] with
+   [start = stop = String.length input] forever. sedlex raises on invalid
+   UTF-8, so it lexes only the valid prefix, and the rest becomes one
+   [Invalid] token. *)
+let tokens input =
   let len = String.length input in
   let valid = valid_utf_8_prefix input in
   let buf = Sedlexing.Utf8.from_string (String.sub input 0 valid) in
-  let rec loop acc =
-    let token = next buf in
-    let start, stop = Sedlexing.bytes_loc buf in
-    if token <> Eof then
-      loop ({ Tokens.value = token; start; stop } :: acc)
-    else if valid < len then
-      { Tokens.value = Invalid; start = valid; stop = len } :: acc
+  let ended = ref false in
+  fun () ->
+    if !ended then
+      { Tokens.value = Eof; start = len; stop = len }
     else
-      acc
-  in
-  let eof = { Tokens.value = Eof; start = len; stop = len } in
-  Array.of_list (List.rev (eof :: loop []))
+      match next buf with
+      | Eof when valid < len ->
+          ended := true;
+          { Tokens.value = Invalid; start = valid; stop = len }
+      | Eof ->
+          ended := true;
+          { Tokens.value = Eof; start = len; stop = len }
+      | value ->
+          let start, stop = Sedlexing.bytes_loc buf in
+          { Tokens.value; start; stop }

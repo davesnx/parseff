@@ -1,26 +1,58 @@
-(* Glue between a lexer that ran over the whole input and parseff. The parser
-   position stays a byte offset: it is always the start of the current token,
-   or a position before the first token. *)
+(* Glue between a lexer and parseff. The lexer runs on demand, and its tokens
+   stay in an array so that a rewind finds them again without lexing twice.
+   The parser position stays a byte offset: it is always the start of the
+   current token, or a position before the first token. *)
 
 open Parseff
 
 type 'tok token = { value : 'tok; start : int; stop : int }
 
 type 'tok t = {
-  tokens : 'tok token array;
+  mutable tokens : 'tok token array;
+  mutable len : int;
+  mutable next : unit -> 'tok token;
+  eof : 'tok;
   show : 'tok -> string;
   mutable last : int;
 }
 
-(* The last token must end the input, with [start = stop = length]. *)
-let create ~show tokens = { tokens; show; last = 0 }
+(* [next ()] returns the next token. After the input, it must return [eof]
+   with [start = stop = length]. *)
+let create ~show ~eof next =
+  { tokens = [||]; len = 0; next; eof; show; last = 0 }
+
+let lexed t = t.len
+
+let push t tok =
+  if t.len = Array.length t.tokens then begin
+    let tokens = Array.make (max 16 (2 * t.len)) tok in
+    Array.blit t.tokens 0 tokens 0 t.len;
+    t.tokens <- tokens
+  end;
+  t.tokens.(t.len) <- tok;
+  t.len <- t.len + 1
+
+(* Lexes until a token starts at or after [pos], or the input ends. *)
+let fill t pos =
+  while
+    t.len = 0
+    ||
+    let tok = t.tokens.(t.len - 1) in
+    tok.start < pos && tok.value <> t.eof
+  do
+    push t (t.next ())
+  done
 
 (* The index of the first token that starts at or after [pos]. Positions only
    change by [skip_to] and backtracking, so the last answer is usually still
    right and is checked first. *)
 let index_at t pos =
+  fill t pos;
   let i = t.last in
-  if t.tokens.(i).start >= pos && (i = 0 || t.tokens.(i - 1).start < pos) then
+  if
+    i < t.len && t.tokens.(i).start >= pos
+    && (i = 0 || t.tokens.(i - 1).start < pos)
+  then
     i
   else
     let rec search lo hi =
@@ -33,7 +65,7 @@ let index_at t pos =
         else
           search (mid + 1) hi
     in
-    let i = search 0 (Array.length t.tokens - 1) in
+    let i = search 0 (t.len - 1) in
     t.last <- i;
     i
 
@@ -46,7 +78,8 @@ let peek t =
    where the next token check fails. *)
 let advance t =
   let i = index_at t (position ()) in
-  let i = min (i + 1) (Array.length t.tokens - 1) in
+  fill t t.tokens.(i).stop;
+  let i = min (i + 1) (t.len - 1) in
   t.last <- i;
   skip_to t.tokens.(i).start
 

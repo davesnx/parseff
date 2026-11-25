@@ -137,7 +137,9 @@ let rec to_string = function
 let () =
   match Sys.argv with
   | [| _; input |] -> (
-      let t = Tokens.create ~show:Lexer.show (Lexer.tokenize input) in
+      let t =
+        Tokens.create ~show:Lexer.show ~eof:Lexer.Eof (Lexer.tokens input)
+      in
       match parse input (program t) with
       | Ok e ->
           Printf.printf "%s = %g\n" (to_string e) (eval [] e)
