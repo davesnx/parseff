@@ -936,11 +936,12 @@ module State = struct
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
-    t.pos <- Array.unsafe_get t.frames base;
-    let saved = Array.unsafe_get t.frames (base + 2) in
-    if t.diag_len > saved then drop_frame_diags t frame saved;
-    let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
-    if trail_depth t > saved then undo_frame_trail t frame saved
+    let frames = t.frames in
+    t.pos <- Array.unsafe_get frames base;
+    let diag = Array.unsafe_get frames (base + 2) in
+    let trail = Array.unsafe_get frames (base + 1) lsr frame_trail_shift in
+    if t.diag_len > diag then drop_frame_diags t frame diag;
+    if trail_depth t > trail then undo_frame_trail t frame trail
 
   let[@inline never] advance_capture_frame (t : t) i =
     touch_frame t i;
