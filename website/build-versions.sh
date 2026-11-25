@@ -50,7 +50,7 @@ for tag in "${tags[@]}"; do
 done
 
 build "$here/src/content/docs" "$root/main" main unreleased "$out/main"
-node "$here/check-links.mjs" "$out/main" "$root/main"
+node "$here/check-links.mjs" "$out" "$root"
 
 node -e '
 const [latest, ...tags] = process.argv.slice(1);

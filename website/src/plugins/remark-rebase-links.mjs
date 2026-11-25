@@ -6,6 +6,12 @@ import { contentDir, root } from '../../site.mjs';
 const VERSION_SEGMENT = /^(?:main|\d+\.\d+\.\d+)(?:[/?#]|$)/;
 const PAGE_LINK = /^(\.{1,2}\/[^?#]*?)(\.mdx?)(#.*)?$/;
 
+// The 0.4.0 quick start links to pages that the site never had.
+const MISSING_PAGES = new Map([
+  [`${root}/api/overview/#parse`, `${root}/guides/first-parser/#step-1-parsing-a-key-value-pair`],
+  [`${root}/examples/ip-address`, `${root}/guides/ip-address/`],
+]);
+
 // odoc links pages by file path, such as ./errors.md or ../guides/x.md#a.
 // Starlight serves each page at a route, so the path resolves to that route.
 function pageRoute(url, file) {
@@ -36,7 +42,7 @@ export default function remarkRebaseLinks({ base, site }) {
     visit(tree, ['link', 'definition', 'image'], (node) => {
       if (typeof node.url !== 'string') return;
 
-      let url = pageRoute(node.url, file.path) ?? node.url;
+      let url = MISSING_PAGES.get(node.url) ?? pageRoute(node.url, file.path) ?? node.url;
       if (siteRoot && (url === siteRoot || url.startsWith(`${siteRoot}/`))) {
         url = url.slice(origin.length);
         if (url === root) url = from;
