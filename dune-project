@@ -1,6 +1,8 @@
-(lang dune 3.17)
+(lang dune 3.20)
 
 (using mdx 0.2)
+
+(using oxcaml 0.1)
 
 (generate_opam_files true)
 

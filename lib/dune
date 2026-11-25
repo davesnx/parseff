@@ -1,10 +1,24 @@
 (library
  (name parseff)
  (public_name parseff)
- (modules parseff)
+ (modules parseff compat)
  (libraries uucp)
  (ocamlopt_flags
   (:standard -O3 -unbox-closures -inline 50)))
+
+; OxCaml marks Domain.DLS, Printexc.register_printer and Effect.perform with
+; safety alerts. Compat uses its safe APIs there, and the stdlib ones elsewhere.
+
+(rule
+ (enabled_if %{oxcaml_supported})
+ (action
+  (copy# compat/compat_oxcaml.ml compat.ml)))
+
+(rule
+ (enabled_if
+  (not %{oxcaml_supported}))
+ (action
+  (copy# compat/compat_stock.ml compat.ml)))
 
 (mdx
  (files parseff.mli)

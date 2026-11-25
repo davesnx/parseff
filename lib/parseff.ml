@@ -663,8 +663,8 @@ module State = struct
     peer : slot;
   }
 
-  let key : slot Domain.DLS.key =
-    Domain.DLS.new_key (fun () ->
+  let key : slot Compat.key =
+    Compat.new_key (fun () ->
         let rec active =
           { dls = [| Obj.repr 0 |]; state = none; live = false; peer = idle }
         and idle =
@@ -708,7 +708,7 @@ module State = struct
     if !i < Array.length d then index := !i
 
   let[@inline never] refresh () =
-    let slot = Domain.DLS.get key in
+    let slot = Compat.get key in
     let d = dls_state () in
     slot.dls <- d;
     if !index < 0 then find_index slot d;
@@ -1159,7 +1159,7 @@ end
 exception Not_in_parse_context
 
 let () =
-  Printexc.register_printer (function
+  Compat.register_printer (function
     | Not_in_parse_context ->
         Some
           "Parseff: parser called outside of a parse context. Parser \
@@ -7894,7 +7894,7 @@ let pushed_chunks t =
           None
         else begin
           State.release ();
-          Effect.perform Need
+          Compat.perform Need
         end
   in
   { next; pending = ""; pending_pos = 0 }
