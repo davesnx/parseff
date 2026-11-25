@@ -53,17 +53,58 @@
    l=1M
    (run %{test}))))
 
+; Rerun the streaming suites with each read buffer size.
+
 (rule
  (alias runtest)
- (deps
-  test_streaming.exe
-  test_streaming_robust.exe
-  test_source_each.exe
-  test_differential.exe
-  test_protocol.exe
-  test_iter.exe
-  test_until.exe
-  test_charset.exe)
  (action
-  (system
-   "for n in 1 7 65536; do mkdir -p _build/_tests_buf_size_$n; for t in streaming streaming_robust source_each differential protocol iter until charset; do PARSEFF_TEST_BUF_SIZE=$n ./test_$t.exe --compact -o _build/_tests_buf_size_$n || { echo \"failed: test_$t.exe with PARSEFF_TEST_BUF_SIZE=$n\"; exit 1; }; done; done")))
+  (chdir
+   buf_size_1
+   (setenv
+    PARSEFF_TEST_BUF_SIZE
+    1
+    (progn
+     (run %{dep:test_streaming.exe} --compact)
+     (run %{dep:test_streaming_robust.exe} --compact)
+     (run %{dep:test_source_each.exe} --compact)
+     (run %{dep:test_differential.exe} --compact)
+     (run %{dep:test_protocol.exe} --compact)
+     (run %{dep:test_iter.exe} --compact)
+     (run %{dep:test_until.exe} --compact)
+     (run %{dep:test_charset.exe} --compact))))))
+
+(rule
+ (alias runtest)
+ (action
+  (chdir
+   buf_size_7
+   (setenv
+    PARSEFF_TEST_BUF_SIZE
+    7
+    (progn
+     (run %{dep:test_streaming.exe} --compact)
+     (run %{dep:test_streaming_robust.exe} --compact)
+     (run %{dep:test_source_each.exe} --compact)
+     (run %{dep:test_differential.exe} --compact)
+     (run %{dep:test_protocol.exe} --compact)
+     (run %{dep:test_iter.exe} --compact)
+     (run %{dep:test_until.exe} --compact)
+     (run %{dep:test_charset.exe} --compact))))))
+
+(rule
+ (alias runtest)
+ (action
+  (chdir
+   buf_size_65536
+   (setenv
+    PARSEFF_TEST_BUF_SIZE
+    65536
+    (progn
+     (run %{dep:test_streaming.exe} --compact)
+     (run %{dep:test_streaming_robust.exe} --compact)
+     (run %{dep:test_source_each.exe} --compact)
+     (run %{dep:test_differential.exe} --compact)
+     (run %{dep:test_protocol.exe} --compact)
+     (run %{dep:test_iter.exe} --compact)
+     (run %{dep:test_until.exe} --compact)
+     (run %{dep:test_charset.exe} --compact))))))

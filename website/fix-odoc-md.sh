@@ -10,7 +10,7 @@ sedi() {
 sedi 's|\[`\([^`]*\)`\](\./Parseff[^)]*)|`\1`|g' "$FILE"
 sedi 's|\\+|+|g' "$FILE"
 sedi 's|\\=|=|g' "$FILE"
-"$(dirname "$0")/fix-code-spans.sh" "$FILE"
+"$(dirname "$0")/md_fix.exe" code-spans "$FILE"
 
 awk '
 BEGIN { in_code = 0; blank_count = 0; after_fence = 0; prev_list = 0 }

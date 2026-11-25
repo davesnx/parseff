@@ -10,7 +10,7 @@ and fenced code blocks stay unchanged.
   > Kept: `~consume:`Partial`.
   > ```
   > MD
-  $ ./fix-code-spans.sh in.md
+  $ ./md_fix.exe code-spans in.md
   $ cat in.md
   Pass `` ~consume:`Partial `` to stop early.
   `consume` is `` `All `` by default, see [`Parseff.parse`](./x.md).
