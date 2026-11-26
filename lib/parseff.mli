@@ -1241,6 +1241,11 @@ module Slice : sig
   (** [get s i] returns the byte at 0-based index [i] of [s]. Raises
       [Invalid_argument] if [i] is outside [[0, length s - 1]]. *)
 
+  val blit : t -> int -> bytes -> int -> int -> unit
+  (** [blit src src_off dst dst_off len] copies [len] bytes of [src] from
+      [src_off] into [dst] at [dst_off], like [String.blit]. Raises
+      [Invalid_argument] if either range is out of bounds. *)
+
   val take_while :
     ?at_least:int ->
     ?at_most:int ->
@@ -1825,13 +1830,22 @@ module Iter : sig
         )
       ]} *)
 
-  val take_while : ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
-  (** [take_while ?set pred f] reads bytes while [pred] holds (or using [~set],
-      as in {!Parseff.take_while}) and passes them to [f] in pieces like
-      {!take}. Never fails, and does not call [f] if the first byte does not
-      match. *)
+  val take_while :
+    ?at_most:int ->
+    ?set:Charset.t ->
+    (char -> bool) ->
+    (Slice.t -> unit) ->
+    unit
+  (** [take_while ?at_most ?set pred f] reads bytes while [pred] holds (or using
+      [~set], as in {!Parseff.take_while}) and passes them to [f] in pieces like
+      {!take}. Does not call [f] if the first byte does not match.
+
+      - [~at_most] caps the run length. A matching [(at_most + 1)]-th byte fails
+        with [Limit_exceeded { limit = at_most }], after [f] has received the
+        first [at_most] bytes. Unlike {!Parseff.take_while}, the bytes need not
+        fit in [~backtrack_window]. Raises [Invalid_argument] if [at_most < 0].
+      - Without [~at_most], never fails. *)
 end
-[@@alert unstable "This module can change in any minor release."]
 
 (** {1:streaming Streaming}
 

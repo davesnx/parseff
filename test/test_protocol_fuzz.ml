@@ -10,6 +10,15 @@ let source ~chunk_size input =
   )
 
 let chunk_sizes = [ 1; 3; 7; 64; 4096 ]
+
+(* Bodies go to a callback; collect them so the runners can be compared. *)
+let with_body parser () =
+  let b = Buffer.create 16 in
+  let v =
+    parser (fun piece -> Buffer.add_string b (Parseff.Slice.to_string piece)) ()
+  in
+  (v, Buffer.contents b)
+
 let small_window = 64
 
 type 'a target = {
@@ -398,7 +407,7 @@ let () =
             (fuzz
                {
                  name = "http";
-                 parser = Http.request;
+                 parser = with_body (fun f -> Http.request f);
                  each = true;
                  valid = http_valid;
                }
@@ -419,7 +428,7 @@ let () =
             (fuzz
                {
                  name = "chunked";
-                 parser = Http.chunked_body;
+                 parser = with_body (fun f -> Http.chunked_body f);
                  each = false;
                  valid = [ "3\r\nabc\r\n1;e=v\r\nd\r\n0\r\nT: x\r\n\r\n" ];
                }

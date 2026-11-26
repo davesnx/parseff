@@ -36,6 +36,32 @@ let test_of_string () =
     )
     lengths
 
+let test_blit () =
+  List.iter
+    (fun offset ->
+      let k = key 17 in
+      let s = slice_at offset k in
+      let dst = Bytes.make 20 '.' in
+      Slice.blit s 3 dst 2 10;
+      Alcotest.(check string)
+        "copied"
+        (".." ^ String.sub k 3 10 ^ "........")
+        (Bytes.to_string dst);
+      Slice.blit s 0 dst 0 0
+    )
+    offsets;
+  let s = slice_at 3 (key 8) in
+  List.iter
+    (fun (src_off, dst_off, len) ->
+      match Slice.blit s src_off (Bytes.create 8) dst_off len with
+      | () ->
+          Alcotest.failf "blit %d %d %d: no Invalid_argument" src_off dst_off
+            len
+      | exception Invalid_argument _ ->
+          ()
+    )
+    [ (-1, 0, 1); (0, -1, 1); (0, 0, -1); (1, 0, 8); (0, 1, 8); (9, 0, 0) ]
+
 let test_equal () =
   List.iter
     (fun n ->
@@ -151,6 +177,7 @@ let () =
       ( "keys",
         [
           Alcotest.test_case "of_string" `Quick test_of_string;
+          Alcotest.test_case "blit" `Quick test_blit;
           Alcotest.test_case "equal" `Quick test_equal;
           Alcotest.test_case "equal matches String.equal" `Quick
             test_equal_matches_string_equal;
