@@ -80,7 +80,7 @@ jobs:
       # Only the unit test dependencies: miou, which an example uses, does not
       # build on OxCaml.
       - name: Setup OxCaml and dependencies
-        uses: ml-in-barcelona/gh-ci-action@oxcaml-repositories
+        uses: ml-in-barcelona/gh-ci-action@v1.4.0
         with:
           ocaml-compiler: ocaml-variants.5.4.0+ox,oxcaml-compiler.5.4.0-ox9
           opam-repositories: |
