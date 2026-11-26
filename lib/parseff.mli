@@ -561,6 +561,35 @@ val error :
         n
     ]} *)
 
+val expected_token :
+  ?help:string -> ?notes:note list -> upto:int -> string -> 'a
+(** [expected_token ?help ?notes ~upto label] fails at the current position with
+    [expected <label>] over the bytes up to [upto]: a token that a separate
+    lexer found, or any range the parser scanned.
+
+    - [found] quotes those bytes (cut at 32 bytes with [...]) and the error
+      range covers them. Both stop at the end of the input, or on a stream after
+      the last whole character read so far. With [upto = position ()], [found]
+      and the range are what {!satisfy} reports at the position.
+    - An ordinary [Expected] failure: it merges with other expected items at the
+      same position, and {!expect} relabels it and keeps its range, help, and
+      notes. When items of different widths fail at one position, the widest
+      decides [found].
+    - [~help] and [~notes] work like {!fail}. When several failures at the error
+      position pass them, the first ones are kept.
+    - Raises [Invalid_argument] if [upto < position ()].
+
+    {@ocaml[
+    let keyword name =
+      let word, stop =
+        peek_with (fun () -> take_while (fun c -> c >= 'a' && c <= 'z'))
+      in
+      if word = name then
+        skip_to stop
+      else
+        expected_token ~upto:stop (Printf.sprintf "%S" name)
+    ]} *)
+
 val warn :
   ?from:int ->
   ?upto:int ->

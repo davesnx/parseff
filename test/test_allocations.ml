@@ -117,6 +117,19 @@ let test_stopping_failures () =
   );
   check_words "or_" 0. (fun () ->
       Parseff.or_ (fun () -> Parseff.char 'x') (fun () -> 'y')
+  );
+  check_words "optional expected_token" 4. (fun () ->
+      Parseff.optional (fun () -> Parseff.expected_token ~upto:3 "token")
+  );
+  check_words "or_ expected_token" 0. (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.expected_token ~upto:3 "token")
+        (fun () -> 'y')
+  );
+  check_words "or_ expected_token ~help" 0. (fun () ->
+      Parseff.or_
+        (fun () -> Parseff.expected_token ~help:"help" ~upto:3 "token")
+        (fun () -> 'y')
   )
 
 let test_literal_success () =

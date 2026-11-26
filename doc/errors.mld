@@ -92,6 +92,12 @@ address:1:4: [error] octet out of range
   * note: octets go from 0 to 255
 v}
 
+{!val:Parseff.expected_token} fails with an [Expected] item instead, for a token
+that a separate lexer found or any range the parser scanned: [found] and the
+range cover the bytes up to [~upto], the item merges with other expected items
+at the same position, and {!val:Parseff.expect} relabels it. It takes [~help]
+and [~notes] like [fail].
+
 {1 [expect]}
 
 {!val:Parseff.expect} replaces [Expected] failures at the parser's starting
