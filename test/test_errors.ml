@@ -1595,6 +1595,182 @@ let test_render_eof_at_line_end () =
     )
     (render "" ctx_json_parser)
 
+let test_render_eof_after_blank_lines () =
+  let trivia () =
+    Parseff.skip_whitespace ();
+    while Parseff.peek_char () = Some '#' do
+      Parseff.skip_while (fun c -> c <> '\n');
+      Parseff.skip_whitespace ()
+    done
+  in
+  let a_then_b () =
+    trivia ();
+    Parseff.literal "a";
+    trivia ();
+    Parseff.literal "b"
+  in
+  let stream ~read_size input =
+    let pos = ref 0 in
+    let read buf off len =
+      let n = min (min read_size len) (String.length input - !pos) in
+      Bytes.blit_string input !pos buf off n;
+      pos := !pos + n;
+      n
+    in
+    match Parseff.Source.parse (Parseff.Source.of_function read) a_then_b with
+    | Stdlib.Ok () ->
+        "ok"
+    | Stdlib.Error e ->
+        Parseff.render_error ~name:"input.json" e
+  in
+  let push input =
+    let t = Parseff.Push.parse a_then_b in
+    let result =
+      match Parseff.Push.feed t input with
+      | Parseff.Push.Done result ->
+          result
+      | Parseff.Push.Await ->
+          Parseff.Push.finish t
+    in
+    match result with
+    | Stdlib.Ok _ ->
+        "ok"
+    | Stdlib.Error e ->
+        Parseff.render_error ~name:"input.json" e
+  in
+  let check label expected input =
+    check_render label expected (render input a_then_b);
+    check_render (label ^ ", ~source") expected
+      (render ~source:input input a_then_b);
+    check_render (label ^ ", stream") expected (stream ~read_size:4096 input);
+    check_render (label ^ ", push") expected (push input)
+  in
+  check "several blank lines"
+    (lines
+       [
+         "input.json:5:1: [error] expected \"b\", found end of input";
+         "2 |  a";
+         "  | ...";
+         "5 |";
+         "  | ^";
+       ]
+    )
+    "\n a\n\n\n";
+  check "one blank line"
+    (lines
+       [
+         "input.json:4:1: [error] expected \"b\", found end of input";
+         "2 |  a";
+         "3 |";
+         "4 |";
+         "  | ^";
+       ]
+    )
+    "\n a\n\n";
+  check "lines of spaces and tabs"
+    (lines
+       [
+         "input.json:5:1: [error] expected \"b\", found end of input";
+         "2 |  a";
+         "  | ...";
+         "5 |";
+         "  | ^";
+       ]
+    )
+    "\n a\n  \n\t\n";
+  check "only blank lines"
+    (lines
+       [
+         "input.json:4:1: [error] expected \"a\", found end of input";
+         "3 |";
+         "4 |";
+         "  | ^";
+       ]
+    )
+    "\n\n\n";
+  check "before the end of input"
+    (lines
+       [
+         "input.json:5:1: [error] expected \"b\", found 'c'";
+         "4 |";
+         "5 | c";
+         "  | ^";
+       ]
+    )
+    "\n a\n\n\nc\n";
+  check "a comment counts as text"
+    (lines
+       [
+         "input.json:5:1: [error] expected \"b\", found end of input";
+         "3 | # c";
+         "4 |";
+         "5 |";
+         "  | ^";
+       ]
+    )
+    "\n a\n# c\n\n";
+  check "an error line with text"
+    (lines
+       [
+         "input.json:5:5: [error] expected \"b\", found end of input";
+         "2 |  a";
+         "  | ...";
+         "5 |   #x";
+         "  |     ^";
+       ]
+    )
+    "\n a\n\n\n  #x";
+  check "CRLF"
+    (lines
+       [
+         "input.json:5:1: [error] expected \"b\", found end of input";
+         "2 |  a";
+         "  | ...";
+         "5 |";
+         "  | ^";
+       ]
+    )
+    "\r\n a\r\n\r\n\r\n";
+  let array = "[1,\n\n\n\n" in
+  let framed =
+    lines
+      [
+        "input.json:5:1: [error] expected value, found end of input";
+        "1 |   [1,";
+        "  | \xe2\x95\xad\xe2\x94\x80\xe2\x95\xaf";
+        "  | \xe2\x94\x82 ...";
+        "5 | \xe2\x94\x82";
+        "  | \xe2\x95\xb0\xe2\x94\x80^";
+        "  * while parsing array, from 1:1";
+      ]
+  in
+  check_render "opener" framed (render array ctx_json_parser);
+  check_render "opener, ~source" framed
+    (render ~source:array array ctx_json_parser);
+  (* A stream keeps the lines that open frames need, so after one-byte reads
+     the line with "a" is gone when the error is built, and the line above
+     stays the one before the error. *)
+  check_render "one-byte reads"
+    (lines
+       [
+         "input.json:5:1: [error] expected \"b\", found end of input";
+         "4 |";
+         "5 |";
+         "  | ^";
+       ]
+    )
+    (stream ~read_size:1 "\n a\n\n\n");
+  check_render "one-byte reads, line cut before the buffer"
+    (lines
+       [
+         "input.json:3:1: [error] expected \"b\", found end of input";
+         "2 |";
+         "3 |";
+         "  | ^";
+       ]
+    )
+    (stream ~read_size:1 " a\n\n")
+
 let test_render_gap () =
   let many_lines = String.concat "" (List.init 40 (fun _ -> "1,\n")) in
   check_render "many hidden lines"
@@ -4679,6 +4855,8 @@ let () =
           test_case "empty line" `Quick test_render_empty_line;
           test_case "end of input at line end" `Quick
             test_render_eof_at_line_end;
+          test_case "end of input after blank lines" `Quick
+            test_render_eof_after_blank_lines;
           test_case "gap" `Quick test_render_gap;
           test_case "context cap" `Quick test_render_context_cap;
           test_case "invalid UTF-8 and control bytes" `Quick

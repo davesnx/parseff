@@ -210,6 +210,11 @@ val render_error :
       [location.byte_col] counts bytes. Carets count terminal cells (wide
       characters take 2 cells, combining marks take 0, and control/invalid UTF-8
       bytes print as escapes such as [\x1B]).
+    - At end of input, the line shown above the error is the last one that is
+      not blank, so blank lines after the last token don't hide it. Two or more
+      blank lines in between print as [...]. In streaming, this needs the end of
+      the stream to be known when the error is built, and the line to be still
+      buffered.
     - In streaming without [~source]: if the error line is no longer known, the
       header prints [byte N] with no excerpt. If only the line's prefix was
       dropped, the excerpt starts with [...] and contexts starting in the
