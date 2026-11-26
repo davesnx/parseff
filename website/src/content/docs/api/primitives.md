@@ -63,10 +63,10 @@ let uppercase () =
 
 ### `peek_char`
 
-[`Parseff.peek_char`](./Parseff.md#val-peek_char) returns `Some c` for the next byte without consuming it, or `None` at end of input. Use it for cheap single-byte dispatch instead of trying alternatives with [`Parseff.or_`](./Parseff.md#val-or_).
+[`Parseff.peek_char`](./Parseff.md#val-peek_char) returns `Some c` for the next byte without consuming it, or `None` at end of input. Use it for cheap single-byte dispatch instead of trying alternatives with [`Parseff.or_`](./Parseff.md#val-or_). With `~ahead:n` it returns the byte `n` places after the next one, so two-byte symbols need no backtracking frame either.
 
 ```ocaml
-val peek_char : unit -> char option
+val peek_char : ?ahead:int -> unit -> char option
 ```
 
 ```ocaml
@@ -76,6 +76,15 @@ let value_start () =
   | Some '{' -> `Object
   | Some '"' -> `String
   | _ -> Parseff.fail "expected value"
+
+let assign_or_equal () =
+  match Parseff.peek_char ~ahead:1 () with
+  | Some '=' ->
+      Parseff.literal "==";
+      `Equal
+  | _ ->
+      let _ = Parseff.char '=' in
+      `Assign
 ```
 
 ## Character scanning
