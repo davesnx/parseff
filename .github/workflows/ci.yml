@@ -77,16 +77,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup OxCaml
-        uses: ocaml/setup-ocaml@v3.9.1
+      # Only the unit test dependencies: miou, which an example uses, does not
+      # build on OxCaml.
+      - name: Setup OxCaml and dependencies
+        uses: ml-in-barcelona/gh-ci-action@oxcaml-repositories
         with:
           ocaml-compiler: ocaml-variants.5.4.0+ox,oxcaml-compiler.5.4.0-ox9
           opam-repositories: |
             ox: git+https://github.com/oxcaml/opam-repository.git
             default: https://opam.ocaml.org
-
-      - name: Install dependencies
-        run: make -f Makefile-ox install SWITCH="$(opam switch show)"
+          install-deps: false
+          extra-packages: dune uucp alcotest
 
       - name: Run tests
         run: make -f Makefile-ox test SWITCH="$(opam switch show)"
