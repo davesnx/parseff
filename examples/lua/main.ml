@@ -60,8 +60,20 @@ let tee_trim (base, line) =
 let render_window ~name (e : Parseff.error) =
   let stop = tee.base + (tee.hi - tee.lo) in
   let inside (r : Parseff.range) = r.start >= tee.base && r.stop <= stop in
-  match e.kind with
-  | Custom (Lexer.Lua { msg; _ }) when inside e.range ->
+  let rebuild =
+    match e.kind with
+    | Custom (Lexer.Lua { msg; _ }) ->
+        Some (fun text r notes -> Parser.error_at text r ~notes ?help:e.help msg)
+    | Expected { items = Label label, []; more = 0; _ } ->
+        Some
+          (fun text r notes ->
+            Parser.expected_at text r ~notes ?help:e.help label
+          )
+    | _ ->
+        None
+  in
+  match rebuild with
+  | Some rebuild when inside e.range ->
       let shift = tee.base - (tee.line - 1) in
       let text =
         String.make (tee.line - 1) '\n'
@@ -81,8 +93,7 @@ let render_window ~name (e : Parseff.error) =
           )
           e.notes
       in
-      render ~name ~source:text
-        (Parser.error_at text (rebase e.range) ~notes ?help:e.help msg)
+      render ~name ~source:text (rebuild text (rebase e.range) notes)
   | _ ->
       render ~name e
 

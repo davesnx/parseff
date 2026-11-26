@@ -1677,6 +1677,11 @@ val lexeme : ?skip:(unit -> unit) -> (unit -> 'a) -> 'a
 (** [lexeme ?skip p] runs [p], runs [skip ()] (default {!skip_whitespace}), and
     returns [p]'s result.
 
+    [skip] should record no failures: one it records where it stops, as {!many}
+    and {!or_} do, joins the next error there, which then reads
+    [expected ' ', '#', or ')'] instead of [expected ')']. Read trivia with
+    {!peek_char} and {!skip_while}, as below.
+
     {@ocaml[
     let skip () =
       skip_whitespace ();

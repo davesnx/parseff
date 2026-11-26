@@ -39,6 +39,17 @@ the excerpt and the column are those of the whole line.
   $ head -1 from_stdin.txt
   stdin:1:12909: [error] expected expression, found '='
 
+The excerpt also shows the line before the error when the stream has dropped
+it.
+
+  $ printf -- '-- %s\nlocal y = f(a b)\n' "$(awk 'BEGIN { for (i = 0; i < 4000; i++) printf "x" }')" > long_comment.lua
+  $ ./main.exe check - < long_comment.lua > from_stdin.txt 2>&1
+  [1]
+  $ ./main.exe check long_comment.lua 2>&1 | sed 's/^long_comment.lua:/stdin:/' > from_file.txt
+  $ diff from_file.txt from_stdin.txt
+  $ head -1 from_stdin.txt
+  stdin:2:15: [error] expected "," or ")" in the argument list that starts at 2:12, found 'b'
+
 A last statement of one token with no final newline keeps its line and column.
 
   $ printf 'local x = 1\nend' | ./main.exe check -
