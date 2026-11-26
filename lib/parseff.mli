@@ -673,10 +673,16 @@ val end_of_input : unit -> unit
     {!Source.parse} already enforce this by default unless [~consume:`Partial]
     is passed. *)
 
-val peek_char : unit -> char option
+val peek_char : ?ahead:int -> unit -> char option
 (** [peek_char ()] returns [Some c] for the next byte without consuming it, or
     [None] at end of input. Avoids the backtracking frame of {!or_} or
     {!look_ahead} for single-byte dispatch.
+
+    - [~ahead:n] returns the byte [n] places after the next one instead
+      ([~ahead:0] is the next byte), or [None] when the input ends before it, so
+      [=] and [==] can be told apart without a frame. In streaming, the [n + 1]
+      bytes from the position must fit in [~backtrack_window].
+    - Raises [Invalid_argument] if [n < 0].
 
     {@ocaml[
     let value () =

@@ -772,6 +772,21 @@ let test_slice_keys () =
     )
     [ 0; 3; 7; 8; 17 ]
 
+let test_peek_ahead () =
+  let check name f =
+    match
+      Parseff.parse ~consume:`Partial "a=b" (fun () -> words_per_call f)
+    with
+    | Ok actual ->
+        if actual > 0. then
+          Alcotest.failf "%s allocated %.6f minor words per call, expected none"
+            name actual
+    | Error error ->
+        Alcotest.fail (Parseff.render_error error)
+  in
+  check "peek_char ()" (fun () -> Parseff.peek_char ());
+  check "peek_char ~ahead:1 ()" (fun () -> Parseff.peek_char ~ahead:1 ())
+
 let () =
   Alcotest.run "Allocations"
     [
@@ -790,6 +805,7 @@ let () =
           Alcotest.test_case "skip_until" `Quick test_skip_until_success;
           Alcotest.test_case "scans" `Quick test_scan_success;
           Alcotest.test_case "Slice.hash and Slice.equal" `Quick test_slice_keys;
+          Alcotest.test_case "peek_char ~ahead" `Quick test_peek_ahead;
         ]
       );
       ( "operators",

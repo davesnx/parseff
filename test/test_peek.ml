@@ -764,6 +764,96 @@ let test_token_cache () =
         (String.trim (Buffer.contents retried))
   )
 
+let show_char = function Some c -> String.make 1 c | None -> "-"
+
+let test_ahead_reads () =
+  check_all "bytes ahead, then the position" Fun.id "a.5bcdefgh"
+    "Ok a . 5 h - - 0" (fun () ->
+      let at n = show_char (peek_char ~ahead:n ()) in
+      String.concat " "
+        [ at 0; at 1; at 2; at 9; at 10; at 50; string_of_int (position ()) ]
+  )
+
+let test_ahead_after_consuming () =
+  check_all "after consuming" Fun.id "ab=c" "Ok = c ab" (fun () ->
+      let word = take_while is_alpha in
+      let next = show_char (peek_char ()) in
+      let second = show_char (peek_char ~ahead:1 ()) in
+      String.concat " " [ next; second; word ]
+  )
+
+let test_ahead_at_end () =
+  check_all "at end of input" Fun.id "a" "Ok - -" (fun () ->
+      let _ = any_char () in
+      show_char (peek_char ()) ^ " " ^ show_char (peek_char ~ahead:1 ())
+  )
+
+let test_ahead_far () =
+  check_all "far past the end" Fun.id "abc" "Ok - - b" (fun () ->
+      let _ = any_char () in
+      let far = show_char (peek_char ~ahead:max_int ()) in
+      let less = show_char (peek_char ~ahead:(max_int - 1) ()) in
+      String.concat " " [ far; less; show_char (peek_char ()) ]
+  )
+
+let test_ahead_window () =
+  let input = String.make 40 'x' in
+  let window n =
+    show Fun.id
+      (run ~backtrack_window:16 (Some 3) input (fun () ->
+           let _ = any_char () in
+           show_char (peek_char ~ahead:n ())
+       )
+      )
+  in
+  Alcotest.(check string) "16 bytes fit" "Ok x" (window 15);
+  Alcotest.(check string)
+    "17 bytes do not" "Error at 1: backtrack window of 16 bytes exceeded"
+    (window 16)
+
+let test_ahead_negative () =
+  List.iter
+    (fun (mode_name, mode) ->
+      Alcotest.check_raises mode_name
+        (Invalid_argument "Parseff.peek_char: ~ahead is negative") (fun () ->
+          let _ =
+            run mode "ab" (fun () ->
+                let _ = any_char () in
+                peek_char ~ahead:(-1) ()
+            )
+          in
+          ()
+      )
+    )
+    modes
+
+let test_ahead_push () =
+  let peek () = peek_char ~ahead:1 () in
+  let t = Push.parse peek in
+  ( match Push.feed t "=" with
+  | Push.Await ->
+      ()
+  | Push.Done _ ->
+      Alcotest.fail "one byte answered a peek two bytes ahead"
+  );
+  ( match Push.feed t "=x" with
+  | Push.Done (Ok (c, rest)) ->
+      Alcotest.(check string)
+        "second byte, nothing consumed" "= ==x"
+        (show_char c ^ " " ^ rest)
+  | _ ->
+      Alcotest.fail "expected the peek to complete"
+  );
+  let t = Push.parse peek in
+  let _ = Push.feed t "=" in
+  match Push.finish t with
+  | Ok (c, rest) ->
+      Alcotest.(check string)
+        "end of input after one byte" "- ="
+        (show_char c ^ " " ^ rest)
+  | Error e ->
+      Alcotest.fail (error_message e)
+
 let () =
   let open Alcotest in
   run "peek_with and skip_to"
@@ -804,6 +894,17 @@ let () =
           test_case "rejects bad targets" `Quick test_skip_to_rejects;
           test_case "unread stream bytes" `Quick test_skip_to_unread_stream;
           test_case "outside a parse" `Quick test_outside_parse;
+        ]
+      );
+      ( "peek_char ~ahead",
+        [
+          test_case "reads without consuming" `Quick test_ahead_reads;
+          test_case "after consuming" `Quick test_ahead_after_consuming;
+          test_case "at end of input" `Quick test_ahead_at_end;
+          test_case "far past the end" `Quick test_ahead_far;
+          test_case "backtrack window" `Quick test_ahead_window;
+          test_case "negative" `Quick test_ahead_negative;
+          test_case "push" `Quick test_ahead_push;
         ]
       );
     ]
