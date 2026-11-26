@@ -42,16 +42,12 @@ let is_digit c = c >= '0' && c <= '9'
 let scan_number () =
   skip_while is_digit;
   if peek_char () = Some '.' then
-    let fraction =
-      look_ahead (fun () ->
-          let _ = any_char () in
-          match peek_char () with Some c -> is_digit c | None -> false
-      )
-    in
-    if fraction then begin
-      let _ = any_char () in
-      skip_while is_digit
-    end
+    match peek_char ~ahead:1 () with
+    | Some '0' .. '9' ->
+        let _ = any_char () in
+        skip_while is_digit
+    | _ ->
+        ()
 
 let is_name_start u =
   Uchar.equal u (Uchar.of_char '_') || Uucp.Id.is_xid_start u

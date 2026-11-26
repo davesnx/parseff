@@ -2970,19 +2970,28 @@ let some_chars = Array.init 256 (fun i -> Some (Char.chr i))
 
 let[@inline always] some_char c = Array.unsafe_get some_chars (Char.code c)
 
-let[@inline never] peek_char_slow st =
-  if have st 1 then
-    some_char (char_at st st.pos)
+let[@inline never] peek_char_slow st ahead =
+  if ahead < 0 then
+    invalid_arg "Parseff.peek_char: ~ahead is negative"
+  else if ahead < max_int && have st (ahead + 1) then
+    some_char (char_at st (st.pos + ahead))
   else
     None
 
-let[@inline] peek_char () =
+let[@inline] peek_char ?ahead () =
   let st = get_state () in
-  let p = st.pos in
-  if p < st.input_len then
-    some_char (char_at st p)
-  else
-    peek_char_slow st
+  match ahead with
+  | None ->
+      let p = st.pos in
+      if p < st.input_len then
+        some_char (char_at st p)
+      else
+        peek_char_slow st 0
+  | Some n ->
+      if n >= 0 && n < st.input_len - st.pos then
+        some_char (char_at st (st.pos + n))
+      else
+        peek_char_slow st n
 
 let[@inline] position () =
   let st = get_state () in
