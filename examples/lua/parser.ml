@@ -22,37 +22,6 @@ let is_eof () = match peek () with None -> true | Some _ -> false
 let next_is c = match peek () with Some d -> d = c | None -> false
 let is_kw k = function L.Kw k' -> k' == k | _ -> false
 
-(* The gap record at the last [cut], for [attempt]. *)
-let cut_pos = ref (-1)
-let cut_stop = ref 0
-let cut_nl = ref false
-let cut_indent = ref 0
-
-let restore_gap ~at ~stop ~nl ~indent =
-  L.gap_end := at;
-  L.tok_stop := stop;
-  L.gap_nl := nl;
-  L.indent := indent
-
-(* A failed capture rewinds to its start or to the last cut inside it, and
-   the gap record there is put back. *)
-let attempt f =
-  let start = pos () in
-  let at = !L.gap_end
-  and stop = !L.tok_stop
-  and nl = !L.gap_nl
-  and indent = !L.indent in
-  match Parseff.capture ~release:true f with
-  | Ok _ as ok ->
-      ok
-  | Error _ as err ->
-      let p = pos () in
-      if p = start then
-        restore_gap ~at ~stop ~nl ~indent
-      else if p = !cut_pos then
-        restore_gap ~at:p ~stop:!cut_stop ~nl:!cut_nl ~indent:!cut_indent;
-      err
-
 let caused_by_lexical ?word ~region (e : Parseff.error) =
   (not (L.is_lexical e))
   && Hashtbl.fold
@@ -255,7 +224,7 @@ let list_elem ?(line_stop = false) ?(skip_word = false) ?region
     parse ()
   else
     let start = pos () in
-    match attempt parse with
+    match L.attempt parse with
     | Ok v ->
         v
     | Error e when fail_at_end && is_eof_error e ->
@@ -277,7 +246,7 @@ let list_elem ?(line_stop = false) ?(skip_word = false) ?region
 exception Truncated
 
 let header ~region ~kw parse =
-  match attempt parse with
+  match L.attempt parse with
   | Ok v ->
       Some v
   | Error e ->
@@ -293,15 +262,15 @@ let what_header = function
   | k ->
       "the \"" ^ k ^ "\" condition"
 
-(* Reads a name; a reserved word or another token fails. The range of the
-   name is [!L.tok_start, !L.tok_stop]. *)
+(* Reads a name; a reserved word or another token fails. The name stops at
+   [L.prev_stop ()]. *)
 let need_name ~what () =
   match peek () with
   | Some c when L.is_alpha c ->
       let s = pos () in
       let w = L.word () in
       if L.is_reserved w then
-        L.error ~from:s ~upto:!L.tok_stop ~help:(reserved_help w)
+        L.error ~from:s ~upto:(L.prev_stop ()) ~help:(reserved_help w)
           (Printf.sprintf "expected %s, found reserved word '%s'" what w)
       else
         w
@@ -314,7 +283,7 @@ let field_name ~what () =
   | Some c when L.is_alpha c ->
       let s = pos () in
       let w = L.word () in
-      let r = { start = s; stop = !L.tok_stop } in
+      let r = { start = s; stop = s + String.length w } in
       if L.is_reserved w then
         report
           (L.make_error ~from:s ~upto:r.stop
@@ -346,7 +315,7 @@ let expect_assign () =
       | Some '=' ->
           L.error ~from:s ~upto:(s + 2) "expected \"=\", found '=='"
       | _ ->
-          L.finish s
+          L.trivia ()
     )
   | _ ->
       expect_view L.Assign
@@ -662,9 +631,10 @@ and expr_from_word w s e ind =
 and operand () =
   match peek () with
   | Some c when L.is_alpha c ->
-      let s = pos () and ind = !L.indent in
+      let s = pos () in
+      let ind = L.indent_at s in
       let w = L.word () in
-      operand_word w s !L.tok_stop ind
+      operand_word w s (s + String.length w) ind
   | _ ->
       operand_token ()
 
@@ -700,28 +670,28 @@ and operand_token () =
   let b = !L.breaks in
   match L.lex_token () with
   | L.Sym L.Minus ->
-      L.finish s;
+      L.trivia ();
       unop Neg s
   | L.Sym L.Hash ->
-      L.finish s;
+      L.trivia ();
       unop Len s
   | L.Sym L.Tilde ->
-      L.finish s;
+      L.trivia ();
       unop Bnot s
   | L.Number (v, text) ->
-      L.finish s;
-      mk_expr (Number (v, text)) { start = s; stop = !L.tok_stop }
+      let stop = L.finish () in
+      mk_expr (Number (v, text)) { start = s; stop }
   | L.String str ->
-      L.after_token s (!L.breaks > b);
-      mk_expr (String str) { start = s; stop = !L.tok_stop }
+      let stop = L.after_token s (!L.breaks > b) in
+      mk_expr (String str) { start = s; stop }
   | L.Sym L.Dots ->
-      L.finish s;
-      mk_expr Vararg { start = s; stop = !L.tok_stop }
+      let stop = L.finish () in
+      mk_expr Vararg { start = s; stop }
   | L.Sym L.Lbrace ->
-      L.finish s;
+      L.trivia ();
       table_after_brace s
   | L.Sym L.Lparen ->
-      L.finish s;
+      L.trivia ();
       suffixes (paren s)
   | L.Eof ->
       expected_expression_view (L.view ())
@@ -740,7 +710,7 @@ and primary () =
   | Some c when L.is_alpha c ->
       let s = pos () in
       let w = L.word () in
-      let e = !L.tok_stop in
+      let e = s + String.length w in
       if L.is_reserved w then
         expected_expression_word w s e
       else
@@ -904,9 +874,10 @@ and field () =
           Keyed (k, expr ())
     )
   | Some c when L.is_alpha c ->
-      let s = pos () and ind = !L.indent in
+      let s = pos () in
+      let ind = L.indent_at s in
       let w = L.word () in
-      let e = !L.tok_stop in
+      let e = s + String.length w in
       if
         (not (L.is_reserved w))
         && next_is '='
@@ -1015,16 +986,17 @@ and block_loop closer opener acc returned first =
             {
               term = T_eof;
               term_at = { start = p; stop = p };
-              term_indent = !L.indent;
+              term_indent = L.indent_at p;
             }
           )
       | Some ';' ->
           L.sym1 ();
           block_loop closer opener acc returned None
       | Some c when L.is_alpha c ->
-          let s = pos () and ind = !L.indent in
+          let s = pos () in
+          let ind = L.indent_at s in
           let w = L.word () in
-          block_word closer opener acc returned w s !L.tok_stop ind
+          block_word closer opener acc returned w s (s + String.length w) ind
       | Some _ ->
           after_return_view returned;
           let st = statement_sym () in
@@ -1043,11 +1015,7 @@ and block_word closer opener acc returned w s e ind =
       next_statement closer opener acc st
 
 and next_statement closer opener acc st =
-  Parseff.cut ();
-  cut_pos := pos ();
-  cut_stop := !L.tok_stop;
-  cut_nl := !L.gap_nl;
-  cut_indent := !L.indent;
+  L.cut ();
   let returned =
     match st.sdesc with
     | Return _ ->
@@ -1107,10 +1075,11 @@ and expect_lead kw opener =
   in
   match peek () with
   | Some c when L.is_alpha c ->
-      let s = pos () and ind = !L.indent in
+      let s = pos () in
+      let ind = L.indent_at s in
       let nl = L.nl () and prev = L.prev_stop () in
       let w = L.word () in
-      let e = !L.tok_stop in
+      let e = s + String.length w in
       if String.equal w name then
         None
       else if nl then begin
@@ -1189,7 +1158,7 @@ and statement_word opener w s e ind =
     )
   | _ -> (
       let a = pos () in
-      match attempt (fun () -> simple_word opener w s e) with
+      match L.attempt (fun () -> simple_word opener w s e) with
       | Ok st ->
           st
       | Error err ->
@@ -1218,7 +1187,7 @@ and simple_word opener w s e =
       mk Break e
   | "goto" ->
       let n = need_name ~what:"a label name after \"goto\"" () in
-      mk (Goto n) !L.tok_stop
+      mk (Goto n) (L.prev_stop ())
   | "local" ->
       local_names s
   | "end" | "else" | "elseif" | "until" ->
@@ -1243,7 +1212,7 @@ and simple_word opener w s e =
 (* A statement that starts with a token other than a word. *)
 and statement_sym () =
   let a = pos () in
-  match attempt simple_sym with Ok st -> st | Error err -> recovered a err
+  match L.attempt simple_sym with Ok st -> st | Error err -> recovered a err
 
 and simple_sym () =
   let start = pos () in
@@ -1397,7 +1366,7 @@ and for_header () =
         let s = pos () in
         let w = L.word () in
         if not (String.equal w "in") then
-          L.error ~from:s ~upto:!L.tok_stop
+          L.error ~from:s ~upto:(L.prev_stop ())
             (Printf.sprintf "expected \"in\", found %s" (L.quoted w))
     | _ ->
         let c = L.view () in
@@ -1418,7 +1387,7 @@ and for_header () =
       let s = pos () in
       skip1 ();
       if next_is '=' then bad_after "'=='" ~from:s ~upto:(s + 2);
-      L.finish s;
+      L.trivia ();
       let a = expr () in
       expect_comma ();
       let b = expr () in
@@ -1446,7 +1415,7 @@ and for_header () =
         in
         `Gen ([ v ], exprs [])
       else
-        bad_after (L.quoted w) ~from:s ~upto:!L.tok_stop
+        bad_after (L.quoted w) ~from:s ~upto:(L.prev_stop ())
   | _ ->
       let c = L.view () in
       bad_after (found c) ~from:c.start ~upto:c.stop
@@ -1501,7 +1470,7 @@ and function_stat s e ind =
   let op = { kind = "function"; at = { start = s; stop = e }; indent = ind } in
   let a = pos () in
   match
-    attempt (fun () ->
+    L.attempt (fun () ->
         if next_is '(' then
           fail_at
             ~help:
@@ -1550,14 +1519,14 @@ and local_function start =
     {
       kind = "function";
       at = { start = fs; stop = fs + 8 };
-      indent = !L.indent;
+      indent = L.indent_at fs;
     }
   in
   match
-    attempt (fun () ->
+    L.attempt (fun () ->
         let _ = L.word () in
+        let name_start = pos () in
         let n = need_name ~what:"a function name after \"local function\"" () in
-        let name_start = !L.tok_start in
         let qualified =
           match peek () with
           | Some ('.' | ':') -> (
@@ -1576,7 +1545,7 @@ and local_function start =
                         Buffer.add_string text part;
                         err :=
                           Some
-                            (L.make_error ~from:name_start ~upto:!L.tok_stop
+                            (L.make_error ~from:name_start ~upto:(L.prev_stop ())
                                ~help:
                                  "write \"function a.b()\" without \"local\" \
                                   to set a field, or \"local function b()\" \
@@ -1652,7 +1621,12 @@ and local_names start =
         (L.view ())
         (Printf.sprintf "unexpected '(' after \"local %s\"" n);
       let _, stop =
-        funcbody { kind = "function"; at = { start; stop }; indent = !L.indent }
+        funcbody
+          {
+            kind = "function";
+            at = { start; stop };
+            indent = L.indent_at (pos ());
+          }
       in
       { sdesc = Bad_stat; srange = { start; stop } }
   | Some '=', _ when match L.peek_second () with Some '=' -> false | _ -> true
@@ -1667,38 +1641,22 @@ and local_names start =
       { sdesc = Local (vars, []); srange = { start; stop } }
 
 and parses_as_statement () =
-  let at = !L.gap_end
-  and stop = !L.tok_stop
-  and nl = !L.gap_nl
-  and indent = !L.indent in
-  let c_pos = !cut_pos
-  and c_stop = !cut_stop
-  and c_nl = !cut_nl
-  and c_indent = !cut_indent in
   let before = Parseff.Diagnostics.length errors in
-  let valid =
-    Parseff.look_ahead (fun () ->
-        match
-          Parseff.capture (fun () ->
-              match expr_stat (pos ()) (suffixed ()) with
-              | _ ->
-                  true
-              | exception Truncated ->
-                  false
-          )
-        with
-        | Ok parsed ->
-            parsed && Parseff.Diagnostics.length errors = before
-        | Error _ ->
-            false
-    )
-  in
-  restore_gap ~at ~stop ~nl ~indent;
-  cut_pos := c_pos;
-  cut_stop := c_stop;
-  cut_nl := c_nl;
-  cut_indent := c_indent;
-  valid
+  L.look_ahead (fun () ->
+      match
+        Parseff.capture (fun () ->
+            match expr_stat (pos ()) (suffixed ()) with
+            | _ ->
+                true
+            | exception Truncated ->
+                false
+        )
+      with
+      | Ok parsed ->
+          parsed && Parseff.Diagnostics.length errors = before
+      | Error _ ->
+          false
+  )
 
 and local_name closes () =
   let n = need_name ~what:"a variable name after \"local\"" () in
@@ -1711,7 +1669,7 @@ and local_name closes () =
         | Some c when L.is_alpha c -> (
             let s = pos () in
             let a = L.word () in
-            let e = !L.tok_stop in
+            let e = s + String.length a in
             match a with
             | "const" ->
                 Const
@@ -1750,7 +1708,7 @@ and local_name closes () =
               L.error ~from:s ~upto:(s + 2)
                 (Printf.sprintf "expected \"%s\", found '>%c'" ">" c)
           | _ ->
-              L.finish s
+              L.trivia ()
         )
       | _ ->
           expect_view L.Gt
@@ -1835,7 +1793,7 @@ and expr_stat start e =
         skip1 ();
         if next_is '=' then not_a_statement ~at:s e;
         check_target e;
-        L.finish s;
+        L.trivia ();
         assign [ e ]
   | _ -> (
       match e.edesc with
@@ -1920,7 +1878,7 @@ and not_a_statement : 'a. at:int -> expr -> 'a =
             "this expression is not a statement"
     )
   | None ->
-      if !L.comment_end = at && !L.gap_comment >= e.erange.stop then
+      if L.comment_in_gap ~at ~from:e.erange.stop then
         generic
           ~help:
             (Printf.sprintf
@@ -1967,9 +1925,10 @@ let one () =
       L.sym1 ();
       None
   | Some c when L.is_alpha c ->
-      let s = pos () and ind = !L.indent in
+      let s = pos () in
+      let ind = L.indent_at s in
       let w = L.word () in
-      let e = !L.tok_stop in
+      let e = s + String.length w in
       after_return_word !returned w s e;
       let st = statement_word None w s e ind in
       set_returned st;

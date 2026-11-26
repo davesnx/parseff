@@ -1071,20 +1071,86 @@ let lex_token () =
    whitespace and comments after them, so the position between tokens is the
    start of the next token. *)
 
-(* The gap is the trivia before the token at the position. [trivia] records
-   what the parser asks about it: where the previous token stopped, whether
-   the gap has a line break, the indent of the line, and a comment on the line
-   of the previous token. These are plain refs, not [Parseff.Ref]s: each fact
-   depends only on the input and on [gap_end], so a rewind cannot make it
-   wrong, only describe a later gap. [Parser.attempt] puts the record back
-   where it rewinds. *)
-let tok_start = ref 0
-let tok_stop = ref 0
-let gap_end = ref (-1)
-let gap_nl = ref false
-let indent = ref 0
-let gap_comment = ref (-1)
-let comment_end = ref (-1)
+(* The trivia before the token at [at]: where the token before it stopped,
+   whether it has a line break, the indent of the line of the token at [at],
+   and the start of a comment on the line of the token before ([-1] for none).
+   [trivia] writes every field after each token. A rewind does not restore
+   it, so every rewind past a [trivia] must: the parser rewinds through
+   [attempt] and [look_ahead] below. Its other rewinds, an operator lookup
+   and a peek, read no trivia. The fields are mutable so that a token does
+   not allocate. *)
+type gap = {
+  mutable at : int;
+  mutable stop : int;
+  mutable nl : bool;
+  mutable indent : int;
+  mutable comment : int;
+}
+
+let gap = { at = -1; stop = 0; nl = false; indent = 0; comment = -1 }
+
+let copy_gap ~src ~dst =
+  dst.at <- src.at;
+  dst.stop <- src.stop;
+  dst.nl <- src.nl;
+  dst.indent <- src.indent;
+  dst.comment <- src.comment
+
+(* The gap at the last [cut]. *)
+let cut_gap = { gap with at = -1 }
+
+(* [Parseff.cut], keeping the gap at the cut for [attempt]. *)
+let cut () =
+  Parseff.cut ();
+  assert (gap.at = Parseff.position ());
+  copy_gap ~src:gap ~dst:cut_gap
+
+(* [Parseff.capture ~release:true]. A failure rewinds to the start or to the
+   last [cut] inside, and the gap there is put back. The gap at the start is
+   saved in locals: [attempt] is on the hot path and must not allocate. *)
+let attempt f =
+  let start = Parseff.position () in
+  let { at; stop; nl; indent; comment } = gap in
+  match Parseff.capture ~release:true f with
+  | Ok _ as ok ->
+      ok
+  | Error _ as err ->
+      let p = Parseff.position () in
+      if p = start then
+        copy_gap ~src:{ at; stop; nl; indent; comment } ~dst:gap
+      else if p = cut_gap.at then
+        copy_gap ~src:cut_gap ~dst:gap
+      else
+        assert false;
+      err
+
+(* [Parseff.look_ahead], putting back the gap and the last cut. *)
+let look_ahead f =
+  let g = { gap with at = gap.at } and c = { cut_gap with at = cut_gap.at } in
+  let v = Parseff.look_ahead f in
+  copy_gap ~src:g ~dst:gap;
+  copy_gap ~src:c ~dst:cut_gap;
+  v
+
+(* Where the token before the position stopped, and whether a line break
+   comes before it. *)
+let prev_stop () =
+  assert (gap.at = Parseff.position ());
+  gap.stop
+
+let nl () =
+  assert (gap.at = Parseff.position ());
+  gap.nl
+
+(* The indent of the line of the token at [s], the position. Taking [s]
+   keeps the check cheap where the caller has it. *)
+let[@inline] indent_at s =
+  assert (gap.at = s);
+  gap.indent
+
+(* Whether the gap that ends at [at] has a comment on the line of the token
+   before it, starting at [from] or later. *)
+let comment_in_gap ~at ~from = gap.at = at && gap.comment >= from
 
 (* Where a ['&'] or ['|'] operator stopped, for the hints on [&&] and [||]. *)
 let amp_end = ref (-1)
@@ -1096,23 +1162,6 @@ let line_start_at p =
   else
     Dynarray.get lines (line_index p)
 
-(* Where the token before the position stopped, and whether a line break
-   comes before it. If the record is for another gap (a rewind that the
-   parser did not repair), the answers fall back to the position. *)
-let prev_stop () =
-  let p = Parseff.position () in
-  if !gap_end = p then
-    !tok_stop
-  else
-    p
-
-let nl () =
-  let p = Parseff.position () in
-  if !gap_end = p then
-    !gap_nl
-  else
-    false
-
 let second () =
   let _ = Parseff.any_char () in
   Parseff.peek_char ()
@@ -1122,30 +1171,27 @@ let peek_second () = Parseff.look_ahead second
 
 let is_blank c = c = ' ' || c = '\t' || c = '\011' || c = '\012'
 
-let close_gap nl cmt =
-  let p = Parseff.position () in
-  gap_end := p;
-  gap_nl := nl;
-  if nl then indent := p - line_start_at p;
-  if cmt >= 0 then begin
-    gap_comment := cmt;
-    comment_end := p
-  end
+let[@inline] close_gap at stop nl comment =
+  gap.at <- at;
+  gap.stop <- stop;
+  gap.nl <- nl;
+  if nl then gap.indent <- at - line_start_at at;
+  gap.comment <- comment
 
-let rec gap nl cmt =
+let rec skip_gap stop nl cmt =
   match Parseff.peek_char () with
   | Some (' ' | '\t' | '\011' | '\012') ->
       Parseff.skip_while is_blank;
-      gap nl cmt
+      skip_gap stop nl cmt
   | Some '\n' ->
       let _ = Parseff.any_char () in
       incr breaks;
       add_line (Parseff.position ());
-      gap true cmt
+      skip_gap stop true cmt
   | Some '\r' ->
       let _ = Parseff.any_char () in
       incr breaks;
-      gap true cmt
+      skip_gap stop true cmt
   | Some '-' -> (
       match peek_second () with
       | Some '-' ->
@@ -1160,39 +1206,39 @@ let rec gap nl cmt =
             else
               cmt
           in
-          gap (nl || !breaks > b) cmt
+          skip_gap stop (nl || !breaks > b) cmt
       | _ ->
-          close_gap nl cmt
+          close_gap (Parseff.position ()) stop nl cmt
     )
   | _ ->
-      close_gap nl cmt
+      close_gap (Parseff.position ()) stop nl cmt
 
-let trivia () =
-  let p = Parseff.position () in
-  tok_stop := p;
+(* [p] is where the token before stopped. *)
+let trivia_from p =
   match Parseff.peek_char () with
   | Some (' ' | '\t' | '\n' | '\r' | '\011' | '\012' | '-') ->
-      gap false (-1)
+      skip_gap p false (-1)
   | _ ->
-      gap_end := p;
-      gap_nl := false
+      close_gap p p false (-1)
 
-let[@inline] finish s =
-  tok_start := s;
-  trivia ()
+let trivia () = trivia_from (Parseff.position ())
+
+(* [trivia], returning where the token before stopped. *)
+let finish () =
+  let p = Parseff.position () in
+  trivia_from p;
+  p
 
 let word_text () = Parseff.take_while is_alnum
 
 let word () =
-  let s = Parseff.position () in
   let w = Parseff.take_while is_alnum in
-  finish s;
+  trivia ();
   w
 
 let sym1 () =
-  let s = Parseff.position () in
   let _ = Parseff.any_char () in
-  finish s
+  trivia ()
 
 (* A token read on a rare or error path: its kind, its range, and whether a
    line break comes before it or inside it. *)
@@ -1203,20 +1249,24 @@ let lex_counting () =
   let t = lex_token () in
   (t, !breaks > b)
 
+(* The gap counts only if it is for [p]: a token read right after bytes read
+   without their trivia, as in [Parser.not_a_statement], has none. *)
 let view () =
   let p = Parseff.position () in
   let (tok, inside), stop = Parseff.peek_with lex_counting in
-  { tok; start = p; stop; nl = inside || (!gap_end = p && !gap_nl); inside }
+  { tok; start = p; stop; nl = inside || (gap.at = p && gap.nl); inside }
 
-(* A token with a line break inside sets the indent of the tokens after it on
-   its line, as the start of its last line. *)
+(* A token with a line break inside, such as a long string, gives the tokens
+   after it on its last line the indent [s - l], where [l] is the start of that
+   line. [l] comes after the token start [s], so the indent is negative. *)
 let after_token s inside =
-  if inside then indent := s - line_start_at (Parseff.position ());
-  finish s
+  if inside then gap.indent <- s - line_start_at (Parseff.position ());
+  finish ()
 
 let skip_view v =
   Parseff.skip_to v.stop;
-  after_token v.start v.inside
+  let _ = after_token v.start v.inside in
+  ()
 
 let word_view w ~start ~stop =
   { tok = keyword w; start; stop; nl = false; inside = false }
@@ -1260,8 +1310,6 @@ let begin_chunk () =
   Dynarray.add_last lines 0;
   first_line := 1;
   last_line_start := 0;
-  gap_comment := -1;
-  comment_end := -1;
   amp_end := -1;
   pipe_end := -1;
   ignore (Parseff.optional (fun () -> Parseff.literal "\xEF\xBB\xBF"));
@@ -1272,10 +1320,10 @@ let begin_chunk () =
       ()
   );
   trivia ();
-  tok_stop := 0;
-  gap_nl := true;
-  let p = Parseff.position () in
-  indent := p - line_start_at p
+  (* The first token starts a line and has no token before it. *)
+  gap.stop <- 0;
+  gap.nl <- true;
+  gap.indent <- gap.at - line_start_at gap.at
 
 let trim_lines_at p =
   let j = max 0 (line_index p - 1) in
