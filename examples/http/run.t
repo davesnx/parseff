@@ -224,6 +224,14 @@ response that runs to the end of the input (Iter.take_while):
     body: 588895 bytes, starting "1\n2\n3\n4\n5\n6\n7\n8\n"
   $ cmp big.txt out.txt
 
+A response that runs to the end of the input has no length to check first, so
+--max-body stops it when it reads one byte past the limit:
+
+  $ (printf 'HTTP/1.1 200 OK\r\n\r\n'; cat big.txt) | ./main.exe --chunk 7 --window 64 --max-body 1000 --body-out out.txt response
+  error 413 Content Too Large at byte 19: limit of 1000 exceeded
+  $ wc -c < out.txt | tr -d ' '
+  1000
+
 The sink gets each piece as it arrives, so a body cut short has already
 handed over the bytes before the error, and the error is at the end of the
 input:

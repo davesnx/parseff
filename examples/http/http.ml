@@ -427,9 +427,12 @@ let response_body ?max_body ~meth (head : response) on_data =
     body ?max_body ~version:head.version head.headers on_data
   else
     let total = ref 0 in
-    Parseff.Iter.take_while ~set:any_byte is_any (fun piece ->
-        total := !total + Parseff.Slice.length piece;
-        on_data piece
+    Parseff.context "body" (fun () ->
+        Parseff.Iter.take_while ?at_most:max_body ~set:any_byte is_any
+          (fun piece ->
+            total := !total + Parseff.Slice.length piece;
+            on_data piece
+        )
     );
     Data !total
 
@@ -449,6 +452,8 @@ let status_of_error (e : Parseff.error) =
   | Custom (Unsupported_coding _) ->
       (501, "Not Implemented")
   | Custom (Body_too_large _) ->
+      (413, "Content Too Large")
+  | Parseff.Limit_exceeded _ when innermost = "body" ->
       (413, "Content Too Large")
   | Parseff.Limit_exceeded _ when innermost = "request target" ->
       (414, "URI Too Long")

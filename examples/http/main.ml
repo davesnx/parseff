@@ -7,6 +7,19 @@ type sink = {
 }
 
 let preview_limit = 64
+let scratch = Bytes.create 4096
+
+let write oc piece =
+  let n = Parseff.Slice.length piece in
+  let rec go off =
+    if off < n then begin
+      let len = min (Bytes.length scratch) (n - off) in
+      Parseff.Slice.blit piece off scratch 0 len;
+      output oc scratch 0 len;
+      go (off + len)
+    end
+  in
+  go 0
 
 let on_data sink piece =
   let n = Parseff.Slice.length piece in
@@ -15,9 +28,7 @@ let on_data sink piece =
     Buffer.add_char sink.preview (Parseff.Slice.get piece i)
   done;
   sink.length <- sink.length + n;
-  Option.iter
-    (fun oc -> output_string oc (Parseff.Slice.to_string piece))
-    sink.out
+  Option.iter (fun oc -> write oc piece) sink.out
 
 let reset sink =
   Buffer.clear sink.preview;

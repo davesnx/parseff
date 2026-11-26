@@ -411,6 +411,160 @@ let test_iter_take_while_set_in_or () =
     "pieces joined" true
     (Buffer.contents out = expected_body body_len)
 
+(* Iter.take_while ~at_most agrees with Parseff.take_while ~at_most on the
+   result, the error and the bytes, whatever the chunk size, through parse,
+   Source and Push. The bytes before a limit failure reach f. *)
+let is_letter c = c >= 'a' && c <= 'z'
+let letters = Parseff.Charset.of_predicate is_letter
+
+let outcome = function
+  | Ok pos ->
+      Printf.sprintf "ok %d" pos
+  | Error (e : Parseff.error) ->
+      Printf.sprintf "error %d-%d %s" e.range.start e.range.stop
+        (Parseff.error_message e)
+
+let chunked input chunk =
+  let at = ref 0 in
+  Parseff.Source.of_function (fun b o len ->
+      let n = min (min chunk len) (String.length input - !at) in
+      Bytes.blit_string input !at b o n;
+      at := !at + n;
+      n
+  )
+
+let pushed input chunk p =
+  let t = Parseff.Push.parse p in
+  let rec go at =
+    if at >= String.length input then
+      Result.map fst (Parseff.Push.finish t)
+    else
+      let n = min chunk (String.length input - at) in
+      match Parseff.Push.feed t (String.sub input at n) with
+      | Parseff.Push.Await ->
+          go (at + n)
+      | Done r ->
+          Result.map fst r
+  in
+  go 0
+
+let test_take_while_at_most () =
+  let inputs =
+    [ ""; "!"; "abc"; "abc!"; "abcd"; "abcd!"; "abcde!"; "abcdefghij" ]
+  in
+  List.iter
+    (fun input ->
+      List.iter
+        (fun at_most ->
+          List.iter
+            (fun set ->
+              let tail () =
+                Parseff.skip_while (fun c -> c = '!');
+                Parseff.position ()
+              in
+              let expected_bytes = ref "" in
+              let reference =
+                Parseff.parse input (fun () ->
+                    expected_bytes := Parseff.take_while ~at_most ?set is_letter;
+                    tail ()
+                )
+              in
+              let expected_bytes =
+                match reference with
+                | Ok _ ->
+                    !expected_bytes
+                | Error _ ->
+                    String.sub input 0 at_most
+              in
+              let iter () =
+                let b = Buffer.create 16 in
+                let p () =
+                  Parseff.Iter.take_while ~at_most ?set is_letter (fun s ->
+                      Buffer.add_string b (Parseff.Slice.to_string s)
+                  );
+                  tail ()
+                in
+                (b, p)
+              in
+              let check what run =
+                let b, p = iter () in
+                let r = run p in
+                let what =
+                  Printf.sprintf "%S ~at_most:%d%s %s" input at_most
+                    ( if set = None then
+                        ""
+                      else
+                        " ~set"
+                    )
+                    what
+                in
+                Alcotest.(check string) what (outcome reference) (outcome r);
+                Alcotest.(check string)
+                  (what ^ ": bytes") expected_bytes (Buffer.contents b)
+              in
+              check "parse" (Parseff.parse input);
+              List.iter
+                (fun chunk ->
+                  check
+                    (Printf.sprintf "Source, chunks of %d" chunk)
+                    (Parseff.Source.parse ~backtrack_window:2
+                       (chunked input chunk)
+                    );
+                  check
+                    (Printf.sprintf "Push, chunks of %d" chunk)
+                    (pushed input chunk)
+                )
+                [ 1; 2; 3; 64 ]
+            )
+            [ None; Some letters ]
+        )
+        [ 0; 1; 3; 4; 5 ]
+    )
+    inputs;
+  match
+    Parseff.parse "a" (fun () ->
+        Parseff.Iter.take_while ~at_most:(-1) is_letter ignore
+    )
+  with
+  | _ ->
+      Alcotest.fail "negative ~at_most: no Invalid_argument"
+  | exception Invalid_argument _ ->
+      ()
+
+let test_take_while_at_most_past_window () =
+  let total = ref 0 in
+  let run at_most =
+    total := 0;
+    Parseff.Source.parse ~backtrack_window:64
+      (body_source ~prefix:"" ~len:body_len ~suffix:"0") (fun () ->
+        Parseff.Iter.take_while ~at_most ~set:letters is_letter (fun s ->
+            total := !total + Parseff.Slice.length s
+        );
+        Parseff.char '0'
+    )
+  in
+  Alcotest.(check string) "at the limit" "ok" (show (run body_len));
+  Alcotest.(check int) "bytes at the limit" body_len !total;
+  ( match run (body_len - 1) with
+  | Error { kind = Parseff.Limit_exceeded { limit }; range; _ } ->
+      Alcotest.(check int) "limit" (body_len - 1) limit;
+      Alcotest.(check (pair int int))
+        "range" (0, body_len) (range.start, range.stop)
+  | r ->
+      Alcotest.failf "expected Limit_exceeded, got %s" (show r)
+  );
+  Alcotest.(check int) "bytes before the failure" (body_len - 1) !total;
+  Alcotest.(check string)
+    "fatal in or_" "error 0 limit of 3 exceeded"
+    (show
+       (Parseff.parse "abcd" (fun () ->
+            Parseff.or_
+              (fun () -> Parseff.Iter.take_while ~at_most:3 is_letter ignore)
+              (fun () -> ignore (Parseff.take_while (fun _ -> true)))
+        )
+       )
+    )
+
 let pieces_of run input =
   let got = ref [] in
   let r =
@@ -750,6 +904,9 @@ let () =
           test_case "Iter.take_while ~set in or_ in a small window" `Quick
             test_iter_take_while_set_in_or;
           test_case "string input" `Quick test_iter_take_string;
+          test_case "Iter.take_while ~at_most" `Quick test_take_while_at_most;
+          test_case "Iter.take_while ~at_most past the window" `Quick
+            test_take_while_at_most_past_window;
         ]
       );
       ( "frames",
