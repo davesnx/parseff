@@ -90,11 +90,6 @@ let eat t value =
   else
     unexpected tok (t.show value)
 
-(* [optional] keeps the failure, so a later failure at the same token also
-   lists [value]. *)
-let accept t value =
-  match optional (fun () -> eat t value) with Some () -> true | None -> false
-
 let select t label f =
   let tok = peek t in
   match f tok.value with
@@ -103,12 +98,3 @@ let select t label f =
       v
   | None ->
       unexpected tok label
-
-(* The end of the token before the position, so ranges leave out the
-   whitespace and comments that [advance] skipped. *)
-let last_stop t =
-  let i = index_at t (position ()) in
-  if i = 0 then
-    position ()
-  else
-    t.tokens.(i - 1).stop

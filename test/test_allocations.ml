@@ -126,7 +126,7 @@ let test_stopping_failures () =
         (fun () -> Parseff.expected_token ~upto:3 "token")
         (fun () -> 'y')
   );
-  check_words "or_ expected_token ~help" 0. (fun () ->
+  check_words "or_ expected_token ~help, again at one position" 0. (fun () ->
       Parseff.or_
         (fun () -> Parseff.expected_token ~help:"help" ~upto:3 "token")
         (fun () -> 'y')
