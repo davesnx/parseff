@@ -328,10 +328,9 @@ let http_method () =
 
 {1:iter [Iter]}
 
-{!module:Parseff.Iter} (unstable: may change in any minor release) passes each
-value or byte piece to a callback [f] instead of returning it. Memory stays
-bounded by one element or one piece, so the input can be much larger than
-[~backtrack_window].
+{!module:Parseff.Iter} passes each value or byte piece to a callback [f]
+instead of returning it. Memory stays bounded by one element or one piece, so
+the input can be much larger than [~backtrack_window].
 
 {@ocaml skip[
 module Iter : sig
@@ -340,7 +339,11 @@ module Iter : sig
     ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
   val take : int -> (Slice.t -> unit) -> unit
   val take_while :
-    ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+    ?at_most:int ->
+    ?set:Charset.t ->
+    (char -> bool) ->
+    (Slice.t -> unit) ->
+    unit
 end
 ]}
 
@@ -351,6 +354,9 @@ end
   {!val:Parseff.take} and {!val:Parseff.take_while}, but give the bytes to [f]
   as non-empty {!type:Parseff.Slice.t} pieces. A piece borrows the input buffer
   and is valid only during [f]. Call {!val:Parseff.Slice.to_string} to keep it.
+- [Iter.take_while ~at_most] fails with [Limit_exceeded] after [f] has
+  received [at_most] bytes, and the bytes need not fit in
+  [~backtrack_window].
 
 {@ocaml[
 let sum_ints input =

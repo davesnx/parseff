@@ -275,6 +275,56 @@ let test_exception_passes () =
     )
     modes
 
+let recovering () =
+  recover
+    ~sync:(fun () -> ignore (any_char ()))
+    (fun () -> char 'x')
+    (fun _ -> 'h')
+
+let test_no_recovery_inside () =
+  List.iter
+    (fun (mode_name, mode) ->
+      let d = Diagnostics.create () in
+      let result =
+        run ~diagnostics:d mode "ab" (fun () -> fst (peek_with recovering))
+      in
+      let failed =
+        match result with Ok _ -> None | Error e -> Some e.range.start
+      in
+      Alcotest.(check (option int))
+        ("recover inside does not recover, " ^ mode_name)
+        (Some 0) failed;
+      Alcotest.(check int)
+        ("no diagnostics, " ^ mode_name)
+        0 (Diagnostics.length d)
+    )
+    modes
+
+let test_recovery_after () =
+  List.iter
+    (fun (mode_name, mode) ->
+      let d = Diagnostics.create () in
+      let result =
+        run ~diagnostics:d mode "ab" (fun () ->
+            let _ = peek_with (fun () -> char 'a') in
+            let _ =
+              or_
+                (fun () -> fst (peek_with (fun () -> char 'x')))
+                (fun () -> 'n')
+            in
+            (try ignore (peek_with (fun () -> raise Exit)) with Exit -> ());
+            recovering ()
+        )
+      in
+      Alcotest.(check string)
+        ("recover after a peek recovers, " ^ mode_name)
+        "Ok h, 1 diagnostics"
+        (show (String.make 1) result
+        ^ Printf.sprintf ", %d diagnostics" (Diagnostics.length d)
+        )
+    )
+    modes
+
 let test_nested_rollback () =
   List.iter
     (fun (mode_name, mode) ->
@@ -740,6 +790,8 @@ let () =
           test_case "small window token loop" `Quick
             test_small_window_token_loop;
           test_case "exception passes" `Quick test_exception_passes;
+          test_case "no recovery inside" `Quick test_no_recovery_inside;
+          test_case "recovery after a peek" `Quick test_recovery_after;
           test_case "backtrack window" `Quick test_window;
           test_case "token cache" `Quick test_token_cache;
         ]

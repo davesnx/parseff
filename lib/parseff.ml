@@ -109,6 +109,16 @@ let rec equal_bytes a ao b bo i len =
   || String.unsafe_get a (ao + i) = String.unsafe_get b (bo + i)
      && equal_bytes a ao b bo (i + 1) len
 
+let span_blit src src_off dst dst_off len =
+  if
+    len < 0 || src_off < 0
+    || src_off > src.len - len
+    || dst_off < 0
+    || dst_off > Bytes.length dst - len
+  then
+    invalid_arg "Parseff.Slice.blit";
+  Bytes.blit_string src.buf (src.off + src_off) dst dst_off len
+
 (* Compares 8-byte words, then the last 8 bytes, which may overlap the words
    already compared. Below 8 bytes the same goes for 4-byte words. *)
 let span_equal a b =
@@ -938,11 +948,12 @@ module State = struct
 
   let restore_rewind_frame (t : t) frame =
     let base = frame * frame_stride in
-    t.pos <- Array.unsafe_get t.frames base;
-    let saved = Array.unsafe_get t.frames (base + 2) in
-    if t.diag_len > saved then drop_frame_diags t frame saved;
-    let saved = Array.unsafe_get t.frames (base + 1) lsr frame_trail_shift in
-    if trail_depth t > saved then undo_frame_trail t frame saved
+    let frames = t.frames in
+    t.pos <- Array.unsafe_get frames base;
+    let diag = Array.unsafe_get frames (base + 2) in
+    let trail = Array.unsafe_get frames (base + 1) lsr frame_trail_shift in
+    if t.diag_len > diag then drop_frame_diags t frame diag;
+    if trail_depth t > trail then undo_frame_trail t frame trail
 
   let[@inline never] advance_capture_frame (t : t) i =
     touch_frame t i;
@@ -3670,13 +3681,16 @@ let look_ahead p =
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match without_recovery st p with
+  st.recovery_off <- st.recovery_off + 1;
+  match p () with
   | v ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       if st.far != saved then st.far <- saved;
       v
   | exception exn ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -3687,14 +3701,17 @@ let peek_with p =
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match without_recovery st p with
+  st.recovery_off <- st.recovery_off + 1;
+  match p () with
   | v ->
+      st.recovery_off <- st.recovery_off - 1;
       let stop = st.pos in
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       if st.far != saved then st.far <- saved;
       (v, stop)
   | exception exn ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -3708,17 +3725,21 @@ let not_followed_by ?(label = label_not_followed_by) p =
   let frame = State.push_rewind_frame st frame_barrier in
   let saved = st.far in
   if saved != far_none then st.far <- far_none;
-  match without_recovery st p with
+  st.recovery_off <- st.recovery_off + 1;
+  match p () with
   | _ ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       st.far <- saved;
       fail_str_cold st start tag_label label
   | exception Fail ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       st.far <- saved
   | exception exn ->
+      st.recovery_off <- st.recovery_off - 1;
       restore_rewind_frame st frame;
       State.pop_rewind_frame st frame;
       far_merge st saved;
@@ -4164,30 +4185,57 @@ module Iter = struct
       if left > 0 then fail_bytes st left
     end
 
-  let take_while ?set pred (f : span -> unit) =
+  (* Scans at most [limit] bytes past [first]. When the limit is reached with
+     a byte left to read, that byte decides between stopping and failing. *)
+  let take_while ?at_most ?set pred (f : span -> unit) =
+    let limit =
+      match at_most with
+      | None ->
+          max_int
+      | Some n ->
+          check_at_most "Parseff.Iter.take_while" 0 n;
+          n
+    in
     let st = get_state () in
     check_sealable st "Iter.take_while";
+    let first = st.pos in
     let more = ref true in
     while !more && have st 1 do
       let base = st.base in
       let input = st.input in
       let start = st.pos - base in
       let stop = st.input_len - base in
+      let left = limit - (st.pos - first) in
+      let lim =
+        if left < stop - start then
+          start + left
+        else
+          stop
+      in
       let i = ref start in
       begin match set with
       | None ->
-          while !i < stop && pred (Bytes.unsafe_get input !i) do
+          while !i < lim && pred (Bytes.unsafe_get input !i) do
             incr i
           done
       | Some set ->
-          i := Charset.scan set input start stop
+          i := Charset.scan set input start lim
       end;
       let n = !i - start in
       if n > 0 then begin
         st.pos <- !i + base;
         give st f { buf = Bytes.unsafe_to_string input; off = start; len = n }
       end;
-      if !i < stop then more := false
+      if !i < lim then
+        more := false
+      else if !i < stop then begin
+        let c = Bytes.unsafe_get input !i in
+        let matches =
+          match set with None -> pred c | Some set -> Charset.mem set c
+        in
+        if matches then fail_limit st ~from:first ~upto:(!i + base + 1) limit;
+        more := false
+      end
     done
 end
 
@@ -8364,6 +8412,7 @@ module Slice = struct
   let to_string = span_to_string
   let length = span_length
   let get = span_get
+  let blit = span_blit
   let take_while = take_while_span
   let sep_by_take = sep_by_take_span
   let recognize = recognize_span

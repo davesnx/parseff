@@ -113,7 +113,7 @@ let analyse path ~on_statement ~on_errors =
         on_errors (errors @ Lexer.take_fresh_lexical ())
       )
       (Parseff.Source.parse_each ~max_depth:100_000 ~backtrack_window
-         ~diagnostics:Parser.errors ~pending:Parser.pending source Parser.top
+         ~diagnostics:Parser.errors source Parser.top
       )
   in
   try

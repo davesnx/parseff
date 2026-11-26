@@ -16,17 +16,20 @@ type response = {
   headers : headers;
 }
 
-type body = No_body | Raw of string | Form of (string * string) list
+type body = No_body | Data of int | Form of (string * string) list
 
 type Parseff.custom_error +=
   | Bad_framing of string
   | Unsupported_coding of string
+  | Body_too_large of int
 
 let describe = function
   | Bad_framing m ->
       m
   | Unsupported_coding c ->
       "unsupported transfer coding " ^ c
+  | Body_too_large n ->
+      Printf.sprintf "body larger than %d bytes" n
   | _ ->
       "unknown error"
 
@@ -37,6 +40,7 @@ let max_value = 8190
 let max_headers = 100
 let max_chunk_digits = 15
 let max_chunk_extensions = 16
+let default_max_body = 1 lsl 30
 
 let is_tchar = function
   | '!'
@@ -304,19 +308,21 @@ let chunk_line () =
   crlf ();
   size
 
-let chunked_body () =
-  let buf = Buffer.create 256 in
-  let rec chunks () =
+let chunked_body ?(max_body = default_max_body) on_data () =
+  let rec chunks total =
     let size = chunk_line () in
-    if size > 0 then begin
-      Buffer.add_string buf (Parseff.take size);
+    if size = 0 then
+      total
+    else begin
+      if size > max_body - total then Parseff.error (Body_too_large max_body);
+      Parseff.Iter.take size on_data;
       crlf ();
-      chunks ()
+      chunks (total + size)
     end
   in
-  chunks ();
+  let total = chunks 0 in
   let trailers = fields "trailer section" () in
-  (Buffer.contents buf, trailers)
+  (total, trailers)
 
 let form_char () =
   match Parseff.any_char () with
@@ -390,22 +396,26 @@ let chunked ~version headers =
             (Bad_framing "chunked must be the final transfer coding, once")
       end
 
-let body ~version headers =
+let body ?(max_body = default_max_body) ~version headers on_data =
   if chunked ~version headers then
-    Raw (fst (chunked_body ()))
+    Data (fst (chunked_body ~max_body on_data ()))
   else
     match content_length headers with
     | None | Some 0 ->
         No_body
+    | Some n when n > max_body ->
+        Parseff.error (Body_too_large max_body)
     | Some n -> (
         match find "content-type" headers with
         | Some "application/x-www-form-urlencoded" ->
             Form (Parseff.within n form)
         | _ ->
-            Raw (Parseff.take n)
+            Parseff.Iter.take n on_data;
+            Data n
       )
 
-let response_body ~meth (head : response) =
+let response_body ?(max_body = default_max_body) ~meth (head : response) on_data
+    =
   if
     meth = "HEAD" || head.status < 200 || head.status = 204 || head.status = 304
     || (meth = "CONNECT" && head.status < 300)
@@ -415,14 +425,22 @@ let response_body ~meth (head : response) =
     chunked ~version:head.version head.headers
     || content_length head.headers <> None
   then
-    body ~version:head.version head.headers
+    body ~max_body ~version:head.version head.headers on_data
   else
-    Raw (Parseff.take_while ~set:any_byte is_any)
+    let total = ref 0 in
+    Parseff.context "body" (fun () ->
+        Parseff.Iter.take_while ~at_most:max_body ~set:any_byte is_any
+          (fun piece ->
+            total := !total + Parseff.Slice.length piece;
+            on_data piece
+        )
+    );
+    Data !total
 
-let request () =
+let request ?max_body on_data () =
   let head = Parseff.context "head" request_head in
   Parseff.commit ();
-  let body = body ~version:head.version head.headers in
+  let body = body ?max_body ~version:head.version head.headers on_data in
   (head, body)
 
 let status_of_error (e : Parseff.error) =
@@ -434,6 +452,10 @@ let status_of_error (e : Parseff.error) =
       (501, "Not Implemented")
   | Custom (Unsupported_coding _) ->
       (501, "Not Implemented")
+  | Custom (Body_too_large _) ->
+      (413, "Content Too Large")
+  | Parseff.Limit_exceeded _ when innermost = "body" ->
+      (413, "Content Too Large")
   | Parseff.Limit_exceeded _ when innermost = "request target" ->
       (414, "URI Too Long")
   | Parseff.Limit_exceeded _

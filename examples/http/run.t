@@ -114,7 +114,7 @@ hexadecimal, a chunk size with too many digits, and a chunk cut short:
   $ printf '1234567890abcdef0\r\nx\r\n' | ./main.exe chunked
   error 400 Bad Request at byte 0: limit of 15 exceeded
   $ printf '5\r\nhel' | ./main.exe chunked
-  error 400 Bad Request at byte 3: expected 5 bytes, found only 3 (end of input)
+  error 400 Bad Request at byte 6: expected 2 bytes, found end of input
 
 A status code must have 3 digits, the first one not 0:
 
@@ -170,14 +170,76 @@ that line, but the limit failure is the furthest failure, so it is reported:
   $ printf "GET / HTTP/1.1\r\n$name: v\r\n\r\n" | ./main.exe requests
   error 431 Request Header Fields Too Large at byte 16: limit of 256 exceeded
 
-A body larger than the window is 413, not 431, whether it has a
-Content-Length or comes in one chunk:
+Bodies stream to the sink in pieces with Iter.take, so a body larger than the
+window is read, whether it has a Content-Length or comes in one chunk:
 
   $ body=$(head -c 2000 /dev/zero | tr '\0' b)
   $ printf "POST / HTTP/1.1\r\nContent-Length: 2000\r\n\r\n$body" | ./main.exe --window 1024 requests
-  error 413 Content Too Large at byte 41: backtrack window of 1024 bytes exceeded
+  POST / HTTP/1.1
+    Content-Length: 2000
+    body: 2000 bytes, starting "bbbbbbbbbbbbbbbb"
   $ printf "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n7d0\r\n$body\r\n0\r\n\r\n" | ./main.exe --window 1024 requests
-  error 413 Content Too Large at byte 52: backtrack window of 1024 bytes exceeded
+  POST / HTTP/1.1
+    Transfer-Encoding: chunked
+    body: 2000 bytes, starting "bbbbbbbbbbbbbbbb"
+
+--max-body limits a body to 413. A Content-Length over the limit fails before
+any body byte is read, a chunk when it would take the body over the limit:
+
+  $ printf "POST / HTTP/1.1\r\nContent-Length: 2000\r\n\r\n$body" | ./main.exe --max-body 1000 requests
+  error 413 Content Too Large at byte 41: body larger than 1000 bytes
+  $ printf "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n258\r\n$(head -c 600 /dev/zero | tr '\0' b)\r\n258\r\n" | ./main.exe --max-body 1000 requests
+  error 413 Content Too Large at byte 659: body larger than 1000 bytes
+
+A form body is parsed with within, which keeps its bytes, so a form larger than
+the window is still 413:
+
+  $ printf "POST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 2000\r\n\r\n$body" | ./main.exe --window 1024 requests
+  error 413 Content Too Large at byte 90: backtrack window of 1024 bytes exceeded
+
+A 600 KB body, read 7 bytes at a time with a window of 64 bytes. --body-out
+writes what the sink receives, and it matches what was sent. With
+Content-Length, in chunks of 4093 bytes followed by a pipelined GET, and as a
+response that runs to the end of the input (Iter.take_while):
+
+  $ seq 100000 > big.txt
+  $ wc -c < big.txt | tr -d ' '
+  588895
+  $ (printf 'POST /big HTTP/1.1\r\nContent-Length: 588895\r\n\r\n'; cat big.txt) > length.txt
+  $ ./main.exe --chunk 7 --window 64 --body-out out.txt requests < length.txt
+  POST /big HTTP/1.1
+    Content-Length: 588895
+    body: 588895 bytes, starting "1\n2\n3\n4\n5\n6\n7\n8\n"
+  $ cmp big.txt out.txt
+  $ split -b 4093 big.txt part.
+  $ (printf 'PUT /big HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n'; for p in part.*; do printf '%x\r\n' $(($(wc -c < $p))); cat $p; printf '\r\n'; done; printf '0\r\n\r\nGET /next HTTP/1.1\r\n\r\n') > chunked.txt
+  $ ./main.exe --chunk 7 --window 64 --body-out out.txt requests < chunked.txt
+  PUT /big HTTP/1.1
+    Transfer-Encoding: chunked
+    body: 588895 bytes, starting "1\n2\n3\n4\n5\n6\n7\n8\n"
+  GET /next HTTP/1.1
+  $ cmp big.txt out.txt
+  $ (printf 'HTTP/1.1 200 OK\r\n\r\n'; cat big.txt) | ./main.exe --chunk 7 --window 64 --body-out out.txt response
+  HTTP/1.1 200 OK
+    body: 588895 bytes, starting "1\n2\n3\n4\n5\n6\n7\n8\n"
+  $ cmp big.txt out.txt
+
+A response that runs to the end of the input has no length to check first, so
+--max-body stops it when it reads one byte past the limit:
+
+  $ (printf 'HTTP/1.1 200 OK\r\n\r\n'; cat big.txt) | ./main.exe --chunk 7 --window 64 --max-body 1000 --body-out out.txt response
+  error 413 Content Too Large at byte 19: limit of 1000 exceeded
+  $ wc -c < out.txt | tr -d ' '
+  1000
+
+The sink gets each piece as it arrives, so a body cut short has already
+handed over the bytes before the error, and the error is at the end of the
+input:
+
+  $ printf 'POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\nhello' | ./main.exe --chunk 1 --body-out out.txt requests
+  error 400 Bad Request at byte 44: expected 5 bytes, found end of input
+  $ cat out.txt
+  hello
 
 An HTTP/1.0 message with Transfer-Encoding has faulty framing (RFC 9112
 section 6.1), also with chunked alone. The error ends the sequence, so the

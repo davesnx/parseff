@@ -24,12 +24,9 @@ let test_negative_at_least () =
   check "many" (fun () -> Parseff.many ~at_least:(-1) ~at_most:0 digit);
   check "sep_by" (fun () -> Parseff.sep_by ~at_least:(-1) digit comma);
   check "end_by" (fun () -> Parseff.end_by ~at_least:(-1) digit comma);
-  check "Iter.many" (fun () ->
-      (Parseff.Iter.many [@alert "-unstable"]) ~at_least:(-1) digit ignore
-  );
+  check "Iter.many" (fun () -> Parseff.Iter.many ~at_least:(-1) digit ignore);
   check "Iter.sep_by" (fun () ->
-      (Parseff.Iter.sep_by [@alert "-unstable"]) ~at_least:(-1) digit comma
-        ignore
+      Parseff.Iter.sep_by ~at_least:(-1) digit comma ignore
   );
   check "whitespace" (fun () -> Parseff.whitespace ~at_least:(-1) ());
   check "Utf8.take_while" (fun () ->

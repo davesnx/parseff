@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 let is_field_char c = c = '\t' || (c >= ' ' && c <> '\127')
 let field = Parseff.Charset.of_predicate is_field_char
 let is_a c = c = 'a'

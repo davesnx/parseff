@@ -285,7 +285,7 @@ let http_method () =
 
 ## `Iter`
 
-[`Parseff.Iter`](./Parseff-Iter.md) (unstable: may change in any minor release) passes each value or byte piece to a callback `f` instead of returning it. Memory stays bounded by one element or one piece, so the input can be much larger than `~backtrack_window`.
+[`Parseff.Iter`](./Parseff-Iter.md) passes each value or byte piece to a callback `f` instead of returning it. Memory stays bounded by one element or one piece, so the input can be much larger than `~backtrack_window`.
 
 ```ocaml
 module Iter : sig
@@ -294,12 +294,17 @@ module Iter : sig
     ?at_least:int -> (unit -> 'a) -> (unit -> 'b) -> ('a -> unit) -> unit
   val take : int -> (Slice.t -> unit) -> unit
   val take_while :
-    ?set:Charset.t -> (char -> bool) -> (Slice.t -> unit) -> unit
+    ?at_most:int ->
+    ?set:Charset.t ->
+    (char -> bool) ->
+    (Slice.t -> unit) ->
+    unit
 end
 ```
 
 - [`Parseff.Iter.many`](./Parseff-Iter.md#val-many) and [`Parseff.Iter.sep_by`](./Parseff-Iter.md#val-sep_by) work like [`Parseff.many`](./Parseff.md#val-many) and [`Parseff.sep_by`](./Parseff.md#val-sep_by), but give each element to `f` and do not build a list.
 - [`Parseff.Iter.take`](./Parseff-Iter.md#val-take) and [`Parseff.Iter.take_while`](./Parseff-Iter.md#val-take_while) work like [`Parseff.take`](./Parseff.md#val-take) and [`Parseff.take_while`](./Parseff.md#val-take_while), but give the bytes to `f` as non-empty [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) pieces. A piece borrows the input buffer and is valid only during `f`. Call [`Parseff.Slice.to_string`](./Parseff-Slice.md#val-to_string) to keep it.
+- `Iter.take_while ~at_most` fails with `Limit_exceeded` after `f` has received `at_most` bytes, and the bytes need not fit in `~backtrack_window`.
 
 ```ocaml
 let sum_ints input =
