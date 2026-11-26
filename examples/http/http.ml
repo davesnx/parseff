@@ -414,7 +414,8 @@ let body ?(max_body = default_max_body) ~version headers on_data =
             Data n
       )
 
-let response_body ?max_body ~meth (head : response) on_data =
+let response_body ?(max_body = default_max_body) ~meth (head : response) on_data
+    =
   if
     meth = "HEAD" || head.status < 200 || head.status = 204 || head.status = 304
     || (meth = "CONNECT" && head.status < 300)
@@ -424,11 +425,11 @@ let response_body ?max_body ~meth (head : response) on_data =
     chunked ~version:head.version head.headers
     || content_length head.headers <> None
   then
-    body ?max_body ~version:head.version head.headers on_data
+    body ~max_body ~version:head.version head.headers on_data
   else
     let total = ref 0 in
     Parseff.context "body" (fun () ->
-        Parseff.Iter.take_while ?at_most:max_body ~set:any_byte is_any
+        Parseff.Iter.take_while ~at_most:max_body ~set:any_byte is_any
           (fun piece ->
             total := !total + Parseff.Slice.length piece;
             on_data piece

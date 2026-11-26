@@ -115,7 +115,10 @@ let () =
       ("--chunk", Arg.Set_int buf_size, "N read stdin N bytes at a time");
       ("--window", Arg.Set_int window, "N backtrack window in bytes");
       ("--max-body", Arg.Set_int max_body, "N largest body in bytes");
-      ("--body-out", Arg.Set_string body_out, "FILE append every body to FILE");
+      ( "--body-out",
+        Arg.Set_string body_out,
+        "FILE write the bytes of each non-form body to FILE"
+      );
       ( "--method",
         Arg.Set_string meth,
         "M method of the request that the response answers"
