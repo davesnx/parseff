@@ -1,5 +1,6 @@
 ## Unreleased
 
+- [PERF] Run `peek_with`, `look_ahead` and `not_followed_by` with one exception handler instead of two: about 19 fewer instructions per call (@davesnx)
 - [PERF] Scan a `Charset` 8 bytes at a time when it excludes the bytes below a threshold and up to four more, such as HTTP field values, JSON string bodies and CSV fields: 16–45% fewer cycles for `take_while ~set` on fields of 4 to 128 bytes ([#155](https://github.com/davesnx/parseff/pull/155)) (@davesnx)
 - [PERF] Parse on several domains without slowing each other down: once a second domain parses, nothing writes the state hint shared by all domains, so CPU time per domain at 64 domains drops from 11 s to 0.11 s on the benchmark in the PR ([#151](https://github.com/davesnx/parseff/pull/151)) (@davesnx)
 - [PERF] Scan a `Charset` that excludes one or two bytes, such as `fun c -> c <> ';'`, 8 bytes at a time in `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` ([#150](https://github.com/davesnx/parseff/pull/150)) (@davesnx)
