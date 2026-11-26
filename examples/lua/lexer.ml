@@ -3,9 +3,9 @@ type Parseff.custom_error += Lua of { msg : string; eof : bool }
 let error ?from ?upto ?notes ?help ?(eof = false) msg : 'a =
   Parseff.error ?from ?upto ?notes ?help (Lua { msg; eof })
 
-let make_error ?from ?notes ?help ?eof msg =
+let make_error ?from ?upto ?notes ?help ?eof msg =
   match
-    Parseff.capture (fun () -> (error ?from ?notes ?help ?eof msg : unit))
+    Parseff.capture (fun () -> (error ?from ?upto ?notes ?help ?eof msg : unit))
   with
   | Error e ->
       e
@@ -474,6 +474,14 @@ let first_line = ref 1
 let scan = ref 0
 let breaks = ref 0
 
+(* Start of the line after the last ['\n'] read. A rewind can read a line
+   break again, so [add_line] keeps [lines] sorted and without repeats. *)
+let last_line_start = ref 0
+
+let add_line p =
+  last_line_start := p;
+  if p > Dynarray.get_last lines then Dynarray.add_last lines p
+
 let line_index i =
   let rec go lo hi =
     if lo >= hi then
@@ -494,7 +502,6 @@ let loc i =
     let j = line_index i in
     Printf.sprintf "%d:%d" (!first_line + j) (i - Dynarray.get lines j + 1)
 
-let line_start () = Dynarray.get_last lines
 let window () = (Dynarray.get lines 0, !first_line)
 
 let space c =
@@ -502,7 +509,7 @@ let space c =
   | '\n' ->
       incr scan;
       incr breaks;
-      Dynarray.add_last lines !scan;
+      add_line !scan;
       true
   | '\r' ->
       incr scan;
@@ -522,11 +529,11 @@ let newline () =
   let p = Parseff.position () in
   let c = Parseff.any_char () in
   incr breaks;
-  if c = '\n' then Dynarray.add_last lines (p + 1);
+  if c = '\n' then add_line (p + 1);
   match Parseff.peek_char () with
   | Some (('\n' | '\r') as d) when d <> c ->
       ignore (Parseff.any_char ());
-      if d = '\n' then Dynarray.add_last lines (p + 2)
+      if d = '\n' then add_line (p + 2)
   | _ ->
       ()
 
@@ -897,12 +904,6 @@ let comment ~start =
   | _ ->
       Parseff.skip_while (fun c -> c <> '\n' && c <> '\r')
 
-let lx_tok = ref Eof
-let lx_start = ref 0
-let lx_stop = ref 0
-let lx_comment = ref (-1)
-let lx_breaks_before = ref 0
-
 let other_char () =
   let c = Parseff.any_char () in
   if Char.code c >= 0xC0 then
@@ -923,307 +924,318 @@ let two c s1 s2 =
   | _ ->
       Sym s1
 
-let rec lex () =
-  skip_space ();
+(* Reads the token at the position, without the trivia after it. The
+   position is a token start, so ['-'] does not start a comment. *)
+let lex_token () =
   let p = Parseff.position () in
-  lx_start := p;
-  let tok =
-    match Parseff.peek_char () with
-    | None ->
-        Eof
-    | Some c -> (
-        match c with
-        | 'a' .. 'z' | 'A' .. 'Z' | '_' ->
-            keyword (Parseff.take_while is_alnum)
-        | '0' .. '9' ->
-            let d = Parseff.any_char () in
-            let head =
-              match (d, Parseff.peek_char ()) with
-              | '0', Some (('x' | 'X') as x) ->
+  match Parseff.peek_char () with
+  | None ->
+      Eof
+  | Some c -> (
+      match c with
+      | 'a' .. 'z' | 'A' .. 'Z' | '_' ->
+          keyword (Parseff.take_while is_alnum)
+      | '0' .. '9' ->
+          let d = Parseff.any_char () in
+          let head =
+            match (d, Parseff.peek_char ()) with
+            | '0', Some (('x' | 'X') as x) ->
+                ignore (Parseff.any_char ());
+                String.init 2 (fun i ->
+                    if i = 0 then
+                      '0'
+                    else
+                      x
+                )
+            | _ ->
+                String.make 1 d
+          in
+          number ~start:p ~head
+      | '"' | '\'' ->
+          short_string ~start:p
+      | '-' ->
+          one Minus
+      | '[' -> (
+          ignore (Parseff.any_char ());
+          let n = count_equals () in
+          match Parseff.peek_char () with
+          | Some '[' -> (
+              ignore (Parseff.any_char ());
+              match
+                long_bracket ~start:p ~level:n ~keep:true ~what:"string"
+              with
+              | Some s ->
+                  String s
+              | None ->
+                  Bad
+            )
+          | _ when n = 0 ->
+              Sym Lbracket
+          | _ ->
+              ignore
+                (lex_error ~from:p
+                   ~help:
+                     "a long string starts with '[', any number of '=' and \
+                      another '[', as in [==["
+                   "invalid long string delimiter"
+                );
+              Bad
+        )
+      | '.' -> (
+          ignore (Parseff.any_char ());
+          match Parseff.peek_char () with
+          | Some '.' -> (
+              ignore (Parseff.any_char ());
+              match Parseff.peek_char () with
+              | Some '.' ->
                   ignore (Parseff.any_char ());
-                  String.init 2 (fun i ->
-                      if i = 0 then
-                        '0'
-                      else
-                        x
-                  )
+                  Sym Dots
               | _ ->
-                  String.make 1 d
-            in
-            number ~start:p ~head
-        | '"' | '\'' ->
-            short_string ~start:p
-        | '-' -> (
-            ignore (Parseff.any_char ());
-            match Parseff.peek_char () with
-            | Some '-' ->
-                ignore (Parseff.any_char ());
-                if !lx_comment < 0 && !breaks = !lx_breaks_before then
-                  lx_comment := p;
-                comment ~start:p;
-                Other ""
-            | _ ->
-                Sym Minus
-          )
-        | '[' -> (
-            ignore (Parseff.any_char ());
-            let n = count_equals () in
-            match Parseff.peek_char () with
-            | Some '[' -> (
-                ignore (Parseff.any_char ());
-                match
-                  long_bracket ~start:p ~level:n ~keep:true ~what:"string"
-                with
-                | Some s ->
-                    String s
-                | None ->
-                    Bad
-              )
-            | _ when n = 0 ->
-                Sym Lbracket
-            | _ ->
-                ignore
-                  (lex_error ~from:p
-                     ~help:
-                       "a long string starts with '[', any number of '=' and \
-                        another '[', as in [==["
-                     "invalid long string delimiter"
-                  );
-                Bad
-          )
-        | '.' -> (
-            ignore (Parseff.any_char ());
-            match Parseff.peek_char () with
-            | Some '.' -> (
-                ignore (Parseff.any_char ());
-                match Parseff.peek_char () with
-                | Some '.' ->
-                    ignore (Parseff.any_char ());
-                    Sym Dots
-                | _ ->
-                    Sym Concat
-              )
-            | Some d when is_digit d ->
-                number ~start:p ~head:"."
-            | _ ->
-                Sym Dot
-          )
-        | '=' ->
-            two '=' Assign Eq
-        | '/' ->
-            two '/' Slash Dslash
-        | ':' ->
-            two ':' Colon Dcolon
-        | '~' ->
-            two '=' Tilde Ne
-        | '<' -> (
-            ignore (Parseff.any_char ());
-            match Parseff.peek_char () with
-            | Some '=' ->
-                one Le
-            | Some '<' ->
-                one Shl
-            | _ ->
-                Sym Lt
-          )
-        | '>' -> (
-            ignore (Parseff.any_char ());
-            match Parseff.peek_char () with
-            | Some '=' ->
-                one Ge
-            | Some '>' ->
-                one Shr
-            | _ ->
-                Sym Gt
-          )
-        | '+' ->
-            one Plus
-        | '*' ->
-            one Star
-        | '%' ->
-            one Percent
-        | '^' ->
-            one Caret
-        | '#' ->
-            one Hash
-        | '&' ->
-            one Amp
-        | '|' ->
-            one Pipe
-        | '(' ->
-            one Lparen
-        | ')' ->
-            one Rparen
-        | '{' ->
-            one Lbrace
-        | '}' ->
-            one Rbrace
-        | ']' ->
-            one Rbracket
-        | ';' ->
-            one Semi
-        | ',' ->
-            one Comma
-        | '!' -> (
-            ignore (Parseff.any_char ());
-            match Parseff.peek_char () with
-            | Some '=' ->
-                ignore (Parseff.any_char ());
-                Other "!="
-            | _ ->
-                Other "!"
-          )
-        | _ ->
-            Other (other_char ())
-      )
-  in
-  match tok with
-  | Other "" ->
-      lex ()
-  | tok ->
-      lx_tok := tok;
-      lx_stop := Parseff.position ()
-
-type state = {
-  mutable tok : token;
-  mutable start : int;
-  mutable stop : int;
-  mutable nl : bool;
-  mutable comment : int;
-  mutable indent : int;
-  mutable prev : token;
-  mutable prev_stop : int;
-  mutable ahead : state option;
-}
-
-let st =
-  {
-    tok = Eof;
-    start = 0;
-    stop = 0;
-    nl = true;
-    comment = -1;
-    indent = 0;
-    prev = Eof;
-    prev_stop = 0;
-    ahead = None;
-  }
-
-let lex_into (s : state) ~indent =
-  let breaks_before = !breaks in
-  lx_breaks_before := breaks_before;
-  lx_comment := -1;
-  lex ();
-  s.tok <- !lx_tok;
-  s.start <- !lx_start;
-  s.stop <- !lx_stop;
-  s.nl <- !breaks > breaks_before;
-  s.comment <- !lx_comment;
-  s.indent <-
-    ( if s.nl then
-        s.start - line_start ()
-      else
-        indent
+                  Sym Concat
+            )
+          | Some d when is_digit d ->
+              number ~start:p ~head:"."
+          | _ ->
+              Sym Dot
+        )
+      | '=' ->
+          two '=' Assign Eq
+      | '/' ->
+          two '/' Slash Dslash
+      | ':' ->
+          two ':' Colon Dcolon
+      | '~' ->
+          two '=' Tilde Ne
+      | '<' -> (
+          ignore (Parseff.any_char ());
+          match Parseff.peek_char () with
+          | Some '=' ->
+              one Le
+          | Some '<' ->
+              one Shl
+          | _ ->
+              Sym Lt
+        )
+      | '>' -> (
+          ignore (Parseff.any_char ());
+          match Parseff.peek_char () with
+          | Some '=' ->
+              one Ge
+          | Some '>' ->
+              one Shr
+          | _ ->
+              Sym Gt
+        )
+      | '+' ->
+          one Plus
+      | '*' ->
+          one Star
+      | '%' ->
+          one Percent
+      | '^' ->
+          one Caret
+      | '#' ->
+          one Hash
+      | '&' ->
+          one Amp
+      | '|' ->
+          one Pipe
+      | '(' ->
+          one Lparen
+      | ')' ->
+          one Rparen
+      | '{' ->
+          one Lbrace
+      | '}' ->
+          one Rbrace
+      | ']' ->
+          one Rbracket
+      | ';' ->
+          one Semi
+      | ',' ->
+          one Comma
+      | '!' -> (
+          ignore (Parseff.any_char ());
+          match Parseff.peek_char () with
+          | Some '=' ->
+              ignore (Parseff.any_char ());
+              Other "!="
+          | _ ->
+              Other "!"
+        )
+      | _ ->
+          Other (other_char ())
     )
 
-let advance () =
-  st.prev <- st.tok;
-  st.prev_stop <- st.stop;
-  match st.ahead with
-  | Some a ->
-      st.tok <- a.tok;
-      st.start <- a.start;
-      st.stop <- a.stop;
-      st.nl <- a.nl;
-      st.comment <- a.comment;
-      st.indent <- a.indent;
-      st.ahead <- None
-  | None ->
-      lex_into st ~indent:st.indent
+(* Single pass: each token parser reads its bytes, then [trivia] reads the
+   whitespace and comments after them, so the position between tokens is the
+   start of the next token. *)
 
-let peek2 () =
-  match st.ahead with
-  | Some a ->
-      a.tok
-  | None ->
-      let a = { st with ahead = None } in
-      lex_into a ~indent:st.indent;
-      st.ahead <- Some a;
-      a.tok
+(* The gap is the trivia before the token at the position. [trivia] records
+   what the parser asks about it: where the previous token stopped, whether
+   the gap has a line break, the indent of the line, and a comment on the line
+   of the previous token. These are plain refs, not [Parseff.Ref]s: each fact
+   depends only on the input and on [gap_end], so a rewind cannot make it
+   wrong, only describe a later gap. [Parser.attempt] puts the record back
+   where it rewinds. *)
+let tok_start = ref 0
+let tok_stop = ref 0
+let gap_end = ref (-1)
+let gap_nl = ref false
+let indent = ref 0
+let gap_comment = ref (-1)
+let comment_end = ref (-1)
 
-type snapshot = { saved : state; saved_lines : int; saved_first : int }
+(* Where a ['&'] or ['|'] operator stopped, for the hints on [&&] and [||]. *)
+let amp_end = ref (-1)
+let pipe_end = ref (-1)
 
-let save () =
-  {
-    saved =
-      { st with ahead = Option.map (fun a -> { a with tok = a.tok }) st.ahead };
-    saved_lines = Dynarray.length lines;
-    saved_first = !first_line;
-  }
+let line_start_at p =
+  if !last_line_start <= p then
+    !last_line_start
+  else
+    Dynarray.get lines (line_index p)
 
-let restore s =
-  let v = s.saved in
-  st.tok <- v.tok;
-  st.start <- v.start;
-  st.stop <- v.stop;
-  st.nl <- v.nl;
-  st.comment <- v.comment;
-  st.indent <- v.indent;
-  st.prev <- v.prev;
-  st.prev_stop <- v.prev_stop;
-  st.ahead <- v.ahead;
-  Dynarray.truncate lines s.saved_lines;
-  first_line := s.saved_first
+(* Where the token before the position stopped, and whether a line break
+   comes before it. If the record is for another gap (a rewind that the
+   parser did not repair), the answers fall back to the position. *)
+let prev_stop () =
+  let p = Parseff.position () in
+  if !gap_end = p then
+    !tok_stop
+  else
+    p
 
-let start () =
-  Hashtbl.reset lexical_errors;
-  fresh_lexical := [];
-  Dynarray.clear lines;
-  Dynarray.add_last lines 0;
-  first_line := 1;
-  ignore (Parseff.optional (fun () -> Parseff.literal "\xEF\xBB\xBF"));
-  ( match Parseff.peek_char () with
-  | Some '#' ->
-      Parseff.skip_while (fun c -> c <> '\n')
-  | _ ->
-      ()
-  );
-  st.prev <- Eof;
-  st.prev_stop <- 0;
-  st.ahead <- None;
-  lex_into st ~indent:0;
-  st.nl <- true;
-  st.indent <- st.start - line_start ()
+let nl () =
+  let p = Parseff.position () in
+  if !gap_end = p then
+    !gap_nl
+  else
+    false
 
-let trim_lines () =
-  let j = max 0 (line_index st.start - 1) in
-  if j > 0 then begin
-    let kept =
-      Dynarray.init
-        (Dynarray.length lines - j)
-        (fun i -> Dynarray.get lines (i + j))
-    in
-    Dynarray.clear lines;
-    Dynarray.append lines kept;
-    first_line := !first_line + j
+let second () =
+  let _ = Parseff.any_char () in
+  Parseff.peek_char ()
+
+(* The byte after the next one. *)
+let peek_second () = Parseff.look_ahead second
+
+let is_blank c = c = ' ' || c = '\t' || c = '\011' || c = '\012'
+
+let close_gap nl cmt =
+  let p = Parseff.position () in
+  gap_end := p;
+  gap_nl := nl;
+  if nl then indent := p - line_start_at p;
+  if cmt >= 0 then begin
+    gap_comment := cmt;
+    comment_end := p
   end
 
-let found () =
-  let quoted t =
-    let t' =
-      if String.length t > 32 then
-        String.sub t 0 32
-      else
-        t
-    in
-    "'" ^ escape_found t' ^ "'"
-    ^
+let rec gap nl cmt =
+  match Parseff.peek_char () with
+  | Some (' ' | '\t' | '\011' | '\012') ->
+      Parseff.skip_while is_blank;
+      gap nl cmt
+  | Some '\n' ->
+      let _ = Parseff.any_char () in
+      incr breaks;
+      add_line (Parseff.position ());
+      gap true cmt
+  | Some '\r' ->
+      let _ = Parseff.any_char () in
+      incr breaks;
+      gap true cmt
+  | Some '-' -> (
+      match peek_second () with
+      | Some '-' ->
+          let p = Parseff.position () in
+          let _ = Parseff.any_char () in
+          let _ = Parseff.any_char () in
+          let b = !breaks in
+          comment ~start:p;
+          let cmt =
+            if cmt < 0 && not nl then
+              p
+            else
+              cmt
+          in
+          gap (nl || !breaks > b) cmt
+      | _ ->
+          close_gap nl cmt
+    )
+  | _ ->
+      close_gap nl cmt
+
+let trivia () =
+  let p = Parseff.position () in
+  tok_stop := p;
+  match Parseff.peek_char () with
+  | Some (' ' | '\t' | '\n' | '\r' | '\011' | '\012' | '-') ->
+      gap false (-1)
+  | _ ->
+      gap_end := p;
+      gap_nl := false
+
+let[@inline] finish s =
+  tok_start := s;
+  trivia ()
+
+let word_text () = Parseff.take_while is_alnum
+
+let word () =
+  let s = Parseff.position () in
+  let w = Parseff.take_while is_alnum in
+  finish s;
+  w
+
+let sym1 () =
+  let s = Parseff.position () in
+  let _ = Parseff.any_char () in
+  finish s
+
+(* A token read on a rare or error path: its kind, its range, and whether a
+   line break comes before it or inside it. *)
+type view = { tok : token; start : int; stop : int; nl : bool; inside : bool }
+
+let lex_counting () =
+  let b = !breaks in
+  let t = lex_token () in
+  (t, !breaks > b)
+
+let view () =
+  let p = Parseff.position () in
+  let (tok, inside), stop = Parseff.peek_with lex_counting in
+  { tok; start = p; stop; nl = inside || (!gap_end = p && !gap_nl); inside }
+
+(* A token with a line break inside sets the indent of the tokens after it on
+   its line, as the start of its last line. *)
+let after_token s inside =
+  if inside then indent := s - line_start_at (Parseff.position ());
+  finish s
+
+let skip_view v =
+  Parseff.skip_to v.stop;
+  after_token v.start v.inside
+
+let word_view w ~start ~stop =
+  { tok = keyword w; start; stop; nl = false; inside = false }
+
+let quoted t =
+  let t' =
     if String.length t > 32 then
-      "..."
+      String.sub t 0 32
     else
-      ""
+      t
   in
-  match st.tok with
+  "'" ^ escape_found t' ^ "'"
+  ^
+  if String.length t > 32 then
+    "..."
+  else
+    ""
+
+let found_tok = function
   | Eof ->
       "end of input"
   | Name w ->
@@ -1240,3 +1252,40 @@ let found () =
       quoted t
   | Bad ->
       "an invalid token"
+
+let begin_chunk () =
+  Hashtbl.reset lexical_errors;
+  fresh_lexical := [];
+  Dynarray.clear lines;
+  Dynarray.add_last lines 0;
+  first_line := 1;
+  last_line_start := 0;
+  gap_comment := -1;
+  comment_end := -1;
+  amp_end := -1;
+  pipe_end := -1;
+  ignore (Parseff.optional (fun () -> Parseff.literal "\xEF\xBB\xBF"));
+  ( match Parseff.peek_char () with
+  | Some '#' ->
+      Parseff.skip_while (fun c -> c <> '\n')
+  | _ ->
+      ()
+  );
+  trivia ();
+  tok_stop := 0;
+  gap_nl := true;
+  let p = Parseff.position () in
+  indent := p - line_start_at p
+
+let trim_lines_at p =
+  let j = max 0 (line_index p - 1) in
+  if j > 0 then begin
+    let kept =
+      Dynarray.init
+        (Dynarray.length lines - j)
+        (fun i -> Dynarray.get lines (i + j))
+    in
+    Dynarray.clear lines;
+    Dynarray.append lines kept;
+    first_line := !first_line + j
+  end
