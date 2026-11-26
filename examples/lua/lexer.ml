@@ -502,7 +502,6 @@ let loc i =
     let j = line_index i in
     Printf.sprintf "%d:%d" (!first_line + j) (i - Dynarray.get lines j + 1)
 
-let line_start () = Dynarray.get_last lines
 let window () = (Dynarray.get lines 0, !first_line)
 
 let space c =
@@ -905,12 +904,6 @@ let comment ~start =
   | _ ->
       Parseff.skip_while (fun c -> c <> '\n' && c <> '\r')
 
-let lx_tok = ref Eof
-let lx_start = ref 0
-let lx_stop = ref 0
-let lx_comment = ref (-1)
-let lx_breaks_before = ref 0
-
 let other_char () =
   let c = Parseff.any_char () in
   if Char.code c >= 0xC0 then
@@ -931,8 +924,8 @@ let two c s1 s2 =
   | _ ->
       Sym s1
 
-(* Reads the token at the position, without the trivia around it. A [--]
-   comment reads as [Other ""]. *)
+(* Reads the token at the position, without the trivia after it. The
+   position is a token start, so ['-'] does not start a comment. *)
 let lex_token () =
   let p = Parseff.position () in
   match Parseff.peek_char () with
@@ -960,18 +953,8 @@ let lex_token () =
           number ~start:p ~head
       | '"' | '\'' ->
           short_string ~start:p
-      | '-' -> (
-          ignore (Parseff.any_char ());
-          match Parseff.peek_char () with
-          | Some '-' ->
-              ignore (Parseff.any_char ());
-              if !lx_comment < 0 && !breaks = !lx_breaks_before then
-                lx_comment := p;
-              comment ~start:p;
-              Other ""
-          | _ ->
-              Sym Minus
-        )
+      | '-' ->
+          one Minus
       | '[' -> (
           ignore (Parseff.any_char ());
           let n = count_equals () in
@@ -1084,173 +1067,6 @@ let lex_token () =
           Other (other_char ())
     )
 
-let rec lex () =
-  skip_space ();
-  lx_start := Parseff.position ();
-  match lex_token () with
-  | Other "" ->
-      lex ()
-  | tok ->
-      lx_tok := tok;
-      lx_stop := Parseff.position ()
-
-type state = {
-  mutable tok : token;
-  mutable start : int;
-  mutable stop : int;
-  mutable nl : bool;
-  mutable comment : int;
-  mutable indent : int;
-  mutable prev : token;
-  mutable prev_stop : int;
-  mutable ahead : state option;
-}
-
-let st =
-  {
-    tok = Eof;
-    start = 0;
-    stop = 0;
-    nl = true;
-    comment = -1;
-    indent = 0;
-    prev = Eof;
-    prev_stop = 0;
-    ahead = None;
-  }
-
-let lex_into (s : state) ~indent =
-  let breaks_before = !breaks in
-  lx_breaks_before := breaks_before;
-  lx_comment := -1;
-  lex ();
-  s.tok <- !lx_tok;
-  s.start <- !lx_start;
-  s.stop <- !lx_stop;
-  s.nl <- !breaks > breaks_before;
-  s.comment <- !lx_comment;
-  s.indent <-
-    ( if s.nl then
-        s.start - line_start ()
-      else
-        indent
-    )
-
-let advance () =
-  st.prev <- st.tok;
-  st.prev_stop <- st.stop;
-  match st.ahead with
-  | Some a ->
-      st.tok <- a.tok;
-      st.start <- a.start;
-      st.stop <- a.stop;
-      st.nl <- a.nl;
-      st.comment <- a.comment;
-      st.indent <- a.indent;
-      st.ahead <- None
-  | None ->
-      lex_into st ~indent:st.indent
-
-let peek2 () =
-  match st.ahead with
-  | Some a ->
-      a.tok
-  | None ->
-      let a = { st with ahead = None } in
-      lex_into a ~indent:st.indent;
-      st.ahead <- Some a;
-      a.tok
-
-type snapshot = { saved : state; saved_lines : int; saved_first : int }
-
-let save () =
-  {
-    saved =
-      { st with ahead = Option.map (fun a -> { a with tok = a.tok }) st.ahead };
-    saved_lines = Dynarray.length lines;
-    saved_first = !first_line;
-  }
-
-let restore s =
-  let v = s.saved in
-  st.tok <- v.tok;
-  st.start <- v.start;
-  st.stop <- v.stop;
-  st.nl <- v.nl;
-  st.comment <- v.comment;
-  st.indent <- v.indent;
-  st.prev <- v.prev;
-  st.prev_stop <- v.prev_stop;
-  st.ahead <- v.ahead;
-  Dynarray.truncate lines s.saved_lines;
-  first_line := s.saved_first
-
-let start () =
-  Hashtbl.reset lexical_errors;
-  fresh_lexical := [];
-  Dynarray.clear lines;
-  Dynarray.add_last lines 0;
-  first_line := 1;
-  ignore (Parseff.optional (fun () -> Parseff.literal "\xEF\xBB\xBF"));
-  ( match Parseff.peek_char () with
-  | Some '#' ->
-      Parseff.skip_while (fun c -> c <> '\n')
-  | _ ->
-      ()
-  );
-  st.prev <- Eof;
-  st.prev_stop <- 0;
-  st.ahead <- None;
-  lex_into st ~indent:0;
-  st.nl <- true;
-  st.indent <- st.start - line_start ()
-
-let trim_lines () =
-  let j = max 0 (line_index st.start - 1) in
-  if j > 0 then begin
-    let kept =
-      Dynarray.init
-        (Dynarray.length lines - j)
-        (fun i -> Dynarray.get lines (i + j))
-    in
-    Dynarray.clear lines;
-    Dynarray.append lines kept;
-    first_line := !first_line + j
-  end
-
-let found () =
-  let quoted t =
-    let t' =
-      if String.length t > 32 then
-        String.sub t 0 32
-      else
-        t
-    in
-    "'" ^ escape_found t' ^ "'"
-    ^
-    if String.length t > 32 then
-      "..."
-    else
-      ""
-  in
-  match st.tok with
-  | Eof ->
-      "end of input"
-  | Name w ->
-      quoted w
-  | Kw k ->
-      quoted (kw_text k)
-  | Sym s ->
-      quoted (sym_text s)
-  | Number (_, t) ->
-      quoted t
-  | String v ->
-      quoted ("\"" ^ v ^ "\"")
-  | Other t ->
-      quoted t
-  | Bad ->
-      "an invalid token"
-
 (* Single pass: each token parser reads its bytes, then [trivia] reads the
    whitespace and comments after them, so the position between tokens is the
    start of the next token. *)
@@ -1274,31 +1090,28 @@ let comment_end = ref (-1)
 let amp_end = ref (-1)
 let pipe_end = ref (-1)
 
-let stale = ref 0
-
 let line_start_at p =
   if !last_line_start <= p then
     !last_line_start
   else
     Dynarray.get lines (line_index p)
 
+(* Where the token before the position stopped, and whether a line break
+   comes before it. If the record is for another gap (a rewind that the
+   parser did not repair), the answers fall back to the position. *)
 let prev_stop () =
   let p = Parseff.position () in
   if !gap_end = p then
     !tok_stop
-  else begin
-    incr stale;
+  else
     p
-  end
 
 let nl () =
   let p = Parseff.position () in
   if !gap_end = p then
     !gap_nl
-  else begin
-    incr stale;
+  else
     false
-  end
 
 let second () =
   let _ = Parseff.any_char () in
