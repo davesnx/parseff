@@ -1,7 +1,12 @@
 (* Glue between a lexer and parseff. The lexer runs on demand, and its tokens
    stay in an array so that a rewind finds them again without lexing twice.
    The parser position stays a byte offset: it is always the start of the
-   current token, or a position before the first token. *)
+   current token, or a position before the first token.
+
+   Tokens are keyed by position only, so the lexer must not depend on what the
+   parser expects, as a regular expression against division does: after a
+   rewind, a token lexed for one reading would be reused for the other.
+   [examples/single_pass] reads such tokens where the grammar needs them. *)
 
 open Parseff
 
