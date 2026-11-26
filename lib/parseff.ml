@@ -336,6 +336,7 @@ type shown = {
   views : view list;
   frame_locs : (int * int * int option) option list;
   char_column : int option;
+  above : int option;  (** The line shown above the error line, from [views]. *)
   built : bool;
 }
 
@@ -1309,6 +1310,24 @@ let last_newline s from limit =
     decr i
   done;
   !i
+
+let last_text_byte s ~floor stop =
+  let i = ref (stop - 1) in
+  while
+    !i >= floor
+    &&
+    match Bytes.unsafe_get s !i with
+    | ' ' | '\t' | '\r' | '\n' | '\x0b' | '\x0c' ->
+        true
+    | _ ->
+        false
+  do
+    decr i
+  done;
+  if !i >= floor then
+    Some !i
+  else
+    None
 
 let rec count_cut_chars idx s len i stop =
   if i + 8 <= stop && Int64.logand (bytes_get64u s i) 0x8080808080808080L = 0L
@@ -6232,8 +6251,30 @@ let shown_of ~input ~base ~input_len ~source_open ~limit idx ~pos ~notes frames
   in
   let prev_view =
     match here with
-    | Some (li, _, line) when li >= 1 ->
-        view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
+    | Some (li, line_start, line) when li >= 1 -> (
+        let above () =
+          view ~number:(line - 1) ~start:idx.starts.(li - 1) ~focus:0
+        in
+        if pos < input_len || source_open || line_start < base then
+          above ()
+        else
+          (* At end of input the lines above the error can be blank, after the
+             last token; show the last one with text instead. Counting bytes
+             keeps a long run of blank lines out of the line index. *)
+          let rel = line_start - base in
+          match last_text_byte input ~floor:0 rel with
+          | None ->
+              above ()
+          | Some q ->
+              let nl = last_newline input 0 q in
+              if nl < 0 && base > 0 then
+                above ()
+              else
+                view
+                  ~number:(line - count_newlines input (nl + 1) rel)
+                  ~start:(nl + 1 + base)
+                  ~focus:0
+      )
     | _ ->
         None
   in
@@ -6316,9 +6357,22 @@ let shown_of ~input ~base ~input_len ~source_open ~limit idx ~pos ~notes frames
     | [] ->
         []
   in
-  { views = with_middles views; frame_locs; char_column; built = true }
+  {
+    views = with_middles views;
+    frame_locs;
+    char_column;
+    above = Option.map (fun (v : view) -> v.number) prev_view;
+    built = true;
+  }
 
-let pending = { views = []; frame_locs = []; char_column = None; built = false }
+let pending =
+  {
+    views = [];
+    frame_locs = [];
+    char_column = None;
+    above = None;
+    built = false;
+  }
 
 let window_index x (l : location) =
   let idx = create_line_index () in
@@ -6511,9 +6565,36 @@ let render ?name ?source ?custom e =
             )
             (List.rev frames)
         in
+        let prev_line =
+          match src with
+          | Some (s, starts) when e.range.start >= String.length s -> (
+              match
+                last_text_byte (Bytes.unsafe_of_string s) ~floor:0
+                  starts.(line - 1)
+              with
+              | Some q ->
+                  let rec search lo hi =
+                    if hi - lo <= 1 then
+                      lo + 1
+                    else
+                      let mid = (lo + hi) / 2 in
+                      if starts.(mid) <= q then
+                        search mid hi
+                      else
+                        search lo mid
+                  in
+                  search 0 (Array.length starts)
+              | None ->
+                  line - 1
+            )
+          | Some _ ->
+              line - 1
+          | None ->
+              Option.value (shown e.excerpt).above ~default:0
+        in
         let prev_view =
-          if line > 1 then
-            get (line - 1) 0
+          if prev_line >= 1 then
+            get prev_line 0
           else
             None
         in

@@ -1,5 +1,6 @@
 ## Unreleased
 
+- [FEATURE] At end of input, `render_error` shows the last line with text above the error, so in `x +` followed by blank lines the excerpt shows `x +` instead of two empty lines; two or more blank lines in between print as `...` (@davesnx)
 - [FEATURE] Add `expected_token ?help ?notes ~upto label`, which fails with an `Expected` item whose `found` and range cover the bytes up to `upto`, such as a token from a separate lexer: it merges with other expected items in `or_`, `expect` relabels it, and a failure swallowed by `or_` allocates nothing unless it passes `~help` or `~notes` (@davesnx)
 - [FEATURE] Make `Parseff.Iter` stable: the module loses its `unstable` alert, so `Iter.many`, `Iter.sep_by`, `Iter.take` and `Iter.take_while` follow the same compatibility promise as the rest of the API (@davesnx)
 - [FEATURE] Add `~at_most` to `Iter.take_while`: a matching byte past the limit fails with `Limit_exceeded` after `f` has received the first `at_most` bytes, so a body read to the end of the input can be capped ([#156](https://github.com/davesnx/parseff/pull/156)) (@davesnx)
