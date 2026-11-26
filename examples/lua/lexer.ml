@@ -1240,6 +1240,150 @@ let sym1 () =
   let _ = Parseff.any_char () in
   trivia ()
 
+(* Readers of a one-byte symbol that also starts longer tokens. Call each at
+   its byte. It reads the symbol and its trivia and returns [true] if the next
+   byte does not make a longer token; otherwise it reads nothing. *)
+
+let[@inline] read_sym () =
+  sym1 ();
+  true
+
+(* ['='], not ['==']. *)
+let assign () = match peek_second () with Some '=' -> false | _ -> read_sym ()
+
+(* ['.'], not ['..'], ['...'] or a number such as [.5]. *)
+let dot () =
+  match peek_second () with
+  | Some ('.' | '0' .. '9') ->
+      false
+  | _ ->
+      read_sym ()
+
+(* [':'], not ['::']. *)
+let colon () = match peek_second () with Some ':' -> false | _ -> read_sym ()
+
+(* ['['], not a long bracket such as ['[['] or ['[=']. *)
+let lbracket () =
+  match peek_second () with Some ('[' | '=') -> false | _ -> read_sym ()
+
+(* ['<'], not ['<='] or ['<<']. *)
+let lt () =
+  match peek_second () with Some ('=' | '<') -> false | _ -> read_sym ()
+
+(* At ['='] or ['>'] where only the one-byte symbol is valid: reads it and its
+   trivia. If the next byte makes a longer symbol, [too_long] gets its start
+   and fails. Reading a byte and peeking at the next costs less than
+   [peek_second]. *)
+let assign_or too_long =
+  let s = Parseff.position () in
+  let _ = Parseff.any_char () in
+  match Parseff.peek_char () with Some '=' -> too_long s | _ -> trivia ()
+
+let gt_or too_long =
+  let s = Parseff.position () in
+  let _ = Parseff.any_char () in
+  match Parseff.peek_char () with
+  | Some (('=' | '>') as c) ->
+      too_long s c
+  | _ ->
+      trivia ()
+
+let not_ident () =
+  match Parseff.peek_char () with Some c -> not (is_alnum c) | None -> true
+
+let[@inline] next c =
+  match Parseff.peek_char () with
+  | Some d when d = c ->
+      let _ = Parseff.any_char () in
+      true
+  | _ ->
+      false
+
+let[@inline] skip_one () =
+  let _ = Parseff.any_char () in
+  ()
+
+(* Reads the binary operator at the position, without its trivia. [None]
+   leaves bytes read, so call it where the position is rewound, as in an
+   operator lookup of [Parseff.precedence]. *)
+let binop () =
+  match Parseff.peek_char () with
+  | Some '+' ->
+      skip_one ();
+      Some Ast.Add
+  | Some '-' ->
+      skip_one ();
+      Some Ast.Sub
+  | Some '*' ->
+      skip_one ();
+      Some Ast.Mul
+  | Some '/' ->
+      skip_one ();
+      if next '/' then
+        Some Ast.Idiv
+      else
+        Some Ast.Div
+  | Some '%' ->
+      skip_one ();
+      Some Ast.Mod
+  | Some '^' ->
+      skip_one ();
+      Some Ast.Pow
+  | Some '&' ->
+      skip_one ();
+      Some Ast.Band
+  | Some '|' ->
+      skip_one ();
+      Some Ast.Bor
+  | Some '.' ->
+      skip_one ();
+      if next '.' && not (next '.') then
+        Some Ast.Concat
+      else
+        None
+  | Some '=' ->
+      skip_one ();
+      if next '=' then
+        Some Ast.Eq
+      else
+        None
+  | Some '~' ->
+      skip_one ();
+      if next '=' then
+        Some Ast.Ne
+      else
+        Some Ast.Bxor
+  | Some '<' ->
+      skip_one ();
+      if next '=' then
+        Some Ast.Le
+      else if next '<' then
+        Some Ast.Shl
+      else
+        Some Ast.Lt
+  | Some '>' ->
+      skip_one ();
+      if next '=' then
+        Some Ast.Ge
+      else if next '>' then
+        Some Ast.Shr
+      else
+        Some Ast.Gt
+  | Some 'a' ->
+      skip_one ();
+      if next 'n' && next 'd' && not_ident () then
+        Some Ast.And
+      else
+        None
+  | Some 'o' ->
+      skip_one ();
+      if next 'r' && not_ident () then
+        Some Ast.Or
+      else
+        None
+  | _ ->
+      None
+
 (* A token read on a rare or error path: its kind, its range, and whether a
    line break comes before it or inside it. *)
 type view = { tok : token; start : int; stop : int; nl : bool; inside : bool }

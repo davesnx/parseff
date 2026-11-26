@@ -305,18 +305,12 @@ let expect_view s =
   fail_at v
     (Printf.sprintf "expected %s, found %s" (L.quote (L.sym_text s)) (found v))
 
-(* ['='], not ['==']. *)
 let expect_assign () =
   match peek () with
-  | Some '=' -> (
-      let s = pos () in
-      let _ = Parseff.any_char () in
-      match peek () with
-      | Some '=' ->
+  | Some '=' ->
+      L.assign_or (fun s ->
           L.error ~from:s ~upto:(s + 2) "expected \"=\", found '=='"
-      | _ ->
-          L.trivia ()
-    )
+      )
   | _ ->
       expect_view L.Assign
 
@@ -504,101 +498,54 @@ let marked mark op =
 let op_band = marked L.amp_end Band
 let op_bor = marked L.pipe_end Bor
 
-let skip1 () =
-  let _ = Parseff.any_char () in
-  ()
-
-(* Reads [c] if it comes next. *)
-let follows c =
-  match peek () with
-  | Some d when d = c ->
-      skip1 ();
-      true
-  | _ ->
-      false
-
-let not_ident () =
-  match peek () with Some c -> not (L.is_alnum c) | None -> true
-
-(* [precedence] rewinds a lookup that returns [None], so the lookup reads the
-   whole operator, and the operator's token parser reads the trivia. *)
+(* [precedence] rewinds a lookup that returns [None], so [L.binop] can read
+   the whole operator, and the operator's token parser reads the trivia. *)
 let operator () =
-  match peek () with
-  | Some '+' ->
-      skip1 ();
-      op_add
-  | Some '-' ->
-      skip1 ();
-      op_sub
-  | Some '*' ->
-      skip1 ();
-      op_mul
-  | Some '/' ->
-      skip1 ();
-      if follows '/' then
-        op_idiv
-      else
-        op_div
-  | Some '%' ->
-      skip1 ();
-      op_mod
-  | Some '^' ->
-      skip1 ();
-      op_pow
-  | Some '&' ->
-      skip1 ();
-      op_band
-  | Some '|' ->
-      skip1 ();
-      op_bor
-  | Some '.' ->
-      skip1 ();
-      if follows '.' && not (next_is '.') then
-        op_concat
-      else
-        None
-  | Some '=' ->
-      skip1 ();
-      if follows '=' then
-        op_eq
-      else
-        None
-  | Some '~' ->
-      skip1 ();
-      if follows '=' then
-        op_ne
-      else
-        op_bxor
-  | Some '<' ->
-      skip1 ();
-      if follows '=' then
-        op_le
-      else if follows '<' then
-        op_shl
-      else
-        op_lt
-  | Some '>' ->
-      skip1 ();
-      if follows '=' then
-        op_ge
-      else if follows '>' then
-        op_shr
-      else
-        op_gt
-  | Some 'a' ->
-      skip1 ();
-      if follows 'n' && follows 'd' && not_ident () then
-        op_and
-      else
-        None
-  | Some 'o' ->
-      skip1 ();
-      if follows 'r' && not_ident () then
-        op_or
-      else
-        None
-  | _ ->
+  match L.binop () with
+  | None ->
       None
+  | Some Add ->
+      op_add
+  | Some Sub ->
+      op_sub
+  | Some Mul ->
+      op_mul
+  | Some Div ->
+      op_div
+  | Some Idiv ->
+      op_idiv
+  | Some Mod ->
+      op_mod
+  | Some Pow ->
+      op_pow
+  | Some Band ->
+      op_band
+  | Some Bor ->
+      op_bor
+  | Some Concat ->
+      op_concat
+  | Some Eq ->
+      op_eq
+  | Some Ne ->
+      op_ne
+  | Some Bxor ->
+      op_bxor
+  | Some Lt ->
+      op_lt
+  | Some Le ->
+      op_le
+  | Some Shl ->
+      op_shl
+  | Some Gt ->
+      op_gt
+  | Some Ge ->
+      op_ge
+  | Some Shr ->
+      op_shr
+  | Some And ->
+      op_and
+  | Some Or ->
+      op_or
 
 let expected_expression_view v =
   fail_at ?help:(expression_hint v) v
@@ -726,39 +673,30 @@ and suffixed () = suffixes (primary ())
 
 and suffixes e =
   match peek () with
-  | Some '.' -> (
-      match L.peek_second () with
-      | Some ('.' | '0' .. '9') ->
-          e
-      | _ ->
-          L.sym1 ();
-          let n, r = field_name ~what:"a field name after '.'" () in
-          suffixes (mk_expr (Index (e, mk_expr (String n) r)) (span e.erange r))
-    )
-  | Some '[' -> (
-      match L.peek_second () with
-      | Some ('[' | '=') ->
-          string_suffix e
-      | _ ->
-          let s = pos () in
-          L.sym1 ();
-          let k = expr () in
-          let r =
-            close_sym ~opener:{ start = s; stop = s + 1 } ~what:"index" ']'
-          in
-          suffixes (mk_expr (Index (e, k)) (span e.erange r))
-    )
-  | Some ':' -> (
-      match L.peek_second () with
-      | Some ':' ->
-          e
-      | _ ->
-          L.sym1 ();
-          let m = need_name ~what:"a method name after ':'" () in
-          let args, stop = method_args () in
-          suffixes
-            (mk_expr (Method_call (e, m, args)) { start = e.erange.start; stop })
-    )
+  | Some '.' ->
+      if L.dot () then
+        let n, r = field_name ~what:"a field name after '.'" () in
+        suffixes (mk_expr (Index (e, mk_expr (String n) r)) (span e.erange r))
+      else
+        e
+  | Some '[' ->
+      let s = pos () in
+      if L.lbracket () then
+        let k = expr () in
+        let r =
+          close_sym ~opener:{ start = s; stop = s + 1 } ~what:"index" ']'
+        in
+        suffixes (mk_expr (Index (e, k)) (span e.erange r))
+      else
+        string_suffix e
+  | Some ':' ->
+      if L.colon () then
+        let m = need_name ~what:"a method name after ':'" () in
+        let args, stop = method_args () in
+        suffixes
+          (mk_expr (Method_call (e, m, args)) { start = e.erange.start; stop })
+      else
+        e
   | Some ('"' | '\'') ->
       string_suffix e
   | Some '(' ->
@@ -859,33 +797,23 @@ and table_after_brace s =
 
 and field () =
   match peek () with
-  | Some '[' -> (
-      match L.peek_second () with
-      | Some ('[' | '=') ->
-          Positional (expr ())
-      | _ ->
-          let s = pos () in
-          L.sym1 ();
-          let k = expr () in
-          let _ =
-            close_sym ~opener:{ start = s; stop = s + 1 } ~what:"key" ']'
-          in
-          expect_assign ();
-          Keyed (k, expr ())
-    )
+  | Some '[' ->
+      let s = pos () in
+      if L.lbracket () then begin
+        let k = expr () in
+        let _ = close_sym ~opener:{ start = s; stop = s + 1 } ~what:"key" ']' in
+        expect_assign ();
+        Keyed (k, expr ())
+      end else
+        Positional (expr ())
   | Some c when L.is_alpha c ->
       let s = pos () in
       let ind = L.indent_at s in
       let w = L.word () in
       let e = s + String.length w in
-      if
-        (not (L.is_reserved w))
-        && next_is '='
-        && match L.peek_second () with Some '=' -> false | _ -> true
-      then begin
-        L.sym1 ();
+      if (not (L.is_reserved w)) && next_is '=' && L.assign () then
         Named (w, expr ())
-      end else
+      else
         Positional (expr_from_word w s e ind)
   | _ ->
       Positional (expr ())
@@ -1384,10 +1312,7 @@ and for_header () =
   in
   match peek () with
   | Some '=' ->
-      let s = pos () in
-      skip1 ();
-      if next_is '=' then bad_after "'=='" ~from:s ~upto:(s + 2);
-      L.trivia ();
+      L.assign_or (fun s -> bad_after "'=='" ~from:s ~upto:(s + 2));
       let a = expr () in
       expect_comma ();
       let b = expr () in
@@ -1459,13 +1384,6 @@ and repeat_stat s e ind =
         srange = { start = s; stop = p };
       }
 
-and dot_next () =
-  next_is '.'
-  && match L.peek_second () with Some ('.' | '0' .. '9') -> false | _ -> true
-
-and colon_next () =
-  next_is ':' && match L.peek_second () with Some ':' -> false | _ -> true
-
 and function_stat s e ind =
   let op = { kind = "function"; at = { start = s; stop = e }; indent = ind } in
   let a = pos () in
@@ -1479,18 +1397,16 @@ and function_stat s e ind =
             (L.view ()) "expected a function name after \"function\", found '('";
         let n = need_name ~what:"a function name after \"function\"" () in
         let rec path acc =
-          if dot_next () then begin
-            L.sym1 ();
+          if next_is '.' && L.dot () then
             path (need_name ~what:"a name after '.'" () :: acc)
-          end else
+          else
             List.rev acc
         in
         let names = path [ n ] in
         let meth =
-          if colon_next () then begin
-            L.sym1 ();
+          if next_is ':' && L.colon () then
             Some (need_name ~what:"a method name after ':'" ())
-          end else
+          else
             None
         in
         let params = param_list () in
@@ -1629,9 +1545,7 @@ and local_names start =
           }
       in
       { sdesc = Bad_stat; srange = { start; stop } }
-  | Some '=', _ when match L.peek_second () with Some '=' -> false | _ -> true
-    ->
-      L.sym1 ();
+  | Some '=', _ when L.assign () ->
       let es = explist () in
       let stop =
         match List.rev es with e :: _ -> e.erange.stop | [] -> stop
@@ -1661,9 +1575,7 @@ and parses_as_statement () =
 and local_name closes () =
   let n = need_name ~what:"a variable name after \"local\"" () in
   match peek () with
-  | Some '<'
-    when match L.peek_second () with Some ('=' | '<') -> false | _ -> true ->
-      L.sym1 ();
+  | Some '<' when L.lt () ->
       let attrib =
         match peek () with
         | Some c when L.is_alpha c -> (
@@ -1700,16 +1612,11 @@ and local_name closes () =
             Const
       in
       ( match peek () with
-      | Some '>' -> (
-          let s = pos () in
-          skip1 ();
-          match peek () with
-          | Some (('=' | '>') as c) ->
+      | Some '>' ->
+          L.gt_or (fun s c ->
               L.error ~from:s ~upto:(s + 2)
                 (Printf.sprintf "expected \"%s\", found '>%c'" ">" c)
-          | _ ->
-              L.trivia ()
-        )
+          )
       | _ ->
           expect_view L.Gt
       );
@@ -1777,24 +1684,18 @@ and expr_stat start e =
       let ts = targets [ e ] in
       expect_assign ();
       assign ts
-  | Some '=' ->
-      let call_eq =
-        match e.edesc with
-        | Call _ | Method_call _ -> (
-            match L.peek_second () with Some '=' -> true | _ -> false
-          )
-        | _ ->
-            false
-      in
-      if call_eq then
-        { sdesc = Call_stat e; srange = e.erange }
-      else
-        let s = pos () in
-        skip1 ();
-        if next_is '=' then not_a_statement ~at:s e;
-        check_target e;
-        L.trivia ();
-        assign [ e ]
+  | Some '=' -> (
+      match e.edesc with
+      | Call _ | Method_call _ ->
+          (* A call cannot be assigned to; before ['=='] it is the whole
+             statement. *)
+          if L.assign () then check_target e;
+          { sdesc = Call_stat e; srange = e.erange }
+      | _ ->
+          L.assign_or (fun s -> not_a_statement ~at:s e);
+          check_target e;
+          assign [ e ]
+    )
   | _ -> (
       match e.edesc with
       | Call _ | Method_call _ ->
