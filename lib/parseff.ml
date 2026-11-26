@@ -164,6 +164,8 @@ type over = {
   mutable on : int;
   mutable opushes : int;
   mutable oclip : int;
+  mutable ohelp : string option;
+  mutable onotes : note_data list;
 }
 
 type far_extra =
@@ -1761,6 +1763,16 @@ let tag_bytes = 5
 let tag_at_least = 6
 let tag_big = 7
 let max_small_count = max_int lsr 3
+
+(* A token item keeps the token width in its payload, so that the error can
+   quote the token even after [expect] relabels it. Other [tag_big] payloads
+   stay below [big_token_payload]. *)
+let big_token_payload = 16
+
+let[@inline always] token_kind width =
+  ((big_token_payload + width) lsl 3) lor tag_big
+
+let is_token_kind k = k land 7 = tag_big && k lsr 3 >= big_token_payload
 let far_max_capacity = 62
 
 let[@inline never] far_first_int st p k =
@@ -1876,6 +1888,8 @@ let[@inline never] far_overflow f k s =
               on = 0;
               opushes = 0;
               oclip = 0;
+              ohelp = None;
+              onotes = [];
             }
           in
           f.extra <- Over o;
@@ -1968,12 +1982,82 @@ let far_clip f =
   | _ ->
       no_end
 
+(* The help and notes of an [Expected] failure live in its [Over] record, so
+   that failures without them cost nothing. The first ones at a position win. *)
+let far_has_hint o = o.ohelp != None || o.onotes != []
+
+let hint_over pos help notes =
+  {
+    opos = pos;
+    oitems = [];
+    oend = no_end;
+    on = 0;
+    opushes = 0;
+    oclip = 0;
+    ohelp = help;
+    onotes = notes;
+  }
+
+let[@inline never] far_add_hint f help notes =
+  if f.special = 0 then
+    match f.extra with
+    | Over o when o.opos = f.pos ->
+        if not (far_has_hint o) then begin
+          o.ohelp <- help;
+          o.onotes <- notes
+        end
+    | _ ->
+        f.extra <- Over (hint_over f.pos help notes)
+
+let[@inline] token_width w k =
+  if is_token_kind k then
+    imax w ((k lsr 3) - big_token_payload)
+  else
+    w
+
+(* The widest token among the items after the first [n0], and the overflow
+   items after the first [o0] when [n0] fills the inline items. *)
+let far_token_width f n0 o0 =
+  let w = ref 0 in
+  for i = n0 to f.n - 1 do
+    w := token_width !w (far_item_kind f i)
+  done;
+  begin match f.extra with
+  | Over o when f.special = 0 && o.opos = f.pos ->
+      let fresh =
+        List.length o.oitems
+        -
+        if n0 < far_total_capacity then
+          0
+        else
+          o0
+      in
+      List.iteri
+        (fun i (k, _) -> if i < fresh then w := token_width !w k)
+        o.oitems
+  | _ ->
+      ()
+  end;
+  !w
+
 let far_relabel f n0 o0 label =
+  let w = far_token_width f n0 o0 in
+  let kind =
+    if w > 0 then
+      token_kind w
+    else
+      tag_label
+  in
   f.n <- n0;
   begin match far_over f with
   | Some o ->
       if n0 < far_total_capacity then
-        f.extra <- No_extra
+        f.extra <-
+          ( if far_has_hint o then
+              Over (hint_over f.pos o.ohelp o.onotes)
+            else
+              No_extra
+          )
       else
         o.oitems <-
           List.filteri (fun i _ -> i >= List.length o.oitems - o0) o.oitems
@@ -1981,11 +2065,11 @@ let far_relabel f n0 o0 label =
       ()
   end;
   if n0 = 0 then begin
-    f.k0 <- tag_label;
+    f.k0 <- kind;
     f.s0 <- label;
     f.n <- 1
   end else
-    far_push_str f tag_label label
+    far_push_str f kind label
 
 let[@inline always] fail_int st p k =
   let f = st.far in
@@ -2021,6 +2105,13 @@ let[@inline always] fail_str st p k s =
   raise_notrace Fail
 
 let[@inline never] fail_str_cold st p k s = fail_str st p k s
+
+let[@inline never] fail_str_hint st p k s help notes =
+  try fail_str st p k s
+  with Fail ->
+    let f = st.far in
+    if f.pos = p then far_add_hint f help notes;
+    raise_notrace Fail
 
 let special_user = 2
 
@@ -2952,6 +3043,8 @@ let[@inline never] clip_far st start limit =
               on = f.n;
               opushes = 0;
               oclip = 0;
+              ohelp = None;
+              onotes = [];
             }
 
 let[@inline never] reclip_far st limit n0 p0 =
@@ -3323,6 +3416,25 @@ let[@inline] error ?from ?upto ?(notes = []) ?help e =
   else
     fail_user st st.pos (Payload_ext (e, { from; upto; notes; help }))
 
+let[@inline never] invalid_token_upto () =
+  invalid_arg "Parseff.expected_token: upto precedes the position"
+
+let expected_token ?help ?(notes = []) ~upto label =
+  let st = get_state () in
+  let p = st.pos in
+  if upto < p then invalid_token_upto ();
+  let kind =
+    if upto = p then
+      tag_label
+    else
+      token_kind (imin (upto - p) (max_small_count - big_token_payload))
+  in
+  if help == None && notes == [] then
+    fail_str_cold st p kind label
+  else
+    fail_str_hint st p kind label help
+      (check_notes "Parseff.expected_token" notes)
+
 let[@inline always] record_diagnostic c st pos value =
   if st.diag == c.self then begin
     c.rev <- { pos; value } :: c.rev;
@@ -3541,7 +3653,8 @@ let[@inline never] far_merge st saved =
       done;
       match far_over t with
       | Some o ->
-          List.iter (fun (k, s) -> far_overflow saved k s) o.oitems
+          List.iter (fun (k, s) -> far_overflow saved k s) o.oitems;
+          if far_has_hint o then far_add_hint saved o.ohelp o.onotes
       | None ->
           ()
     end;
@@ -6720,6 +6833,8 @@ let expected_of_far f =
           else
             string_of_int payload ^ " bytes"
         )
+    else if is_token_kind kind then
+      Label s
     else if tag = tag_big && payload >= big_field_payload then begin
       let label, _, _ = field_mismatch payload s in
       Label label
@@ -6911,10 +7026,52 @@ let found_of st ~open_end stop pos =
     end
   end
 
+(* The length of the longest prefix of [s] that does not end inside a UTF-8
+   character. *)
+let whole_chars s =
+  let n = String.length s in
+  let j = char_start s (n - 1) in
+  if j + utf8_sequence_length (Char.code s.[j]) > n then
+    j
+  else
+    n
+
+let token_found st ~open_end stop pos width =
+  let upto = imin (pos + width) stop in
+  if pos < st.base || upto <= pos then
+    found_of st ~open_end stop pos
+  else
+    let rel = pos - st.base in
+    if upto - pos > 32 then
+      let text = Bytes.sub_string st.input rel 33 in
+      ( Text (String.sub text 0 (char_start text 32) ^ "..."),
+        { start = pos; stop = upto }
+      )
+    else
+      let text = Bytes.sub_string st.input rel (upto - pos) in
+      (* On an open stream, the rest of a character may not be read yet. *)
+      let n =
+        if open_end && upto < pos + width then
+          whole_chars text
+        else
+          String.length text
+      in
+      if n = 0 then
+        found_of st ~open_end stop pos
+      else
+        (Text (String.sub text 0 n), { start = pos; stop = pos + n })
+
 let found_of_far st f pos =
   let clip = far_clip f in
   let stop = imax st.base (imin clip st.input_len) in
   let all_short = ref true and all_value = ref true and value = ref None in
+  let token = ref 0 in
+  begin match far_over f with
+  | Some o ->
+      List.iter (fun (k, _) -> token := token_width !token k) o.oitems
+  | None ->
+      ()
+  end;
   for i = 0 to f.n - 1 do
     let kind = far_item_kind f i in
     let tag = kind land 7 and payload = kind lsr 3 in
@@ -6922,7 +7079,10 @@ let found_of_far st f pos =
       if not (tag = tag_bytes || (tag = tag_big && payload = big_bytes_payload))
       then
         all_short := false;
-      if tag = tag_big && payload >= big_field_payload then begin
+      if is_token_kind kind then begin
+        token := imax !token (payload - big_token_payload);
+        all_value := false
+      end else if tag = tag_big && payload >= big_field_payload then begin
         let ((_, found, _) as v) = field_mismatch payload (far_item_str f i) in
         match !value with
         | None ->
@@ -6950,7 +7110,10 @@ let found_of_far st f pos =
           | None ->
               false
         in
-        found_of st ~open_end stop pos
+        if !token > 0 then
+          token_found st ~open_end stop pos !token
+        else
+          found_of st ~open_end stop pos
 
 let scan_location input ~from ~lines ~start pos =
   let n = count_newlines input from pos in
@@ -7131,7 +7294,14 @@ let error_of_far ~last st outer =
             frames
       | x :: xs, more ->
           let found, span = found_of_far st f pos in
-          build st ~last ~pos
+          let help, notes =
+            match far_over f with
+            | Some o ->
+                (o.ohelp, o.onotes)
+            | None ->
+                (None, [])
+          in
+          build st ~last ~pos ~notes ?help
             (Expected { items = (x, xs); found; more })
             span frames
       end

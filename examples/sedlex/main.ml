@@ -1,10 +1,11 @@
 (* sedlex lexes, parseff parses.
 
-   [Lexer.tokenize] runs the sedlex lexer over the whole input first. The
-   parser then reads tokens instead of bytes: [peek] returns the token at the
-   current position, and [advance] moves past it, both with [skip_to].
-   Because positions are byte offsets in the original input, parseff errors
-   still point at the source text. *)
+   [Lexer.tokens] runs the sedlex lexer one token at a time, when the parser
+   first asks for a token. The parser reads tokens instead of bytes through
+   [Tokens]. Because positions are byte offsets in the original input,
+   parseff errors still point at the source text. An unexpected token fails
+   with [expected_token], so the error merges with the other expected items
+   and quotes the token as written. *)
 
 open Parseff
 
@@ -15,56 +16,13 @@ type expr =
   | Binop of char * expr * expr
   | Let of string * expr * expr
 
-type custom_error +=
-  | Unexpected of { expected : string; found : string }
-  | Unbound of string
+type custom_error += Unbound of string
 
 let show_error = function
-  | Unexpected { expected; found } ->
-      Printf.sprintf "expected %s, found %s" expected found
   | Unbound name ->
       Printf.sprintf "unbound variable %s" name
   | _ ->
       "unknown error"
-
-(* [input] is the source text and [tokens] the lexer output, in order. *)
-type tokens = { input : string; tokens : Lexer.t array }
-
-(* The first token that starts at or after byte [pos]. A position inside
-   whitespace or a comment maps to the token after it. [Eof] starts at the end
-   of the input, so the search always finds a token. *)
-let token_at t pos =
-  let rec search lo hi =
-    if lo >= hi then
-      lo
-    else
-      let mid = (lo + hi) / 2 in
-      if t.tokens.(mid).start >= pos then
-        search lo mid
-      else
-        search (mid + 1) hi
-  in
-  t.tokens.(search 0 (Array.length t.tokens - 1))
-
-(* Moves to the start of the next token, past whitespace and comments, so
-   errors and contexts start at the token. *)
-let peek t =
-  let tok = token_at t (position ()) in
-  skip_to tok.start;
-  tok
-
-let advance (t : Lexer.t) = skip_to t.stop
-
-let unexpected t (tok : Lexer.t) expected =
-  error ~from:tok.start ~upto:tok.stop
-    (Unexpected { expected; found = Lexer.describe t.input tok })
-
-let eat t expected_token label =
-  let current_token = peek t in
-  if current_token.token = expected_token then
-    advance current_token
-  else
-    unexpected t current_token label
 
 (* Operators are read by [operator], so their token parsers only return the
    build function. *)
@@ -74,39 +32,39 @@ let sub = binop '-'
 let mul = binop '*'
 let div = binop '/'
 
+(* [optional] keeps the failure, so an error at the next token also says that
+   an operator could come there. *)
 let operator t () =
-  let tok = peek t in
-  let found prec op =
-    advance tok;
-    Some (prec, op)
-  in
-  match tok.token with
-  | Plus ->
-      found 1 add
-  | Minus ->
-      found 1 sub
-  | Star ->
-      found 2 mul
-  | Slash ->
-      found 2 div
-  | _ ->
-      None
+  optional (fun () ->
+      Tokens.select t "an operator" (function
+        | Lexer.Plus ->
+            Some (1, add)
+        | Minus ->
+            Some (1, sub)
+        | Star ->
+            Some (2, mul)
+        | Slash ->
+            Some (2, div)
+        | _ ->
+            None
+      )
+  )
 
 let rec expr t scope () = precedence ~operator:(operator t) (operand t scope)
 
 and operand t scope () =
-  let tok = peek t in
-  match tok.token with
+  let tok = Tokens.peek t in
+  match tok.value with
   | Number n ->
-      advance tok;
+      Tokens.advance t;
       Num n
   | Ident name ->
       if not (List.mem name scope) then
         error ~from:tok.start ~upto:tok.stop (Unbound name);
-      advance tok;
+      Tokens.advance t;
       Var name
   | Minus ->
-      advance tok;
+      Tokens.advance t;
       Neg
         (rec_ (fun () ->
              precedence ~min:3 ~operator:(operator t) (operand t scope)
@@ -114,31 +72,25 @@ and operand t scope () =
         )
   | Lparen ->
       context ~delimited:true "parenthesized expression" (fun () ->
-          advance tok;
+          Tokens.advance t;
           let e = rec_ (expr t scope) in
-          eat t Rparen "')'";
+          Tokens.eat t Rparen;
           e
       )
   | Let ->
-      let_binding t scope tok
+      let_binding t scope
   | _ ->
-      unexpected t tok "an expression"
+      expected_token ~upto:tok.stop "an expression"
 
-and let_binding t scope let_token =
+and let_binding t scope =
   context "let binding" (fun () ->
-      advance let_token;
-      let name_token = peek t in
+      Tokens.advance t;
       let name =
-        match name_token.token with
-        | Ident name ->
-            advance name_token;
-            name
-        | _ ->
-            unexpected t name_token "a name"
+        Tokens.select t "a name" (function Ident name -> Some name | _ -> None)
       in
-      eat t Equal "'='";
+      Tokens.eat t Equal;
       let value = rec_ (expr t scope) in
-      eat t In "'in'";
+      Tokens.eat t In;
       let body = rec_ (expr t (name :: scope)) in
       Let (name, value, body)
   )
@@ -147,7 +99,7 @@ let program t () =
   let e = expr t [] () in
   (* [Eof] ends at the end of the input, so this also consumes trailing
      whitespace and comments. *)
-  eat t Eof "an operator or end of input";
+  Tokens.eat t Eof;
   e
 
 let rec eval env = function
@@ -187,7 +139,9 @@ let rec to_string = function
 let () =
   match Sys.argv with
   | [| _; input |] -> (
-      let t = { input; tokens = Lexer.tokenize input } in
+      let t =
+        Tokens.create ~show:Lexer.show ~eof:Lexer.Eof (Lexer.tokens input)
+      in
       match parse input (program t) with
       | Ok e ->
           Printf.printf "%s = %g\n" (to_string e) (eval [] e)

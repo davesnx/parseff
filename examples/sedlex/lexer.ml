@@ -16,35 +16,10 @@ type token =
   | Invalid
   | Eof
 
-type t = { token : token; start : int; stop : int }
+type t = token Tokens.token
 
-(* Quotes [text] as it appears in the input. Bytes that are not valid UTF-8
-   and control characters print as [\xNN], as in [Parseff.render_error]. *)
-let quote text =
-  let buf = Buffer.create (String.length text + 2) in
-  Buffer.add_char buf '"';
-  let rec loop i =
-    if i < String.length text then begin
-      let d = String.get_utf_8_uchar text i in
-      let n = Uchar.utf_decode_length d in
-      let c = text.[i] in
-      if Uchar.utf_decode_is_valid d && c >= ' ' && c <> '\x7f' then
-        Buffer.add_string buf (String.sub text i n)
-      else
-        for j = i to i + n - 1 do
-          Printf.bprintf buf "\\x%02X" (Char.code text.[j])
-        done;
-      loop (i + n)
-    end
-  in
-  loop 0;
-  Buffer.add_char buf '"';
-  Buffer.contents buf
-
-(* Describes [t] with its text in [input], so a number reads as written. *)
-let describe input t =
-  let text () = String.sub input t.start (t.stop - t.start) in
-  match t.token with
+(* How an error names a token that the parser expected. *)
+let show = function
   | Let ->
       "'let'"
   | In ->
@@ -64,11 +39,11 @@ let describe input t =
   | Rparen ->
       "')'"
   | Number _ ->
-      "number " ^ text ()
+      "a number"
   | Ident _ ->
-      "identifier " ^ text ()
+      "a name"
   | Invalid ->
-      "invalid input " ^ quote (text ())
+      "invalid input"
   | Eof ->
       "end of input"
 
@@ -125,22 +100,26 @@ let valid_utf_8_prefix s =
   in
   loop 0
 
-(* Lexes all of [input]. The last token is [Eof], with
-   [start = stop = String.length input]. sedlex raises on invalid UTF-8, so it
-   lexes only the valid prefix, and the rest becomes one [Invalid] token. *)
-let tokenize input =
+(* A lexer for [input] that returns one token per call, then [Eof] with
+   [start = stop = String.length input] forever. sedlex raises on invalid
+   UTF-8, so it lexes only the valid prefix, and the rest becomes one
+   [Invalid] token. *)
+let tokens input =
   let len = String.length input in
   let valid = valid_utf_8_prefix input in
   let buf = Sedlexing.Utf8.from_string (String.sub input 0 valid) in
-  let rec loop acc =
-    let token = next buf in
-    let start, stop = Sedlexing.bytes_loc buf in
-    if token <> Eof then
-      loop ({ token; start; stop } :: acc)
-    else if valid < len then
-      { token = Invalid; start = valid; stop = len } :: acc
+  let ended = ref false in
+  fun () ->
+    if !ended then
+      { Tokens.value = Eof; start = len; stop = len }
     else
-      acc
-  in
-  let eof = { token = Eof; start = len; stop = len } in
-  Array.of_list (List.rev (eof :: loop []))
+      match next buf with
+      | Eof when valid < len ->
+          ended := true;
+          { Tokens.value = Invalid; start = valid; stop = len }
+      | Eof ->
+          ended := true;
+          { Tokens.value = Eof; start = len; stop = len }
+      | value ->
+          let start, stop = Sedlexing.bytes_loc buf in
+          { Tokens.value; start; stop }

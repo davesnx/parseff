@@ -86,6 +86,8 @@ address:1:4: [error] octet out of range
   * note: octets go from 0 to 255
 ```
 
+[`Parseff.expected_token`](./Parseff.md#val-expected_token) fails with an `Expected` item instead, for a token that a separate lexer found or any range the parser scanned: `found` and the range cover the bytes up to `~upto`, the item merges with other expected items at the same position, and [`Parseff.expect`](./Parseff.md#val-expect) relabels it. It takes `~help` and `~notes` like `fail`.
+
 ## `expect`
 
 [`Parseff.expect`](./Parseff.md#val-expect) replaces `Expected` failures at the parser's starting position with `expected <description>`. Failures past the starting position, as well as `fail` and `error`, are preserved.
