@@ -471,7 +471,6 @@ let is_lexical (e : Parseff.error) =
 
 let lines : int Dynarray.t = Dynarray.create ()
 let first_line = ref 1
-let scan = ref 0
 let breaks = ref 0
 
 (* Start of the line after the last ['\n'] read. A rewind can read a line
@@ -504,26 +503,25 @@ let loc i =
 
 let window () = (Dynarray.get lines 0, !first_line)
 
-let space c =
-  match c with
-  | '\n' ->
-      incr scan;
-      incr breaks;
-      add_line !scan;
-      true
-  | '\r' ->
-      incr scan;
-      incr breaks;
-      true
-  | ' ' | '\t' | '\011' | '\012' ->
-      incr scan;
-      true
-  | _ ->
-      false
+let is_blank c = c = ' ' || c = '\t' || c = '\011' || c = '\012'
 
-let skip_space () =
-  scan := Parseff.position ();
-  Parseff.skip_while space
+(* Reads one line break byte, so ["\r\n"] counts as two breaks, unlike in
+   [newline]. *)
+let[@inline] line_break () =
+  if Parseff.any_char () = '\n' then add_line (Parseff.position ());
+  incr breaks
+
+(* Skips blanks and line breaks, for the [\z] escape. *)
+let rec blanks () =
+  match Parseff.peek_char () with
+  | Some (' ' | '\t' | '\011' | '\012') ->
+      Parseff.skip_while is_blank;
+      blanks ()
+  | Some ('\n' | '\r') ->
+      line_break ();
+      blanks ()
+  | _ ->
+      ()
 
 let newline () =
   let p = Parseff.position () in
@@ -749,7 +747,7 @@ let short_string ~start =
             end
         | Some 'z' ->
             ignore (Parseff.any_char ());
-            skip_space ();
+            blanks ();
             loop ()
         | Some 'u' ->
             unicode k
@@ -1169,8 +1167,6 @@ let second () =
 (* The byte after the next one. *)
 let peek_second () = Parseff.look_ahead second
 
-let is_blank c = c = ' ' || c = '\t' || c = '\011' || c = '\012'
-
 let[@inline] close_gap at stop nl comment =
   gap.at <- at;
   gap.stop <- stop;
@@ -1183,14 +1179,8 @@ let rec skip_gap stop nl cmt =
   | Some (' ' | '\t' | '\011' | '\012') ->
       Parseff.skip_while is_blank;
       skip_gap stop nl cmt
-  | Some '\n' ->
-      let _ = Parseff.any_char () in
-      incr breaks;
-      add_line (Parseff.position ());
-      skip_gap stop true cmt
-  | Some '\r' ->
-      let _ = Parseff.any_char () in
-      incr breaks;
+  | Some ('\n' | '\r') ->
+      line_break ();
       skip_gap stop true cmt
   | Some '-' -> (
       match peek_second () with

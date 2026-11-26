@@ -87,7 +87,6 @@ let render_window ~name (e : Parseff.error) =
       render ~name e
 
 let analyse path ~on_statement ~on_errors =
-  Parser.reset ();
   let run source =
     Seq.iter
       (fun r ->
@@ -113,7 +112,7 @@ let analyse path ~on_statement ~on_errors =
         on_errors (errors @ Lexer.take_fresh_lexical ())
       )
       (Parseff.Source.parse_each ~max_depth:100_000 ~backtrack_window
-         ~diagnostics:Parser.errors source Parser.top
+         ~diagnostics:Parser.errors source (Parser.chunk ())
       )
   in
   try

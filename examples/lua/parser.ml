@@ -1624,38 +1624,46 @@ and local_name closes () =
   | _ ->
       Var (n, None)
 
+(* The word after the values, peeked once: it must end the block or start
+   the next statement. *)
 and return_stat s e =
-  let r = { start = s; stop = e } in
-  let next_word () = L.keyword (fst (Parseff.peek_with L.word_text)) in
-  let es =
+  let next_word () =
     match peek () with
-    | None | Some ';' ->
-        []
-    | Some c when L.is_alpha c && is_terminator (next_word ()) ->
-        []
+    | Some c when L.is_alpha c ->
+        Some (L.keyword (fst (Parseff.peek_with L.word_text)))
     | _ ->
-        explist ()
+        None
   in
-  let stop = match List.rev es with e :: _ -> e.erange.stop | [] -> r.stop in
-  let stop =
+  let word = next_word () in
+  let es, word =
+    match (peek (), word) with
+    | (None | Some ';'), _ ->
+        ([], word)
+    | _, Some t when is_terminator t ->
+        ([], word)
+    | _ ->
+        let es = explist () in
+        (es, next_word ())
+  in
+  let stop = match List.rev es with x :: _ -> x.erange.stop | [] -> e in
+  let stop, word =
     if next_is ';' then begin
       let p = pos () in
       L.sym1 ();
-      p + 1
+      (p + 1, next_word ())
     end else
-      stop
+      (stop, word)
   in
   let fail v =
     fail_at ~help:"the values of a \"return\" are separated by ','" v
       (Printf.sprintf "unexpected %s after the return statement" (found v))
   in
-  ( match peek () with
-  | None ->
+  ( match (peek (), word) with
+  | None, _ ->
       ()
-  | Some c when L.is_alpha c ->
-      let t = next_word () in
+  | Some _, Some t ->
       if not (is_terminator t || starts_statement t) then fail (L.view ())
-  | Some _ ->
+  | Some _, None ->
       let v = L.view () in
       if not (starts_statement v.tok) then fail v
   );
@@ -1800,15 +1808,7 @@ and not_a_statement : 'a. at:int -> expr -> 'a =
              statement"
           "this expression is not a statement"
 
-let returned = ref None
-let started = ref false
-
-let reset () =
-  started := false;
-  returned := None;
-  Parseff.Diagnostics.clear errors
-
-let one () =
+let one returned =
   Parseff.Ref.set unclosed_hints [];
   Parseff.Ref.set else_ifs [];
   let set_returned s =
@@ -1840,13 +1840,18 @@ let one () =
       set_returned st;
       Some st
 
-let top () =
-  if not !started then begin
-    L.begin_chunk ();
-    started := true
-  end;
-  L.trim_lines_at (pos ());
-  one ()
+(* The parser of each statement of a new chunk, for [Source.parse_each]. The
+   first call also reads the start of the chunk. *)
+let chunk () =
+  Parseff.Diagnostics.clear errors;
+  let started = ref false and returned = ref None in
+  fun () ->
+    if not !started then begin
+      L.begin_chunk ();
+      started := true
+    end;
+    L.trim_lines_at (pos ());
+    one returned
 
 let error_at source (r : range) ?notes ?help msg =
   match
