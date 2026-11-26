@@ -69,6 +69,36 @@ let error_at_view ?notes ?help (v : L.view) msg =
 let soft_at ?word ?region ?notes ?help v msg =
   report ?word ?region (error_at_view ?notes ?help v msg)
 
+(* [Parseff.expected_token] fails at the position and quotes the token's
+   bytes, but [found] names an invalid token, shows a string by its value, and
+   keeps non-ASCII characters that [expected_token] can escape. *)
+let quoted_as_written (v : L.view) =
+  v.start = pos ()
+  &&
+  match v.tok with
+  | L.Name _ | L.Kw _ | L.Sym _ | L.Number _ ->
+      true
+  | L.Other t ->
+      String.for_all (fun c -> Char.code c < 0x80) t
+  | L.String _ | L.Bad | L.Eof ->
+      false
+
+(* An expected item merges with the others at the token. At end of input,
+   [fail_at] points after the token before, so the excerpt shows its line. *)
+let expected ?notes ?help (v : L.view) label : 'a =
+  if quoted_as_written v then
+    Parseff.expected_token ?notes ?help ~upto:v.stop label
+  else
+    fail_at ?notes ?help v
+      (Printf.sprintf "expected %s, found %s" label (found v))
+
+let soft_expected ?region ?help v label =
+  match Parseff.capture (fun () -> (expected ?help v label : unit)) with
+  | Error e ->
+      report ?region e
+  | Ok () ->
+      assert false
+
 let is_eof_error (e : Parseff.error) =
   match e.kind with Custom (L.Lua { eof = true; _ }) -> true | _ -> false
 
@@ -275,8 +305,7 @@ let need_name ~what () =
       else
         w
   | _ ->
-      let v = L.view () in
-      fail_at v (Printf.sprintf "expected %s, found %s" what (found v))
+      expected (L.view ()) what
 
 let field_name ~what () =
   match peek () with
@@ -297,13 +326,9 @@ let field_name ~what () =
           );
       (w, r)
   | _ ->
-      let v = L.view () in
-      fail_at v (Printf.sprintf "expected %s, found %s" what (found v))
+      expected (L.view ()) what
 
-let expect_view s =
-  let v = L.view () in
-  fail_at v
-    (Printf.sprintf "expected %s, found %s" (L.quote (L.sym_text s)) (found v))
+let expect_view s = expected (L.view ()) (L.quote (L.sym_text s))
 
 let expect_assign () =
   match peek () with
@@ -397,7 +422,7 @@ let one_of_text = function
 
 let line_of i = L.line_index i
 
-let unclosed ~(opener : range) ~what expected =
+let unclosed ~(opener : range) ~what what_expected =
   let v = L.view () in
   let caret = match v.tok with L.Eof -> L.prev_stop () | _ -> v.start in
   let notes =
@@ -411,9 +436,9 @@ let unclosed ~(opener : range) ~what expected =
     else
       []
   in
-  fail_at ~notes v
-    (Printf.sprintf "expected %s in the %s that starts at %s, found %s" expected
-       what (loc opener.start) (found v)
+  expected ~notes v
+    (Printf.sprintf "%s in the %s that starts at %s" what_expected what
+       (loc opener.start)
     )
 
 let quote_char c = L.quote (String.make 1 c)
@@ -548,8 +573,7 @@ let operator () =
       op_or
 
 let expected_expression_view v =
-  fail_at ?help:(expression_hint v) v
-    (Printf.sprintf "expected expression, found %s" (found v))
+  expected ?help:(expression_hint v) v "expression"
 
 let expected_expression_word w s e =
   L.error ~from:s ~upto:e
@@ -582,8 +606,13 @@ and operand () =
       let ind = L.indent_at s in
       let w = L.word () in
       operand_word w s (s + String.length w) ind
-  | _ ->
+  | Some ('"' | '\'' | '0' .. '9' | '-' | '[' | '.' | '#' | '~' | '{' | '(')
+  | None ->
       operand_token ()
+  | Some _ ->
+      (* No operand starts with this byte: fail before reading the token, so
+         that the expected item starts at it. *)
+      expected_expression_view (L.view ())
 
 and unop op start =
   let e = unary_operand () in
@@ -643,6 +672,7 @@ and operand_token () =
   | L.Eof ->
       expected_expression_view (L.view ())
   | tok ->
+      (* Read already, as ['..']: [expected] reports it with [fail_at]. *)
       let v = { L.tok; start = s; stop = pos (); nl = false; inside = false } in
       expected_expression_view v
 
@@ -727,10 +757,8 @@ and string_suffix e =
 
 and method_args () =
   let fail v =
-    fail_at ~help:"a method call needs arguments, as in obj:name()" v
-      (Printf.sprintf "expected arguments after the method name, found %s"
-         (found v)
-      )
+    expected ~help:"a method call needs arguments, as in obj:name()" v
+      "arguments after the method name"
   in
   match peek () with
   | Some '(' ->
@@ -825,10 +853,7 @@ and funcbody opener =
   ({ params; vararg; body }, stop)
 
 and param_list () =
-  if not (next_is '(') then begin
-    let v = L.view () in
-    fail_at v (Printf.sprintf "expected \"(\", found %s" (found v))
-  end;
+  if not (next_is '(') then expected (L.view ()) "\"(\"";
   let s = pos () in
   L.sym1 ();
   let opener = { start = s; stop = s + 1 } in
@@ -996,10 +1021,8 @@ and expect_lead kw opener =
       )
   in
   let unexpected v =
-    soft_at ~region:opener.at.start ?help:(token_hint v) v
-      (Printf.sprintf "expected \"%s\" after %s, found %s" name
-         (what_header opener.kind) (found v)
-      )
+    soft_expected ~region:opener.at.start ?help:(token_hint v) v
+      (Printf.sprintf "\"%s\" after %s" name (what_header opener.kind))
   in
   match peek () with
   | Some c when L.is_alpha c ->
@@ -1158,8 +1181,7 @@ and simple_sym () =
           | L.Sym L.Dcolon ->
               L.skip_view c
           | _ ->
-              fail_at c
-                (Printf.sprintf "expected %s, found %s" (L.quote "::") (found c))
+              expected c (L.quote "::")
           );
           { sdesc = Label n; srange = { start; stop = c.stop } }
       | t ->
@@ -1181,8 +1203,7 @@ and simple_sym () =
             | _ ->
                 token_hint v
           in
-          fail_at ?help v
-            (Printf.sprintf "expected a statement, found %s" (found v))
+          expected ?help v "a statement"
     )
 
 and stray w s e opener =
@@ -1297,8 +1318,7 @@ and for_header () =
           L.error ~from:s ~upto:(L.prev_stop ())
             (Printf.sprintf "expected \"in\", found %s" (L.quoted w))
     | _ ->
-        let c = L.view () in
-        fail_at c (Printf.sprintf "expected \"in\", found %s" (found c))
+        expected (L.view ()) "\"in\""
     );
     let rec exprs acc =
       let e = expr () in
@@ -1341,9 +1361,14 @@ and for_header () =
         `Gen ([ v ], exprs [])
       else
         bad_after (L.quoted w) ~from:s ~upto:(L.prev_stop ())
-  | _ ->
+  | _ -> (
       let c = L.view () in
-      bad_after (found c) ~from:c.start ~upto:c.stop
+      match c.tok with
+      | L.Eof ->
+          bad_after (found c) ~from:c.start ~upto:c.stop
+      | _ ->
+          expected c "'=' or \"in\" after the loop variable"
+    )
 
 and repeat_stat s e ind =
   let op = { kind = "repeat"; at = { start = s; stop = e }; indent = ind } in
@@ -1390,11 +1415,11 @@ and function_stat s e ind =
   match
     L.attempt (fun () ->
         if next_is '(' then
-          fail_at
+          expected
             ~help:
               "an anonymous function is an expression: assign it, as in local \
                f = function(...) ... end"
-            (L.view ()) "expected a function name after \"function\", found '('";
+            (L.view ()) "a function name after \"function\"";
         let n = need_name ~what:"a function name after \"function\"" () in
         let rec path acc =
           if next_is '.' && L.dot () then
@@ -1853,14 +1878,24 @@ let chunk () =
     L.trim_lines_at (pos ());
     one returned
 
-let error_at source (r : range) ?notes ?help msg =
+let error_in source (r : range) fail =
   match
     Parseff.parse ~consume:`Partial source (fun () ->
-        if r.start > 0 then ignore (Parseff.Slice.take r.start);
-        (L.error ~from:r.start ~upto:r.stop ?notes ?help msg : unit)
+        Parseff.skip_to r.start;
+        (fail () : unit)
     )
   with
   | Error e ->
       e
   | Ok () ->
       assert false
+
+let error_at source (r : range) ?notes ?help msg =
+  error_in source r (fun () ->
+      L.error ~from:r.start ~upto:r.stop ?notes ?help msg
+  )
+
+let expected_at source (r : range) ?notes ?help label =
+  error_in source r (fun () ->
+      Parseff.expected_token ?notes ?help ~upto:r.stop label
+  )
