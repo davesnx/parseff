@@ -1,0 +1,6 @@
+(executable
+ (name main)
+ (libraries parseff uucp))
+
+(cram
+ (deps main.exe))
