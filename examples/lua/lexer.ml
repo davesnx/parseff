@@ -1160,12 +1160,7 @@ let line_start_at p =
   else
     Dynarray.get lines (line_index p)
 
-let second () =
-  let _ = Parseff.any_char () in
-  Parseff.peek_char ()
-
-(* The byte after the next one. *)
-let peek_second () = Parseff.look_ahead second
+let peek_second () = Parseff.peek_char ~ahead:1 ()
 
 let[@inline] close_gap at stop nl comment =
   gap.at <- at;
@@ -1262,8 +1257,7 @@ let lt () =
 
 (* At ['='] or ['>'] where only the one-byte symbol is valid: reads it and its
    trivia. If the next byte makes a longer symbol, [too_long] gets its start
-   and fails. Reading a byte and peeking at the next costs less than
-   [peek_second]. *)
+   and fails. *)
 let assign_or too_long =
   let s = Parseff.position () in
   let _ = Parseff.any_char () in
