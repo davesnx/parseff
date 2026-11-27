@@ -1,16 +1,23 @@
-## Unreleased
+## 0.6.1
 
-- [BREAKING] Add `~ahead` to `peek_char`: `peek_char ~ahead:1 ()` reads the byte after the next one without a backtracking frame, so a single-pass lexer can tell `=` from `==` or `.` from `..` cheaply: the Lua example runs 2.1% fewer instructions with it than with `look_ahead`. Code that uses `peek_char` as a value of type `unit -> char option` now needs `fun () -> peek_char ()` (@davesnx)
-- [FEATURE] At end of input, `render_error` shows the last line with text above the error, so in `x +` followed by blank lines the excerpt shows `x +` instead of two empty lines; two or more blank lines in between print as `...` (@davesnx)
-- [FEATURE] Add `expected_token ?help ?notes ~upto label`, which fails with an `Expected` item whose `found` and range cover the bytes up to `upto`, such as a token from a separate lexer: it merges with other expected items in `or_`, `expect` relabels it, and a failure swallowed by `or_` allocates nothing unless it passes `~help` or `~notes` (@davesnx)
-- [FEATURE] Make `Parseff.Iter` stable: the module loses its `unstable` alert, so `Iter.many`, `Iter.sep_by`, `Iter.take` and `Iter.take_while` follow the same compatibility promise as the rest of the API (@davesnx)
-- [FEATURE] Add `~at_most` to `Iter.take_while`: a matching byte past the limit fails with `Limit_exceeded` after `f` has received the first `at_most` bytes, so a body read to the end of the input can be capped ([#156](https://github.com/davesnx/parseff/pull/156)) (@davesnx)
-- [FEATURE] Add `Slice.blit` to copy part of a slice into `bytes` without building a string ([#156](https://github.com/davesnx/parseff/pull/156)) (@davesnx)
-- [PERF] Run `peek_with`, `look_ahead` and `not_followed_by` with one exception handler instead of two: about 19 fewer instructions per call (@davesnx)
+- [BREAKING] Add `~ahead` to `peek_char` to read the byte after the next one without a backtracking frame; code that passes `peek_char` as a `unit -> char option` value needs `fun () -> peek_char ()` ([#162](https://github.com/davesnx/parseff/pull/162)) (@davesnx)
+- [FEATURE] Show the last line with text above an error at end of input in `render_error`, instead of the blank lines after it ([#163](https://github.com/davesnx/parseff/pull/163)) (@davesnx)
+- [FEATURE] Add `expected_token ?help ?notes ~upto label`, which fails with an `Expected` item that covers a whole token: it merges with other expected items in `or_`, and `expect` relabels it ([#159](https://github.com/davesnx/parseff/pull/159)) (@davesnx)
+- [FEATURE] Make `Parseff.Iter` stable, add `~at_most` to `Iter.take_while`, and add `Slice.blit` ([#156](https://github.com/davesnx/parseff/pull/156)) (@davesnx)
+- [FEATURE] Add `Slice.of_string`, `Slice.equal` and `Slice.hash`, so `Hashtbl.Make (Slice)` finds a slice of the input without allocating ([#152](https://github.com/davesnx/parseff/pull/152)) (@davesnx)
+- [PERF] Run `peek_with`, `look_ahead` and `not_followed_by` with one exception handler instead of two: about 19 fewer instructions per call ([#157](https://github.com/davesnx/parseff/pull/157)) (@davesnx)
 - [PERF] Scan a `Charset` 8 bytes at a time when it excludes the bytes below a threshold and up to four more, such as HTTP field values, JSON string bodies and CSV fields: 16–45% fewer cycles for `take_while ~set` on fields of 4 to 128 bytes ([#155](https://github.com/davesnx/parseff/pull/155)) (@davesnx)
-- [PERF] Parse on several domains without slowing each other down: once a second domain parses, nothing writes the state hint shared by all domains, so CPU time per domain at 64 domains drops from 11 s to 0.11 s on the benchmark in the PR ([#151](https://github.com/davesnx/parseff/pull/151)) (@davesnx)
+- [PERF] Parse on several domains without slowing each other down: CPU time per domain at 64 domains drops from 11 s to 0.11 s on the benchmark in the PR ([#151](https://github.com/davesnx/parseff/pull/151)) (@davesnx)
 - [PERF] Scan a `Charset` that excludes one or two bytes, such as `fun c -> c <> ';'`, 8 bytes at a time in `take_while`, `skip_while`, `Slice.take_while` and `Iter.take_while` ([#150](https://github.com/davesnx/parseff/pull/150)) (@davesnx)
 - [PERF] Scan the input directly in `Iter.take_while` instead of through a closure built on every call: 6 fewer minor words per call, and 17–22% faster per byte with `~set` on stock OCaml ([#149](https://github.com/davesnx/parseff/pull/149)) (@davesnx)
+- [DOCS] Fail with `expected_token` at the Lua example's token mismatches, and document that `lexeme`'s trivia must record no failures ([#164](https://github.com/davesnx/parseff/pull/164)) (@davesnx)
+- [DOCS] Add a single-pass version of the sedlex example's language, with the same errors ([#161](https://github.com/davesnx/parseff/pull/161)) (@davesnx)
+- [DOCS] Make the Lua example clearer: one gap record, rewinds in the lexer, guarded symbol readers ([#160](https://github.com/davesnx/parseff/pull/160)) (@davesnx)
+- [DOCS] Parse the Lua example in a single pass: 12.5% fewer instructions on a 20 MB file ([#158](https://github.com/davesnx/parseff/pull/158)) (@davesnx)
+- [DOCS] Pin odoc to the markdown fixes of ocaml/odoc#1528 and drop the scripts that worked around them ([#153](https://github.com/davesnx/parseff/pull/153)) (@davesnx)
+- [DOCS] Add an example that lexes with sedlex and parses the tokens with parseff ([#144](https://github.com/davesnx/parseff/pull/144)) (@davesnx)
+- [CHORE] Compile the tests on OxCaml 5.4.0-ox9: eta-expand `Buffer.add_string` in the `Iter.many` recovery test ([#148](https://github.com/davesnx/parseff/pull/148)) (@davesnx)
+- [CHORE] Format with ocamlformat 0.30.0, and require 0.30.x ([7a0a438](https://github.com/davesnx/parseff/commit/7a0a438)) (@davesnx)
 
 ## 0.6.0
 
