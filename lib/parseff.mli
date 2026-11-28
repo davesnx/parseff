@@ -318,48 +318,21 @@ module Ref : sig
       raises. Writes to [cell] inside [parser] last until it ends; other cells
       keep theirs. Raises [Invalid_argument] where {!set} does.
 
-      In this indentation-sensitive tree, a block's lines must start at the
-      block's width; once [c]'s block ends, [d] is checked at [b]'s width again.
+      [nested p] runs [p] one level deeper; [depth] is back to its outer value
+      once [p] returns or fails.
 
       {@ocaml[
-      type tree = Node of string * tree list
-
-      let indent = Ref.create 0
-      let spaces () = String.length (take_while (fun c -> c = ' '))
-
-      let line () =
-        let _ = char '\n' in
-        if spaces () <> Ref.get indent then fail "wrong indentation"
-
-      let rec node () =
-        let label = take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
-        let width =
-          look_ahead (fun () ->
-              or_
-                (fun () ->
-                  let _ = char '\n' in
-                  spaces ()
-                )
-                (fun () -> 0)
-          )
-        in
-        if width <= Ref.get indent then
-          Node (label, [])
-        else
-          Ref.with_value indent width (fun () ->
-              Node
-                ( label,
-                  many (fun () ->
-                      line ();
-                      node ()
-                  )
-                )
-          )
+      let depth = Ref.create 0
+      let nested p = Ref.with_value depth (Ref.get depth + 1) p
       ]}
       {@ocaml[
-      # parse "a\n b\n  c\n d" node;;
-      - : (tree, error) result =
-      Ok (Node ("a", [Node ("b", [Node ("c", [])]); Node ("d", [])]))
+      # parse "" (fun () ->
+          let inside = nested (fun () -> Ref.get depth) in
+          (inside, Ref.get depth));;
+      - : (int * int, error) result = Ok (1, 0)
+      # parse "" (fun () ->
+          or_ (fun () -> nested (fun () -> fail "no")) (fun () -> Ref.get depth));;
+      - : (int, error) result = Ok 0
       ]} *)
 end
 
