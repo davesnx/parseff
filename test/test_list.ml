@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 open Parseff
 
 type expr = Num of int | Add of expr * expr | Hole_expr

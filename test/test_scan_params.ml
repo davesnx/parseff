@@ -236,7 +236,7 @@ let test_messages () =
     "a\xff" (fun () -> Parseff.Utf8.skip_while ~at_least:1 not_bang
   )
 
-let within = Parseff.within [@alert "-unstable"]
+let within = Parseff.within
 
 let test_within () =
   let input = "xabcdef" in

@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 open Parseff
 
 module Nested_or = struct

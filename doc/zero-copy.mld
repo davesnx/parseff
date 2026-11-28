@@ -7,9 +7,9 @@ values.
 {1 [Slice]}
 
 A {!type:Parseff.Slice.t} borrows a byte range from the input string without
-copying under {!val:Parseff.parse}. Under {!val:Parseff.Source.parse} (or inside
-{!val:Parseff.within}), slices may be materialized into owned copies so the
-streaming buffer can reclaim older prefixes.
+copying under {!val:Parseff.parse}, including inside {!val:Parseff.within}.
+Under {!val:Parseff.Source.parse}, slices may be materialized into owned copies
+so the streaming buffer can reclaim older prefixes.
 
 {@ocaml skip[
 module Slice : sig

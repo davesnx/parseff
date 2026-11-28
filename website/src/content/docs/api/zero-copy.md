@@ -11,7 +11,7 @@ description: Zero-copy slices and fused scanners
 
 ## `Slice`
 
-A [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) borrows a byte range from the input string without copying under [`Parseff.parse`](./Parseff.md#val-parse). Under [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) (or inside [`Parseff.within`](./Parseff.md#val-within)), slices may be materialized into owned copies so the streaming buffer can reclaim older prefixes.
+A [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) borrows a byte range from the input string without copying under [`Parseff.parse`](./Parseff.md#val-parse), including inside [`Parseff.within`](./Parseff.md#val-within). Under [`Parseff.Source.parse`](./Parseff-Source.md#val-parse), slices may be materialized into owned copies so the streaming buffer can reclaim older prefixes.
 
 ```ocaml
 module Slice : sig

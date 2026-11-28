@@ -85,7 +85,7 @@ let wav_header () =
 {!val:Parseff.take} reads exactly [n] bytes as a string (fails with an
 [Expected] error if fewer than [n] bytes remain or [n < 0]).
 {!val:Parseff.Slice.take} returns a zero-copy {!type:Parseff.Slice.t} (see
-{{!page-"zero-copy"}Zero-copy API}). {!val:Parseff.within} (unstable) runs an
+{{!page-"zero-copy"}Zero-copy API}). {!val:Parseff.within} runs an
 inner parser bounded to the next [n] bytes without copying.
 
 {@ocaml skip[

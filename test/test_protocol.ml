@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 let chunked_source ~chunk_size input =
   let pos = ref 0 in
   Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
@@ -521,6 +519,76 @@ let test_take_while_at_most () =
       s
     )
     (fun name -> check_ok name Alcotest.string "")
+
+exception Leave_frame
+
+let test_within_exception_restores_end () =
+  both "an exception leaves the frame" "abcdef"
+    (fun () ->
+      let _ =
+        try Parseff.within 2 (fun () -> raise Leave_frame)
+        with Leave_frame -> ()
+      in
+      Parseff.take_while always
+    )
+    (fun name -> check_ok name Alcotest.string "abcdef")
+
+let test_within_slices () =
+  both "slices inside the frame" "abcdef"
+    (fun () ->
+      let a, b =
+        Parseff.within 4 (fun () ->
+            let a = Parseff.Slice.take 1 in
+            (a, Parseff.Slice.take_while always)
+        )
+      in
+      let _ = Parseff.take_while always in
+      (Parseff.Slice.to_string a, Parseff.Slice.to_string b)
+    )
+    (fun name -> check_ok name Alcotest.(pair string string) ("a", "bcd"))
+
+let test_within_advance_to_past_end () =
+  let run name result =
+    match result () with
+    | _ ->
+        Alcotest.failf "%s: advance_to past the frame end should raise" name
+    | exception Invalid_argument _ ->
+        ()
+  in
+  let parser () =
+    let _, stop = Parseff.peek_with (fun () -> Parseff.take 5) in
+    Parseff.within 3 (fun () -> Parseff.advance_to stop)
+  in
+  run "string" (fun () -> Parseff.parse "abcdef" parser);
+  List.iter
+    (fun chunk_size ->
+      run (Printf.sprintf "chunks of %d" chunk_size) (fun () ->
+          Parseff.Source.parse (chunked_source ~chunk_size "abcdef") parser
+      )
+    )
+    chunk_sizes
+
+let test_within_larger_than_window_unpinned () =
+  let input = String.make 1000 'x' in
+  List.iter
+    (fun chunk_size ->
+      check_ok
+        (Printf.sprintf "chunks of %d" chunk_size)
+        Alcotest.int 1000
+        (Parseff.Source.parse ~backtrack_window:16
+           (chunked_source ~chunk_size input) (fun () ->
+             Parseff.within 1000 (fun () ->
+                 let n = ref 0 in
+                 while Parseff.peek_char () <> None do
+                   let _ = Parseff.any_char () in
+                   incr n
+                 done;
+                 !n
+             )
+         )
+        )
+    )
+    chunk_sizes
 
 let test_within_keeps_outer_found_text () =
   let parser () =
@@ -1218,6 +1286,13 @@ let () =
           Alcotest.test_case "read suspends" `Quick test_within_read_suspends;
           Alcotest.test_case "found text of a failure before the frame" `Quick
             test_within_keeps_outer_found_text;
+          Alcotest.test_case "exception restores the end" `Quick
+            test_within_exception_restores_end;
+          Alcotest.test_case "slices" `Quick test_within_slices;
+          Alcotest.test_case "advance_to past the end" `Quick
+            test_within_advance_to_past_end;
+          Alcotest.test_case "larger than the window, nothing pinned" `Quick
+            test_within_larger_than_window_unpinned;
         ]
       );
       ( "at_most",

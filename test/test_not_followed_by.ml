@@ -359,7 +359,7 @@ let test_streaming_boundary () =
 
 let test_within () =
   check_all "within" Fun.id "letter" "Ok ter" (fun () ->
-      within 3 (kw "let") [@alert "-unstable"];
+      within 3 (kw "let");
       take_while is_lower
   )
 

@@ -201,6 +201,12 @@ let test_scan_success () =
   let uword u = Uchar.to_int u <> 0x20 in
   let set = Parseff.Charset.of_predicate word in
   check "skip_while" 0. "abc " (fun () -> Parseff.skip_while word);
+  let skip_word () = Parseff.skip_while word in
+  let slice_word () = Parseff.Slice.take_while word in
+  check "within on string input" 0. "abc " (fun () -> Parseff.within 3 skip_word);
+  check "Slice.take_while inside within" 4. "abc " (fun () ->
+      Parseff.within 3 slice_word
+  );
   check "skip_while ~set" 2. "abc " (fun () -> Parseff.skip_while ~set word);
   check "skip_while ~at_least" 0. "abc " (fun () ->
       Parseff.skip_while ~at_least:2 word

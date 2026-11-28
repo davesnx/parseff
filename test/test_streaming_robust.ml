@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 open Effect
 open Effect.Deep
 

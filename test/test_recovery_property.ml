@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 open Parseff
 
 let show = function

@@ -3088,25 +3088,60 @@ let[@inline never] reclip_far st limit n0 p0 =
     | Some _ | None ->
         ()
 
-let[@inline never] limited st stop f =
+let[@inline never] frame_end st stop =
+  if st.pos <> stop then
+    if have st 1 then
+      fail_int st st.pos tag_end_of_input
+    else
+      fail_bytes st (stop - st.pos)
+
+let[@inline never] frame_failed st start limit far0 far0_pos far0_n far0_pushes
+    =
+  if st.far != far0 || st.far.pos <> far0_pos then
+    clip_far st start limit
+  else if st.far.n <> far0_n || far_over_pushes st.far <> far0_pushes then
+    reclip_far st limit far0_n far0_pushes
+
+(* On string input a frame only lowers [input_len]: slices stay zero-copy and
+   nothing is allocated. *)
+let[@inline never] within_string st stop p =
   let start = st.pos in
   let far0 = st.far in
   let far0_pos = far0.pos in
   let far0_n = far0.n in
   let far0_pushes = far_over_pushes far0 in
-  let outer = st.source in
   let outer_len = st.input_len in
-  let limit, ended, window =
-    match outer with
-    | None ->
-        (stop, true, default_backtrack_window)
-    | Some src -> (
-        match src.feed with
-        | Frame fr ->
-            (imin stop fr.limit, src.eof, src.window)
-        | Read _ | Chunks _ | Bigstrings _ ->
-            (stop, src.eof, src.window)
-      )
+  let limit = imin stop outer_len in
+  st.input_len <- limit;
+  match
+    let v = p () in
+    frame_end st stop;
+    v
+  with
+  | v ->
+      st.input_len <- outer_len;
+      v
+  | exception exn ->
+      if exn == Fail then
+        frame_failed st start limit far0 far0_pos far0_n far0_pushes;
+      st.input_len <- outer_len;
+      raise exn
+
+(* On a streaming source a frame installs a [Frame] source that reads from the
+   outer one up to [limit], so [n] can exceed the backtrack window. *)
+let[@inline never] within_source st stop outer src p =
+  let start = st.pos in
+  let far0 = st.far in
+  let far0_pos = far0.pos in
+  let far0_n = far0.n in
+  let far0_pushes = far_over_pushes far0 in
+  let outer_len = st.input_len in
+  let limit =
+    match src.feed with
+    | Frame fr ->
+        imin stop fr.limit
+    | Read _ | Chunks _ | Bigstrings _ ->
+        stop
   in
   let fr = { outer; limit; outer_len } in
   st.source <-
@@ -3119,26 +3154,25 @@ let[@inline never] limited st stop f =
         origin = 0;
         offset = 0;
         feed = Frame fr;
-        eof = ended || outer_len >= limit;
-        window;
+        eof = src.eof || outer_len >= limit;
+        window = src.window;
         busy = false;
       };
   st.input_len <- imin outer_len limit;
-  let leave () =
-    st.source <- outer;
-    st.input_len <- fr.outer_len
-  in
-  match f () with
+  match
+    let v = p () in
+    frame_end st stop;
+    v
+  with
   | v ->
-      leave ();
+      st.source <- outer;
+      st.input_len <- fr.outer_len;
       v
   | exception exn ->
       if exn == Fail then
-        if st.far != far0 || st.far.pos <> far0_pos then
-          clip_far st start limit
-        else if st.far.n <> far0_n || far_over_pushes st.far <> far0_pushes then
-          reclip_far st limit far0_n far0_pushes;
-      leave ();
+        frame_failed st start limit far0 far0_pos far0_n far0_pushes;
+      st.source <- outer;
+      st.input_len <- fr.outer_len;
       raise exn
 
 let ctx_stride = 2
@@ -3557,15 +3591,11 @@ let within n p =
     else
       st.pos + n
   in
-  limited st stop (fun () ->
-      let v = p () in
-      if st.pos <> stop then
-        if have st 1 then
-          fail_int st st.pos tag_end_of_input
-        else
-          fail_bytes st (stop - st.pos);
-      v
-  )
+  match st.source with
+  | None ->
+      within_string st stop p
+  | Some src as outer ->
+      within_source st stop outer src p
 
 let[@inline never] without_recovery st p =
   st.recovery_off <- st.recovery_off + 1;

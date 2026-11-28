@@ -79,7 +79,7 @@ let wav_header () =
 
 ## Fixed-length reads and framed payloads
 
-[`Parseff.take`](./Parseff.md#val-take) reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`). [`Parseff.Slice.take`](./Parseff-Slice.md#val-take) returns a zero-copy [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) (see [Zero-copy API](./zero-copy.md)). [`Parseff.within`](./Parseff.md#val-within) (unstable) runs an inner parser bounded to the next `n` bytes without copying.
+[`Parseff.take`](./Parseff.md#val-take) reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`). [`Parseff.Slice.take`](./Parseff-Slice.md#val-take) returns a zero-copy [`Parseff.Slice.t`](./Parseff-Slice.md#type-t) (see [Zero-copy API](./zero-copy.md)). [`Parseff.within`](./Parseff.md#val-within) runs an inner parser bounded to the next `n` bytes without copying.
 
 ```ocaml
 val take : int -> string

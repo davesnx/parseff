@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 let source ~chunk_size input =
   let pos = ref 0 in
   Parseff.Source.of_function (fun buf off len ->

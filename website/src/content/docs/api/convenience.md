@@ -169,7 +169,7 @@ val within : int -> (unit -> 'a) -> 'a
 ```
 
 - [`Parseff.take`](./Parseff.md#val-take) reads exactly `n` bytes as a string (fails with an `Expected` error if fewer than `n` bytes remain or `n < 0`).
-- [`Parseff.within`](./Parseff.md#val-within) (unstable) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
+- [`Parseff.within`](./Parseff.md#val-within) runs a parser bounded to the next `n` bytes, presenting EOF at the frame boundary without copying the payload. Fails if bytes remain unread inside the frame or the input ends before `n` bytes.
 - To stream a payload larger than `~backtrack_window` to a callback, see [`Iter`](./streaming.md#iter).
 
 ```ocaml

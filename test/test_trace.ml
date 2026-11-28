@@ -1,5 +1,3 @@
-[@@@alert "-unstable"]
-
 let show (e : Parseff.trace_event) =
   match e with
   | Parseff.Enter { name; pos } ->

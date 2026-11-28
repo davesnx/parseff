@@ -1752,20 +1752,19 @@ val take : int -> string
     [n] within [~backtrack_window], or use {!Iter.take}. *)
 
 val within : int -> (unit -> 'a) -> 'a
-[@@alert unstable "This value can change in any minor release."]
 (** [within n parser] runs [parser] bounded to the next [n] bytes (such as a
     length-prefixed frame payload).
 
     - [parser] sees end of input after [n] bytes. Fails with
       [expected end of input] if [parser] leaves bytes unread, with
-      [expected k bytes, found end of input] if input ends before [n] bytes and
-      [parser] succeeded early, or like {!take} if [n < 0]. Nested [within]
-      frames end no later than their enclosing frame.
-    - Does not copy or buffer all [n] bytes: under {!Source.parse}, [n] can
-      exceed [~backtrack_window] when [parser] calls {!commit}. Inside [within],
-      {!Slice.take}, {!Slice.take_while}, and {!Slice.recognize} return owned
-      copies even on string input, and {!advance_to} raises [Invalid_argument]
-      for targets past the frame end.
+      [expected k bytes, found end of input] if input ends [k] bytes before the
+      frame end and [parser] succeeded early, or like {!take} if [n < 0]. Nested
+      [within] frames end no later than their enclosing frame.
+    - On string input, only moves the end of input: {!Slice} values stay
+      zero-copy. Under {!Source.parse}, does not buffer the [n] bytes, so [n]
+      can exceed [~backtrack_window] unless an enclosing {!or_}, {!many}, or
+      similar frame pins the input (call {!commit} to release it).
+    - {!advance_to} raises [Invalid_argument] for targets past the frame end.
 
     {@ocaml[
     let frame () =
