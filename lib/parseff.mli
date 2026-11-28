@@ -301,6 +301,56 @@ module Ref : sig
   val set : 'a t -> 'a -> unit
   (** [set cell v] writes [v] into [cell]. Raises [Invalid_argument] if another
       running parse already wrote to [cell]. *)
+
+  val with_value : 'a t -> 'a -> (unit -> 'b) -> 'b
+  (** [with_value cell v parser] runs [parser] with [cell] set to [v], then puts
+      back the value [cell] had before, whether [parser] returns, fails, or
+      raises. Writes to [cell] inside [parser] last until it ends; other cells
+      keep theirs. Raises [Invalid_argument] where {!set} does.
+
+      In this indentation-sensitive tree, a block's lines must start at the
+      block's width; once [c]'s block ends, [d] is checked at [b]'s width again.
+
+      {@ocaml[
+      type tree = Node of string * tree list
+
+      let indent = Ref.create 0
+      let spaces () = String.length (take_while (fun c -> c = ' '))
+
+      let line () =
+        let _ = char '\n' in
+        if spaces () <> Ref.get indent then fail "wrong indentation"
+
+      let rec node () =
+        let label = take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
+        let width =
+          look_ahead (fun () ->
+              or_
+                (fun () ->
+                  let _ = char '\n' in
+                  spaces ()
+                )
+                (fun () -> 0)
+          )
+        in
+        if width <= Ref.get indent then
+          Node (label, [])
+        else
+          Ref.with_value indent width (fun () ->
+              Node
+                ( label,
+                  many (fun () ->
+                      line ();
+                      node ()
+                  )
+                )
+          )
+      ]}
+      {@ocaml[
+      # parse "a\n b\n  c\n d" node;;
+      - : (tree, error) result =
+      Ok (Node ("a", [Node ("b", [Node ("c", [])]); Node ("d", [])]))
+      ]} *)
 end
 
 (** {1 Trace} *)

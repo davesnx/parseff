@@ -8540,6 +8540,20 @@ module Ref = struct
       st.trail <- Undo { cell = c; old = c.value; depth; token; next }
     end;
     c.value <- value
+
+  (* On an exception the frames [p] pushed are gone, and [set c value]
+     already recorded [c] in the current frame if a backtrack can reach it, so
+     a plain write is enough and keeps failing branches cheap. *)
+  let with_value c value p =
+    let old = c.value in
+    set c value;
+    match p () with
+    | result ->
+        set c old;
+        result
+    | exception exn ->
+        c.value <- old;
+        raise exn
 end
 
 module Slice = struct

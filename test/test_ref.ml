@@ -710,6 +710,289 @@ let test_nested_parse () =
     "inner parse" "Parseff.Ref.set: another running parse uses this cell"
     (ok_exn result)
 
+let test_with_value_success () =
+  let c = Ref.create 1 in
+  let inside =
+    ok_exn
+      (parse "a" (fun () ->
+           Ref.with_value c 2 (fun () ->
+               let seen = Ref.get c in
+               Ref.set c 3;
+               let _ = char 'a' in
+               (seen, Ref.get c)
+           )
+       )
+      )
+  in
+  Alcotest.(check (pair int int)) "inside" (2, 3) inside;
+  Alcotest.(check int) "restored after the parse" 1 (Ref.get c)
+
+let test_with_value_failure () =
+  check_final "with_value or_" "b" "ok" 0
+    (with_cell (fun c () ->
+         or_
+           (fun () ->
+             Ref.with_value c 1 (fun () ->
+                 Ref.set c 2;
+                 let _ = char 'a' in
+                 ()
+             )
+           )
+           (fun () ->
+             if Ref.get c <> 0 then fail "not restored";
+             let _ = char 'b' in
+             ()
+           )
+     )
+    );
+  check_final "with_value error" "b" "error expected 'a', found 'b'" 0
+    (with_cell (fun c () ->
+         Ref.with_value c 1 (fun () ->
+             let _ = char 'a' in
+             ()
+         )
+     )
+    )
+
+let test_with_value_backtracking () =
+  let failing c () =
+    Ref.with_value c 1 (fun () ->
+        incr_cell c;
+        char 'a'
+    )
+  in
+  let after ?(outcome = "ok") name input expected wrap =
+    check_final name input outcome expected
+      (with_cell (fun c () ->
+           Ref.set c 5;
+           wrap c;
+           if Ref.get c <> 5 then fail "not restored"
+       )
+      )
+  in
+  after "one_of" "b" 5 (fun c ->
+      let _ = one_of [ failing c; (fun () -> char 'b') ] in
+      ()
+  );
+  after "many" "aab" 5 (fun c ->
+      let _ = many (failing c) in
+      ()
+  );
+  after "optional" "b" 5 (fun c ->
+      let _ = optional (failing c) in
+      ()
+  );
+  after "look_ahead" "a" 5 (fun c ->
+      let _ = look_ahead (failing c) in
+      ()
+  );
+  after "capture" "b" 5 (fun c ->
+      let _ = capture (failing c) in
+      ()
+  );
+  (* Without ~diagnostics a recovered failure ends the parse with [Error]. *)
+  after ~outcome:"error expected 'a', found 'b'" "recover" "b" 5 (fun c ->
+      recover
+        ~sync:(fun () -> ())
+        (fun () ->
+          let _ = failing c () in
+          ()
+        )
+        (fun _ -> ())
+  )
+
+let test_with_value_outer_backtrack () =
+  (* The cell was written in the same frame before [with_value], and [p]'s own
+     writes were partly undone by an inner [or_]. Backtracking out of the
+     whole branch still goes back to the value before the branch. *)
+  check_final "outer or_" "ac" "ok" 0
+    (with_cell (fun c () ->
+         or_
+           (fun () ->
+             Ref.set c 1;
+             Ref.with_value c 2 (fun () ->
+                 or_
+                   (fun () ->
+                     Ref.set c 3;
+                     let _ = char 'x' in
+                     ()
+                   )
+                   (fun () ->
+                     if Ref.get c <> 2 then fail "inner not undone";
+                     let _ = char 'a' in
+                     ()
+                   )
+             );
+             if Ref.get c <> 1 then fail "not restored to 1";
+             let _ = char 'b' in
+             ()
+           )
+           (fun () ->
+             if Ref.get c <> 0 then fail "not rolled back to 0";
+             let _ = literal "ac" in
+             ()
+           )
+     )
+    );
+  check_final "kept after success" "ab" "ok" 1
+    (with_cell (fun c () ->
+         Ref.set c 1;
+         Ref.with_value c 2 (fun () ->
+             let _ = char 'a' in
+             ()
+         );
+         let _ = char 'b' in
+         ()
+     )
+    )
+
+let test_with_value_nested () =
+  check_final "nested" "abc" "ok" 0
+    (with_cell (fun c () ->
+         Ref.with_value c 1 (fun () ->
+             let _ = char 'a' in
+             Ref.with_value c 2 (fun () ->
+                 if Ref.get c <> 2 then fail "inner";
+                 let _ = char 'b' in
+                 ()
+             );
+             if Ref.get c <> 1 then fail "outer";
+             let _ = char 'c' in
+             ()
+         )
+     )
+    )
+
+let test_with_value_exception () =
+  let c = Ref.create 0 in
+  let raised =
+    match
+      parse "a" (fun () ->
+          or_
+            (fun () -> Ref.with_value c 1 (fun () -> raise Exit))
+            (fun () -> ())
+      )
+    with
+    | _ ->
+        false
+    | exception Exit ->
+        true
+  in
+  Alcotest.(check bool) "Exit escapes" true raised;
+  Alcotest.(check int) "restored" 0 (Ref.get c);
+  let outside = Ref.with_value c 4 (fun () -> Ref.get c) in
+  Alcotest.(check (pair int int)) "outside a parse" (4, 0) (outside, Ref.get c)
+
+let test_with_value_push () =
+  let c = Ref.create 0 in
+  let p =
+    Push.parse (fun () ->
+        Ref.with_value c 1 (fun () ->
+            literal "abc";
+            Ref.get c
+        )
+    )
+  in
+  ( match Push.feed p "a" with
+  | Await ->
+      ()
+  | Done _ ->
+      Alcotest.fail "done too early"
+  );
+  Alcotest.(check int) "set while suspended" 1 (Ref.get c);
+  ( match Push.feed p "bc" with
+  | Done (Ok (seen, _)) ->
+      Alcotest.(check int) "value" 1 seen
+  | _ ->
+      Alcotest.fail "expected Done Ok"
+  );
+  Alcotest.(check int) "restored after feed" 0 (Ref.get c);
+  let p = Push.parse (fun () -> Ref.with_value c 2 (fun () -> literal "abc")) in
+  let _ = Push.feed p "ab" in
+  Alcotest.(check int) "set while suspended" 2 (Ref.get c);
+  Push.cancel p;
+  Alcotest.(check int) "restored after cancel" 0 (Ref.get c);
+  Ref.set c 7;
+  Alcotest.(check int) "cell released after cancel" 7 (Ref.get c)
+
+let test_with_value_iter () =
+  let c = Ref.create 0 in
+  let seen = ref [] in
+  let _ =
+    ok_exn
+      (parse "aaa" (fun () ->
+           Ref.with_value c 3 (fun () ->
+               Iter.many
+                 (fun () -> char 'a')
+                 (fun _ -> seen := Ref.get c :: !seen)
+           )
+       )
+      )
+  in
+  Alcotest.(check (list int)) "callback reads the value" [ 3; 3; 3 ] !seen;
+  Alcotest.(check int) "restored" 0 (Ref.get c);
+  let message =
+    match
+      parse "a" (fun () ->
+          Ref.set c 1;
+          Iter.many
+            (fun () -> char 'a')
+            (fun _ -> Ref.with_value c 2 (fun () -> ()))
+      )
+    with
+    | _ ->
+        "no error"
+    | exception Invalid_argument _ ->
+        "Invalid_argument"
+  in
+  Alcotest.(check string) "inside a callback" "Invalid_argument" message
+
+type tree = Node of string * tree list
+
+let test_with_value_indentation () =
+  let indent = Ref.create 0 in
+  let spaces () = String.length (take_while (fun c -> c = ' ')) in
+  let line () =
+    let _ = char '\n' in
+    if spaces () <> Ref.get indent then fail "wrong indentation"
+  in
+  let rec node () =
+    let label = take_while ~at_least:1 (fun c -> c >= 'a' && c <= 'z') in
+    let width =
+      look_ahead (fun () ->
+          or_
+            (fun () ->
+              let _ = char '\n' in
+              spaces ()
+            )
+            (fun () -> 0)
+      )
+    in
+    if width <= Ref.get indent then
+      Node (label, [])
+    else
+      Ref.with_value indent width (fun () ->
+          Node
+            ( label,
+              many (fun () ->
+                  line ();
+                  node ()
+              )
+            )
+      )
+  in
+  let rec show (Node (l, cs)) =
+    l ^ "(" ^ String.concat " " (List.map show cs) ^ ")"
+  in
+  let run input =
+    match parse input node with Ok t -> show t | Error e -> error_message e
+  in
+  Alcotest.(check string)
+    "tree" "a(b(c() d()) e(f()) g())"
+    (run "a\n  b\n    c\n    d\n  e\n   f\n  g");
+  Alcotest.(check string) "dedent too far" "wrong indentation" (run "a\n  b\n c");
+  Alcotest.(check int) "restored" 0 (Ref.get indent)
+
 let () =
   Alcotest.run "Ref"
     [
@@ -757,6 +1040,20 @@ let () =
             test_cell_does_not_keep_input;
           Alcotest.test_case "exceptions that escape a branch" `Quick
             test_escaping_exceptions;
+        ]
+      );
+      ( "with_value",
+        [
+          Alcotest.test_case "success" `Quick test_with_value_success;
+          Alcotest.test_case "failure" `Quick test_with_value_failure;
+          Alcotest.test_case "backtracking" `Quick test_with_value_backtracking;
+          Alcotest.test_case "outer backtrack" `Quick
+            test_with_value_outer_backtrack;
+          Alcotest.test_case "nested" `Quick test_with_value_nested;
+          Alcotest.test_case "exception" `Quick test_with_value_exception;
+          Alcotest.test_case "push" `Quick test_with_value_push;
+          Alcotest.test_case "iter" `Quick test_with_value_iter;
+          Alcotest.test_case "indentation" `Quick test_with_value_indentation;
         ]
       );
     ]
