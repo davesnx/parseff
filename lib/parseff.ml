@@ -2911,7 +2911,7 @@ let[@inline never] scan_uchars st inp ~base start limit pred =
         true
       end
     else
-      let d = utf8_decode inp !pos (Bytes.length inp) in
+      let d = utf8_decode inp !pos (st.input_len - base) in
       if not (Uchar.utf_decode_is_valid d) then
         fail_str st (!pos + base) tag_label label_utf8;
       pred (Uchar.utf_decode_uchar d)
@@ -5778,6 +5778,14 @@ let char_len ?(limit = max_int) s i =
   else
     1
 
+(* The byte length of the character at [i] when the input ends at [stop]: a
+   character cut by [stop] counts one byte, as at the end of a string. *)
+let char_len_to s i stop =
+  if i + utf8_sequence_length (Char.code (Bytes.unsafe_get s i)) > stop then
+    1
+  else
+    char_len s i
+
 let count_code_points ?limit s a b =
   let n = ref 0 and i = ref a in
   while
@@ -7136,7 +7144,12 @@ let found_of st ~open_end stop pos =
       else
         (Text (Bytes.sub_string st.input rel !k), { start = p; stop = p + !k })
     end else begin
-      let n = char_len ~limit:(unread_limit st) st.input rel in
+      let n =
+        if open_end then
+          char_len ~limit:(unread_limit st) st.input rel
+        else
+          char_len_to st.input rel len
+      in
       let n =
         if n <= len - rel then
           n
@@ -7588,7 +7601,7 @@ let recovering_on st ~release ~contexts ~record ~progress errors ~sync parser
       st.pos <- p;
       fill_uchar st ~keep_from:p p;
       if p < st.input_len then
-        st.pos <- p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+        st.pos <- p + char_len_to st.input (p - st.base) (st.input_len - st.base)
     end;
     let v = hole e in
     mark_recovered st base;
@@ -7772,7 +7785,7 @@ let require parser missing =
 let skip_char st =
   let p = st.pos in
   fill_uchar st ~keep_from:p p;
-  st.pos <- p + imin (char_len st.input (p - st.base)) (st.input_len - p)
+  st.pos <- p + char_len_to st.input (p - st.base) (st.input_len - st.base)
 
 exception Not_an_element
 

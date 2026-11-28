@@ -9,6 +9,13 @@ let chunked_source ~chunk_size input =
   )
 
 let chunk_sizes = [ 1; 2; 3; 7; 64; 4096 ]
+
+let cut_found m =
+  match String.index_from_opt m 0 ',' with
+  | Some i when i + 7 <= String.length m && String.sub m i 7 = ", found" ->
+      String.sub m 0 i
+  | _ ->
+      m
 let always _ = true
 
 let check_message expected name = function
@@ -586,6 +593,73 @@ let test_within_larger_than_window_unpinned () =
                  !n
              )
          )
+        )
+    )
+    chunk_sizes
+
+(* U+3000 is a 3-byte whitespace character; the frame cuts it. *)
+let test_within_cuts_utf8 () =
+  List.iter
+    (fun (what, payload) ->
+      both what "\xE3\x80\x80!"
+        (fun () -> Parseff.within 2 payload)
+        (fun name -> function
+          | Ok () ->
+              Alcotest.failf "%s: read past the frame end" name
+          | Error e ->
+              Alcotest.(check (pair int string))
+                name
+                (0, "expected valid UTF-8")
+                (e.range.start, cut_found (Parseff.error_message e))
+        )
+    )
+    [
+      ("Utf8.skip_whitespace", Parseff.Utf8.skip_whitespace);
+      ( "Utf8.take_while",
+        fun () -> ignore (Parseff.Utf8.take_while Parseff.Utf8.is_whitespace)
+      );
+    ]
+
+(* Streaming found text can stop short, so only [parse] is checked. *)
+let test_within_found_cut_char () =
+  match
+    Parseff.parse "\xE6\x80\x80" (fun () ->
+        Parseff.within 2 (fun () -> Parseff.char 'b')
+    )
+  with
+  | Ok _ ->
+      Alcotest.fail "expected an error"
+  | Error e ->
+      Alcotest.(check (pair string int))
+        "found text"
+        ("expected 'b', found '\\xE6'", 1)
+        (Parseff.error_message e, e.range.stop)
+
+let test_within_recover_cut_char () =
+  let parser () =
+    Parseff.within 2 (fun () ->
+        let _ =
+          Parseff.recover
+            ~sync:(fun () -> ())
+            (fun () -> Parseff.char 'b')
+            (fun _ -> '?')
+        in
+        let at = Parseff.position () in
+        let _ = Parseff.take_while always in
+        at
+    )
+  in
+  let diagnostics = Parseff.Diagnostics.create () in
+  check_ok "string" Alcotest.int 1
+    (Parseff.parse ~consume:`Partial ~diagnostics "\xE6\x80\x80" parser);
+  List.iter
+    (fun chunk_size ->
+      check_ok
+        (Printf.sprintf "chunks of %d" chunk_size)
+        Alcotest.int 1
+        (Parseff.Source.parse ~consume:`Partial ~diagnostics
+           (chunked_source ~chunk_size "\xE6\x80\x80")
+           parser
         )
     )
     chunk_sizes
@@ -1293,6 +1367,12 @@ let () =
             test_within_advance_to_past_end;
           Alcotest.test_case "larger than the window, nothing pinned" `Quick
             test_within_larger_than_window_unpinned;
+          Alcotest.test_case "UTF-8 character cut by the frame end" `Quick
+            test_within_cuts_utf8;
+          Alcotest.test_case "found text cut by the frame end" `Quick
+            test_within_found_cut_char;
+          Alcotest.test_case "recover skips a cut character" `Quick
+            test_within_recover_cut_char;
         ]
       );
       ( "at_most",

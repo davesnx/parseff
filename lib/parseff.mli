@@ -112,8 +112,9 @@ type note = { at : range option; text : string }
 
 type excerpt
 (** Source lines retained for {!render_error}. Errors from {!parse} reference
-    the input string lazily; errors from {!Source.parse} or {!within} store a
-    copy of the relevant lines. *)
+    the input string lazily; errors from {!Source.parse} store a copy of the
+    relevant lines. An error built inside {!within}, such as one caught by
+    {!capture}, shows only the bytes up to the frame end. *)
 
 type custom_error = ..
 (** Extensible variant for domain errors passed to {!val-error} and {!val:warn}.
@@ -1268,8 +1269,8 @@ val skip_nested :
 module Slice : sig
   type t
   (** A slice of the input. Zero-copy under {!Parseff.parse}; an owned copy
-      under {!Parseff.Source.parse} and {!Parseff.within}. Read bytes with
-      {!length} and {!get}, or copy to a string with {!to_string}. *)
+      under {!Parseff.Source.parse}. Read bytes with {!length} and {!get}, or
+      copy to a string with {!to_string}. *)
 
   val to_string : t -> string
   (** [to_string s] allocates and returns the slice's bytes as a string. *)
