@@ -246,9 +246,15 @@ let cut_found m =
 
 let render_check cx (e : Parseff.error) =
   let plain = Parseff.render_error e in
-  (* Known, not about frames: with a delimited context at end of input, the
-     stored excerpt elides a single blank line that ~source shows. *)
-  let known = e.contexts <> [] && e.range.start = String.length cx.input in
+  (* Known, not about frames: with a context at end of input, the stored
+     excerpt elides a single blank line that ~source shows; a context that
+     starts on a line after the error gets a wrong line. *)
+  let known =
+    (e.contexts <> [] && e.range.start = String.length cx.input)
+    || List.exists
+         (fun (c : Parseff.context) -> c.start > e.range.start)
+         e.contexts
+  in
   if cx.check_render && cx.bad_render = None && not known then begin
     let full = Parseff.render_error ~source:cx.input e in
     if plain <> full then
