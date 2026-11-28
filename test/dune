@@ -42,7 +42,8 @@
   test_note_range
   test_at_most
   test_slice
-  test_expected_token)
+  test_expected_token
+  test_within_fuzz)
  (modules :standard \ test_fold_right_limit)
  (libraries parseff http alcotest uucp))
 
