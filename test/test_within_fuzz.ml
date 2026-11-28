@@ -1,9 +1,10 @@
 (* Differential fuzzing of [within]: random parser programs from a small
    grammar run on random byte strings.
 
-   - Frame oracle: [take k; within n body] on [input] behaves like [body] on the
-     [n] bytes after [k] (shifted by [k]), plus the documented short-frame
-     error.
+   - Frame oracle: [take k; within n body] on [input] behaves like a frame
+     over all of the [n] bytes after [k] (shifted by [k]), plus the documented
+     short-frame error. The frame keeps [expected end of frame] for unread
+     bytes on both sides.
    - Runner oracle: [parse], [Source.parse] (several chunk sizes and windows)
      and [Push.parse] agree on values, errors and diagnostics.
    - Render oracle: under [parse], [render_error e] equals
@@ -1017,7 +1018,8 @@ let check_runners stats g input ~diags ~partial =
         )
         !dump
 
-(* Frame oracle: [take k; within n body] against [body] on the frame bytes. *)
+(* Frame oracle: [take k; within n body] against a frame over all of the frame
+   bytes. *)
 let check_frame stats ~k ~n body input ~diags =
   let len = String.length input in
   if k <= len && n >= 0 then begin
@@ -1026,7 +1028,9 @@ let check_frame stats ~k ~n body input ~diags =
     let sub = String.sub input k frame_len in
     match
       ( outcome ~full:true ~diags ~partial:true Memory g input,
-        outcome ~shift:k ~full:true ~diags ~partial:false Memory body sub
+        outcome ~shift:k ~full:true ~diags ~partial:false Memory
+          (Within (frame_len, body))
+          sub
       )
     with
     | None, _ | _, None ->
@@ -1077,7 +1081,7 @@ let check_frame stats ~k ~n body input ~diags =
               {
                 inner with
                 result =
-                  Printf.sprintf "Ok %s,w(%s)@%d" prefix
+                  Printf.sprintf "Ok %s,%s@%d" prefix
                     (String.sub inner.result 3 (String.length inner.result - 3))
                     (k + n);
               }

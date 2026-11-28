@@ -79,7 +79,39 @@ let test_within_end_of_input () =
 let test_within_leftover () =
   both "bytes left" "hel-oworld"
     (fun () -> Parseff.within 5 (fun () -> Parseff.take 3))
-    (check_message "expected end of input, found '-'")
+    (check_message "expected end of frame, found '-'")
+
+let test_within_leftover_items () =
+  let is_end_of_frame name = function
+    | Error
+        {
+          Parseff.kind =
+            Expected { items = Parseff.End_of_frame, []; found = Text _; _ };
+          range;
+          _;
+        } ->
+        Alcotest.(check int) (name ^ " range start") 1 range.start
+    | Error e ->
+        Alcotest.failf "%s: %s" name (Parseff.error_message e)
+    | Ok _ ->
+        Alcotest.failf "%s: expected an error" name
+  in
+  both "End_of_frame item" "abcdef"
+    (fun () -> Parseff.within 3 (fun () -> Parseff.take 1))
+    is_end_of_frame;
+  both "merged with the payload items" "aabc"
+    (fun () ->
+      Parseff.within 3 (fun () -> Parseff.many (fun () -> Parseff.char 'a'))
+    )
+    (check_message "expected 'a' or end of frame, found 'b'");
+  both "next to end of input" "aabc"
+    (fun () ->
+      Parseff.within 3 (fun () ->
+          let _ = Parseff.many (fun () -> Parseff.char 'a') in
+          Parseff.or_ Parseff.end_of_input (fun () -> ())
+      )
+    )
+    (check_message "expected 'a', end of input, or end of frame, found 'b'")
 
 let test_within_read_past_end () =
   both "read past the frame" "hello world"
@@ -1333,6 +1365,8 @@ let () =
           Alcotest.test_case "frame" `Quick test_within_frame;
           Alcotest.test_case "end of input" `Quick test_within_end_of_input;
           Alcotest.test_case "bytes left" `Quick test_within_leftover;
+          Alcotest.test_case "end of frame item" `Quick
+            test_within_leftover_items;
           Alcotest.test_case "read past the end" `Quick
             test_within_read_past_end;
           Alcotest.test_case "found text" `Quick test_within_found_stops_at_end;

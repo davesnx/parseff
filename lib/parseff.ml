@@ -318,6 +318,7 @@ type expected =
   | Literal of string
   | Label of string
   | End_of_input
+  | End_of_frame
 
 type found = Text of string | End | Short of int | Value of string
 type range = range_data = { start : int; stop : int }
@@ -1780,6 +1781,9 @@ let tag_byte = 1
 let tag_literal = 2
 let tag_label = 3
 let tag_end_of_input = 4
+
+(* [tag_end_of_input] with payload 1: the end of a [within] frame. *)
+let end_of_frame_kind = (1 lsl 3) lor tag_end_of_input
 let tag_bytes = 5
 let tag_at_least = 6
 let tag_big = 7
@@ -3091,7 +3095,7 @@ let[@inline never] reclip_far st limit n0 p0 =
 let[@inline never] frame_end st stop =
   if st.pos <> stop then
     if have st 1 then
-      fail_int st st.pos tag_end_of_input
+      fail_int st st.pos end_of_frame_kind
     else
       fail_bytes st (stop - st.pos)
 
@@ -5883,6 +5887,8 @@ let expected_text = function
       l
   | End_of_input ->
       "end of input"
+  | End_of_frame ->
+      "end of frame"
 
 let max_items = 8
 
@@ -7125,6 +7131,8 @@ let expected_rank = function
       2
   | End_of_input ->
       3
+  | End_of_frame ->
+      4
 
 let compare_expected a b =
   match (a, b) with
@@ -7148,7 +7156,10 @@ let expected_of_far f =
     else if tag = tag_label then
       Label s
     else if tag = tag_end_of_input then
-      End_of_input
+      if payload = 0 then
+        End_of_input
+      else
+        End_of_frame
     else if tag = tag_bytes then
       Label
         ( if payload = 1 then

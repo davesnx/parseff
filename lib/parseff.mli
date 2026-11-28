@@ -82,6 +82,8 @@ type expected = private
       (** A label from {!val:satisfy}, {!val:take_while}, {!val:expect}, and
           similar combinators. *)
   | End_of_input  (** End of input. *)
+  | End_of_frame
+      (** End of a {!val:within} frame, when its parser leaves bytes unread. *)
 
 type found = private
   | Text of string
@@ -1815,7 +1817,7 @@ val within : int -> (unit -> 'a) -> 'a
     length-prefixed frame payload).
 
     - [parser] sees end of input after [n] bytes. Fails with
-      [expected end of input] if [parser] leaves bytes unread, with
+      [expected end of frame] if [parser] leaves bytes unread, with
       [expected k bytes, found end of input] if input ends [k] bytes before the
       frame end and [parser] succeeded early, or like {!take} if [n < 0]. Nested
       [within] frames end no later than their enclosing frame.

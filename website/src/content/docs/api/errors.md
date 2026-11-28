@@ -135,7 +135,7 @@ type error = private {
 
 `kind` cases:
 
-- `Expected { items; found; more }`: primitive mismatch. `items` holds up to 64 sorted, unique expectations (`Char`, `Literal`, `Label`, `End_of_input`); `more` counts overflow items. `found` is `Text` (input snippet), `End` (EOF), `Short n` (short fixed-width read), or `Value` (mismatched binary integer).
+- `Expected { items; found; more }`: primitive mismatch. `items` holds up to 64 sorted, unique expectations (`Char`, `Literal`, `Label`, `End_of_input`, `End_of_frame`); `more` counts overflow items. `found` is `Text` (input snippet), `End` (EOF), `Short n` (short fixed-width read), or `Value` (mismatched binary integer).
 - `Failed msg`: raised by [`Parseff.fail`](./Parseff.md#val-fail), or `"no alternative matched"` for `one_of []`.
 - `Custom e`: raised by [`Parseff.error`](./Parseff.md#val-error). Match with a fallback `_` case.
 - `Limit_exceeded { limit }`: exceeded `~at_most` on `take_while`, `skip_while`, `Slice.take_while`, `take_until`, `skip_until`, `Utf8.take_while`, `Utf8.skip_while`, `Utf8.Slice.take_while`, `many`, `sep_by`, or `end_by`. Fatal like `cut (); fail`: no enclosing choice tries another option, up to the nearest [`Parseff.look_ahead`](./Parseff.md#val-look_ahead), [`Parseff.peek_with`](./Parseff.md#val-peek_with) or [`Parseff.capture`](./Parseff.md#val-capture). Use `capture` to recover; with `~release:true` it resumes after the item that crossed the limit.

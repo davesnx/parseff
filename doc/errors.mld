@@ -157,7 +157,8 @@ constructible), except {!type:Parseff.range} and {!type:Parseff.note}.
 [kind] cases:
 
 - [Expected { items; found; more }]: primitive mismatch. [items] holds up to 64
-  sorted, unique expectations ([Char], [Literal], [Label], [End_of_input]);
+  sorted, unique expectations ([Char], [Literal], [Label], [End_of_input],
+  [End_of_frame]);
   [more] counts overflow items. [found] is [Text] (input snippet), [End] (EOF),
   [Short n] (short fixed-width read), or [Value] (mismatched binary integer).
 - [Failed msg]: raised by {!val:Parseff.fail}, or ["no alternative matched"]
