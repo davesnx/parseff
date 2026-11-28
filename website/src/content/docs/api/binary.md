@@ -118,3 +118,27 @@ let tlv_message () =
 - **Exact-match mismatches**: fail at the start of the field with an `Expected` error formatted in hexadecimal, e.g. `expected int32be 0x01020304, found 0xDE000000`, merging with other alternatives at the same offset.
 - **Positions**: always byte offsets, advancing by the field width.
 - **Streaming and performance**: multi-byte reads use the stdlib's `String.get_int16_be`/`String.get_int32_le` primitives directly on the buffer and work across chunk boundaries in [`Parseff.Source.parse`](./Parseff-Source.md#val-parse) and [`Parseff.Push`](./Parseff-Push.md).
+
+[`Parseff.render_error`](./Parseff.md#val-render_error) prints lines and columns by default, which mean little in binary input. Pass `~binary:true` to print byte offsets and a hex excerpt instead:
+
+```ocaml
+let frame () =
+  let len = Parseff.BE.any_uint16 () in
+  Parseff.take len
+
+let () =
+  match Parseff.parse "\x00\x0a\x00\x0ahello" frame with
+  | Ok _ -> ()
+  | Error e ->
+      print_endline (Parseff.render_error ~name:"frame.bin" ~binary:true e)
+```
+
+Output:
+
+```
+frame.bin: byte 2: [error] expected 10 bytes, found only 7 (end of input)
+0 | 00 0a 00 0a 68 65 6c 6c 6f                       ....hello
+  |       ^^^^^^^^^^^^^^^^^^^^
+```
+
+Without `~binary:true`, the length byte `0x0a` reads as a newline and the header says `frame.bin:2:1`.

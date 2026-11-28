@@ -185,10 +185,12 @@ val render_error :
   ?name:string ->
   ?source:string ->
   ?custom:(custom_error -> string) ->
+  ?binary:bool ->
   error ->
   string
-(** [render_error ?name ?source ?custom e] renders [e] with a source excerpt,
-    underlines, open contexts, notes, and help lines (no trailing newline):
+(** [render_error ?name ?source ?custom ?binary e] renders [e] with a source
+    excerpt, underlines, open contexts, notes, and help lines (no trailing
+    newline):
 
     {v
     input.json:4:5: [error] expected ',' or '}', found '"'
@@ -223,7 +225,13 @@ val render_error :
       dropped prefix, the header column falls back to [location.byte_col] and
       carets mark only the retained portion.
     - [~help], [Depth_limit_exceeded], and [Backtrack_window_exceeded] append a
-      [* help:] line. *)
+      [* help:] line.
+    - [~binary:true] (default [false]) is for binary input. The header and
+      contexts print [byte N], and the excerpt shows the rows of 16 bytes that
+      hold the error and the notes, as hexadecimal and ASCII ([.] for bytes
+      outside [0x20]-[0x7E]), with carets under the error bytes. An error at end
+      of input marks the empty slot after the last byte. In streaming without
+      [~source], bytes the error no longer holds print blank. *)
 
 (** {1:diagnostics Diagnostics}
 

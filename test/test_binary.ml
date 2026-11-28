@@ -807,6 +807,263 @@ let test_any_varint_combinators () =
      )
     )
 
+let frame () =
+  let len = Parseff.BE.any_uint32 () in
+  let kind = Parseff.any_uint8 () in
+  (kind, Parseff.take (len - 1))
+
+let frames () = Parseff.many frame
+let truncated = "\x00\x00\x00\x06\x01hello\x00\x00\x00\x0a\x06cut\xff\x00"
+
+let error_of = function
+  | Ok _ ->
+      Alcotest.fail "Expected failure"
+  | Error e ->
+      e
+
+let render ?source e = Parseff.render_error ~name:"f.bin" ?source ~binary:true e
+
+let chunked n input =
+  let pos = ref 0 in
+  Parseff.Source.of_chunks (fun () ->
+      if !pos >= String.length input then
+        None
+      else begin
+        let k = min n (String.length input - !pos) in
+        let c = String.sub input !pos k in
+        pos := !pos + k;
+        Some c
+      end
+  )
+
+let test_render_both_ways () =
+  let e = error_of (Parseff.parse truncated frames) in
+  Alcotest.(check string)
+    "line and column"
+    "f.bin:2:2: [error] expected 9 bytes, found only 5 (end of input)\n\
+     1 | \\x00\\x00\\x00\\x06\\x01hello\\x00\\x00\\x00\n\
+     2 | \\x06cut\\xFF\\x00\n\
+    \  |     ^^^^^^^^^^^"
+    (Parseff.render_error ~name:"f.bin" e);
+  let bytes =
+    "f.bin: byte 15: [error] expected 9 bytes, found only 5 (end of input)\n\
+    \ 0 | 00 00 00 06 01 68 65 6c 6c 6f 00 00 00 0a 06 63  .....hello.....c\n\
+    \   |                                              ^^\n\
+     16 | 75 74 ff 00                                      ut..\n\
+    \   | ^^^^^^^^^^^"
+  in
+  Alcotest.(check string) "binary" bytes (render e);
+  Alcotest.(check string)
+    "binary with ~source" bytes
+    (render ~source:truncated e)
+
+let test_render_streamed () =
+  let e = error_of (Parseff.Source.parse (chunked 3 truncated) frames) in
+  Alcotest.(check string)
+    "the newline byte the error no longer holds is blank"
+    "f.bin: byte 15: [error] expected 9 bytes, found only 5 (end of input)\n\
+    \ 0 | 00 00 00 06 01 68 65 6c 6c 6f 00 00 00    06 63  .....hello... .c\n\
+    \   |                                              ^^\n\
+     16 | 75 74 ff 00                                      ut..\n\
+    \   | ^^^^^^^^^^^"
+    (render e)
+
+let test_render_far_into_a_stream () =
+  let record i =
+    if i = 300 then
+      "\xba\xd0\x00"
+    else
+      "\xca\xfe" ^ String.make 1 (Char.chr (i land 0xff))
+  in
+  let input = String.concat "" (List.init 301 record) in
+  let errors =
+    Parseff.Source.parse_each ~backtrack_window:16 (chunked 5 input) (fun () ->
+        Parseff.BE.int16 0xcafe;
+        Parseff.any_uint8 ()
+    )
+    |> Seq.filter_map (function Ok _ -> None | Error e -> Some e)
+    |> List.of_seq
+  in
+  let e = match errors with [ e ] -> e | _ -> Alcotest.fail "one error" in
+  Alcotest.(check int) "error offset" 900 e.range.start;
+  let rows =
+    List.filter
+      (fun l -> String.length l > 5 && l.[0] <> ' ' && l.[0] <> 'f')
+      (String.split_on_char '\n' (render e))
+  in
+  Alcotest.(check bool) "rows shown" true (rows <> []);
+  List.iter
+    (fun row ->
+      let bar = String.index row '|' in
+      let offset = int_of_string (String.trim (String.sub row 0 bar)) in
+      for k = 0 to 15 do
+        let at = bar + 2 + (3 * k) in
+        if at + 1 < String.length row && row.[at] <> ' ' then
+          Alcotest.(check string)
+            (Printf.sprintf "byte %d" (offset + k))
+            (Printf.sprintf "%02x" (Char.code input.[offset + k]))
+            (String.sub row at 2)
+      done
+    )
+    rows;
+  let first = List.hd rows in
+  let bar = String.index first '|' in
+  let offset = int_of_string (String.trim (String.sub first 0 bar)) in
+  Alcotest.(check string)
+    "the error byte is shown" "ba"
+    (String.sub first (bar + 2 + (3 * (900 - offset))) 2)
+
+let test_render_nul_and_invalid_utf8 () =
+  let input = "\x00\xc3\x28\xff\xfe\x00AB\x00" in
+  let e =
+    error_of
+      (Parseff.parse input (fun () ->
+           Parseff.context "magic" (fun () ->
+               let _ = Parseff.take 3 in
+               Parseff.BE.int16 0x1234
+           )
+       )
+      )
+  in
+  Alcotest.(check string)
+    "excerpt"
+    "f.bin: byte 3: [error] expected int16be 0x1234, found 0xFFFE\n\
+     0 | 00 c3 28 ff fe 00 41 42 00                       ..(...AB.\n\
+    \  |          ^^^^^\n\
+    \  * while parsing magic, from byte 0"
+    (render e)
+
+let test_render_context_and_notes () =
+  let e =
+    error_of
+      (Parseff.parse "\x01\x02\x03\x04" (fun () ->
+           Parseff.context "header" (fun () ->
+               let _ = Parseff.any_uint8 () in
+               let _ = Parseff.any_uint8 () in
+               Parseff.fail ~from:2 ~upto:4
+                 ~notes:
+                   [
+                     { at = Some { start = 0; stop = 2 }; text = "tag" };
+                     { at = None; text = "loose" };
+                   ]
+                 ~help:"check the length" "bad length"
+           )
+       )
+      )
+  in
+  Alcotest.(check string)
+    "contexts, notes, and help"
+    "f.bin: byte 2: [error] bad length\n\
+     0 | 01 02 03 04                                      ....\n\
+    \  |       ^^^^^\n\
+    \  | ----- tag\n\
+    \  * while parsing header, from byte 0\n\
+    \  * note: loose\n\
+    \  * help: check the length"
+    (render e)
+
+let test_render_note_rows () =
+  let input = String.init 80 (fun i -> Char.chr (0x41 + (i mod 26))) in
+  let e =
+    error_of
+      (Parseff.parse input (fun () ->
+           let _ = Parseff.take 70 in
+           Parseff.fail ~from:66 ~upto:70
+             ~notes:
+               [
+                 { at = Some { start = 2; stop = 3 }; text = "far" };
+                 { at = Some { start = 50; stop = 52 }; text = "near" };
+               ]
+             "bad"
+       )
+      )
+  in
+  Alcotest.(check string)
+    "a note row elides the rows between"
+    "f.bin: byte 66: [error] bad\n\
+    \ 0 | 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50  ABCDEFGHIJKLMNOP\n\
+    \   |       -- far\n\
+    \   | ...\n\
+     48 | 57 58 59 5a 41 42 43 44 45 46 47 48 49 4a 4b 4c  WXYZABCDEFGHIJKL\n\
+    \   |       ----- near\n\
+     64 | 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 41 42  MNOPQRSTUVWXYZAB\n\
+    \   |       ^^^^^^^^^^^"
+    (render e)
+
+let test_render_long_range () =
+  let input = String.make 64 '\x00' in
+  let e =
+    error_of (Parseff.parse input (fun () -> Parseff.fail ~from:4 ~upto:60 "x"))
+  in
+  let carets = String.make 35 '^' in
+  Alcotest.(check string)
+    "the first and last rows of the range"
+    ("f.bin: byte 4: [error] x\n\
+     \ 0 | 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\n\
+     \   |             " ^ carets
+   ^ "\n\
+     \   | ...\n\
+      48 | 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\n\
+     \   | " ^ carets
+    )
+    (render e)
+
+let test_render_offset_zero () =
+  let e = error_of (Parseff.parse "\xde\xad" (fun () -> Parseff.BE.int16 1)) in
+  Alcotest.(check string)
+    "offset 0"
+    "f.bin: byte 0: [error] expected int16be 0x0001, found 0xDEAD\n\
+     0 | de ad                                            ..\n\
+    \  | ^^^^^"
+    (render e)
+
+let test_render_end_of_input () =
+  let at_end input =
+    render
+      (error_of
+         (Parseff.parse input (fun () ->
+              let _ = Parseff.take (String.length input) in
+              Parseff.any_uint8 ()
+          )
+         )
+      )
+  in
+  Alcotest.(check string)
+    "inside a row"
+    "f.bin: byte 2: [error] expected 1 byte, found end of input\n\
+     0 | 01 02                                            ..\n\
+    \  |       ^^"
+    (at_end "\x01\x02");
+  Alcotest.(check string)
+    "after a full row: an empty next row holds the caret at slot 0"
+    "f.bin: byte 16: [error] expected 1 byte, found end of input\n\
+    \ 0 | 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f  ................\n\
+     16 |\n\
+    \   | ^^"
+    (at_end (String.init 16 Char.chr));
+  Alcotest.(check string)
+    "after two full rows"
+    "f.bin: byte 32: [error] expected 1 byte, found end of input\n\
+     16 | 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f  ................\n\
+     32 |\n\
+    \   | ^^"
+    (at_end (String.init 32 Char.chr));
+  Alcotest.(check string)
+    "empty input has no bytes to show"
+    "f.bin: byte 0: [error] expected 1 byte, found end of input" (at_end "")
+
+let test_render_default_and_no_name () =
+  let e = error_of (Parseff.parse "\xde\xad" (fun () -> Parseff.BE.int16 1)) in
+  Alcotest.(check string)
+    "~binary:false is the default" (Parseff.render_error e)
+    (Parseff.render_error ~binary:false e);
+  Alcotest.(check string)
+    "without ~name"
+    "byte 0: [error] expected int16be 0x0001, found 0xDEAD\n\
+     0 | de ad                                            ..\n\
+    \  | ^^^^^"
+    (Parseff.render_error ~binary:true e)
+
 let () =
   Alcotest.run "binary"
     [
@@ -934,6 +1191,24 @@ let () =
           Alcotest.test_case "take" `Quick test_streaming_take;
           Alcotest.test_case "eof" `Quick test_streaming_eof;
           Alcotest.test_case "TLV composition" `Quick test_streaming_composition;
+        ]
+      );
+      ( "render_error ~binary:true",
+        [
+          Alcotest.test_case "both ways" `Quick test_render_both_ways;
+          Alcotest.test_case "streamed" `Quick test_render_streamed;
+          Alcotest.test_case "far into a stream" `Quick
+            test_render_far_into_a_stream;
+          Alcotest.test_case "NUL and invalid UTF-8" `Quick
+            test_render_nul_and_invalid_utf8;
+          Alcotest.test_case "contexts, notes, help" `Quick
+            test_render_context_and_notes;
+          Alcotest.test_case "note rows" `Quick test_render_note_rows;
+          Alcotest.test_case "long range" `Quick test_render_long_range;
+          Alcotest.test_case "offset 0" `Quick test_render_offset_zero;
+          Alcotest.test_case "end of input" `Quick test_render_end_of_input;
+          Alcotest.test_case "default and no name" `Quick
+            test_render_default_and_no_name;
         ]
       );
     ]

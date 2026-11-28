@@ -6479,12 +6479,183 @@ let shown x =
     s
   end
 
-let render ?name ?source ?custom e =
+let byte_reader ?source e =
+  match source with
+  | Some s ->
+      fun i ->
+        if i >= 0 && i < String.length s then
+          Some (String.unsafe_get s i)
+        else
+          None
+  | None ->
+      let x = e.excerpt in
+      let kept i =
+        if i >= 0 && i < x.kept_len then
+          Some (Bytes.unsafe_get x.kept i)
+        else
+          None
+      in
+      if x.kept_len > 0 then
+        kept
+      else
+        let views = (shown x).views in
+        fun i ->
+          List.find_map
+            (fun (v : view) ->
+              let j = i - v.first in
+              if j >= 0 && j < String.length v.text then
+                Some (String.unsafe_get v.text j)
+              else
+                None
+            )
+            views
+
+(* The hex excerpt of [render ~binary:true]: rows of 16 bytes, in hexadecimal
+   and ASCII, with carets under the error bytes and dashes under the notes.
+   Returns the gutter width, the notes it placed, and the text to append. *)
+let hex_excerpt e byte_at =
+  let row p = p / 16 * 16 in
+  let known p = Option.is_some (byte_at p) in
+  let has_bytes r =
+    let rec go k = k < 16 && (known (r + k) || go (k + 1)) in
+    go 0
+  in
+  (* The last byte to mark: an empty range marks the slot at its start, and a
+     range that runs past the known bytes stops at the last one. *)
+  let last_of start stop =
+    let l = ref (imax start (stop - 1)) in
+    while !l > start && not (known !l) do
+      decr l
+    done;
+    !l
+  in
+  let start = e.range.start in
+  let last = last_of start e.range.stop in
+  let r0 = row start and r1 = row last in
+  let error_rows =
+    if
+      start > 0 && (not (known start)) && known (start - 1) && not (has_bytes r0)
+    then
+      [ r0 - 16; r0 ]
+    else
+      List.filter has_bytes
+        ( if r1 > r0 then
+            [ r0; r1 ]
+          else
+            [ r0 ]
+        )
+  in
+  let placed =
+    if error_rows = [] then
+      []
+    else
+      List.filter_map
+        (fun (n : note) ->
+          match n.at with
+          | Some r when known r.start || known (r.start - 1) ->
+              Some (n, r.start, last_of r.start r.stop)
+          | _ ->
+              None
+        )
+        e.notes
+  in
+  let rows =
+    List.sort_uniq compare
+      (error_rows @ List.map (fun (_, s, _) -> row s) placed)
+  in
+  let w = List.fold_left (fun m r -> imax m (digits r)) 1 rows in
+  let b = Buffer.create 256 in
+  let gutter () =
+    Buffer.add_char b '\n';
+    for _ = 1 to w do
+      Buffer.add_char b ' '
+    done;
+    Buffer.add_string b " | "
+  in
+  let underline r c a z =
+    if a <= r + 15 && z >= r then begin
+      let a = imax a r - r and z = imin z (r + 15) - r in
+      gutter ();
+      for _ = 1 to 3 * a do
+        Buffer.add_char b ' '
+      done;
+      for _ = 0 to (3 * (z - a)) + 1 do
+        Buffer.add_char b c
+      done;
+      true
+    end else
+      false
+  in
+  let hex_row r =
+    let line = Buffer.create 72 in
+    for k = 0 to 15 do
+      if k > 0 then Buffer.add_char line ' ';
+      match byte_at (r + k) with
+      | Some c ->
+          Buffer.add_string line (Printf.sprintf "%02x" (Char.code c))
+      | None ->
+          Buffer.add_string line "  "
+    done;
+    Buffer.add_string line "  ";
+    for k = 0 to 15 do
+      Buffer.add_char line
+        ( match byte_at (r + k) with
+        | Some (' ' .. '~' as c) ->
+            c
+        | Some _ ->
+            '.'
+        | None ->
+            ' '
+        )
+    done;
+    let s = Buffer.contents line in
+    let n = ref (String.length s) in
+    while !n > 0 && s.[!n - 1] = ' ' do
+      decr n
+    done;
+    Buffer.add_char b '\n';
+    add_padded b w r;
+    Buffer.add_string b " |";
+    if !n > 0 then begin
+      Buffer.add_char b ' ';
+      Buffer.add_substring b s 0 !n
+    end
+  in
+  let rec emit prev = function
+    | [] ->
+        ()
+    | r :: rest ->
+        ( match prev with
+        | Some p when r > p + 16 ->
+            gutter ();
+            Buffer.add_string b "..."
+        | _ ->
+            ()
+        );
+        hex_row r;
+        if List.mem r error_rows then ignore (underline r '^' start last : bool);
+        List.iter
+          (fun ((n : note), a, z) ->
+            if row a = r && underline r '-' a z then add_text b n.text
+          )
+          placed;
+        emit (Some r) rest
+  in
+  emit None rows;
+  (w, List.map (fun (n, _, _) -> n) placed, Buffer.contents b)
+
+let render ?name ?source ?custom ?(binary = false) e =
   let src =
-    match source with Some s -> Some (s, source_line_starts s) | None -> None
+    match source with
+    | Some s when not binary ->
+        Some (s, source_line_starts s)
+    | _ ->
+        None
   in
   let where =
     match (src, e.location) with
+    | _ when binary ->
+        None
     | Some (s, starts), _ ->
         let l = location_in s e.range.start in
         Some
@@ -6506,6 +6677,8 @@ let render ?name ?source ?custom e =
   in
   let frame_loc i (f : context) =
     match src with
+    | _ when binary ->
+        None
     | Some (s, starts) ->
         let l = location_in s f.start in
         let shown =
@@ -6587,6 +6760,12 @@ let render ?name ?source ?custom e =
         get loc.line (loc.byte_col - 1)
     )
   in
+  let hex =
+    if binary then
+      Some (hex_excerpt e (byte_reader ?source e))
+    else
+      None
+  in
   let placed =
     if error_view = None then
       []
@@ -6595,14 +6774,27 @@ let render ?name ?source ?custom e =
   in
   let loose =
     List.filter
-      (fun (n : note) -> not (List.exists (fun (m, _, _, _) -> m == n) placed))
+      (fun (n : note) ->
+        not
+          (List.exists (fun (m, _, _, _) -> m == n) placed
+          ||
+          match hex with
+          | Some (_, hex_placed, _) ->
+              List.memq n hex_placed
+          | None ->
+              false
+          )
+      )
       e.notes
   in
   let w =
-    match error_view with
-    | None ->
+    match (hex, error_view) with
+    | Some (w, _, text), _ ->
+        Buffer.add_string b text;
+        w
+    | None, None ->
         1
-    | Some error_view ->
+    | None, Some error_view ->
         let line = error_view.number in
         let opener =
           List.find_map
