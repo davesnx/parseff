@@ -138,7 +138,7 @@ Output:
 ```
 frame.bin: byte 2: [error] expected 10 bytes, found only 7 (end of input)
 0 | 00 0a 00 0a 68 65 6c 6c 6f                       ....hello
-  |       ^^^^^^^^^^^^^^^^^^^^
+  |       ^^^^^^^^^^^^^^^^^^^^                         ^^^^^^^
 ```
 
 Without `~binary:true`, the length byte `0x0a` reads as a newline and the header says `frame.bin:2:1`.

@@ -6516,9 +6516,14 @@ let byte_reader ?source e =
             )
             views
 
+(* The column of a row's first ASCII byte: after 16 hex pairs, their 15
+   separators, and two spaces. *)
+let hex_ascii_column = (16 * 3) + 1
+
 (* The hex excerpt of [render ~binary:true]: rows of 16 bytes, in hexadecimal
-   and ASCII, with carets under the error bytes and dashes under the notes.
-   Returns the gutter width, the notes it placed, and the text to append. *)
+   and ASCII, with carets under the error bytes and dashes under the notes, in
+   both columns. Returns the gutter width, the notes it placed, and the text to
+   append. *)
 let hex_excerpt e byte_at =
   let row p = p / 16 * 16 in
   let known p = Option.is_some (byte_at p) in
@@ -6586,6 +6591,12 @@ let hex_excerpt e byte_at =
         Buffer.add_char b ' '
       done;
       for _ = 0 to (3 * (z - a)) + 1 do
+        Buffer.add_char b c
+      done;
+      for _ = (3 * z) + 2 to hex_ascii_column + a - 1 do
+        Buffer.add_char b ' '
+      done;
+      for _ = a to z do
         Buffer.add_char b c
       done;
       true

@@ -231,9 +231,16 @@ val render_error :
     - [~binary:true] (default [false]) is for binary input. The header and
       contexts print [byte N], and the excerpt shows the rows of 16 bytes that
       hold the error and the notes, as hexadecimal and ASCII ([.] for bytes
-      outside [0x20]-[0x7E]), with carets under the error bytes. An error at end
-      of input marks the empty slot after the last byte. In streaming without
-      [~source], bytes the error no longer holds print blank. *)
+      outside [0x20]-[0x7E]), with carets under the error bytes and dashes under
+      the notes in both columns. An error at end of input marks the empty slot
+      after the last byte. In streaming without [~source], bytes the error no
+      longer holds print blank.
+
+    {v
+    frame.bin: byte 2: [error] expected 10 bytes, found only 7 (end of input)
+    0 | 00 0a 00 0a 68 65 6c 6c 6f                       ....hello
+      |       ^^^^^^^^^^^^^^^^^^^^                         ^^^^^^^
+    v} *)
 
 (** {1:diagnostics Diagnostics}
 

@@ -848,9 +848,9 @@ let test_render_both_ways () =
   let bytes =
     "f.bin: byte 15: [error] expected 9 bytes, found only 5 (end of input)\n\
     \ 0 | 00 00 00 06 01 68 65 6c 6c 6f 00 00 00 0a 06 63  .....hello.....c\n\
-    \   |                                              ^^\n\
+    \   |                                              ^^                 ^\n\
      16 | 75 74 ff 00                                      ut..\n\
-    \   | ^^^^^^^^^^^"
+    \   | ^^^^^^^^^^^                                      ^^^^"
   in
   Alcotest.(check string) "binary" bytes (render e);
   Alcotest.(check string)
@@ -863,9 +863,9 @@ let test_render_streamed () =
     "the newline byte the error no longer holds is blank"
     "f.bin: byte 15: [error] expected 9 bytes, found only 5 (end of input)\n\
     \ 0 | 00 00 00 06 01 68 65 6c 6c 6f 00 00 00    06 63  .....hello... .c\n\
-    \   |                                              ^^\n\
+    \   |                                              ^^                 ^\n\
      16 | 75 74 ff 00                                      ut..\n\
-    \   | ^^^^^^^^^^^"
+    \   | ^^^^^^^^^^^                                      ^^^^"
     (render e)
 
 let test_render_far_into_a_stream () =
@@ -929,7 +929,7 @@ let test_render_nul_and_invalid_utf8 () =
     "excerpt"
     "f.bin: byte 3: [error] expected int16be 0x1234, found 0xFFFE\n\
      0 | 00 c3 28 ff fe 00 41 42 00                       ..(...AB.\n\
-    \  |          ^^^^^\n\
+    \  |          ^^^^^                                      ^^\n\
     \  * while parsing magic, from byte 0"
     (render e)
 
@@ -955,8 +955,8 @@ let test_render_context_and_notes () =
     "contexts, notes, and help"
     "f.bin: byte 2: [error] bad length\n\
      0 | 01 02 03 04                                      ....\n\
-    \  |       ^^^^^\n\
-    \  | ----- tag\n\
+    \  |       ^^^^^                                        ^^\n\
+    \  | -----                                            -- tag\n\
     \  * while parsing header, from byte 0\n\
     \  * note: loose\n\
     \  * help: check the length"
@@ -982,12 +982,12 @@ let test_render_note_rows () =
     "a note row elides the rows between"
     "f.bin: byte 66: [error] bad\n\
     \ 0 | 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f 50  ABCDEFGHIJKLMNOP\n\
-    \   |       -- far\n\
+    \   |       --                                           - far\n\
     \   | ...\n\
      48 | 57 58 59 5a 41 42 43 44 45 46 47 48 49 4a 4b 4c  WXYZABCDEFGHIJKL\n\
-    \   |       ----- near\n\
+    \   |       -----                                        -- near\n\
      64 | 4d 4e 4f 50 51 52 53 54 55 56 57 58 59 5a 41 42  MNOPQRSTUVWXYZAB\n\
-    \   |       ^^^^^^^^^^^"
+    \   |       ^^^^^^^^^^^                                  ^^^^"
     (render e)
 
 let test_render_long_range () =
@@ -995,16 +995,16 @@ let test_render_long_range () =
   let e =
     error_of (Parseff.parse input (fun () -> Parseff.fail ~from:4 ~upto:60 "x"))
   in
-  let carets = String.make 35 '^' in
+  let carets = String.make 35 '^' and ascii = String.make 12 '^' in
   Alcotest.(check string)
     "the first and last rows of the range"
     ("f.bin: byte 4: [error] x\n\
      \ 0 | 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\n\
-     \   |             " ^ carets
+     \   |             " ^ carets ^ "      " ^ ascii
    ^ "\n\
      \   | ...\n\
       48 | 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\n\
-     \   | " ^ carets
+     \   | " ^ carets ^ "              " ^ ascii
     )
     (render e)
 
@@ -1014,7 +1014,7 @@ let test_render_offset_zero () =
     "offset 0"
     "f.bin: byte 0: [error] expected int16be 0x0001, found 0xDEAD\n\
      0 | de ad                                            ..\n\
-    \  | ^^^^^"
+    \  | ^^^^^                                            ^^"
     (render e)
 
 let test_render_end_of_input () =
@@ -1032,21 +1032,21 @@ let test_render_end_of_input () =
     "inside a row"
     "f.bin: byte 2: [error] expected 1 byte, found end of input\n\
      0 | 01 02                                            ..\n\
-    \  |       ^^"
+    \  |       ^^                                           ^"
     (at_end "\x01\x02");
   Alcotest.(check string)
     "after a full row: an empty next row holds the caret at slot 0"
     "f.bin: byte 16: [error] expected 1 byte, found end of input\n\
     \ 0 | 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f  ................\n\
      16 |\n\
-    \   | ^^"
+    \   | ^^                                               ^"
     (at_end (String.init 16 Char.chr));
   Alcotest.(check string)
     "after two full rows"
     "f.bin: byte 32: [error] expected 1 byte, found end of input\n\
      16 | 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f  ................\n\
      32 |\n\
-    \   | ^^"
+    \   | ^^                                               ^"
     (at_end (String.init 32 Char.chr));
   Alcotest.(check string)
     "empty input has no bytes to show"
@@ -1061,7 +1061,7 @@ let test_render_default_and_no_name () =
     "without ~name"
     "byte 0: [error] expected int16be 0x0001, found 0xDEAD\n\
      0 | de ad                                            ..\n\
-    \  | ^^^^^"
+    \  | ^^^^^                                            ^^"
     (Parseff.render_error ~binary:true e)
 
 let () =
