@@ -860,13 +860,40 @@ let test_render_both_ways () =
 let test_render_streamed () =
   let e = error_of (Parseff.Source.parse (chunked 3 truncated) frames) in
   Alcotest.(check string)
-    "the newline byte the error no longer holds is blank"
+    "the line end the excerpt holds prints as bytes"
     "f.bin: byte 15: [error] expected 9 bytes, found only 5 (end of input)\n\
-    \ 0 | 00 00 00 06 01 68 65 6c 6c 6f 00 00 00    06 63  .....hello... .c\n\
+    \ 0 | 00 00 00 06 01 68 65 6c 6c 6f 00 00 00 0a 06 63  .....hello.....c\n\
     \   |                                              ^^                 ^\n\
      16 | 75 74 ff 00                                      ut..\n\
     \   | ^^^^^^^^^^^                                      ^^^^"
     (render e)
+
+let test_render_streamed_crlf () =
+  let input = "ab\r\n\x00\x05xy" in
+  let parser () =
+    let _ = Parseff.take 4 in
+    Parseff.take (Parseff.BE.any_uint16 ())
+  in
+  let whole = error_of (Parseff.parse input parser) in
+  Alcotest.(check string)
+    "string input"
+    "f.bin: byte 6: [error] expected 5 bytes, found only 2 (end of input)\n\
+     0 | 61 62 0d 0a 00 05 78 79                          ab....xy\n\
+    \  |                   ^^^^^                                ^^"
+    (render whole);
+  List.iter
+    (fun n ->
+      let e = error_of (Parseff.Source.parse (chunked n input) parser) in
+      Alcotest.(check string)
+        (Printf.sprintf "chunks of %d" n)
+        (render whole) (render e);
+      Alcotest.(check string)
+        (Printf.sprintf "chunks of %d, text" n)
+        (Parseff.render_error whole)
+        (Parseff.render_error e)
+    )
+    (* Chunk sizes that keep the line above the error buffered. *)
+    [ 3; 8 ]
 
 let test_render_far_into_a_stream () =
   let record i =
@@ -1197,6 +1224,7 @@ let () =
         [
           Alcotest.test_case "both ways" `Quick test_render_both_ways;
           Alcotest.test_case "streamed" `Quick test_render_streamed;
+          Alcotest.test_case "streamed CRLF" `Quick test_render_streamed_crlf;
           Alcotest.test_case "far into a stream" `Quick
             test_render_far_into_a_stream;
           Alcotest.test_case "NUL and invalid UTF-8" `Quick

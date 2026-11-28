@@ -331,6 +331,9 @@ type view = {
   first : int;
   left_cut : bool;
   right_cut : bool;
+  ending : string;
+      (** The line end right after [text] that display drops ([\r], [\n], or
+          [\r\n]), kept for the hex excerpt of [render ~binary:true]. *)
 }
 
 type shown = {
@@ -6045,7 +6048,7 @@ let window_stop s len start limit =
 let window ~number ~first text focus =
   let len = String.length text in
   if len <= window_size then
-    { number; text; first; left_cut = false; right_cut = false }
+    { number; text; first; left_cut = false; right_cut = false; ending = "" }
   else begin
     let bytes = Bytes.unsafe_of_string text in
     let start = window_start bytes len 0 focus in
@@ -6056,6 +6059,7 @@ let window ~number ~first text focus =
       first = first + start;
       left_cut = start > 0;
       right_cut = stop < len;
+      ending = "";
     }
   end
 
@@ -6226,6 +6230,18 @@ let shown_of ~input ~base ~input_len ~source_open ~limit idx ~pos ~notes frames
         else
           stop
       in
+      (* The bytes from [stop], the end of the text, through the newline at
+         [nl] if the line [ended]. *)
+      let ending ~ended stop nl =
+        Bytes.sub_string input stop
+          (nl - stop
+          +
+          if ended then
+            1
+          else
+            0
+          )
+      in
       if line_end - rel <= window_size && (ended || line_end = len) then begin
         let stop =
           if ended || (line_end = len && not source_open) then
@@ -6240,6 +6256,7 @@ let shown_of ~input ~base ~input_len ~source_open ~limit idx ~pos ~notes frames
             first = start;
             left_cut = false;
             right_cut = (not ended) && source_open;
+            ending = ending ~ended stop line_end;
           }
       end else begin
         let ws = window_start input len rel focus in
@@ -6261,6 +6278,12 @@ let shown_of ~input ~base ~input_len ~source_open ~limit idx ~pos ~notes frames
             left_cut = ws > rel;
             right_cut =
               stop < line_stop || ((not ended) && nl = len && source_open);
+            ending =
+              ( if stop < line_stop then
+                  ""
+                else
+                  ending ~ended stop nl
+              );
           }
       end
     end
@@ -6509,8 +6532,11 @@ let byte_reader ?source e =
           List.find_map
             (fun (v : view) ->
               let j = i - v.first in
-              if j >= 0 && j < String.length v.text then
+              let n = String.length v.text in
+              if j >= 0 && j < n then
                 Some (String.unsafe_get v.text j)
+              else if j >= n && j < n + String.length v.ending then
+                Some (String.unsafe_get v.ending (j - n))
               else
                 None
             )
