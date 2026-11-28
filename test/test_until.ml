@@ -16,7 +16,7 @@ let of_result = function
 
 let function_source ~size input =
   let pos = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun buf off len ->
       let n = min (min size len) (String.length input - !pos) in
       Bytes.blit_string input !pos buf off n;

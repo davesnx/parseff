@@ -88,10 +88,10 @@ val of_string : string -> Source.t
 
 ### `Source.of_channel`
 
-Reads from an `in_channel` with buffer size `~buf_size` (default `4096`; raises `Invalid_argument` if `< 1`).
+Reads from an `in_channel` with buffer size `~buffer_size` (default `4096`; raises `Invalid_argument` if `< 1`).
 
 ```ocaml
-val of_channel : ?buf_size:int -> in_channel -> Source.t
+val of_channel : ?buffer_size:int -> in_channel -> Source.t
 ```
 
 ### `Source.of_chunks`

@@ -2,7 +2,7 @@ exception Boom
 
 let generated ?(chunk = 7) next =
   let pending = ref "" and at = ref 0 and ended = ref false in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun b o len ->
       while !at = String.length !pending && not !ended do
         ( match next () with

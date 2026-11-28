@@ -108,7 +108,7 @@ let () =
 | Section | Key APIs |
 |---------|----------|
 | [Primitives](/parseff/api/primitives/) | `literal`, `char`, `satisfy`, `peek_char`, `Charset`, `take_while`, `skip_while`, `take_until`, `skip_until`, `end_of_input`, `position`, `with_range`, `location`, `recognize` |
-| [Combinators](/parseff/api/combinators/) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `peek_with`, `skip_to`, `not_followed_by`, `expect`, `context`, `commit`, `cut`, `rec_`, `parse ~trace` |
+| [Combinators](/parseff/api/combinators/) | `or_`, `one_of`, `one_of_labeled`, `optional`, `look_ahead`, `peek_with`, `advance_to`, `not_followed_by`, `expect`, `context`, `commit`, `cut`, `rec_`, `parse ~trace` |
 | [Repetition and separation](/parseff/api/repetition/) | `many`, `count`, `sep_by`, `end_by`, `between`, `fold_left`, `fold_right`, `expression`, `precedence` |
 | [Convenience](/parseff/api/convenience/) | `digit`, `letter`, `alphanum`, `any_char`, `integer`, `number`, `hex_integer`, `whitespace`, `skip_whitespace`, `lexeme`, `keyword`, `identifier`, `take`, `within` |
 | [Errors](/parseff/api/errors/) | `fail`, `error`, `expect`, `context`, `cut`, `render_error`, `error_message` |

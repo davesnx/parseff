@@ -104,7 +104,7 @@ let chunked ~src ~window ~max_body sink =
       print_error e
 
 let () =
-  let buf_size = ref 4096 in
+  let buffer_size = ref 4096 in
   let window = ref 65_536 in
   let max_body = ref Http.default_max_body in
   let body_out = ref "" in
@@ -112,7 +112,7 @@ let () =
   let mode = ref "" in
   Arg.parse
     [
-      ("--chunk", Arg.Set_int buf_size, "N read stdin N bytes at a time");
+      ("--chunk", Arg.Set_int buffer_size, "N read stdin N bytes at a time");
       ("--window", Arg.Set_int window, "N backtrack window in bytes");
       ("--max-body", Arg.Set_int max_body, "N largest body in bytes");
       ( "--body-out",
@@ -134,7 +134,7 @@ let () =
       Some (open_out_bin !body_out)
   in
   let sink = { preview = Buffer.create preview_limit; length = 0; out } in
-  let src = Parseff.Source.of_channel ~buf_size:!buf_size stdin in
+  let src = Parseff.Source.of_channel ~buffer_size:!buffer_size stdin in
   let window = !window and max_body = !max_body in
   ( match !mode with
   | "requests" ->

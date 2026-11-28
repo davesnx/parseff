@@ -590,7 +590,7 @@ val expected_token :
         peek_with (fun () -> take_while (fun c -> c >= 'a' && c <= 'z'))
       in
       if word = name then
-        skip_to stop
+        advance_to stop
       else
         expected_token ~upto:stop (Printf.sprintf "%S" name)
     ]} *)
@@ -779,7 +779,7 @@ val peek_with : (unit -> 'a) -> 'a * int
     In {!Source.parse}, the input read by [parser] (including skipped
     whitespace) must fit in [~backtrack_window].
 
-    Pair with {!skip_to} to inspect a token once and advance past it without
+    Pair with {!advance_to} to inspect a token once and advance past it without
     rescanning:
 
     {@ocaml[
@@ -812,7 +812,7 @@ val peek_with : (unit -> 'a) -> 'a * int
 
     let advance () =
       let _ = peek () in
-      skip_to !stop
+      advance_to !stop
     ]}
 
     Reset [read_at] to [-1] before each parse. To report token diagnostics,
@@ -833,8 +833,8 @@ val not_followed_by : ?label:string -> (unit -> 'a) -> unit
       not_followed_by ~label:"'!' alone" (fun () -> char '=')
     ]} *)
 
-val skip_to : int -> unit
-(** [skip_to target] advances the position to byte offset [target] (typically
+val advance_to : int -> unit
+(** [advance_to target] moves the position to byte offset [target] (typically
     returned by {!peek_with}) without reading input. Under {!Source.parse} and
     {!Source.parse_each}, [target] counts from where the parse starts in the
     source, as {!position} does.
@@ -1764,8 +1764,8 @@ val within : int -> (unit -> 'a) -> 'a
     - Does not copy or buffer all [n] bytes: under {!Source.parse}, [n] can
       exceed [~backtrack_window] when [parser] calls {!commit}. Inside [within],
       {!Slice.take}, {!Slice.take_while}, and {!Slice.recognize} return owned
-      copies even on string input, and {!skip_to} raises [Invalid_argument] for
-      targets past the frame end.
+      copies even on string input, and {!advance_to} raises [Invalid_argument]
+      for targets past the frame end.
 
     {@ocaml[
     let frame () =
@@ -1923,10 +1923,10 @@ module Source : sig
   (** [of_string s] creates a source from a complete string (useful for testing
       streaming code paths). *)
 
-  val of_channel : ?buf_size:int -> in_channel -> t
-  (** [of_channel ?buf_size ic] reads from [ic] using an internal buffer of
-      [buf_size] bytes (default [4096]). Raises [Invalid_argument] if
-      [buf_size < 1]. *)
+  val of_channel : ?buffer_size:int -> in_channel -> t
+  (** [of_channel ?buffer_size ic] reads from [ic] using an internal buffer of
+      [buffer_size] bytes (default [4096]). Raises [Invalid_argument] if
+      [buffer_size < 1]. *)
 
   val of_function :
     ?initial_buffer_size:int -> (bytes -> int -> int -> int) -> t

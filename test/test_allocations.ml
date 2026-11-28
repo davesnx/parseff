@@ -530,7 +530,7 @@ let test_short_message () =
   check_first_read 1100;
   check_first_read 1500
 
-let test_small_buf_size () =
+let test_small_buffer_size () =
   let default = words_per_call (fun () -> parse_head (head_function ())) in
   let small =
     words_per_call (fun () ->
@@ -822,7 +822,7 @@ let () =
             test_head_in_large_chunk;
           Alcotest.test_case "short message" `Quick test_short_message;
           Alcotest.test_case "small initial_buffer_size" `Quick
-            test_small_buf_size;
+            test_small_buffer_size;
           Alcotest.test_case "full first read" `Quick test_full_first_read;
           Alcotest.test_case "words on reads of 1 byte" `Quick
             test_one_byte_reads;

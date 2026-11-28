@@ -1,6 +1,6 @@
 let chunked_source ?(chunk_size = 1) input =
   let pos = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun buf off len ->
       let available = String.length input - !pos in
       let n = min (min chunk_size len) available in
@@ -1054,7 +1054,7 @@ let test_large_input_grows_read_buffer () =
     );
   check "of_seq" (Parseff.Source.of_seq (Seq.return input))
 
-let test_buf_size_sets_read_lengths () =
+let test_buffer_size_sets_read_lengths () =
   let input =
     String.init 10_000 (fun i -> Char.chr (Char.code 'a' + (i mod 26)))
   in
@@ -1132,7 +1132,7 @@ let test_scan_read_lengths () =
        (String.sub input 0 700)
     )
 
-let test_buf_size_rejected () =
+let test_buffer_size_rejected () =
   List.iter
     (fun initial_buffer_size ->
       match
@@ -2386,7 +2386,7 @@ let sources n input k =
     );
   with_channel input (fun ic ->
       k "of_channel"
-        (Parseff.Source.of_channel ?buf_size:Buf_size_env.buf_size ic)
+        (Parseff.Source.of_channel ?buffer_size:Buffer_size_env.buffer_size ic)
   )
 
 let head_input = "GET / HTTP/1.1\r\nHost: a\r\n\r\nBODY and more"
@@ -3042,10 +3042,10 @@ let () =
       ( "Source.of_function ~initial_buffer_size",
         [
           test_case "sets the read lengths" `Quick
-            test_buf_size_sets_read_lengths;
+            test_buffer_size_sets_read_lengths;
           test_case "sets the read lengths of take_while" `Quick
             test_scan_read_lengths;
-          test_case "below 1 is rejected" `Quick test_buf_size_rejected;
+          test_case "below 1 is rejected" `Quick test_buffer_size_rejected;
         ]
       );
       ( "source keeps unread bytes",

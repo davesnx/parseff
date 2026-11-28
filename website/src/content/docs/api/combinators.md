@@ -84,13 +84,13 @@ let optional_sign () =
 val look_ahead : (unit -> 'a) -> 'a
 ```
 
-### `peek_with` and `skip_to`
+### `peek_with` and `advance_to`
 
-[`Parseff.peek_with`](./Parseff.md#val-peek_with) behaves like [`Parseff.look_ahead`](./Parseff.md#val-look_ahead) and also returns the byte offset where the parser stopped. [`Parseff.skip_to`](./Parseff.md#val-skip_to) advances to that offset without re-parsing the bytes.
+[`Parseff.peek_with`](./Parseff.md#val-peek_with) behaves like [`Parseff.look_ahead`](./Parseff.md#val-look_ahead) and also returns the byte offset where the parser stopped. [`Parseff.advance_to`](./Parseff.md#val-advance_to) moves to that offset without re-parsing the bytes.
 
 ```ocaml
 val peek_with : (unit -> 'a) -> 'a * int
-val skip_to : int -> unit
+val advance_to : int -> unit
 ```
 
 ```ocaml
@@ -98,7 +98,7 @@ let keyword_or_name () =
   let word, stop = Parseff.peek_with name in
   if is_keyword word then Parseff.fail "expected a name"
   else (
-    Parseff.skip_to stop;
+    Parseff.advance_to stop;
     word)
 ```
 

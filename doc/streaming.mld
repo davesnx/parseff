@@ -107,10 +107,10 @@ Wraps a string as a source (useful for testing streaming code paths).
 
 {2 [Source.of_channel]}
 
-Reads from an [in_channel] with buffer size [~buf_size] (default [4096];
+Reads from an [in_channel] with buffer size [~buffer_size] (default [4096];
 raises [Invalid_argument] if [< 1]).
 
-{@ocaml skip[val of_channel : ?buf_size:int -> in_channel -> Source.t]}
+{@ocaml skip[val of_channel : ?buffer_size:int -> in_channel -> Source.t]}
 
 {2 [Source.of_chunks]}
 

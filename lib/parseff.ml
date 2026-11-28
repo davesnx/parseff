@@ -505,10 +505,10 @@ let[@inline always] imax (a : int) b =
     a
   else
     b
-let default_buf_size = 4096
+let default_buffer_size = 4096
 
 let max_young_wosize = 256
-let young_buf_size = (max_young_wosize - 1) * (Sys.word_size / 8)
+let young_buffer_size = (max_young_wosize - 1) * (Sys.word_size / 8)
 let default_backtrack_window = 65_536
 
 let check_backtrack_window ?(name = "Source.parse") w =
@@ -549,21 +549,21 @@ module Byte_source = struct
          }
       )
 
-  let of_channel ?(buf_size = default_buf_size) ic =
-    if buf_size < 1 then
-      invalid_arg "Parseff.Source.of_channel: buf_size must be at least 1";
+  let of_channel ?(buffer_size = default_buffer_size) ic =
+    if buffer_size < 1 then
+      invalid_arg "Parseff.Source.of_channel: buffer_size must be at least 1";
     make ~initial:"" ~eof:false
       (Read
          {
            read = (fun buf off len -> input ic buf off len);
-           tmp = Bytes.create buf_size;
-           tmp_cap = buf_size;
+           tmp = Bytes.create buffer_size;
+           tmp_cap = buffer_size;
            grow = false;
            held = 0;
          }
       )
 
-  let of_function ?(initial_buffer_size = young_buf_size) read =
+  let of_function ?(initial_buffer_size = young_buffer_size) read =
     if initial_buffer_size < 1 then
       invalid_arg
         "Parseff.Source.of_function: initial_buffer_size must be at least 1";
@@ -572,7 +572,7 @@ module Byte_source = struct
          {
            read;
            tmp = Bytes.create initial_buffer_size;
-           tmp_cap = imax initial_buffer_size default_buf_size;
+           tmp_cap = imax initial_buffer_size default_buffer_size;
            grow = false;
            held = 0;
          }
@@ -1489,9 +1489,11 @@ let[@inline never] handle_location st =
   }
 
 let buffer_room kept n =
-  if kept + n + imax kept n > young_buf_size && (2 * kept) + n <= young_buf_size
+  if
+    kept + n + imax kept n > young_buffer_size
+    && (2 * kept) + n <= young_buffer_size
   then
-    young_buf_size - kept - n
+    young_buffer_size - kept - n
   else
     imax kept n
 
@@ -1688,7 +1690,7 @@ let[@inline never] rec fill st ~keep_from need =
                   st.input_len <- st.input_len + avail;
                   avail
                 end else begin
-                  let n = imin avail default_buf_size in
+                  let n = imin avail default_buffer_size in
                   if n > 0 then begin
                     append st ~floor ~own:true c.pending off n;
                     c.pending_pos <- off + n
@@ -1701,7 +1703,7 @@ let[@inline never] rec fill st ~keep_from need =
                     if b.slice_pos = b.slice_stop then next_slice st b;
                     let off = b.slice_pos in
                     let n =
-                      imin room (imin (b.slice_stop - off) young_buf_size)
+                      imin room (imin (b.slice_stop - off) young_buffer_size)
                     in
                     if n > 0 then begin
                       append_bigstring st ~floor b.slice off n;
@@ -3773,10 +3775,11 @@ let not_followed_by ?(label = label_not_followed_by) p =
       far_merge st saved;
       raise exn
 
-let skip_to target =
+let advance_to target =
   let st = get_state () in
   if target < st.pos || target > st.input_len then
-    invalid_arg "Parseff.skip_to: target is not in the input after the position";
+    invalid_arg
+      "Parseff.advance_to: target is not in the input after the position";
   st.pos <- target
 
 let[@inline never] ctx_grow st =

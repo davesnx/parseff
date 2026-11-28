@@ -47,7 +47,7 @@ let fill t pos =
   done
 
 (* The index of the first token that starts at or after [pos]. Positions only
-   change by [skip_to] and backtracking, so the last answer is usually still
+   change by [advance_to] and backtracking, so the last answer is usually still
    right and is checked first. *)
 let index_at t pos =
   fill t pos;
@@ -74,7 +74,7 @@ let index_at t pos =
 
 let peek t =
   let tok = t.tokens.(index_at t (position ())) in
-  skip_to tok.start;
+  advance_to tok.start;
   tok
 
 (* To the start of the next token, so a combinator that starts here starts
@@ -84,7 +84,7 @@ let advance t =
   fill t t.tokens.(i).stop;
   let i = min (i + 1) (t.len - 1) in
   t.last <- i;
-  skip_to t.tokens.(i).start
+  advance_to t.tokens.(i).start
 
 let unexpected tok label = expected_token ~upto:tok.stop label
 

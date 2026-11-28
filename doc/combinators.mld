@@ -83,15 +83,15 @@ and failure.
 
 {@ocaml skip[val look_ahead : (unit -> 'a) -> 'a]}
 
-{2 [peek_with] and [skip_to]}
+{2 [peek_with] and [advance_to]}
 
 {!val:Parseff.peek_with} behaves like {!val:Parseff.look_ahead} and also returns
-the byte offset where the parser stopped. {!val:Parseff.skip_to} advances to
+the byte offset where the parser stopped. {!val:Parseff.advance_to} moves to
 that offset without re-parsing the bytes.
 
 {@ocaml skip[
 val peek_with : (unit -> 'a) -> 'a * int
-val skip_to : int -> unit
+val advance_to : int -> unit
 ]}
 
 {@ocaml skip[
@@ -99,7 +99,7 @@ let keyword_or_name () =
   let word, stop = Parseff.peek_with name in
   if is_keyword word then Parseff.fail "expected a name"
   else (
-    Parseff.skip_to stop;
+    Parseff.advance_to stop;
     word)
 ]}
 

@@ -64,9 +64,9 @@ let test_expect () =
 let test_require () =
   let errors = Diagnostics.create () in
   let p () =
-    skip_to 2;
+    advance_to 2;
     require (token 3 "'in'") (fun _ -> ());
-    skip_to 3
+    advance_to 3
   in
   Alcotest.(check bool)
     "parse succeeds" true
@@ -116,12 +116,12 @@ let test_past_end () =
   check "stops at the end of the input" "ab" "0-2 expected 'in', found 'ab'"
     (token 10 "'in'");
   check "from inside the input" "ab" "1-2 expected 'in', found 'b'" (fun () ->
-      skip_to 1;
+      advance_to 1;
       token 10 "'in'" ()
   );
   check "at the end of the input" "ab" "2-2 expected 'in', found end of input"
     (fun () ->
-      skip_to 2;
+      advance_to 2;
       token 10 "'in'" ()
   );
   check "a long token past the end" (String.make 40 'a')
@@ -257,7 +257,7 @@ let test_invalid_upto () =
     (fun () ->
       let _ =
         parse "ab" (fun () ->
-            skip_to 1;
+            advance_to 1;
             expected_token ~upto:0 "'in'"
         )
       in

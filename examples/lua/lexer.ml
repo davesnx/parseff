@@ -1392,7 +1392,7 @@ let after_token s inside =
   finish ()
 
 let skip_view v =
-  Parseff.skip_to v.stop;
+  Parseff.advance_to v.stop;
   let _ = after_token v.start v.inside in
   ()
 

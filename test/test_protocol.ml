@@ -2,7 +2,7 @@
 
 let chunked_source ~chunk_size input =
   let pos = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun buf off len ->
       let n = min (min chunk_size len) (String.length input - !pos) in
       Bytes.blit_string input !pos buf off n;
@@ -98,7 +98,7 @@ let test_within_found_stops_at_end () =
       let result =
         Parseff.Source.parse (chunked_source ~chunk_size "abcdefgh") parser
       in
-      match (Buf_size_env.buf_size, result) with
+      match (Buffer_size_env.buffer_size, result) with
       | None, _ ->
           check_message (message found) name result
       | Some _, Error e
@@ -847,12 +847,12 @@ let stepping_back ~stream n =
         for i = n - 1 downto 0 do
           ignore
             (Parseff.look_ahead (fun () ->
-                 Parseff.skip_to i;
+                 Parseff.advance_to i;
                  Parseff.satisfy alpha
              )
             )
         done;
-        Parseff.skip_to n
+        Parseff.advance_to n
     )
   in
   let before = Gc.allocated_bytes () in

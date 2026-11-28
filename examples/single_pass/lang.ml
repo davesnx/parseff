@@ -98,7 +98,7 @@ let peek_word () =
   )
 
 let read_to stop =
-  skip_to stop;
+  advance_to stop;
   trivia ()
 
 let symbol c label =

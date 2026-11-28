@@ -62,9 +62,9 @@
  (alias runtest)
  (action
   (chdir
-   buf_size_1
+   buffer_size_1
    (setenv
-    PARSEFF_TEST_BUF_SIZE
+    PARSEFF_TEST_BUFFER_SIZE
     1
     (progn
      (run %{dep:test_streaming.exe} --compact)
@@ -80,9 +80,9 @@
  (alias runtest)
  (action
   (chdir
-   buf_size_7
+   buffer_size_7
    (setenv
-    PARSEFF_TEST_BUF_SIZE
+    PARSEFF_TEST_BUFFER_SIZE
     7
     (progn
      (run %{dep:test_streaming.exe} --compact)
@@ -98,9 +98,9 @@
  (alias runtest)
  (action
   (chdir
-   buf_size_65536
+   buffer_size_65536
    (setenv
-    PARSEFF_TEST_BUF_SIZE
+    PARSEFF_TEST_BUFFER_SIZE
     65536
     (progn
      (run %{dep:test_streaming.exe} --compact)

@@ -36,7 +36,7 @@ let run () =
 
 let yielding_source ?(chunk = 2) data =
   let p = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun b o len ->
       perform Yield;
       let n = min (min chunk len) (String.length data - !p) in
@@ -182,7 +182,7 @@ let test_location_after_compaction () =
   in
   let chunked =
     let p = ref 0 in
-    Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+    Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
       (fun b o len ->
         let n = min (min 100 len) (String.length text - !p) in
         Bytes.blit_string text !p b o n;
@@ -198,7 +198,7 @@ let test_location_after_compaction () =
 
 let fn_src data chunk =
   let p = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun b o l ->
       let n = min (min l chunk) (String.length data - !p) in
       Bytes.blit_string data !p b o n;
@@ -363,12 +363,12 @@ let test_small_window_rejected () =
   | Error e ->
       Alcotest.failf "wrong error: %s" (Parseff.error_message e)
 
-let test_buf_size_rejected () =
+let test_buffer_size_rejected () =
   List.iter
     (fun n ->
-      match Parseff.Source.of_channel ~buf_size:n stdin with
+      match Parseff.Source.of_channel ~buffer_size:n stdin with
       | _ ->
-          Alcotest.failf "buf_size %d accepted" n
+          Alcotest.failf "buffer_size %d accepted" n
       | exception Invalid_argument _ ->
           ()
     )
@@ -850,7 +850,7 @@ let () =
       );
       ( "source validation",
         [
-          test_case "buf_size" `Quick test_buf_size_rejected;
+          test_case "buffer_size" `Quick test_buffer_size_rejected;
           test_case "read result" `Quick test_bad_read_result;
         ]
       );

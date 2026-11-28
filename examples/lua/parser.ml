@@ -1786,7 +1786,7 @@ and not_a_statement : 'a. at:int -> expr -> 'a =
   match compound with
   | Some (s, v) -> (
       let op_start = v.start in
-      Parseff.skip_to v.stop;
+      Parseff.advance_to v.stop;
       let adjacent () =
         let n = L.view () in
         (n.tok, n.stop)
@@ -1881,7 +1881,7 @@ let chunk () =
 let error_in source (r : range) fail =
   match
     Parseff.parse ~consume:`Partial source (fun () ->
-        Parseff.skip_to r.start;
+        Parseff.advance_to r.start;
         (fail () : unit)
     )
   with

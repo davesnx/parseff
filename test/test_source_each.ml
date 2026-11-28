@@ -1,6 +1,6 @@
 let bytes_src ?(chunk = 1) data =
   let p = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun b o len ->
       let n = min (min chunk len) (String.length data - !p) in
       Bytes.blit_string data !p b o n;
@@ -474,7 +474,7 @@ let run () =
 
 let yielding_src data =
   let p = ref 0 in
-  Parseff.Source.of_function ?initial_buffer_size:Buf_size_env.buf_size
+  Parseff.Source.of_function ?initial_buffer_size:Buffer_size_env.buffer_size
     (fun b o len ->
       Effect.perform Yield;
       let n = min (min 1 len) (String.length data - !p) in

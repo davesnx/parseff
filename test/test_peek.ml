@@ -42,17 +42,17 @@ let test_value_and_stop () =
   check_all "peek then skip" Fun.id "abc def" "Ok abc 3 0 3 def" (fun () ->
       let word, stop = peek_with (fun () -> take_while is_alpha) in
       let before = position () in
-      skip_to stop;
+      advance_to stop;
       let after = position () in
       ignore (char ' ');
       Printf.sprintf "%s %d %d %d %s" word stop before after
         (take_while is_alpha)
   )
 
-let test_skip_to_same_position () =
-  check_all "skip to the position" string_of_int "ab" "Ok 1" (fun () ->
+let test_advance_to_same_position () =
+  check_all "advance to the position" string_of_int "ab" "Ok 1" (fun () ->
       ignore (char 'a');
-      skip_to (position ());
+      advance_to (position ());
       position ()
   )
 
@@ -145,7 +145,7 @@ let test_diagnostics_removed () =
                   char 'a'
               )
             in
-            skip_to stop;
+            advance_to stop;
             warn (Warning.W "after");
             c
         )
@@ -378,7 +378,7 @@ let test_failure_inside_capture () =
             in
             let at = position () in
             let _, stop = peek_with (fun () -> char 'b') in
-            skip_to stop;
+            advance_to stop;
             Printf.sprintf "%s | %d %d %d"
               (show (fun _ -> "value") failed)
               at (Ref.get cell) (position ())
@@ -398,7 +398,7 @@ let test_stop_after_backtrack () =
     (fun () ->
       let _, stop = peek_with (fun () -> literal "ab") in
       ignore (optional (fun () -> literal "abx"));
-      skip_to stop;
+      advance_to stop;
       position ()
   )
 
@@ -408,7 +408,7 @@ let test_skip_past_peeked_end () =
     (show string_of_int
        (parse ~consume:`Partial "abc" (fun () ->
             let _, stop = peek_with (fun () -> char 'a') in
-            skip_to (stop + 2);
+            advance_to (stop + 2);
             position ()
         )
        )
@@ -428,7 +428,7 @@ let test_small_window_token_loop () =
       if word = "" then
         n
       else begin
-        skip_to stop;
+        advance_to stop;
         go (n + 1)
       end
     in
@@ -549,7 +549,7 @@ let test_rule_in_token_loop () =
           || Ref.get cell <> 0
         then
           fail (Printf.sprintf "word %d" n);
-        skip_to stop;
+        advance_to stop;
         go (n + 1)
       end
     in
@@ -577,7 +577,7 @@ let test_rule_in_token_loop () =
     )
     [ 1; 3; 64 ]
 
-let test_location_after_skip () =
+let test_location_after_advance () =
   let lines = 200 in
   let input = String.concat "\n" (List.init lines (fun _ -> "abcdefgh ij")) in
   let p () =
@@ -589,7 +589,7 @@ let test_location_after_skip () =
         )
       in
       if word <> "" then begin
-        skip_to stop;
+        advance_to stop;
         go ()
       end
     in
@@ -617,15 +617,15 @@ let invalid name f =
   | exception Invalid_argument _ ->
       ()
 
-let test_skip_to_rejects () =
+let test_advance_to_rejects () =
   List.iter
     (fun (mode_name, mode) ->
       let result =
         run mode "abc" (fun () ->
             literal "ab";
-            invalid ("backwards, " ^ mode_name) (fun () -> skip_to 1);
-            invalid ("past the end, " ^ mode_name) (fun () -> skip_to 4);
-            invalid ("negative, " ^ mode_name) (fun () -> skip_to (-1));
+            invalid ("backwards, " ^ mode_name) (fun () -> advance_to 1);
+            invalid ("past the end, " ^ mode_name) (fun () -> advance_to 4);
+            invalid ("negative, " ^ mode_name) (fun () -> advance_to (-1));
             position ()
         )
       in
@@ -635,13 +635,13 @@ let test_skip_to_rejects () =
     )
     modes
 
-let test_skip_to_unread_stream () =
+let test_advance_to_unread_stream () =
   let result =
     Source.parse ~consume:`Partial (chunked ~chunk_size:1 "abc") (fun () ->
         ignore (char 'a');
-        invalid "not read yet" (fun () -> skip_to 3);
+        invalid "not read yet" (fun () -> advance_to 3);
         let _, stop = peek_with (fun () -> literal "bc") in
-        skip_to stop;
+        advance_to stop;
         position ()
     )
   in
@@ -663,9 +663,9 @@ let test_outside_parse () =
   | exception exn ->
       outside_message exn
   );
-  match skip_to 0 with
+  match advance_to 0 with
   | () ->
-      Alcotest.fail "skip_to: expected a failure outside a parse"
+      Alcotest.fail "advance_to: expected a failure outside a parse"
   | exception exn ->
       outside_message exn
 
@@ -673,7 +673,7 @@ let test_window () =
   let input = String.make 64 'a' ^ "!" in
   let p () =
     let word, stop = peek_with (fun () -> take_while is_alpha) in
-    skip_to stop;
+    advance_to stop;
     ignore (char '!');
     String.length word
   in
@@ -732,7 +732,7 @@ let test_token_cache () =
       in
       let advance () =
         let t = peek () in
-        skip_to !stop;
+        advance_to !stop;
         t
       in
       let retried = Buffer.create 16 in
@@ -856,7 +856,7 @@ let test_ahead_push () =
 
 let () =
   let open Alcotest in
-  run "peek_with and skip_to"
+  run "peek_with and advance_to"
     [
       ( "peek_with",
         [
@@ -886,13 +886,14 @@ let () =
           test_case "token cache" `Quick test_token_cache;
         ]
       );
-      ( "skip_to",
+      ( "advance_to",
         [
-          test_case "same position" `Quick test_skip_to_same_position;
+          test_case "same position" `Quick test_advance_to_same_position;
           test_case "past the peeked end" `Quick test_skip_past_peeked_end;
-          test_case "location after skip_to" `Quick test_location_after_skip;
-          test_case "rejects bad targets" `Quick test_skip_to_rejects;
-          test_case "unread stream bytes" `Quick test_skip_to_unread_stream;
+          test_case "location after advance_to" `Quick
+            test_location_after_advance;
+          test_case "rejects bad targets" `Quick test_advance_to_rejects;
+          test_case "unread stream bytes" `Quick test_advance_to_unread_stream;
           test_case "outside a parse" `Quick test_outside_parse;
         ]
       );
